@@ -384,9 +384,29 @@ def create_division(actor, code, name, kind=Division.Kind.DIVISION):
 def set_division_active(actor, division, active, reason):
     reason = _require_reason(reason)
     require_admin(actor)
+    division = Division.objects.select_for_update().get(pk=division.pk)
+    if not active and division.is_intake:
+        raise ValidationError("Choose another intake division before deactivating this one.")
     division.is_active = active
     division.save(update_fields=["is_active"])
     audit(actor, "division.activated" if active else "division.deactivated", division, reason)
+
+
+@transaction.atomic
+def set_intake_division(actor, division, reason):
+    """Make one active unit the central intake (กองรับเรื่องกลาง) for new cases."""
+    reason = _require_reason(reason)
+    require_admin(actor)
+    previous = list(Division.objects.select_for_update().filter(is_intake=True))
+    division = Division.objects.select_for_update().get(pk=division.pk)
+    if not division.is_active:
+        raise ValidationError("The intake division must be active.")
+    if division.is_intake:
+        raise ValidationError("This is already the intake division.")
+    Division.objects.filter(pk__in=[d.pk for d in previous]).update(is_intake=False)
+    division.is_intake = True
+    division.save(update_fields=["is_intake"])
+    audit(actor, "division.intake_set", division, reason, previous=[d.code for d in previous])
 
 
 # --- Requester registration (LINE identity from a signed event, wired in M03) -----------------
@@ -428,6 +448,25 @@ def registration_status(channel, external_id):
         .order_by("-created_at", "-pk")
         .first()
     )
+
+
+@transaction.atomic
+def cancel_registration(channel, external_id):
+    """The requester withdraws their own pending request (from the signed chat identity)."""
+    identity = ChannelIdentity.objects.select_for_update().get(
+        channel=channel, external_id=external_id
+    )
+    pending = identity.registrations.select_for_update().filter(
+        status=RegistrationRequest.Status.PENDING
+    )
+    registration = pending.first()
+    if registration is None:
+        raise ValidationError("No pending registration.")
+    registration.status = RegistrationRequest.Status.CANCELLED
+    registration.decided_at = timezone.now()
+    registration.save(update_fields=["status", "decided_at"])
+    audit(None, "registration.cancelled", registration, actor_label=f"identity:{identity.pk}")
+    return registration
 
 
 @transaction.atomic
@@ -495,3 +534,21 @@ def set_requester_active(actor, requester, active, reason):
     requester.status = Requester.Status.ACTIVE if active else Requester.Status.SUSPENDED
     requester.save(update_fields=["status"])
     audit(actor, "requester.activated" if active else "requester.suspended", requester, reason)
+
+
+@transaction.atomic
+def create_requester(actor, display_name, district_code, reason):
+    """Approve a requester who does not use LINE; staff file their cases on their behalf."""
+    reason = _require_reason(reason)
+    require_admin(actor)
+    display_name = " ".join((display_name or "").split())
+    if not display_name or len(display_name) > 200:
+        raise ValidationError("Name is required (max 200 characters).")
+    district = District.objects.filter(code=district_code, is_active=True).first()
+    if district is None:
+        raise ValidationError("Unknown district.")
+    requester = Requester.objects.create(
+        display_name=display_name, district=district, approved_by=actor
+    )
+    audit(actor, "requester.created_direct", requester, reason, district=district.code)
+    return requester

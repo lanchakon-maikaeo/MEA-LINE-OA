@@ -7,13 +7,20 @@ from django.contrib.auth.views import PasswordChangeView
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
-from django.http import Http404, JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST, require_safe
 
-from operations import forms, identity
-from operations.models import Division, RegistrationRequest, Role, RoleGrant
+from operations import attachments, forms, identity
+from operations.models import (
+    Attachment,
+    Division,
+    RegistrationRequest,
+    Requester,
+    Role,
+    RoleGrant,
+)
 
 User = get_user_model()
 
@@ -84,6 +91,35 @@ def division_detail(request, code):
         .order_by("user__username", "role")
     )
     return render(request, "operations/division.html", {"division": division, "grants": grants})
+
+
+EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
+
+
+@login_required
+@require_safe
+def attachment_download(request, pk):
+    """Scanned-clean files of cases in the viewer's divisions only; everything else is 404."""
+    attachment = (
+        Attachment.objects.select_related("case")
+        .filter(pk=pk, case__isnull=False, scan_status=Attachment.ScanStatus.CLEAN)
+        .first()
+    )
+    scope = identity.staff_scope(request.user)
+    if attachment is None or not identity.can_access_division(
+        scope, attachment.case.owner_division_id
+    ):
+        raise Http404
+    path = attachments.storage_dir() / attachment.storage_name
+    if not attachment.storage_name or not path.is_file():
+        raise Http404
+    position = list(attachment.case.attachments.values_list("pk", flat=True)).index(attachment.pk)
+    filename = f"{attachment.case.number}-{position + 1}.{EXTENSIONS[attachment.content_type]}"
+    response = FileResponse(
+        path.open("rb"), as_attachment=True, filename=filename, content_type=attachment.content_type
+    )
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 # --- Admin console ---------------------------------------------------------------------------
@@ -227,9 +263,35 @@ def admin_registrations(request):
         .select_related("requested_district", "decided_by")
         .order_by("-decided_at")[:50]
     )
+    requesters = Requester.objects.select_related("district").order_by("-approved_at")[:100]
     return render(
-        request, "operations/admin_registrations.html", {"pending": pending, "recent": recent}
+        request,
+        "operations/admin_registrations.html",
+        {
+            "pending": pending,
+            "recent": recent,
+            "requesters": requesters,
+            "requester_form": forms.RequesterCreateForm(),
+        },
     )
+
+
+@admin_required
+@require_POST
+def admin_requester_new(request):
+    form = forms.RequesterCreateForm(request.POST)
+    if form.is_valid():
+        data = form.cleaned_data
+        _run(
+            request,
+            lambda: identity.create_requester(
+                request.user, data["display_name"], data["district"].code, data["reason"]
+            ),
+            "รับรองผู้แจ้งโดยตรงแล้ว",
+        )
+    else:
+        messages.error(request, "ข้อมูลผู้แจ้งไม่ถูกต้อง")
+    return redirect("admin-registrations")
 
 
 @admin_required
@@ -275,13 +337,21 @@ def admin_divisions(request):
 @require_POST
 def admin_division_action(request, pk, action):
     division = get_object_or_404(Division, pk=pk)
-    if action not in {"activate", "deactivate"}:
+    reason = request.POST.get("reason", "")
+    if action == "set-intake":
+        _run(
+            request,
+            lambda: identity.set_intake_division(request.user, division, reason),
+            "ตั้งกองรับเรื่องกลางแล้ว",
+        )
+    elif action in {"activate", "deactivate"}:
+        _run(
+            request,
+            lambda: identity.set_division_active(
+                request.user, division, action == "activate", reason
+            ),
+            "เปลี่ยนสถานะกองแล้ว",
+        )
+    else:
         raise Http404
-    _run(
-        request,
-        lambda: identity.set_division_active(
-            request.user, division, action == "activate", request.POST.get("reason", "")
-        ),
-        "เปลี่ยนสถานะกองแล้ว",
-    )
     return redirect("admin-divisions")

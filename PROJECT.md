@@ -2,7 +2,7 @@
 
 เอกสารหลัก: ขอบเขตโครงการ · Priority Engine · Production-ready · แผนพัฒนาตามโมดูล · Technology Stack · CI/CD · โมดูลสำหรับ AI implement · คำศัพท์กลาง
 
-ปรับปรุง: 6 ตุลาคม 2569 | สถานะ: M00 และ M01 เสร็จในเครื่อง (done local); M02–M13 ยัง planned; ยังไม่ deploy staging/production บน OCI
+ปรับปรุง: 6 ตุลาคม 2569 | สถานะ: M00–M03 เสร็จในเครื่อง (done local); M04–M13 ยัง planned; ยังไม่ deploy staging/production บน OCI
 
 ขอบเขตงานรอบนี้: ปรับแผนในเอกสารเท่านั้น ยกเลิกกรอบเวลาเดิม และกำหนดเป้าหมาย production-ready ตามโมดูล ยังไม่เริ่ม implementation เพิ่ม คำสั่งและลำดับพัฒนาด้านล่างเป็นแผนสำหรับเมื่อผู้ใช้สั่งเริ่มพัฒนา
 
@@ -10,7 +10,7 @@
 
 ข้อกำหนดเพิ่มเติมที่ยืนยัน 5 ตุลาคม 2569: ผู้แจ้งแอด LINE OA สนทนาส่วนตัว ลงทะเบียนชื่อ/เขต และรอแอดมินรับรองก่อนส่งเรื่อง; เห็นเฉพาะเรื่องตนเองแม้อยู่เขตเดียวกัน บัญชีเว็บ ฝอจ. เป็นรายบุคคลผูกกอง/บทบาท รับเฉพาะงานที่มอบหมายให้กองตน แอดมินบริหารทุกกอง เพิ่ม/ปิดบัญชี และกำหนดบทบาทภายหลังได้ การเปลี่ยน AI API/model/key ทำได้ทั้งหน้าเว็บและ configuration แต่จำกัดเฉพาะแอดมินผู้พัฒนา รายละเอียดเหล่านี้เป็นข้อกำหนดที่จะ implement; โค้ดปัจจุบันยังมีเพียง M00
 
-ข้อกำหนดเพิ่มเติมที่ยืนยัน 6 ตุลาคม 2569: staging และ production ใช้ **Oracle Cloud Infrastructure (OCI) Always Free โดยไม่เกินโควตา** ตาม [E.2.1](#oracle-free-tier) PostgreSQL 17 รันใน container บน OCI แทน Supabase Free ซึ่งไม่อยู่ใน baseline แล้ว; VM ขององค์กรเป็นทางเลือกภายหลังเมื่อโหลด ความพร้อมใช้งาน หรือนโยบายข้อมูลเกินที่ free tier รองรับ ช่องทางรับเรื่องคง LINE OA (ทบทวน Microsoft Teams แล้วไม่เลือก) โดยระบบคุมโควตาข้อความเองตาม [C.2.3](#line-quota)
+ข้อกำหนดเพิ่มเติมที่ยืนยัน 6 ตุลาคม 2569: staging และ production ใช้ **Oracle Cloud Infrastructure (OCI) Always Free โดยไม่เกินโควตา** ตาม [E.2.1](#oracle-free-tier) PostgreSQL 17 รันใน container บน OCI แทน Supabase Free ซึ่งไม่อยู่ใน baseline แล้ว; VM ขององค์กรเป็นทางเลือกภายหลังเมื่อโหลด ความพร้อมใช้งาน หรือนโยบายข้อมูลเกินที่ free tier รองรับ ช่องทางรับเรื่องคง LINE OA (ทบทวน Microsoft Teams แล้วไม่เลือก) ใช้บัญชี **@894attlg** โดยระบบคุมโควตาข้อความเองตาม [C.2.3](#line-quota)
 
 เอกสารนี้รวมเนื้อหาจากเอกสารวิเคราะห์ คำศัพท์ และแบบ Priority Engine ไว้เป็นแหล่งอ้างอิงเดียว ส่วน C กำหนดสถาปัตยกรรมและลำดับโมดูล ส่วน E–F กำหนด production gates, CI/CD และคำสั่ง implement การเปิดใช้จริงต้องผ่าน gates และยืนยันสภาพแวดล้อมองค์กรก่อน
 
@@ -618,6 +618,15 @@ ThaiLLM มีช่องทาง API สำหรับนักพัฒน�
 
 #### C.2.3 LINE OA และการคุมโควตาข้อความ
 
+**บัญชีที่ใช้ (ยืนยัน 6 ตุลาคม 2569):** LINE OA `@894attlg` ([LINE Official Account Manager](https://manager.line.biz/account/@894attlg)) Channel secret และ channel access token ของ Messaging API เป็นความลับ ให้เจ้าของบัญชีใส่ใน `.env` (local) หรือ secret store ของ OCI เท่านั้น ห้ามใส่ในเอกสาร commit หรือแชต ผู้ใช้ยืนยันว่าบัญชีนี้ใช้ทั้งทดสอบและ production จึงมีข้อจำกัดว่า LINE channel ตั้ง webhook URL ได้ทีละหนึ่งที่ และโควตา push ใช้ร่วมกันทุก environment
+
+**แผนใช้ OA เดียว (ตัดสินใจ 6 ตุลาคม 2569):** ระหว่างพัฒนาให้ webhook ของ @894attlg ชี้ไปเครื่อง dev ผ่าน tunnel หรือ staging; ทุก environment ที่ไม่ใช่ production บังคับ `LINE_ALLOWED_RECIPIENTS` (ตอบเฉพาะ LINE user ID ในรายการ) ก่อน go-live ให้ทำตาม checklist นี้
+
+1. สร้าง LINE OA ทดสอบบัญชีใหม่ (แพ็กเกจฟรี) สำหรับ staging และใส่ credentials ของบัญชีนั้นใน secret ของ staging
+2. ย้าย webhook URL ของ @894attlg ไป `https://<production-host>/webhooks/line` แล้วกด Verify ใน LINE Developers console
+3. ตั้ง rich menu บน production ด้วย `manage.py setup_line_rich_menu` และเลิกใช้ tunnel ของเครื่อง dev กับ @894attlg
+4. หลัง go-live ทดสอบกับ LINE จริงได้เฉพาะบน OA ทดสอบของ staging; บน production ใช้ได้เพียง smoke test ที่ได้รับอนุญาต
+
 **การตัดสินใจ 6 ตุลาคม 2569:** ใช้ LINE OA เป็นช่องทางรับเรื่องต่อ (ทบทวน Microsoft Teams แล้วไม่เลือก) และออกแบบให้อยู่ในแพ็กเกจฟรีได้นานที่สุด ระบบต้องบังคับงบข้อความรายเดือนเอง ไม่ปล่อยให้โควตาหมดกลางเดือนโดยไม่มีใครรู้ ตัวเลขด้านล่างตรวจเมื่อ 6 ตุลาคม 2569 และต้องตรวจซ้ำก่อนเปิดใช้ [LINE OA ราคาแพ็กเกจ (ไทย)](https://lineforbusiness.com/th/service/line-oa-features/broadcast-message), [Messaging API pricing](https://developers.line.biz/en/docs/messaging-api/pricing/)
 
 | ประเภท | นับโควตา | ใช้ในระบบนี้ |
@@ -865,7 +874,7 @@ M00 มี `migrate`, `test` และ `check --deploy` ของ Django แล�
 _Avoid_: ผู้ใช้หนึ่งคนเท่ากับหนึ่งเขต
 
 **ผู้แจ้ง**:
-บุคคลที่ลงทะเบียนและได้รับการรับรองให้ส่งเรื่องในนามเขตการไฟฟ้า เป็นเจ้าของการติดต่อและเห็นเฉพาะเรื่องที่ตนแจ้งในช่องทางผู้แจ้ง
+บุคคลที่ได้รับการรับรองให้ยื่นเรื่องในนามเขตการไฟฟ้า เป็นเจ้าของเรื่องที่ตนแจ้งและเห็นเฉพาะเรื่องของตนในช่องทางผู้แจ้ง ผู้แจ้งบางคนอาจไม่มี LINE และติดต่อผ่านเจ้าหน้าที่เท่านั้น
 _Avoid_: เขตการไฟฟ้า เมื่อหมายถึงบุคคล
 
 **ฝอจ.**:
@@ -873,8 +882,28 @@ _Avoid_: เขตการไฟฟ้า เมื่อหมายถึง�
 _Avoid_: ผู้อนุมัติ เมื่อยังไม่ได้ระบุอำนาจอนุมัติ
 
 **เรื่อง**:
-งานที่มีเลขอ้างอิง ผู้รับผิดชอบ และสถานะให้ติดตาม โดยเป็นคำขอเบิก คำขอคืน หรือเรื่องแจ้งปัญหา
-_Avoid_: ข้อความ เมื่อหมายถึงงานทั้งเรื่อง
+งานที่มีเลขเรื่อง กองเจ้าภาพ และสถานะให้ติดตาม เกิดขึ้นเมื่อยื่นเรื่องแล้วเท่านั้น หนึ่งเรื่องมีประเภทเดียว คือคำขอเบิก คำขอคืน หรือเรื่องแจ้งปัญหา ข้อความเดียวที่มีหลายประเภทจึงกลายเป็นหลายเรื่อง
+_Avoid_: ข้อความ เมื่อหมายถึงงานทั้งเรื่อง; ร่างเรื่อง
+
+**ร่างเรื่อง**:
+ข้อมูลที่กำลังรวบรวมจากการสนทนาและยังไม่ได้ยืนยันยื่น ยังไม่มีเลขเรื่อง กองเจ้าภาพ หรือสถานะติดตาม และไม่ถือเป็นเรื่อง ผู้แจ้งมีร่างค้างได้หลายร่าง แต่คุยต่อได้ทีละร่าง ถ้ามีหลายร่างต้องเลือกก่อนแก้ ร่างที่ไม่มีความเคลื่อนไหว 7 วันหมดอายุ ปุ่มยืนยันร่างใช้ได้ 30 นาทีและใช้ไม่ได้ทันทีเมื่อร่างถูกแก้
+_Avoid_: เรื่องสถานะร่าง
+
+**ไฟล์แนบ**:
+รูปหรือเอกสารที่ผู้แจ้งส่งมาประกอบร่างเรื่อง เมื่อยื่นแล้วเป็นส่วนหนึ่งของเรื่อง ต้องผ่านการสแกนก่อนเจ้าหน้าที่เปิดดูได้ ไฟล์ที่ยังไม่ได้สแกนหรือสแกนไม่ได้ถือว่ายังไม่ผ่าน
+_Avoid_: ลิงก์ที่ผู้ใช้ส่งมา (ระบบไม่ดึงไฟล์จาก URL เอง)
+
+**การยื่นเรื่อง**:
+การยืนยันร่างเรื่องให้เกิดเป็นเรื่อง ได้เลขเรื่องและเข้าคิวของกองรับเรื่องกลาง ผู้แจ้งยื่นเองหรือเจ้าหน้าที่บันทึกแทนผู้แจ้งก็ได้
+_Avoid_: การส่งเรื่อง (ซึ่งหมายถึงการนำเรื่องเข้าคิวของหน่วยที่เสนอให้รับผิดชอบ)
+
+**ผู้ยื่นเรื่อง**:
+บุคคลที่กดยื่นเรื่องเข้าระบบ อาจเป็นผู้แจ้งเองหรือเจ้าหน้าที่ที่บันทึกแทน ผู้แจ้งยังเป็นเจ้าของเรื่องเสมอ
+_Avoid_: ผู้แจ้ง เมื่อเจ้าหน้าที่เป็นผู้บันทึกแทน
+
+**เลขเรื่อง**:
+เลขอ้างอิงที่ออกเมื่อยื่นเรื่อง บอกประเภทและปี พ.ศ. และเรียงต่อเนื่องไม่ข้ามเลขภายในประเภทและปีเดียวกัน เช่น W69-000123 (เบิก), R69-… (คืน), P69-… (แจ้งปัญหา)
+_Avoid_: เลขข้อความ, เลขร่าง
 
 **ข้อความ**:
 การติดต่อหนึ่งครั้งที่อาจมีข้อมูลเพิ่มเติมของเรื่องเดิมหรือมีหลายเรื่องอยู่ด้วยกัน
@@ -885,7 +914,7 @@ _Avoid_: เรื่อง เมื่อหมายถึงการติ�
 _Avoid_: วัสดุสิ้นเปลือง เมื่อหมายรวมถึงอุปกรณ์ที่ติดตามรายชิ้น
 
 **รายการของ**:
-ชนิดของที่ระบุด้วยรหัส รายละเอียด และหน่วยนับเดียวกัน ของที่มีหมายเลขประจำเครื่องอาจต้องระบุแต่ละชิ้นเพิ่มเติม
+ชนิดของที่ระบุด้วยรหัส รายละเอียด และหน่วยนับเดียวกัน ของที่มีหมายเลขประจำเครื่องอาจต้องระบุแต่ละชิ้นเพิ่มเติม รายการนับเป็นเครื่องหรือชิ้นใช้จำนวนเต็ม ส่วนรายการแบ่งได้ เช่น สายไฟเป็นเมตร ใช้ทศนิยมไม่เกิน 2 ตำแหน่ง
 _Avoid_: ชื่อเรียกไม่เป็นทางการเพียงอย่างเดียว
 
 **คำขอเบิก**:
@@ -917,22 +946,42 @@ _Avoid_: ของทั้งหมดที่มีอยู่, ของร
 _Avoid_: ของพร้อมจ่าย
 
 **เรื่องแจ้งปัญหา**:
-งานเพื่อแก้เหตุผิดปกติ เช่น ของชำรุด จำนวนไม่ตรง หรือการส่งมอบล่าช้า ซึ่งอาจสัมพันธ์กับคำขอเบิกหรือคำขอคืน
-_Avoid_: คำขอเบิกใหม่ โดยอัตโนมัติ
+งานเพื่อแก้เหตุผิดปกติ เช่น ของชำรุด จำนวนไม่ตรง หรือการส่งมอบล่าช้า ซึ่งอาจอ้างถึงเรื่องเบิกหรือคืนที่เกี่ยวข้อง และระบุรายการของหรือหมายเลขประจำเครื่องที่มีปัญหาได้โดยไม่ต้องมีจำนวน ในแชตผู้แจ้งเห็นในชื่อปุ่ม "ปัญหาการใช้งาน" ผู้แจ้งไม่ต้องระบุว่าเป็นปัญหาของกองใด กองเจ้าภาพกำหนดตอนคัดกรองโดยมีข้อเสนอจาก Priority Engine ประกอบ
+_Avoid_: คำขอเบิกใหม่ โดยอัตโนมัติ; ปัญหาการใช้งาน (เมื่อใช้เป็นชื่อประเภทในเอกสาร)
 
 **ผู้รับผิดชอบเรื่อง**:
-บุคคลที่รับหน้าที่ดำเนินการและอัปเดตความคืบหน้าของเรื่องหนึ่ง
-_Avoid_: ผู้อนุมัติ เมื่อหมายถึงผู้ดำเนินงาน
+บุคคลในกองเจ้าภาพที่รับหน้าที่ดำเนินการและอัปเดตความคืบหน้าของเรื่องหนึ่ง เรื่องอาจยังไม่มีผู้รับผิดชอบเรื่องจนกว่าจะมีเจ้าหน้าที่รับไป
+_Avoid_: ผู้อนุมัติ เมื่อหมายถึงผู้ดำเนินงาน; กองเจ้าภาพ; owner
 
 **ปิดเรื่อง**:
-การยืนยันว่ารายการงานที่ต้องดำเนินการครบแล้ว หรือส่วนที่เหลือได้รับการยุติโดยมีเหตุผลและผู้มีอำนาจรับรอง
+การยืนยันว่ารายการงานที่ต้องดำเนินการครบแล้ว หรือส่วนที่เหลือได้รับการยุติโดยมีเหตุผลและผู้มีอำนาจรับรอง คำขอเบิกและเรื่องแจ้งปัญหาต้องให้เขตยืนยันผลก่อนปิด ส่วนคำขอคืนปิดได้เมื่อรับคืนและตรวจสภาพครบ โดยแจ้งผลให้เขตทราบ
 _Avoid_: ตอบข้อความแล้ว, อนุมัติแล้ว
+
+**การยกเลิกเรื่อง**:
+การยุติเรื่องก่อนดำเนินการเสร็จ ผู้แจ้งยกเลิกเรื่องของตนได้ระหว่างรอคัดกรองหรือกำลังคัดกรอง หลังจากนั้นเฉพาะกองเจ้าภาพยกเลิกได้พร้อมเหตุผล การยกเลิกหลังจ่ายของแล้วไม่ย้อนยอดที่เกิดขึ้นจริง
+_Avoid_: การไม่รับเรื่อง, การไม่อนุมัติ
+
+**การไม่รับเรื่อง**:
+การที่ผู้คัดกรองยุติเรื่องเพราะซ้ำ อยู่นอกขอบเขต หรือไม่ใช่งานของ ฝอจ. พร้อมเหตุผล ไม่ใช่การตัดสินตามอำนาจอนุมัติ
+_Avoid_: การไม่อนุมัติ, การยกเลิกเรื่อง
+
+**การเปิดเรื่องใหม่**:
+การนำเรื่องที่ปิดแล้วกลับมาดำเนินการต่อที่กองเจ้าภาพเดิม ทำได้โดยผู้แจ้งเจ้าของเรื่องหรือกองเจ้าภาพภายใน 30 วันหลังปิดพร้อมเหตุผล หากเกินกำหนดให้ยื่นเรื่องแจ้งปัญหาใหม่ที่อ้างถึงเรื่องเดิม
+_Avoid_: การยื่นเรื่องซ้ำ
 
 ### D.2 การส่งต่อและการตัดสินใจ
 
 **กองเจ้าภาพ**:
-กองที่รับผิดชอบผลสำเร็จของเรื่องตามตารางหน้าที่ที่มีผลใช้งาน เรื่องหนึ่งมีเจ้าภาพหลักหนึ่งราย ณ เวลาใดเวลาหนึ่ง แม้ต้องมีหน่วยร่วมดำเนินการ
-_Avoid_: ทุกกองที่ได้รับสำเนา
+กองที่รับผิดชอบผลสำเร็จของเรื่องตามตารางหน้าที่ที่มีผลใช้งาน เรื่องหนึ่งมีเจ้าภาพหลักหนึ่งราย ณ เวลาใดเวลาหนึ่ง แม้ต้องมีหน่วยร่วมดำเนินการ ทุกเรื่องมีกองเจ้าภาพเสมอตั้งแต่ยื่นเรื่อง คำว่า owner ในเอกสารนี้หมายถึงกองเจ้าภาพ
+_Avoid_: ทุกกองที่ได้รับสำเนา; ผู้รับผิดชอบเรื่อง (ซึ่งเป็นบุคคล)
+
+**กองรับเรื่องกลาง**:
+กองที่เป็นกองเจ้าภาพของทุกเรื่องทันทีที่ยื่น เพื่อคัดกรองก่อนส่งต่อ ณ เวลาหนึ่งมีได้หนึ่งกอง และแอดมินเปลี่ยนได้
+_Avoid_: กองที่รับผิดชอบงานสุดท้าย
+
+**การคัดกรอง**:
+การที่เจ้าหน้าที่กองรับเรื่องกลางหยิบเรื่องมาตรวจข้อมูลและกำหนดทางไปต่อ เรื่องที่ยื่นแล้วแต่ยังไม่มีใครหยิบถือว่ารอคัดกรอง ซึ่งเป็นคนละสถานะกับกำลังคัดกรอง
+_Avoid_: การตอบรับงาน
 
 **หน่วยร่วมดำเนินการ**:
 หน่วยที่รับงานย่อยเพื่อสนับสนุนเจ้าภาพหลัก โดยมีผลส่งมอบและผู้รับผิดชอบของงานย่อยชัดเจน
@@ -978,7 +1027,7 @@ _Avoid_: เปลี่ยนคำแนะนำของ AI, อนุมั
 _Avoid_: บัญชีร่วมกอง, หนึ่งกองเท่ากับผู้ใช้หนึ่งคน
 
 **การรับรองผู้แจ้ง**:
-การที่แอดมินตรวจคำขอลงทะเบียนและรับรองบุคคลกับเขต ก่อนให้ส่งเรื่องได้
+การที่แอดมินตรวจคำขอลงทะเบียนและรับรองบุคคลกับเขต ก่อนให้ยื่นเรื่องได้ ผู้แจ้งที่ไม่ใช้ LINE แอดมินรับรองโดยตรงได้พร้อมบันทึกเหตุผล
 _Avoid_: แอดเพื่อนแล้วได้รับสิทธิ์, เลือกเขตเองแล้วมีสิทธิ์
 
 **ขอบเขตกอง**:
@@ -1168,14 +1217,14 @@ SSO/OIDC เป็นงานต่อยอดเมื่อองค์ก�
 
 DB CHECK/UNIQUE/FK ใช้กับเงื่อนไขในแถวหรือคีย์; เงื่อนไขผลรวมข้ามรายการตรวจใน transaction ที่ lock parent/stock rows ตามลำดับ ID คงที่ ไม่ค้าง lock ขณะเรียก LINE, LLM หรือระบบทะเบียน Index เริ่มจาก FK และ query จริง: `(requester_actor_id,status,created_at)` และ `(district_id,status,created_at)` สำหรับรายงานที่มีสิทธิ์, `(owner_division_id,status,due_at)`, inbox/outbox pending state และ external correlation ID; ใช้ EXPLAIN กับข้อมูลขนาด staging ก่อนเพิ่ม index หรือ partition ไม่ index ข้อความส่วนตัวทั้งหมดโดยไม่จำเป็น
 
-**Common command contract v1**: ทุก mutation รับ `actor`, `case_id` เมื่อมี, `expected_revision`, `idempotency_key`, `payload` actor มาจาก authenticated context ไม่ใช่ request body ตรวจสิทธิ์ปัจจุบันก่อนคืนผลจาก ActionReceipt ที่เคยบันทึกไว้ด้วย ผลสำเร็จคืน `case_id`, `case_number`, `revision`, `status`, `action_id`; errors ใช้ `AUTH_REQUIRED`, `FORBIDDEN`, `NOT_FOUND`, `REVISION_CONFLICT`, `VALIDATION_ERROR`, `DEPENDENCY_UNAVAILABLE`, `EXTERNAL_OUTCOME_UNKNOWN` ไม่เผยว่ามีเรื่องของผู้แจ้งคนอื่นหรือกองอื่นผ่านข้อความ error
+**Common command contract v1**: ทุก mutation รับ `actor`, `case_id` เมื่อมี, `expected_revision`, `idempotency_key`, `payload` actor มาจาก authenticated context ไม่ใช่ request body ตรวจสิทธิ์ปัจจุบันก่อนคืนผลจาก ActionReceipt ที่เคยบันทึกไว้ด้วย ผลสำเร็จคืน `case_id`, `case_number`, `revision`, `status`, `action_id`; errors ใช้ `AUTH_REQUIRED`, `FORBIDDEN`, `NOT_FOUND`, `REVISION_CONFLICT`, `VALIDATION_ERROR`, `INVALID_TRANSITION` (สถานะปัจจุบันไม่อนุญาต action), `ACTION_NOT_ENABLED` (action ของโมดูลที่ยังไม่ implement), `IDEMPOTENCY_CONFLICT` (key เดิมแต่ payload ต่าง), `DEPENDENCY_UNAVAILABLE`, `EXTERNAL_OUTCOME_UNKNOWN` ไม่เผยว่ามีเรื่องของผู้แจ้งคนอื่นหรือกองอื่นผ่านข้อความ error
 
 Web API ใช้ JSON `/api/v1/` เฉพาะที่ integration ต้องใช้; HTML views เรียก domain service เดียวกัน mutation เป็น POST พร้อม CSRF สำหรับ session; webhook ยกเว้น CSRF เฉพาะ route และตรวจ signature แทน เก็บ schema ใน `operations/contracts.py` และ export contract JSON ที่ทดสอบได้ ไม่บังคับเพิ่ม REST framework หรือ OpenAPI generator หาก Django/Pydantic เพียงพอ
 
 | Endpoint/command | Input เฉพาะ | Output / ความรับผิดชอบ |
 | --- | --- | --- |
 | `POST /webhooks/line` | raw body + signature | 2xx หลัง durable inbox; invalid signature ปฏิเสธ, DB unavailable ไม่ตอบสำเร็จ |
-| `create_draft`, `update_draft`, `submit_case` | intent, items, fields, source refs | draft revision/สรุป; submit หลังยืนยันเท่านั้น |
+| `create_draft`, `update_draft` (M03, `ConversationDraft`) และ `submit_case` (M02) | intent, items, fields, source refs | ร่างมี revision ของตัวเองใน M03; `submit_case` สร้าง Case เมื่อยืนยันเท่านั้น หรือเมื่อเจ้าหน้าที่กองรับเรื่องกลางบันทึกแทนผู้แจ้ง |
 | `GET /api/v1/cases`, `GET /api/v1/cases/{id}` | filter/cursor ตามสิทธิ์ | รายการ/รายละเอียดของ scope ที่เห็นได้ จำกัด page size |
 | `POST /api/v1/cases/{id}/actions/{action}` | common command + typed payload | approve/reject/handoff/accept/issue/receive/inspect/resolve/confirm/close/reopen ตาม transition |
 | `GET /attachments/{id}` | session และ scope | download เฉพาะไฟล์ผ่าน scan; ไม่คืน path จริง |
@@ -1194,7 +1243,7 @@ Event envelope v1: `event_id`, `event_type`, `subject_type`, `subject_id`, `case
 
 ### E.5 State machine และการทำธุรกรรม
 
-แยก case lifecycle จาก fulfillment counters เพื่อไม่สร้าง status ทุก combination: `draft → submitted → triage → awaiting_approval/awaiting_execution/in_progress → awaiting_confirmation → closed` มี `awaiting_info`, `rejected`, `cancelled` และ `on_hold` เป็นสถานะที่กำหนด resume target ไว้ explicit; จ่ายบางส่วน/รับคืนบางส่วนเป็น derived label จาก line counters ไม่ทับ lifecycle โดยไม่ผ่าน service
+แยก case lifecycle จาก fulfillment counters เพื่อไม่สร้าง status ทุก combination: `submitted → triage → awaiting_approval/awaiting_execution/in_progress → awaiting_confirmation → closed` มี `awaiting_info`, `rejected`, `cancelled` และ `on_hold` เป็นสถานะที่กำหนด resume target ไว้ explicit; จ่ายบางส่วน/รับคืนบางส่วนเป็น derived label จาก line counters ไม่ทับ lifecycle โดยไม่ผ่าน service
 
 | Action | Actor ที่มีสิทธิ์ | Guard / สิ่งที่ต้องบันทึก |
 | --- | --- | --- |
@@ -1205,6 +1254,27 @@ Event envelope v1: `event_id`, `event_type`, `subject_type`, `subject_id`, `case
 | receive/inspect | ผู้รับคืน/ผู้ตรวจสภาพ | รับถึงจริงแยกจากพร้อมจ่าย; ตรวจรายการไม่ตรงแยกไว้; ต้องมีผลตรวจจึงจัด available |
 | resolve/confirm | ผู้แก้ปัญหาในกอง/ผู้แจ้งเจ้าของเรื่อง | บันทึกผลและหลักฐานก่อนให้เขตยืนยัน; ไม่มีการสร้างเบิกหรือคืนแทนอัตโนมัติ |
 | close/cancel/reopen | ผู้มีสิทธิ์ตามประเภทงาน | close ต้องไม่มีส่วนค้างหรือมีคำตัดสินยุติ; cancel หลังจ่ายไม่ย้อนยอดเอง; reopen เก็บเหตุผลและเชื่อมประวัติเดิม |
+
+<a id="m02-decisions"></a>
+
+**การตัดสินใจออกแบบ M02 (ยืนยันกับผู้ใช้ 6 ตุลาคม 2569)** คำศัพท์ที่เกี่ยวข้องอยู่ใน D.1–D.3
+
+| เรื่อง | ข้อตกลง | เหตุผล/ผลที่ตามมา |
+| --- | --- | --- |
+| เรื่องเกิดเมื่อใด | Case เกิดตอน **ยื่นเรื่อง** เท่านั้น ไม่มีสถานะ `draft`; ร่างเรื่องอยู่ใน `ConversationDraft` ของ M03 | เลือกแทนการเก็บร่างเป็น Case สถานะ draft เพื่อให้ตาราง Case มีแต่งานที่ต้องติดตามจริง เลขเรื่อง/กองเจ้าภาพ/คิวไม่ปนกับร่างที่อาจถูกทิ้ง ส่วนผล AI ที่มาช้าตรวจด้วย revision ของร่างใน M03 แทน กลับทางภายหลังต้อง migrate ข้อมูลและแก้ทุก caller จึงบันทึกไว้ที่นี่ |
+| ประเภท | หนึ่งเรื่องหนึ่งประเภท (เบิก/คืน/แจ้งปัญหา); ข้อความที่มีหลายประเภทเป็นหลายเรื่อง; เรื่องแจ้งปัญหาอ้างเรื่องเดิมของผู้แจ้งคนเดียวกันได้ และระบุของ/serial ได้โดยไม่มีจำนวน | matrix ต่อประเภทชัด ไม่ต้องมีสถานะผสม |
+| เจ้าภาพ | `owner_division` (กองเจ้าภาพ) ไม่เป็น null ตั้งแต่ยื่นเรื่อง = กองรับเรื่องกลาง (`Division.is_intake` มีได้หนึ่งกอง แอดมินเปลี่ยนได้ ต้นแบบใช้ SIM-TRIAGE); `assignee` (ผู้รับผิดชอบเรื่อง) ว่างได้ | "owner" ในเอกสารหมายถึงกองเจ้าภาพ |
+| สถานะ | `submitted` (รอคัดกรอง) แยกจาก `triage` (กำลังคัดกรอง); เบิก: triage → awaiting_approval → awaiting_execution → in_progress → awaiting_confirmation → closed; คืน: triage → awaiting_execution → in_progress → closed (**ไม่ต้องให้เขตยืนยัน** แจ้งผลแทน); แจ้งปัญหา: triage → in_progress → awaiting_confirmation → closed | matrix ทั้งหมดอยู่ใน `operations/workflow.py` และ export ด้วย `manage.py export_contract` |
+| เลขเรื่อง | `W69-000123` / `R69-…` / `P69-…` ตามประเภทและปี พ.ศ. (เวลากรุงเทพ) เรียงไม่ข้ามเลข ออกตอนยื่น | ใช้ตัวนับที่ lock แถว rollback แล้วไม่เสียเลข |
+| จำนวนและหน่วย | Decimal เสมอ ห้าม float; หน่วยเครื่อง/ชิ้นและของมี serial เป็นจำนวนเต็ม; หน่วยแบ่งได้ (เมตร) ทศนิยมไม่เกิน 2 ตำแหน่ง; คำขอคืนของที่มี serial ต้องระบุ serial ครบตามจำนวน | |
+| บันทึกแทนผู้แจ้ง | เฉพาะเจ้าหน้าที่ที่มีบทบาทในกองรับเรื่องกลาง (สิทธิ์แอดมินอย่างเดียวไม่พอ); ผู้แจ้งต้องได้รับการรับรองและ active; ต้องระบุช่องทาง (โทรศัพท์/หนังสือ/หน้าเคาน์เตอร์) และหมายเหตุ; `submitted_by` คือเจ้าหน้าที่ ผู้แจ้งยังเป็นเจ้าของเรื่อง | |
+| ผู้แจ้งไม่มี LINE | แอดมินรับรองผู้แจ้งโดยตรงได้พร้อมเหตุผล (`identity.create_requester`, หน้า `/console/admin/registrations/`) | ผู้แจ้งกลุ่มนี้ไม่ได้รับแจ้งทาง LINE |
+| ข้อมูลขั้นต่ำ | เบิก: รายการ + จำนวน + วัตถุประสงค์ (วันที่ต้องการเป็นตัวเลือก); คืน: รายการ + จำนวน (+ serial) + สภาพ + เหตุผล (เอกสารเบิกเดิมเป็นตัวเลือก); แจ้งปัญหา: อาการ (ผลกระทบ/เรื่องเกี่ยวข้อง/ของเป็นตัวเลือก) | ฟิลด์ที่ไม่รู้จักถูกปฏิเสธ |
+| action ที่เปิดใน M02 | start_triage, claim, assign, request_info/info_received, hold/resume, cancel, decline; action อื่นอยู่ใน matrix แต่ตอบ `ACTION_NOT_ENABLED` จนโมดูลเจ้าของ (M06–M09) implement guard | ไม่มี placeholder success |
+| ผู้รับผิดชอบเรื่อง | การรับเรื่อง (start_triage/claim) ต้องเป็นสมาชิกกองเจ้าภาพ; supervisor ของกองเจ้าภาพหรือแอดมินมอบหมายให้สมาชิกกองได้; action จัดการอื่น (พัก ขอข้อมูล ยกเลิก ไม่รับเรื่อง) ทำได้โดยสมาชิกกองเจ้าภาพหรือแอดมิน แต่แอดมินไม่ได้อำนาจอนุมัติ; เมื่อกองเจ้าภาพเปลี่ยน (M06) ผู้รับผิดชอบกลับเป็นว่าง | |
+| ยกเลิก/ไม่รับเรื่อง | ผู้แจ้งยกเลิกเรื่องของตนได้ระหว่าง submitted/triage ไม่ต้องมีเหตุผล หลังจากนั้นเฉพาะกองเจ้าภาพพร้อมเหตุผล ยกเลิกหลังจ่ายไม่ย้อนยอด; ผู้คัดกรองไม่รับเรื่อง (`decline` → `rejected`) พร้อมเหตุผล ไม่ใช่การไม่อนุมัติ (`deny_approval`, M07) | |
+| เปิดเรื่องใหม่ | เปิดเรื่องเดิมกลับไป `in_progress` ที่กองเจ้าภาพเดิม โดยผู้แจ้งเจ้าของเรื่องหรือกองเจ้าภาพภายใน 30 วันพร้อมเหตุผล เกินกำหนดให้ยื่นเรื่องแจ้งปัญหาใหม่ที่อ้างเรื่องเดิม (อยู่ใน matrix ยังไม่เปิดใช้) | |
+| ขอบเขต M02 | service + `contracts.py` + matrix + tests เท่านั้น ยังไม่มี `/api/v1/` หรือหน้าเว็บเรื่อง endpoint มาพร้อมผู้เรียกจริง (M03/M04 internal, M10 เว็บ) | |
 
 M02 ต้องจัดทำ transition matrix แบบ executable ให้ทุก allowed transition มี positive/negative test ของ matrix; เปิด action endpoint เฉพาะ workflow ที่ implement guard ครบใน M07–M09 แล้วเท่านั้น action ที่ยังไม่พร้อมต้องปฏิเสธ ไม่ทำ placeholder success ห้าม arbitrary set status ผ่าน API/admin ข้อมูลใหม่ระหว่าง AI ทำงานสร้าง revision ใหม่ ผลเก่าเก็บประวัติได้แต่ไม่เปลี่ยนข้อเสนอที่เจ้าหน้าที่กำลังใช้โดยเงียบ ทุก manual override เก็บข้อเสนอเดิม ค่าที่คนเลือก เหตุผล ผู้เลือก และ policy version
 
@@ -1397,7 +1467,7 @@ n8n เป็นองค์ประกอบที่เลือกสำห�
 
 **Workflow contract:** `conversation-turn`, `case-notification`, `reminder-recovery` ตาม C.6 มี exported JSON/version ใน `workflows/n8n/`, credentials เป็น reference และ environment mapping ไม่มีค่าลับ Import ซ้ำไม่สร้าง active workflow ซ้อนกัน เปิดใช้เฉพาะ workflow version ที่ release กำหนด การ export/import ไม่รวม API key หรือ encryption key
 
-**Ownership contract:** Django รับ signed LINE events/เก็บร่าง/ตรวจสิทธิ์/เรียก ThaiLLM API ผ่าน adapter/ส่ง LINE; n8n เรียงลำดับ ถามเพิ่มและเรียก scoped APIs ตามผลตรวจของ Django เก็บ event/lease/revision ทุก action ห้ามแก้ตารางธุรกิจโดยตรงหรือใช้ n8n execution success แทนผลธุรกรรม
+**Ownership contract:** Django รับ signed LINE events/เก็บร่าง/ตรวจสิทธิ์/เรียก ThaiLLM API ผ่าน adapter/ส่ง LINE และเป็นเจ้าของ**ตรรกะบทสนทนา** (`operations/conversation.py`: คำถามถัดไป การตรวจคำตอบ ปุ่ม และข้อความตอบกลับ) ตามการตัดสินใจ M03 (6 ตุลาคม 2569); n8n เรียกรอบบทสนทนา (`handle_inbox`/`send_reply`) ผ่าน claim/lease ดูแลจังหวะเวลา การเรียก AI ก่อน deadline, retry และ push ตามงบ ไม่ถือกติกาบทสนทนาซ้ำ เก็บ event/lease/revision ทุก action ห้ามแก้ตารางธุรกิจโดยตรงหรือใช้ n8n execution success แทนผลธุรกรรม
 
 **Acceptance:** import/restart workflow ได้, claim ซ้อน/lease หมดอายุ/complete ซ้ำปลอดภัย, same-district other-user และ cross-division data ไม่หลุด, API down มี fallback, เปลี่ยน active model/key ผ่านสองช่องทางได้ตามสิทธิ์ และ restore metadata+volume+encryption key ในที่แยกโดย outbound ปิด Workflow logs ที่แสดงว่ารันจบอย่างเดียวไม่ใช่หลักฐาน UAT
 
@@ -1436,8 +1506,8 @@ n8n เป็นองค์ประกอบที่เลือกสำห�
 | --- | --- | --- | --- | --- |
 | M00 | Foundation + CI พื้นฐาน | — | settings, DB, commands, test runner | done (local) |
 | M01 | บัญชีรายบุคคล/กอง/สิทธิ์/รับรอง LINE | M00 | Actor, Membership, ChannelIdentity, RegistrationRequest | done (local) |
-| M02 | Case domain/transactions/audit | M01 | command v1, Case, ActionReceipt, OutboxEvent | planned |
-| M03 | LINE ส่วนตัว/ลงทะเบียน/ร่าง/ไฟล์ | M02 | WebhookInbox, ConversationDraft, ownership, submit_case | planned |
+| M02 | Case domain/transactions/audit | M01 | command v1, Case, ActionReceipt, OutboxEvent | done (local) |
+| M03 | LINE ส่วนตัว/ลงทะเบียน/ร่าง/ไฟล์ | M02 | WebhookInbox, ConversationDraft, ownership, submit_case | done (local + live LINE smoke) |
 | M04 | n8n container/Conversation & Orchestration | M02 | workflow JSON, claim/lease APIs, LINE delivery | planned |
 | M05 | ThaiLLM API/configuration/evaluation | M03, M04 | AIProviderProfile, developer-admin settings, schema v1 | planned |
 | M06 | Priority/routing/authority | M02 | policy v1, R01–R10, ServicePolicy | planned |
@@ -1549,11 +1619,23 @@ Implement M02: สร้าง contract v1 และ service สำหรับ 
 รัน make test-module MODULE=M02 โดยใช้ PostgreSQL ไม่ใช้ SQLite แทน lock semantics
 ```
 
+**ผล implement / หลักฐาน 6 ตุลาคม 2569:** M02 done ในเครื่อง (ยังไม่มี hosted CI) ตามการตัดสินใจใน [E.5](#m02-decisions)
+
+- Models + migration `0002_m02_cases`: `EquipmentType` (รายการของ: หน่วย, มี serial, แบ่งได้; DB ห้ามของมี serial แบ่งได้), `Case` (UUID, `number` unique, `kind`, `status`, `resume_status`, `revision`, requester/district/owner_division non-null, assignee, `submitted_by` + `channel` ที่ DB บังคับให้สอดคล้องกัน, ฟิลด์ตามประเภท), `CaseLine` (Decimal(12,2) > 0 หรือว่างสำหรับแจ้งปัญหา, serials), `CaseNumberCounter`, `Decision` (append-only หนึ่งแถวต่อ revision), `ActionReceipt` (unique actor + action + key, request hash, ผลเดิม), `OutboxEvent` (envelope v1, pending จน M04 มาประมวลผล) และ `Division.is_intake` (มีได้หนึ่งกอง); `AuditEvent` ใช้ `AppendOnlyModel` ร่วมกับ `Decision`
+- `operations/workflow.py` คือ transition matrix แบบ executable: สถานะต่อประเภท, action ทั้งหมด 22 ตัวพร้อมโมดูลเจ้าของ, เปิดใช้ 9 ตัวใน M02; `operations/contracts.py` คือ contract v1 (Actor, error codes, CommandResult, การตรวจ payload/จำนวน/หน่วย, event envelope) และ `manage.py export_contract` พิมพ์ JSON ของ contract + matrix
+- `operations/services.py`: `submit_case` และ `perform_action` ทำ Decision + AuditEvent + OutboxEvent + ActionReceipt ใน transaction เดียว; ลำดับตรวจ: actor (อ่าน DB ทุกครั้ง) → advisory lock ของ key → lock แถวเรื่อง + scope (นอก scope = `NOT_FOUND` เหมือนไม่มีจริง) → replay ผลเดิมเมื่อ key/payload ตรง (ตรวจสิทธิ์ปัจจุบันก่อน) → action เปิดใช้หรือไม่ → payload/เหตุผล → `expected_revision` → matrix → guard ของ action; ฐานข้อมูลล่มตอบ `DEPENDENCY_UNAVAILABLE` หลัง rollback; `visible_cases`/`get_case` ใช้กฎ own-requester/own-division ของ M01
+- แอดมิน: `identity.set_intake_division` (ห้ามปิดกองที่เป็นกองรับเรื่องกลาง), `identity.create_requester` (ผู้แจ้งไม่มี LINE) พร้อมหน้าใน `/console/admin/divisions/` และ `/console/admin/registrations/`; Case ไม่มีทางแก้ผ่าน Django admin
+- `seed_demo_cases` (demo DB เท่านั้น, รันซ้ำได้ด้วย idempotency key เดิม): ของจำลอง 5 รายการ ผู้แจ้งจำลอง D01–D04 และเรื่องตัวอย่าง 4 เรื่องจาก `synthetic-data.json` (เพิ่ม `requested_serials` ให้คำขอคืน REQ_SYN_002 เพราะคำขอคืนของมี serial ต้องระบุ serial; ไม่ได้ลบ requirement เดิม) เรื่องตัวอย่างอยู่สถานะ `submitted` จนกว่า M07–M09 จะเดินสถานะได้
+- `make test-module MODULE=M02` ผ่าน **42 tests** และ `make test` รวม **81 tests** บน PostgreSQL: matrix ทุก action × ประเภท × สถานะ (เทียบกับตารางที่ตกลงซึ่งเขียนแยกจาก `workflow.py`), action ของโมดูลถัดไปถูกปฏิเสธ, ทุกสถานะเข้าถึงได้และไปถึง closed, Decimal/หน่วย/serial, ข้อมูลขั้นต่ำต่อประเภท, เลขเรื่องข้ามปีตามเวลากรุงเทพ, key ซ้ำคืนผลเดิมแม้ revision เดินไปแล้ว, key เดิม payload ต่าง conflict, replay ตรวจสิทธิ์ใหม่, stale revision ไม่เขียนทับ, rollback ทั้งหมดเมื่อ outbox/audit ล้มเหลว (เลขเรื่องไม่ข้าม), scope/permission, DB constraints และ concurrency 3 กรณี (รับเรื่องพร้อมกันเหลือหนึ่งคน, retry key เดียวพร้อมกันได้เรื่องเดียว, ยื่นพร้อมกัน 6 เรื่องได้เลขต่อเนื่อง); ตรวจ mutation 10 จุดของ guard สำคัญ tests จับได้ทุกจุด
+- `make ci` ผ่านครบ 5 stages, `make seed-demo` รันซ้ำได้, container build ใหม่ healthy และ smoke ผ่าน
+
+**ข้อจำกัดที่ยังเหลือ:** ยังไม่มี endpoint/หน้าเว็บของเรื่อง (M03/M04/M10); outbox ยังไม่มีผู้ส่ง (M04); ตัวนับจ่าย/รับ/ตรวจ และ action ส่งต่อ อนุมัติ จ่าย รับคืน แก้ปัญหา ยืนยัน ปิด เปิดใหม่ รอ M06–M09; append-only และการห้ามแก้ Case นอก service บังคับระดับ application ส่วนการแยกสิทธิ์ DB role เป็นงาน M12; ของและผู้แจ้งในเรื่องตัวอย่างเป็นข้อมูลจำลอง
+
 <a id="module-m03"></a>
 
 ### M03 — LINE ส่วนตัว ลงทะเบียน บทสนทนา และไฟล์แนบ
 
-**Input/dependency:** M02 และ registration/permission services M01; M04 เป็นผู้ประสานงานจาก outbox และช่องทางจริงต้องมี OA ทดสอบ
+**Input/dependency:** M02 และ registration/permission services M01; M04 เป็นผู้ประสานงานจาก outbox และช่องทางจริงต้องมี OA ทดสอบ (บัญชีที่ใช้: `@894attlg` ตาม C.2.3); ร่างเรื่องอยู่ใน `ConversationDraft` และเรียก `services.submit_case` ของ M02 เมื่อผู้แจ้งยืนยัน (Case เกิดตอนยื่นเท่านั้น)
 
 **ขอบเขตไฟล์/ผลส่งมอบ:** inbound `line.py`, signed webhook, registration adapter, inbox/draft/attachment models, scoped conversation APIs, `attachments.py`, private download และ signed-event fixtures
 
@@ -1567,6 +1649,39 @@ Django เก็บ draft/revision; ส่ง event ให้ conversation-turn 
 โหลดไฟล์ด้วย official content API เก็บ private/quarantine และตรวจ ownership/division/admin ก่อนดู
 รัน make test-module MODULE=M03 พร้อม private/group/replay fixtures; แยก live LINE evidence ที่ยังรอ credentials
 ```
+
+**การตัดสินใจออกแบบ M03 (ยืนยันกับผู้ใช้ 6 ตุลาคม 2569)**
+
+| เรื่อง | ข้อตกลง |
+| --- | --- |
+| แบ่งงานกับ M04 | ตรรกะบทสนทนาอยู่ใน Django (`conversation.handle_inbox` คืนข้อความตอบ, `send_reply` ใช้ reply token ครั้งเดียว) ระหว่างยังไม่มี n8n ใช้ `manage.py process_line_inbox` (`make line-worker`) ซึ่งปฏิเสธการรันใน production; M04 เปลี่ยนผู้เรียกเป็น n8n claim/lease และเพิ่ม push ตามงบ (E.12 แก้ตามนี้แล้ว) |
+| บทสนทนาก่อนมี AI | ถามทีละช่องพร้อมปุ่ม: ประเภท **1. เบิก 2. ส่งคืน 3. ปัญหาการใช้งาน** → หมวดของ (มิเตอร์/หม้อแปลง/อุปกรณ์อื่น) → ของ (ปุ่มเมื่อไม่เกิน 12 รายการ มิฉะนั้นพิมพ์ค้นหา) → จำนวน/หมายเลขเครื่อง → เพิ่มรายการหรือไปต่อ → ฟิลด์ตามประเภท → สรุป → ยืนยัน ข้อความอิสระเก็บเป็นต้นฉบับและถามคำถามเดิมซ้ำ ไม่เดาฟิลด์จากข้อความ (AI ใน M05 ใช้ข้อความต้นฉบับนี้) |
+| "ปัญหาการใช้งาน" | เป็นชื่อปุ่มของเรื่องแจ้งปัญหาทั้งหมด (ชำรุด/ใช้งานไม่ได้ จำนวนไม่ตรง ส่งล่าช้า) ผู้แจ้งไม่ต้องระบุกอง กองเจ้าภาพกำหนดตอนคัดกรองด้วยข้อเสนอของ Priority Engine (M06) |
+| ร่าง | ค้างได้หลายร่าง คุยต่อได้ทีละร่าง ถ้ามีหลายร่างโดยไม่มีร่างที่ใช้อยู่ต้องเลือกก่อน; ร่างที่ไม่เคลื่อนไหว 7 วันหมดอายุและแจ้งผู้ใช้ครั้งเดียวเมื่อทักครั้งถัดไป (ไม่ push) |
+| ปุ่ม | ทุกปุ่มที่เปลี่ยนข้อมูลเป็น token สุ่มที่ผูก LINE identity, ร่าง, revision ของร่างและวันหมดอายุ (ปุ่มยืนยัน 30 นาที ปุ่มอื่น 7 วัน) ปุ่มของขั้นก่อนหน้า ของคนอื่น หรือหมดอายุถูกปฏิเสธ; ยืนยันซ้ำคืนเลขเรื่องเดิม (idempotency key ต่อร่าง) |
+| ไฟล์แนบ | JPEG/PNG/PDF ไม่เกิน 10 MB และไม่เกิน 10 ไฟล์ต่อร่าง ดึงผ่าน content API ด้วย message ID เท่านั้น ตรวจชนิดจาก magic bytes เก็บชื่อสุ่มนอก path ที่ serve สแกนด้วย ClamAV container (`clamav/clamav-debian:1.4` multi-arch pin digest, ~1 GB RAM) ไฟล์ที่ scanner ล่มยังรอสแกน ไม่ผ่านอัตโนมัติ; เจ้าหน้าที่กองเจ้าภาพ/แอดมินดาวน์โหลดได้เฉพาะไฟล์ clean ของเรื่องที่เห็นได้; ไฟล์ไม่ผ่านลบเนื้อไฟล์หลัง 30 วัน |
+| LINE OA | ใช้ @894attlg ทั้งทดสอบและ production จน go-live แล้วสร้าง OA ทดสอบแยกให้ staging ตาม checklist ใน C.2.3 |
+| ขอบเขตที่ไม่ทำใน M03 | ไม่มี push (ผลรับรองลงทะเบียนและอัปเดตเรื่องผู้ใช้เห็นเมื่อทักหรือกดเมนู), ไม่มีหน้าเว็บคิวเรื่องของเจ้าหน้าที่ (M10), ผู้แจ้งยังยกเลิกเรื่องผ่านแชตไม่ได้ |
+
+**ผล implement / หลักฐาน 6 ตุลาคม 2569:** M03 done ในเครื่อง และผ่าน smoke test กับ LINE จริงของ @894attlg ผ่าน Cloudflare quick tunnel ชั่วคราว
+
+- **Live LINE (6 ตุลาคม 2569):** Verify webhook ผ่าน (ลายเซ็นถูก 200), rich menu ติดตั้งแล้ว; ผู้ทดสอบใน allowlist ทักแชต → ลงทะเบียนชื่อ + เลือกเขตวัดเลียบ → แอดมินรับรองในเว็บ → "ส่งเรื่องใหม่" → ปัญหาการใช้งาน (พิมพ์เลขเลือกประเภท/หมวด) → ยืนยัน ได้เรื่อง `P69-000002` สถานะรอคัดกรอง กองเจ้าภาพ SIM-TRIAGE; กดยืนยันซ้ำไม่สร้างเรื่องซ้ำ; 14 events ประมวลผลครบ ตอบ reply สำเร็จ 14/14, ไม่มี event failed; **ใช้โควตา push 0/300**; ยังไม่ได้ทดสอบไฟล์แนบกับ LINE จริง (ทดสอบ ClamAV จริงด้วย EICAR แล้ว) หลังทดสอบปิด tunnel, หยุด worker และเอา `.trycloudflare.com` ออกจาก `ALLOWED_HOSTS` แล้ว ผู้ใช้ต้องปิด Use webhook เอง (ไม่มี API ปิด)
+
+- Migration `0003_m03_line`: `WebhookInbox` (unique channel + webhookEventId, payload + hash, redelivery flag, reply token/deadline/สถานะการตอบ), `ConversationDraft` (UUID, revision, ขั้นตอน, ข้อมูลร่าง; DB บังคับมี case เฉพาะเมื่อยื่นแล้ว), `Conversation` (ร่างที่ใช้อยู่และคำถามที่รอ), `ConversationMessage` (ข้อความต้นฉบับ), `PostbackToken`, `Attachment`; `ChannelIdentity.is_following`; `RegistrationRequest` สถานะ `cancelled`
+- `POST /webhooks/line` (`operations/line.py`): ตรวจ `X-Line-Signature` จาก raw body, ไม่มี secret ตอบ 503, จำกัด 1 MB, เก็บ inbox + OutboxEvent `conversation.message_received` ใน transaction เดียวก่อนตอบ 200, event ID ซ้ำไม่สร้างซ้ำ, DB ล่มตอบ 503 ให้ LINE ส่งใหม่, event ที่ไม่ใช้เก็บเป็น ignored
+- `operations/conversation.py`: lock identity ต่อรอบ, แชตกลุ่ม/ห้องไม่ประมวลผล (join ตอบครั้งเดียวว่าใช้ได้เฉพาะ 1:1), ลงทะเบียนด้วยชื่อ + ปุ่ม 18 เขตผ่าน `submit_registration` ของ M01 และยกเลิกคำขอได้ (`identity.cancel_registration`), ผู้ยังไม่รับรองไม่เห็น/ไม่ส่งเรื่อง, บทสนทนาแบบถามทีละช่อง, "เรื่องของฉัน"/"ติดตามเรื่อง" ใช้ `services.visible_cases` (ผู้แจ้งอื่นแม้เขตเดียวกันได้คำตอบ "ไม่พบ" เหมือนเลขที่ไม่มีจริง), ยื่นเรื่องผ่าน `services.submit_case`, `send_reply` ใช้ token ครั้งเดียวก่อน deadline 50 วินาที ตรวจ `OUTBOUND_ENABLED` และ allowlist นอก production บันทึก sent/expired/skipped/failed/unknown
+- `operations/attachments.py` + `GET /attachments/<id>/`; `operations/line_api.py` (reply, content, rich menu); `manage.py setup_line_rich_menu` + `operations/line_assets/rich-menu.png` (ปุ่ม ส่งเรื่องใหม่/เรื่องของฉัน/ติดตามเรื่อง เป็น postback); Compose เพิ่ม `clamav` และ volume `private_media` (`/data/private-media` สิทธิ์ 700 ของผู้ใช้ app)
+- `make test-module MODULE=M03` ผ่าน **34 tests** และ `make test` รวม **115 tests** บน PostgreSQL ด้วย signed-event fixtures, LINE API ปลอม และ clamd ปลอมที่ใช้โปรโตคอล INSTREAM จริง: ลายเซ็นผิด/ถูกแก้, batch/redelivery/dedup, DB ล่มไม่ ACK, กลุ่ม/ห้อง, follow ไม่ให้สิทธิ์, ลงทะเบียน/ยกเลิก, บทสนทนาเบิก/คืน/ปัญหาจนเป็น Case, ยืนยันซ้ำได้เรื่องเดียว, ปุ่มเก่า/ของคนอื่น/หมดอายุ, ข้อความอิสระ, หน่วยและเลขไทย, หลายร่างต้องเลือก, ร่างหมดอายุ, เห็นเฉพาะเรื่องตน, reply ครั้งเดียว/deadline/allowlist/ผลไม่แน่นอน, ไฟล์ clean/ติดเชื้อ/ปลอมชนิด/ใหญ่เกิน/หมดอายุ/scanner ล่ม, สิทธิ์ดาวน์โหลด, ลำดับเวลา event และ rich menu; ตรวจ mutation 19 จุด tests จับได้ทุกจุด
+- `make ci` ผ่านครบ 5 stages; ClamAV container จริง healthy ตรวจ EICAR เป็น `Eicar-Test-Signature FOUND` และ PNG ผ่าน; web container build ใหม่ healthy, smoke ผ่าน, สแกนผ่าน clamd จาก container และเขียน private media ได้
+
+**วิธีลองกับ LINE จริง (หลังใส่ credentials เอง):**
+
+1. ใน `.env` ใส่ `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `OUTBOUND_ENABLED=true` และ `LINE_ALLOWED_RECIPIENTS=<LINE user ID ของผู้ทดสอบ>` (ดู "Your user ID" ใน LINE Developers console)
+2. ติดตั้ง cloudflared (`brew install cloudflared`) แล้วรัน `make tunnel` เพิ่ม host `*.trycloudflare.com` ที่ได้ลงใน `ALLOWED_HOSTS` และ restart web
+3. ตั้ง Webhook URL เป็น `https://<host>/webhooks/line` เปิด Use webhook และกด Verify; ใน LINE OA Manager ปิด auto-reply/greeting message เพื่อไม่ให้ตอบซ้อน
+4. รัน `make clamav`, `make line-worker` และ `python manage.py setup_line_rich_menu` (เปลี่ยนเมนูของ OA จริง) แล้วทดลอง follow, ลงทะเบียน, รับรองในหน้าแอดมิน และยื่นเรื่อง
+
+**ข้อจำกัดที่ยังเหลือ:** หลักฐาน LINE จริงเป็น smoke test ของผู้ทดสอบคนเดียว ยังไม่ใช่ UAT (G03 ยังไม่ตรวจรับ); เรื่องที่ยื่นแล้วยังไม่มีหน้าเว็บให้เจ้าหน้าที่ดู (M10); ไม่มี push/NotificationDelivery/งบโควตา และ n8n (M04); ไม่มี AI สกัดข้อความ (M05); เมื่อ AI/n8n ยังไม่มา ถ้า reply token หมดอายุก่อนตัวรันทำงาน ผู้ใช้จะไม่ได้คำตอบรอบนั้น (บันทึก `expired`); ภาพ rich menu ใช้ฟอนต์ระบบ macOS ควรเปลี่ยนเป็นภาพตามอัตลักษณ์องค์กรก่อน go-live; retention ของ inbox/ข้อความต้นฉบับตาม E.7 ยังไม่ได้ตั้งค่า
 
 <a id="module-m04"></a>
 
@@ -1755,9 +1870,9 @@ Implement M13: รวมระบบและตรวจ acceptance G01–G10 �
 คำสั่งเริ่ม implementation ที่คัดลอกไปใช้ได้:
 
 ```text
-เริ่ม implement M02 ตาม PROJECT.md โดยใช้ shared instruction ใน F.1 และ M00/M01 ที่มีหลักฐานแล้ว
-ใช้ permission functions ใน operations/identity.py และ AuditEvent เดิม ไม่สร้างการตรวจสิทธิ์ซ้ำ
-อัปเดตสถานะ M02 พร้อมหลักฐานเมื่อครบ acceptance; n8n/AI configuration implement ตาม M04/M05 ที่ปรับแล้ว
+เริ่ม implement M04 ตาม PROJECT.md โดยใช้ shared instruction ใน F.1 และ M00–M03 ที่มีหลักฐานแล้ว
+ให้ n8n เรียก conversation.handle_inbox/send_reply และ outbox ผ่าน claim/lease แทน process_line_inbox; Django ยังเป็นเจ้าของตรรกะบทสนทนาและผู้ส่ง LINE จุดเดียว
+เพิ่ม push/NotificationDelivery และงบโควตา C.2.3 ของ OA @894attlg; อัปเดตสถานะ M04 พร้อมหลักฐานเมื่อครบ acceptance
 ```
 
 เมื่อจบโมดูล ให้เปลี่ยน M01 ในคำสั่งเป็น ID ถัดไปตาม F.2 และระบุ dependency ที่ตรวจว่า done แล้ว การแบ่งงานนี้ทำให้ AI ส่งงานที่ review ได้เป็นส่วน ๆ โดยยังรักษากฎธุรกิจและ release gates ของระบบเดียวกัน

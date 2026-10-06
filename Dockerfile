@@ -6,7 +6,10 @@ RUN pip install --no-cache-dir uv==0.10.11 \
     && uv sync --locked --no-dev \
     && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --no-create-home app \
-    && chown app:app /app
+    && chown app:app /app \
+    && mkdir -p /data/private-media \
+    && chown app:app /data/private-media \
+    && chmod 700 /data/private-media
 COPY config ./config
 COPY operations ./operations
 COPY manage.py synthetic-data.json priority-engine-demo.json ./

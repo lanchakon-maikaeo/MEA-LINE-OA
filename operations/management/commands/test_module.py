@@ -4,6 +4,8 @@ from django.core.management.commands.test import Command as DjangoTest
 MODULE_TESTS = {
     "M00": "operations.tests.test_m00_foundation",
     "M01": "operations.tests.test_m01_identity",
+    "M02": "operations.tests.test_m02_cases",
+    "M03": "operations.tests.test_m03_line",
 }
 
 

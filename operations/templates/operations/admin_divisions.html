@@ -8,11 +8,14 @@
     <tr>
       <td><a href="{% url 'division-detail' division.code %}">{{ division.code }}</a></td>
       <td>{{ division.name }}{% if division.is_synthetic %} (จำลอง){% endif %}</td>
-      <td>{{ division.get_kind_display }}</td>
+      <td>{{ division.get_kind_display }}{% if division.is_intake %} · <strong>กองรับเรื่องกลาง</strong>{% endif %}</td>
       <td>{{ division.is_active|yesno:"ใช้งาน,ปิด" }}</td>
       <td><form class="inline" method="post" action="{% url 'admin-division-action' division.pk division.is_active|yesno:'deactivate,activate' %}">
         {% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">{{ division.is_active|yesno:"ปิด,เปิด" }}</button>
-      </form></td>
+      </form>
+      {% if division.is_active and not division.is_intake %}<form class="inline" method="post" action="{% url 'admin-division-action' division.pk 'set-intake' %}">
+        {% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ตั้งเป็นกองรับเรื่องกลาง</button>
+      </form>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

@@ -29,4 +29,18 @@
     <li>{{ reg.submitted_name }} — {{ reg.requested_district.name }} — {{ reg.get_status_display }} โดย {{ reg.decided_by.username }} {{ reg.decided_at|date:"Y-m-d H:i" }}</li>
   {% empty %}<li>ยังไม่มี</li>{% endfor %}
 </ul>
+<h2>รับรองผู้แจ้งโดยตรง</h2>
+<p>สำหรับผู้แจ้งที่ไม่ใช้ LINE เจ้าหน้าที่กองรับเรื่องกลางจะยื่นเรื่องแทนได้</p>
+<form method="post" action="{% url 'admin-requester-new' %}">
+  <fieldset><legend>เพิ่มผู้แจ้ง</legend>{% csrf_token %}{{ requester_form.as_p }}<button type="submit">รับรอง</button></fieldset>
+</form>
+<h2>ผู้แจ้งที่รับรองแล้ว</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">เขต</th><th scope="col">สถานะ</th></tr></thead>
+  <tbody>
+  {% for requester in requesters %}
+    <tr><td>{{ requester.pk }}</td><td>{{ requester.display_name }}</td><td>{{ requester.district.name }}</td><td>{{ requester.get_status_display }}</td></tr>
+  {% empty %}<tr><td colspan="4">ยังไม่มี</td></tr>{% endfor %}
+  </tbody>
+</table></div>
 {% endblock %}

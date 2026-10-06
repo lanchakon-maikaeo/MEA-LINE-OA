@@ -25,4 +25,7 @@ class Command(DemoCommand):
             Division.objects.update_or_create(
                 code=row["id"], defaults={"name": row["name"], "kind": kind, "is_synthetic": True}
             )
+        # The synthetic intake desk owns new cases unless an admin already chose another unit.
+        if not Division.objects.filter(is_intake=True).exists():
+            Division.objects.filter(code="SIM-TRIAGE").update(is_intake=True)
         self.stdout.write(f"Synthetic units: {len(units)} ensured.")

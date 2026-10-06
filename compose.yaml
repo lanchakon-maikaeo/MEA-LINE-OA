@@ -33,11 +33,31 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://mea_demo:${POSTGRES_PASSWORD:?Run make bootstrap first}@db:5432/mea_demo
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+      PRIVATE_MEDIA_ROOT: /data/private-media
+    volumes:
+      - private_media:/data/private-media
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
       migrate:
         condition: service_completed_successfully
     init: true
+  clamav:
+    # Multi-arch (arm64 for OCI A1); clamd + freshclam signature updates in one container.
+    image: clamav/clamav-debian:1.4@sha256:6d0680780fd29855cb7018f68272cb520821f614259e2066f8ec669069ac91b3
+    ports:
+      - "127.0.0.1:53310:3310"
+    volumes:
+      - clamav_db:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 300s
+      retries: 3
 volumes:
   postgres_data:
+  private_media:
+  clamav_db:

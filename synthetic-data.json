@@ -71,7 +71,7 @@
       "status": "partially_received_awaiting_inspection",
       "source_document": "ISSUE_HIST_SYN_020",
       "lines": [
-        {"item_id": "MTR_SYN_A", "requested_return": 2, "physically_received": 1, "accepted_for_reuse": 0, "awaiting_inspection": 1, "outstanding_return": 1, "received_serials": ["MTR_SYN_005"]}
+        {"item_id": "MTR_SYN_A", "requested_return": 2, "requested_serials": ["MTR_SYN_005", "MTR_SYN_007"], "physically_received": 1, "accepted_for_reuse": 0, "awaiting_inspection": 1, "outstanding_return": 1, "received_serials": ["MTR_SYN_005"]}
       ],
       "expected_behavior": "บันทึกรับไว้จริง 1 เครื่อง ติดตามอีก 1 เครื่อง และยังไม่เพิ่มยอดพร้อมจ่ายของเครื่องที่รอตรวจ"
     },

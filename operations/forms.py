@@ -1,6 +1,6 @@
 from django import forms
 
-from operations.models import Division, Role
+from operations.models import District, Division, Role
 
 REASON = forms.CharField(label="เหตุผล", max_length=500, widget=forms.TextInput)
 
@@ -37,3 +37,11 @@ class DivisionCreateForm(forms.Form):
     code = forms.CharField(label="รหัส", max_length=32)
     name = forms.CharField(label="ชื่อ", max_length=200)
     kind = forms.ChoiceField(label="ประเภท", choices=Division.Kind.choices)
+
+
+class RequesterCreateForm(forms.Form):
+    display_name = forms.CharField(label="ชื่อ-นามสกุลผู้แจ้ง", max_length=200)
+    district = forms.ModelChoiceField(
+        label="เขต", queryset=District.objects.filter(is_active=True), to_field_name="code"
+    )
+    reason = forms.CharField(label="เหตุผล (เช่น ไม่ใช้ LINE)", max_length=500)

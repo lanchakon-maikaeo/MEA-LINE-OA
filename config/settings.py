@@ -85,3 +85,20 @@ LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "console"
 LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_AGE = 10 * 60 * 60
+
+# --- LINE intake (M03) ------------------------------------------------------------------------
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+# Outside production, replies go only to these LINE user IDs (one OA serves all environments).
+LINE_ALLOWED_RECIPIENTS = frozenset(
+    r.strip() for r in os.environ.get("LINE_ALLOWED_RECIPIENTS", "").split(",") if r.strip()
+)
+LINE_REPLY_DEADLINE_SECONDS = int(os.environ.get("LINE_REPLY_DEADLINE_SECONDS") or 50)
+LINE_WEBHOOK_MAX_BYTES = 1024 * 1024
+LINE_API_BASE = "https://api.line.me"
+LINE_DATA_API_BASE = "https://api-data.line.me"
+OUTBOUND_ENABLED = os.environ.get("OUTBOUND_ENABLED", "false").lower() == "true"
+ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+ATTACHMENTS_PER_DRAFT = 10
+CLAMAV_HOST = os.environ.get("CLAMAV_HOST", "127.0.0.1")
+CLAMAV_PORT = int(os.environ.get("CLAMAV_PORT") or 53310)

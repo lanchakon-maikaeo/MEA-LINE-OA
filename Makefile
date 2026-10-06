@@ -3,7 +3,7 @@ UV = $(PYTHON) -m uv
 ENV_FILE = $(if $(wildcard .env),--env-file .env,)
 RUN = $(UV) run --locked $(ENV_FILE)
 
-.PHONY: bootstrap guard db migrate seed-demo dev check test test-module test-e2e security ci build smoke down
+.PHONY: bootstrap guard db migrate seed-demo dev line-worker clamav tunnel check test test-module test-e2e security ci build smoke down
 bootstrap:
 	$(PYTHON) scripts/bootstrap_env.py
 	$(UV) sync --locked
@@ -22,9 +22,21 @@ migrate: guard
 seed-demo: guard
 	$(RUN) python manage.py load_districts
 	$(RUN) python manage.py seed_demo_units
+	$(RUN) python manage.py seed_demo_cases
 
 dev: db migrate
 	$(RUN) python manage.py runserver 127.0.0.1:8000
+
+# Local/staging LINE turns and file scans until n8n (M04); webhook needs a public HTTPS URL.
+# Runs in the web container so attachments share its private-media volume and reach clamav.
+line-worker:
+	docker compose exec web /app/.venv/bin/python manage.py process_line_inbox
+
+clamav:
+	docker compose up -d clamav
+
+tunnel:
+	cloudflared tunnel --url http://127.0.0.1:8000
 
 check:
 	$(RUN) ruff check .

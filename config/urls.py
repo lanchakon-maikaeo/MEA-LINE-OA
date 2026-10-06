@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from operations import views
+from operations import line, views
 
 urlpatterns = [
     path("", views.index, name="index"),
@@ -20,6 +20,8 @@ urlpatterns = [
         views.StaffPasswordChangeView.as_view(),
         name="password_change",
     ),
+    path("webhooks/line", line.webhook, name="line-webhook"),
+    path("attachments/<uuid:pk>/", views.attachment_download, name="attachment-download"),
     path("console/", views.console, name="console"),
     path("divisions/<str:code>/", views.division_detail, name="division-detail"),
     path("console/admin/users/", views.admin_users, name="admin-users"),
@@ -36,6 +38,7 @@ urlpatterns = [
         views.admin_registration_action,
         name="admin-registration-action",
     ),
+    path("console/admin/requesters/new/", views.admin_requester_new, name="admin-requester-new"),
     path("console/admin/divisions/", views.admin_divisions, name="admin-divisions"),
     path(
         "console/admin/divisions/<int:pk>/<slug:action>/",
