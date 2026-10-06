@@ -1,0 +1,45 @@
+{% extends "operations/admin_base.html" %}
+{% block content %}
+<h1>{{ target.staff_profile.display_name|default:target.username }} ({{ target.username }})</h1>
+<p>สถานะ: {{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</p>
+
+<h2>บทบาท</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">บทบาท</th><th scope="col">กอง</th><th scope="col">สถานะ</th><th scope="col">จัดการ</th></tr></thead>
+  <tbody>
+  {% for grant in grants %}
+    <tr>
+      <td>{{ grant.get_role_display }}</td>
+      <td>{{ grant.division.code|default:"ระดับระบบ" }}</td>
+      <td>{% if grant.revoked_at %}ถอนแล้ว {{ grant.revoked_at|date:"Y-m-d H:i" }}{% else %}ใช้งาน{% endif %}</td>
+      <td>{% if not grant.revoked_at %}
+        <form class="inline" method="post" action="{% url 'admin-user-action' target.pk 'revoke' %}">
+          {% csrf_token %}<input type="hidden" name="grant_id" value="{{ grant.pk }}">
+          <label>เหตุผล <input name="reason" required></label><button type="submit">ถอน</button>
+        </form>{% endif %}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="4">ยังไม่มีบทบาท (เข้าถึงเรื่องไม่ได้)</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+
+<form method="post" action="{% url 'admin-user-action' target.pk 'grant' %}">
+  <fieldset><legend>เพิ่มบทบาท</legend>{% csrf_token %}{{ grant_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
+</form>
+<form method="post" action="{% url 'admin-user-action' target.pk 'move' %}">
+  <fieldset><legend>ย้ายกอง (ย้ายทุกบทบาทในกองต้นทาง)</legend>{% csrf_token %}{{ move_form.as_p }}<button type="submit">ย้าย</button></fieldset>
+</form>
+<form method="post" action="{% url 'admin-user-action' target.pk target.is_active|yesno:'suspend,activate' %}">
+  <fieldset><legend>{{ target.is_active|yesno:"ระงับบัญชี,เปิดใช้บัญชี" }}</legend>{% csrf_token %}
+    <label>เหตุผล <input name="reason" required></label> <button type="submit">ยืนยัน</button></fieldset>
+</form>
+<form method="post" action="{% url 'admin-user-action' target.pk 'revoke-sessions' %}">
+  <fieldset><legend>บังคับออกจากระบบทุกเครื่อง</legend>{% csrf_token %}
+    <label>เหตุผล <input name="reason" required></label> <button type="submit">ยืนยัน</button></fieldset>
+</form>
+<form method="post" action="{% url 'admin-user-action' target.pk 'reset-password' %}">
+  <fieldset><legend>ตั้งรหัสผ่านชั่วคราว</legend>{% csrf_token %}
+    <label>เหตุผล <input name="reason" required></label> <button type="submit">ยืนยัน</button></fieldset>
+</form>
+{% endblock %}

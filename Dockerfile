@@ -9,9 +9,10 @@ RUN pip install --no-cache-dir uv==0.10.11 \
     && chown app:app /app
 COPY config ./config
 COPY operations ./operations
-COPY manage.py ./
+COPY manage.py synthetic-data.json priority-engine-demo.json ./
 USER 10001:10001
 EXPOSE 8000
+# Send an allowed Host: staging/production ALLOWED_HOSTS do not list 127.0.0.1 (Django returns 400).
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["/app/.venv/bin/python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/ready/', timeout=3)"]
+    CMD ["/app/.venv/bin/python", "-c", "import os, urllib.request as u; host = os.environ['ALLOWED_HOSTS'].split(',')[0].strip().lstrip('.'); u.urlopen(u.Request('http://127.0.0.1:8000/health/ready/', headers={'Host': host}), timeout=3)"]
 CMD ["/app/.venv/bin/gunicorn", "config.wsgi:application", "--bind=0.0.0.0:8000", "--workers=2", "--access-logfile=-", "--error-logfile=-"]

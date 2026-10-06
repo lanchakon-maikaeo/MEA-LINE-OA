@@ -1,3 +1,4 @@
+import json
 import os
 import secrets
 import subprocess
@@ -11,6 +12,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import OperationalError, connection
+from django.db.migrations.recorder import MigrationRecorder
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from config.environment import read_environment, require_demo_database
@@ -111,7 +113,61 @@ class FoundationTests(TestCase):
             self.assertEqual(response.json(), {"status": "unavailable"})
             self.assertEqual(self.client.get("/health/live/").status_code, 200)
 
+    def test_unapplied_migration_makes_readiness_fail(self):
+        # Code deployed ahead of its schema must not receive traffic (rolled back by TestCase).
+        MigrationRecorder(connection).record_unapplied("sessions", "0001_initial")
+        response = self.client.get("/health/ready/")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+
     def test_invalid_host_is_rejected(self):
         self.assertEqual(
             self.client.get("/health/live/", HTTP_HOST="untrusted.test").status_code, 400
         )
+
+
+class DemoDataTests(SimpleTestCase):
+    """Fixtures later imported by M01/M02/M06 must stay internally consistent."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.data = json.loads((settings.BASE_DIR / "synthetic-data.json").read_text())
+        cls.demo = json.loads((settings.BASE_DIR / "priority-engine-demo.json").read_text())
+
+    def test_eighteen_named_districts_and_consistent_stock(self):
+        self.assertTrue(self.data["metadata"]["contains_synthetic_data"])
+        districts = self.data["districts"]
+        self.assertEqual(len(districts), 18)
+        self.assertEqual(len({d["id"] for d in districts}), 18)
+        self.assertEqual(len({d["name"] for d in districts}), 18)
+        items = {item["id"] for item in self.data["items"]}
+        for row in self.data["stock_snapshot"]:
+            with self.subTest(item=row["item_id"]):
+                self.assertIn(row["item_id"], items)
+                parts = ("available", "reserved", "awaiting_inspection", "awaiting_repair")
+                self.assertEqual(sum(row[k] for k in parts), row["total_on_hand"])
+        for case in self.data["example_cases"]:
+            with self.subTest(case=case["id"]):
+                self.assertIn(case["district_id"], {d["id"] for d in districts})
+                for line in case.get("lines", []):
+                    self.assertIn(line["item_id"], items)
+
+    def test_priority_scenarios_reference_known_units_rules_and_items(self):
+        self.assertTrue(self.demo["metadata"]["is_synthetic"])
+        self.assertFalse(self.demo["metadata"]["production_policy"])
+        district_ids = {d["id"] for d in self.data["districts"]}
+        items = {item["id"] for item in self.data["items"]}
+        units = {d["id"] for d in self.demo["divisions"]}
+        units |= {r["id"] for r in self.demo["coordination_roles"]}
+        for scenario in self.demo["scenarios"]:
+            facts, expected = scenario["facts"], scenario["expected"]
+            with self.subTest(scenario=scenario["id"]):
+                self.assertIn(scenario["district_id"], district_ids)
+                if facts.get("item_id"):
+                    self.assertIn(facts["item_id"], items)
+                for key in ("current_owner", "proposed_owner"):
+                    if expected.get(key):
+                        self.assertIn(expected[key], units)
+                self.assertLessEqual(set(expected.get("support_units", [])), units)
+                self.assertLessEqual(set(expected.get("rules", [])), set(self.demo["rule_ids"]))

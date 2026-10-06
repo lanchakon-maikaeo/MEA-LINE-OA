@@ -2,13 +2,15 @@
 
 เอกสารหลัก: ขอบเขตโครงการ · Priority Engine · Production-ready · แผนพัฒนาตามโมดูล · Technology Stack · CI/CD · โมดูลสำหรับ AI implement · คำศัพท์กลาง
 
-ปรับปรุง: 5 ตุลาคม 2569 | สถานะ: M00 Foundation และ CI ในเครื่องเสร็จแล้ว; M01–M13 ยัง planned; ยังไม่ deploy production
+ปรับปรุง: 6 ตุลาคม 2569 | สถานะ: M00 และ M01 เสร็จในเครื่อง (done local); M02–M13 ยัง planned; ยังไม่ deploy staging/production บน OCI
 
 ขอบเขตงานรอบนี้: ปรับแผนในเอกสารเท่านั้น ยกเลิกกรอบเวลาเดิม และกำหนดเป้าหมาย production-ready ตามโมดูล ยังไม่เริ่ม implementation เพิ่ม คำสั่งและลำดับพัฒนาด้านล่างเป็นแผนสำหรับเมื่อผู้ใช้สั่งเริ่มพัฒนา
 
-ข้อกำหนดที่ยืนยันแล้ว: ผู้ใช้มาจาก 18 เขต งานหลักคือเบิกของ ส่งคืนของ และแจ้งปัญหา มีระบบทะเบียน/สต็อกเดิม ใช้ Synthetic data ของมิเตอร์ หม้อแปลง และอุปกรณ์ไฟฟ้าอื่นในต้นแบบ ไม่มี GIS และใช้กองจำลองจนกว่าผู้ใช้จะส่งหน้าที่กองจริง พัฒนาเพื่อ production-ready ตามโมดูลและเกณฑ์ตรวจรับ รับเรื่องผ่าน LINE OA ใช้ n8n ใน Docker container เป็น Conversation & Orchestration และเรียก ThaiLLM ผ่าน API ภายนอก โดยเปลี่ยน model/API key ได้และไม่ self-host โมเดล ใช้ Supabase Free (PostgreSQL) และเน้นซอฟต์แวร์โอเพนซอร์ส/บริการใช้ฟรีภายในโควตา ชื่อทั้ง 18 เขตใช้ชื่อจริงของการไฟฟ้านครหลวง; รหัสภายใน กอง และธุรกรรมยังเป็นข้อมูลจำลอง
+ข้อกำหนดที่ยืนยันแล้ว: ผู้ใช้มาจาก 18 เขต งานหลักคือเบิกของ ส่งคืนของ และแจ้งปัญหา มีระบบทะเบียน/สต็อกเดิม ใช้ Synthetic data ของมิเตอร์ หม้อแปลง และอุปกรณ์ไฟฟ้าอื่นในต้นแบบ ไม่มี GIS และใช้กองจำลองจนกว่าผู้ใช้จะส่งหน้าที่กองจริง พัฒนาเพื่อ production-ready ตามโมดูลและเกณฑ์ตรวจรับ รับเรื่องผ่าน LINE OA ใช้ n8n ใน Docker container เป็น Conversation & Orchestration และเรียก ThaiLLM ผ่าน API ภายนอก โดยเปลี่ยน model/API key ได้และไม่ self-host โมเดล ใช้ PostgreSQL และเน้นซอฟต์แวร์โอเพนซอร์ส/บริการใช้ฟรีภายในโควตา ชื่อทั้ง 18 เขตใช้ชื่อจริงของการไฟฟ้านครหลวง; รหัสภายใน กอง และธุรกรรมยังเป็นข้อมูลจำลอง
 
 ข้อกำหนดเพิ่มเติมที่ยืนยัน 5 ตุลาคม 2569: ผู้แจ้งแอด LINE OA สนทนาส่วนตัว ลงทะเบียนชื่อ/เขต และรอแอดมินรับรองก่อนส่งเรื่อง; เห็นเฉพาะเรื่องตนเองแม้อยู่เขตเดียวกัน บัญชีเว็บ ฝอจ. เป็นรายบุคคลผูกกอง/บทบาท รับเฉพาะงานที่มอบหมายให้กองตน แอดมินบริหารทุกกอง เพิ่ม/ปิดบัญชี และกำหนดบทบาทภายหลังได้ การเปลี่ยน AI API/model/key ทำได้ทั้งหน้าเว็บและ configuration แต่จำกัดเฉพาะแอดมินผู้พัฒนา รายละเอียดเหล่านี้เป็นข้อกำหนดที่จะ implement; โค้ดปัจจุบันยังมีเพียง M00
+
+ข้อกำหนดเพิ่มเติมที่ยืนยัน 6 ตุลาคม 2569: staging และ production ใช้ **Oracle Cloud Infrastructure (OCI) Always Free โดยไม่เกินโควตา** ตาม [E.2.1](#oracle-free-tier) PostgreSQL 17 รันใน container บน OCI แทน Supabase Free ซึ่งไม่อยู่ใน baseline แล้ว; VM ขององค์กรเป็นทางเลือกภายหลังเมื่อโหลด ความพร้อมใช้งาน หรือนโยบายข้อมูลเกินที่ free tier รองรับ ช่องทางรับเรื่องคง LINE OA (ทบทวน Microsoft Teams แล้วไม่เลือก) โดยระบบคุมโควตาข้อความเองตาม [C.2.3](#line-quota)
 
 เอกสารนี้รวมเนื้อหาจากเอกสารวิเคราะห์ คำศัพท์ และแบบ Priority Engine ไว้เป็นแหล่งอ้างอิงเดียว ส่วน C กำหนดสถาปัตยกรรมและลำดับโมดูล ส่วน E–F กำหนด production gates, CI/CD และคำสั่ง implement การเปิดใช้จริงต้องผ่าน gates และยืนยันสภาพแวดล้อมองค์กรก่อน
 
@@ -18,12 +20,14 @@
 - [B. Priority Engine และอำนาจตัดสินใจ](#priority-engine)
 - [C. แผน Implement และ Technology Stack](#implementation)
 - [Technology Stack ที่แนะนำ](#technology-stack)
-- [Supabase และแนวทางใช้ฟรี](#database-choice)
+- [ฐานข้อมูลและแนวทางใช้ฟรี](#database-choice)
+- [LINE OA และการคุมโควตาข้อความ](#line-quota)
 - [ThaiLLM API และการเปลี่ยน model/API key](#model-choice)
 - [ชื่อการไฟฟ้านครหลวง 18 เขต](#mea-districts)
 - [แผนพัฒนาตามโมดูลและเกณฑ์ส่งมอบ](#implementation-phases)
 - [D. คำศัพท์กลาง](#glossary)
 - [E. แผน production และเกณฑ์เปิดใช้งาน](#production-plan)
+- [Oracle Cloud Always Free และการคุมโควตา](#oracle-free-tier)
 - [CI/CD, deployment และ rollback](#cicd)
 - [F. โมดูลและคำสั่งให้ AI implement](#ai-implementation-modules)
 
@@ -170,7 +174,7 @@ flowchart TB
 
 โครงระบบขั้นต่ำ: ช่องทางรับเรื่องหนึ่งช่องทาง → ตัวจัดข้อมูลและถามเพิ่ม → ระบบเรื่องและกติกางานที่อ่านทะเบียน/ยอดจำลอง → หน้าจอ ฝอจ. → แจ้งสถานะกลับ การทดลองระยะนี้ใช้ชื่อเขตจริงร่วมกับข้อมูลอุปกรณ์ บัญชีผู้ใช้ และรายการดำเนินงานจำลอง
 
-แผนนี้เลือก Django, n8n container, ThaiLLM API ภายนอก, Supabase Free (PostgreSQL) และเครื่องมือประกอบตามเหตุผลในส่วน C โดยยึดกระบวนการและขอบเขตที่ยืนยันแล้ว การเชื่อมระบบเดิมจะตรวจข้อกำหนดของหน่วยงานก่อนนำไปใช้งานจริง
+แผนนี้เลือก Django, n8n container, ThaiLLM API ภายนอก, PostgreSQL บน Oracle Cloud Always Free และเครื่องมือประกอบตามเหตุผลในส่วน C โดยยึดกระบวนการและขอบเขตที่ยืนยันแล้ว การเชื่อมระบบเดิมจะตรวจข้อกำหนดของหน่วยงานก่อนนำไปใช้งานจริง
 
 เมื่อเข้าสู่ระยะใช้งานจริง ระบบสต็อกเดิมเป็นแหล่งยอดทางการ ระบบรับเรื่องเก็บเลขธุรกรรมอ้างอิงและสถานะการเชื่อมต่อ หากยังเชื่อมไม่ได้ ให้เจ้าหน้าที่บันทึกในระบบเดิมแล้วอ้างเลขเอกสารกลับมายังเรื่อง โดยไม่สร้างยอดทางการอีกชุดหนึ่ง
 
@@ -562,14 +566,14 @@ n8n เป็นเจ้าของลำดับบทสนทนาแล�
 | Backend | Python 3.13, Django 5.2 LTS, Gunicorn | ตัวตน สิทธิ์ ownership/scope กฎงาน ธุรกรรม audit และ internal APIs |
 | เว็บ ฝอจ. | Django Templates + HTMX 2.x | คิวเฉพาะกอง หน้าดำเนินงาน และหน้าบริหารทุกกองสำหรับแอดมิน |
 | Conversation & Orchestration | n8n ใน Docker container | รับงานผ่าน claim API จัดลำดับบทสนทนา เรียก AI adapter ถามข้อมูลเพิ่ม แจ้งสถานะและติดตามงานค้าง |
-| ฐานข้อมูลแอป | PostgreSQL + psycopg 3; demo ใช้ Supabase Free ตามเงื่อนไข C.2.1 | แหล่งข้อมูลหลักของบัญชี ร่าง เรื่อง การตัดสินใจ และ outbox |
-| ฐานข้อมูล n8n | PostgreSQL database/user แยกจากแอป พร้อม persistent volume ของ n8n | เก็บ workflow, credentials และ execution metadata; ไม่ใช้บัญชี DB-owner ของแอป |
+| ฐานข้อมูลแอป | PostgreSQL 17 + psycopg 3 ใน container บน OCI Ampere A1 ตาม C.2.1/E.2.1 | แหล่งข้อมูลหลักของบัญชี ร่าง เรื่อง การตัดสินใจ และ outbox |
+| ฐานข้อมูล n8n | PostgreSQL database/user แยกจากแอปใน server เดียวกัน (ประหยัดหน่วยความจำ) พร้อม persistent volume ของ n8n | เก็บ workflow, credentials และ execution metadata; ไม่ใช้บัญชี DB-owner ของแอป |
 | LINE OA | Messaging API, แชท 1:1 | รับลงทะเบียนและเรื่องส่วนตัว; Django ตรวจ signature/identity และเป็นผู้ส่ง reply/push เพียงรายเดียว |
 | AI | ThaiLLM API ภายนอก + HTTP adapter + schema validation | เริ่มประเมินโมเดล 8B ที่บัญชีเข้าถึงได้; model ID/endpoint/key เปลี่ยนภายหลังได้ ไม่ติดตั้ง weights/runtime |
 | บัญชีเว็บ | Django authentication/sessions + กอง + บทบาท | บัญชีรายบุคคลที่แอดมินสร้าง กำหนดบทบาทภายหลังได้; SSO เป็นทางเลือกในอนาคต |
 | AI configuration | AIProviderProfile + key ที่เข้ารหัสหรือ secret reference | แอดมินผู้พัฒนาเปลี่ยนผ่านเว็บหรือ import configuration เข้ากระบวนการทดสอบ/เปิดใช้เดียวกัน |
 | ไฟล์ | Django storage API + private volume | ดาวน์โหลดผ่านสิทธิ์เจ้าของเรื่อง/กอง/แอดมินและตรวจไฟล์ก่อนเปิดดู |
-| Deploy | Docker Compose, HTTPS ingress | Django และ n8n เป็นคนละ container; n8n editor จำกัดผู้ดูแล ไม่เปิดแก่ผู้แจ้งหรือเจ้าหน้าที่กอง |
+| Deploy | Docker Compose บน OCI Ampere A1 Always Free (E.2.1), Caddy HTTPS | Django และ n8n เป็นคนละ container; n8n editor จำกัดผู้ดูแล ไม่เปิดแก่ผู้แจ้งหรือเจ้าหน้าที่กอง |
 | Verification | Django tests + Playwright + workflow replay/integration | ตรวจธุรกรรม สิทธิ์รายบุคคล/กอง และ n8n restart/duplicate-event บน runtime จริง |
 
 workflow ใช้ Webhook/HTTP Request/IF/Switch/Schedule Trigger ตามที่จำเป็น ไม่ต้องใช้ AI Agent node เพื่อให้เกิด orchestration; ThaiLLM เสนอข้อมูลใน schema และ Django ตรวจทุกการเปลี่ยนแปลง ใช้ node มาตรฐานก่อนเพิ่ม Code/community node [n8n flow logic](https://docs.n8n.io/build/flow-logic.md), [HTTP Request](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.httprequest/)
@@ -580,24 +584,21 @@ workflow ใช้ Webhook/HTTP Request/IF/Switch/Schedule Trigger ตามท�
 
 #### C.2.1 ฐานข้อมูลที่เลือกและทางเลือกแบบไม่มีค่าบริการฐานข้อมูล
 
-เลือก **Supabase Free สำหรับ development/integration ที่อยู่ในโควตา** เพื่อลดงานดูแลเครื่องฐานข้อมูล ใช้เฉพาะ PostgreSQL ผ่าน Django ORM; คง Django authentication และไฟล์ private volume ตามแผนเดิม จึงไม่เพิ่ม Supabase Auth, Storage, Realtime หรือ Edge Functions ในรอบนี้
+ปรับ 6 ตุลาคม 2569: เลือก **PostgreSQL 17 ใน container บน OCI Ampere A1 Always Free** สำหรับ staging และ production ตามงบทรัพยากรใน [E.2.1](#oracle-free-tier); local/CI ยังใช้ PostgreSQL container เดิมของ M00 จึงใช้ engine, migrations และ tests ชุดเดียวกันทุก environment
 
-| ทางเลือก | เหมาะเมื่อ | ต้นทุนและข้อจำกัด |
+| ทางเลือก | สถานะ | เหตุผล/ข้อจำกัด |
 | --- | --- | --- |
-| Supabase Free — ตัวตั้งต้น | ต้องการฐานข้อมูลกลางให้ทีมทดสอบโดยเตรียมเครื่องน้อย | ณ วันที่ตรวจ มี DB 500 MB และอาจ pause หลังไม่ใช้งาน 1 สัปดาห์; ไม่มี automatic backup ใน Free จึงต้อง export/restore เอง |
-| PostgreSQL 17 บนเครื่ององค์กร — ทางเลือกสำรอง | มีเครื่องอยู่แล้ว หรือนำข้อมูลขึ้น cloud ไม่ได้ | ไม่มีค่าลิขสิทธิ์ฐานข้อมูล แต่รับผิดชอบเครื่อง พื้นที่ TLS สำรองและกู้คืนเอง; ใช้ models/migrations เดียวกัน |
-| Supabase self-hosted — ยังไม่เลือก | ต้องใช้บริการ Supabase หลายส่วนและมีทีมดูแล | ติดตั้งเองได้ แต่เพิ่มบริการและงานปฏิบัติการเกินความจำเป็นของต้นแบบที่ใช้เพียง PostgreSQL |
+| PostgreSQL 17 container บน OCI A1 — เลือก | baseline staging/production | ไม่มีค่าบริการเมื่ออยู่ในโควตา; ทีมดูแล backup/restore เอง (pgBackRest → OCI Object Storage) และเป็นเครื่องเดียวไม่มี HA |
+| Supabase Free — เลิกใช้ใน baseline | ตัวเลือกเดิมก่อน 6 ต.ค. 2569 | DB 500 MB, pause เมื่อไม่ใช้งาน 1 สัปดาห์ และ Free ไม่มี automatic backup จึงไม่เหมาะกับ production; ถ้ากลับมาใช้ต้องทำ private schema/Data API/RLS ตาม [Supabase API security](https://supabase.com/docs/guides/api/securing-your-api) |
+| PostgreSQL 17 บน VM องค์กร — ทางเลือกภายหลัง | เมื่อเข้าเงื่อนไขย้ายใน E.2.1 | ไม่มีค่าลิขสิทธิ์ฐานข้อมูล ใช้ models/migrations และ pgBackRest restore เดียวกัน |
+| OCI Database with PostgreSQL / Autonomous Database — ไม่ใช้ | — | บริการ PostgreSQL แบบจัดการของ OCI มีค่าใช้จ่าย; Autonomous Database ที่ฟรีเป็น Oracle Database ไม่ใช่ PostgreSQL |
 
-ข้อมูล Free plan และการติดตั้งเองอ้างอิง [Supabase pricing](https://supabase.com/pricing), [Supabase self-hosting](https://supabase.com/docs/guides/self-hosting) ตรวจสอบ 5 ตุลาคม 2569; ตรวจโควตาอีกครั้งก่อนเปิดโครงการ ไม่ถือว่า free tier เป็น SLA สำหรับใช้งานจริง
+แนวทางตั้งค่าเมื่อ implement (M12):
 
-แนวทางเชื่อมต่อที่ต้องทำเมื่อเชื่อมฐานข้อมูล:
-
-- ใช้ `DATABASE_URL` ฝั่ง server ผ่าน direct connection หากเครือข่ายรองรับ หรือ session pooler สำหรับ IPv4; ตรวจ TLS/ใบรับรองและจำกัดจำนวน connection ให้พอดีกับ Free plan ทดสอบ transaction/claim/complete/restart ผ่าน connection จริง n8n ใช้ metadata DB/user แยกและเข้าถึงข้อมูลธุรกิจผ่าน Django API เท่านั้น [Supabase connections](https://supabase.com/docs/guides/database/connecting-to-postgres)
-- เก็บตาราง Django และคิวใน schema ภายในที่ไม่เปิดผ่าน Data API ตั้ง search path ให้ migrations/web/internal APIs สอดคล้องกัน ปิด Data API เมื่อไม่ใช้ และตรวจ default grants; ไม่แก้ schema ที่ Supabase ดูแล เช่น auth/storage/realtime ใช้ role สำหรับ migration แยกจาก runtime และให้สิทธิ์เท่าที่ต้องใช้ [Supabase API security](https://supabase.com/docs/guides/api/securing-your-api)
-- สมาชิกเขตและสิทธิ์เจ้าหน้าที่ตรวจที่ Django ทุก query/action; LINE user ID ไม่ได้กลายเป็น Supabase Auth user โดยอัตโนมัติ หากภายหลังเปิดตารางให้ client ผ่าน Data API ต้องมี grants และ RLS ตาม requester ownership/division scope/admin permissionก่อนเสมอ ไม่ส่ง DB password หรือ secret/service-role key ไป LINE/browser และไม่ถือว่า RLS ป้องกัน role ที่ bypass ได้
-- ให้ Django migrations เป็นเจ้าของ schema แอปเพียงทางเดียว ไม่เพิ่ม migration pipeline ซ้ำ; ใช้ `pg_dump` สำรองฐานข้อมูลและสำรองไฟล์ private volume แยก แล้วทดสอบ restore โดยปิดการส่ง LINE ระหว่างกู้คืน
-
-ตรวจ [Supabase changelog เรื่องการเปิดตารางผ่าน API](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically) แล้ว: ค่าเริ่มต้นกำลังเปลี่ยน จึงตรวจสิทธิ์จริงและกำหนดเอง ไม่พึ่งว่าตารางใหม่จะถูกเปิดหรือปิดโดยอัตโนมัติ
+- PostgreSQL ไม่เปิด port สู่ public รับเฉพาะ Docker network ภายในเครื่อง ใช้ `scram-sha-256` และจำกัด `max_connections` ตาม connection budget ของ Django, n8n, migration และ backup
+- แยก role: migration owner ของ schema แอป, runtime role ของ Django ที่ไม่มีสิทธิ์ DDL, และ n8n metadata database/user ของตนเองที่อ่านข้อมูลธุรกิจไม่ได้; n8n เข้าถึงข้อมูลธุรกิจผ่าน Django API เท่านั้น
+- M00 บังคับ `sslmode=verify-full` นอก local/CI จึงเปิด TLS บน PostgreSQL ด้วย CA ภายในโครงการแล้วส่ง `sslrootcert` ให้ client แม้ DB อยู่เครื่องเดียวกัน; หากจะผ่อนกติกานี้ต้องเปลี่ยน guard พร้อมเหตุผลและ tests ไม่ปิดเงียบ ๆ
+- Django migrations เป็นเจ้าของ schema แอปเพียงทางเดียว สำรองด้วย pgBackRest และสำรองไฟล์ private volume แยก แล้วทดสอบ restore โดยปิดการส่ง LINE ระหว่างกู้คืน
 
 #### C.2.2 ซอฟต์แวร์และค่าใช้จ่าย
 
@@ -605,13 +606,72 @@ Django/Python/PostgreSQL/HTMX เป็นแกนซอฟต์แวร์�
 
 | ส่วน | แนวทางคุมค่าใช้จ่าย |
 | --- | --- |
-| ฐานข้อมูล | Supabase Free ภายในโควตาสำหรับ demo หรือ PostgreSQL บนเครื่องที่มีอยู่; เผื่อ storage/connection ของแอปและ n8n แยกกัน |
+| ฐานข้อมูล | PostgreSQL ใน OCI A1 VM ภายในโควตา Always Free (E.2.1); ไม่ใช้บริการฐานข้อมูลแบบเสียเงิน เผื่อ storage/connection ของแอปและ n8n แยกกัน |
 | ThaiLLM API | ใช้สิทธิ์/โควตาของบัญชีที่ได้รับ ตรวจ model access, rate limit, token usage และค่าใช้จ่ายจริง ไม่สมมติว่าใช้ฟรีไม่จำกัด |
 | n8n | รันใน container ของโครงการ พร้อมค่าเครื่อง พื้นที่ execution logs และ backup; ไม่จำเป็นต้องซื้อ n8n Cloud เพื่อใช้แบบนี้ |
-| LINE OA | ตรวจโควตา reply/push ของบัญชีจริงและลดข้อความซ้ำ โดยแจ้งเหตุสำคัญครบ |
-| แอปและไฟล์ | ค่า Linux host, HTTPS, storage และ backup; ไม่มีค่า GPU/model hosting ในขอบเขตที่เลือก |
+| LINE OA | เริ่มแพ็กเกจฟรี (300 ข้อความ push/เดือน) และคุมตาม C.2.3: reply ฟรีเป็นหลัก push เฉพาะเหตุการณ์ที่ผู้ใช้ต้องลงมือ; เสนอ Basic 1,280 บาท/เดือน (ไม่รวม VAT, 15,000 ข้อความ) เมื่อ forecast เกินเกณฑ์ใน C.2.3 |
+| แอปและไฟล์ | OCI Always Free: compute/block/object storage/backup ค่าใช้จ่ายเป้าหมาย 0 เมื่อไม่เกินงบใน E.2.1 พร้อม budget alert; domain อาจมีค่าใช้จ่ายถ้าไม่ได้ใช้ subdomain ขององค์กร ไม่มีค่า GPU/model hosting |
 
 ThaiLLM มีช่องทาง API สำหรับนักพัฒนาตามประกาศของผู้พัฒนา แต่ endpoint, authentication, model IDs และโควตาที่บัญชีใช้ได้ต้องตรวจเมื่อเชื่อมจริง [NSTDA: ThaiLLM](https://www.nstda.or.th/home/news_post/s-and-t-implementation-thai-llm/), [LINE Messaging API pricing](https://developers.line.biz/en/docs/messaging-api/pricing/)
+
+<a id="line-quota"></a>
+
+#### C.2.3 LINE OA และการคุมโควตาข้อความ
+
+**การตัดสินใจ 6 ตุลาคม 2569:** ใช้ LINE OA เป็นช่องทางรับเรื่องต่อ (ทบทวน Microsoft Teams แล้วไม่เลือก) และออกแบบให้อยู่ในแพ็กเกจฟรีได้นานที่สุด ระบบต้องบังคับงบข้อความรายเดือนเอง ไม่ปล่อยให้โควตาหมดกลางเดือนโดยไม่มีใครรู้ ตัวเลขด้านล่างตรวจเมื่อ 6 ตุลาคม 2569 และต้องตรวจซ้ำก่อนเปิดใช้ [LINE OA ราคาแพ็กเกจ (ไทย)](https://lineforbusiness.com/th/service/line-oa-features/broadcast-message), [Messaging API pricing](https://developers.line.biz/en/docs/messaging-api/pricing/)
+
+| ประเภท | นับโควตา | ใช้ในระบบนี้ |
+| --- | --- | --- |
+| รับข้อความ/webhook | ไม่นับ | ทุกข้อความและไฟล์จากผู้ใช้ |
+| Reply (reply token ใช้ได้ครั้งเดียว ภายใน 1 นาทีหลังได้รับ webhook) | ไม่นับ | ลงทะเบียน ถามเพิ่ม ยืนยันร่าง และตอบสถานะเมื่อผู้ใช้กดดูเอง |
+| Push | นับ 1 ต่อผู้รับต่อ request (หนึ่ง request รวมได้สูงสุด 5 message objects) | เฉพาะเหตุการณ์ในตาราง push ด้านล่าง |
+| Multicast/Broadcast/Narrowcast | นับตามจำนวนผู้รับ | ห้ามใช้ |
+| Loading animation (`/v2/bot/chat/loading/start`, 5–60 วินาที) | ตรวจในบัญชีจริงก่อนใช้ | แสดงในแชท 1:1 ระหว่างรอ AI |
+
+| แพ็กเกจ (ไม่รวม VAT 7%) | ค่ารายเดือน | ข้อความ push/เดือน | ส่งเกินโควตา |
+| --- | --- | --- | --- |
+| ฟรี — เริ่มต้น | 0 บาท | 300 | ไม่ได้ ส่งไม่ออกจนขึ้นเดือนใหม่ |
+| Basic | 1,280 บาท | 15,000 | 0.10 บาท/ข้อความ |
+| Pro | 1,780 บาท | 35,000 | 0.06 บาท/ข้อความ |
+
+**หลักการ 1 — reply ก่อนเสมอและทันเวลา**
+
+- Inbox เก็บ reply token พร้อม `reply_deadline = received_at + LINE_REPLY_DEADLINE_SECONDS` (ค่าเริ่ม 50 วินาที เผื่อจากเพดาน 1 นาที) และ delivery service ใช้ token ได้ครั้งเดียว
+- n8n poll งาน `conversation-turn` ทุกไม่เกิน 5 วินาที และ AI ต้องจบก่อน deadline ถ้า AI ไม่ทันให้ตอบด้วยคำถามตามฟิลด์ผ่าน reply ก่อน token หมด แล้วใช้ผล AI ในรอบที่ผู้ใช้ตอบกลับ คำตอบบทสนทนาจะไม่กลายเป็น push เพียงเพราะ AI ช้า
+- รวมทุกส่วนของคำตอบ (ข้อความ, Flex, รูป ไม่เกิน 5 objects) ไว้ใน reply เดียว ห้ามส่งส่วนแรกด้วย reply แล้วส่วนที่เหลือด้วย push
+- แสดง loading animation ระหว่างรอ AI เพื่อลดการที่ผู้ใช้ส่งข้อความซ้ำ
+
+**หลักการ 2 — ให้ผู้ใช้ดึงสถานะเอง**
+
+- Rich menu มีปุ่ม "ส่งเรื่องใหม่", "เรื่องของฉัน" และ "ติดตามเรื่อง" ส่งเป็น postback ที่ผูก LINE identity แล้วตอบด้วย reply ซึ่งไม่เสียโควตา
+- อัปเดตที่ผู้ใช้ไม่ต้องลงมือ (รับเรื่องแล้ว ส่งต่อกอง อนุมัติบางส่วน ฯลฯ) ไม่ push แต่สะสมเป็น "มีอัปเดตใหม่" แล้วแสดงเมื่อผู้ใช้กดดูหรือส่งข้อความครั้งถัดไป
+
+**หลักการ 3 — push เฉพาะเหตุการณ์ที่ผู้ใช้ต้องลงมือ**
+
+| เหตุการณ์ | ระดับ | เมื่องบเหลือน้อย |
+| --- | --- | --- |
+| ขอข้อมูลเพิ่ม (`awaiting_info`) | critical | ส่งต่อจนโควตาจริงหมด |
+| P0/เหตุอาจอันตราย: ยืนยันว่ารับเรื่องแล้ว | critical | ส่งต่อ พร้อมช่องทางฉุกเฉินที่รับรอง |
+| ของพร้อมรับ/แก้ไขแล้วรอยืนยัน (`awaiting_confirmation`) | critical | ส่งต่อจนโควตาจริงหมด |
+| ผลลงทะเบียน approved/rejected | normal | หยุดตั้งแต่ tier 2 (ผู้ใช้กดดูเองได้) |
+| ปิด/ปฏิเสธ/ยกเลิกเรื่อง | normal | หยุดตั้งแต่ tier 2 |
+| อื่น ๆ | ไม่ push | ใช้หลักการ 2 |
+
+รวมเหตุการณ์ของผู้รับคนเดียวกันที่เกิดในช่วง debounce (ค่าเริ่ม 10 นาที) เป็น push เดียวไม่เกิน 5 objects และใส่ `X-Line-Retry-Key` ทุก push เพื่อไม่ให้ retry หลัง timeout ส่งซ้ำหรือนับซ้ำ [LINE retry](https://developers.line.biz/en/docs/messaging-api/retrying-api-request/)
+
+**หลักการ 4 — งบรายเดือนที่ระบบบังคับ**
+
+- งบเดือนนี้ = ค่าน้อยกว่าระหว่างโควตาแพ็กเกจจาก Get quota API กับ `LINE_PUSH_MONTHLY_BUDGET` ตัวนับใช้ NotificationDelivery ที่เป็น push (accepted หรือ unknown นับทั้งคู่) แล้ว reconcile ทุกชั่วโมงกับ Get consumption API (`totalUsage`) โดยใช้ค่าที่มากกว่า
+- **Tier 0** ใช้ไปน้อยกว่า 60%: ส่งตามตาราง; **Tier 1** 60–80%: ส่งตามตารางแต่ debounce 60 นาที; **Tier 2** 80% ขึ้นไป: ส่งเฉพาะ critical เพื่อกัน `LINE_PUSH_CRITICAL_RESERVE_PERCENT` (ค่าเริ่ม 20%) ไว้ให้ critical; **Tier 3** งบหมดหรือ LINE ตอบว่าเกิน monthly limit: ไม่ push เก็บ delivery เป็น `deferred_quota` ให้ ฝอจ. เห็นในเว็บเพื่อติดต่อทางช่องทางสำรอง และส่งให้ผู้ใช้ทาง reply เมื่อผู้ใช้ติดต่อเข้ามาครั้งถัดไป
+- NotificationDelivery เก็บ method (reply/push), ระดับเหตุการณ์, tier ตอนตัดสินใจ, retry key, จำนวนข้อความที่นับ และผล accepted/failed/unknown/deferred; สถานะธุรกิจไม่ขึ้นกับผลการส่ง
+- แจ้งเตือนแอดมินและเจ้าของงบเมื่อใช้ถึง 50/80/95% และเมื่อ forecast (อัตราใช้เฉลี่ยต่อวัน × วันที่เหลือ) เกินงบ หน้าแอดมินแสดง usage, forecast, tier และรายการ deferred
+
+**ประมาณการและเกณฑ์อัปเกรด**
+
+- เป้าหมายไม่เกิน 2 push ต่อเรื่อง แพ็กเกจฟรีจึงรองรับประมาณ 150 เรื่องต่อเดือนสำหรับทั้งระบบ
+- ช่วง onboarding ผลลงทะเบียนอาจกินโควตามาก ให้เปิดเขตใน pilot เป็นรอบและให้ผู้ใช้กดดูผลลงทะเบียนเองเมื่อเข้า tier 2
+- M13 รายงาน push ต่อเรื่องและจำนวนเรื่องจริงจาก pilot ถ้า forecast เกิน 80% ของโควตาฟรีสองเดือนติดกัน หรือ forecast เมื่อเปิดครบ 18 เขตเกิน 300 ให้เสนอ Basic ต่อเจ้าของงบ และตั้ง `LINE_PUSH_MONTHLY_BUDGET` ต่ำกว่าโควตาแพ็กเกจเพื่อคุมค่าข้อความส่วนเกิน
+- staging ใช้ OA ทดสอบแยก (แพ็กเกจฟรี) และ recipient allowlist ไม่ใช้โควตาของ production
 
 ### C.3 โครงสร้างโค้ดและจุดรวมกติกา
 
@@ -719,7 +779,7 @@ Django เป็นผู้ส่ง LINE เพียงจุดเดีย�
 
 n8n down: รับ event ลง DB ต่อเมื่อบันทึกได้ แล้วรอประมวลผล/แจ้งเตือนผู้ดูแล; AI down: workflow ถามตามฟิลด์หรือส่งคนตรวจได้; DB down: webhook ไม่ตอบว่าบันทึกสำเร็จ การ lease/retry/dead-letter และ external unknown อยู่ใน E.6 พร้อม acceptance tests ไม่อ้าง exactly-once กับปลายทางที่ไม่รองรับ
 
-ข้อความเกี่ยวกับเรื่องส่งเฉพาะ LINE identity ของเจ้าของเรื่องที่ยังมีสิทธิ์; ข้อความลงทะเบียนก่อนมี membership ใช้ registration-only scope และส่งได้เฉพาะ LINE identity จาก signed event เดิม ไม่มี case data ไม่ broadcast ไปทั้งเขตหรือกลุ่ม ใช้ reply/push ตามข้อจำกัด token และสิทธิ์ของ endpoint ตรวจโควตาก่อนส่ง [LINE Messaging API reference](https://developers.line.biz/en/reference/messaging-api/)
+ข้อความเกี่ยวกับเรื่องส่งเฉพาะ LINE identity ของเจ้าของเรื่องที่ยังมีสิทธิ์; ข้อความลงทะเบียนก่อนมี membership ใช้ registration-only scope และส่งได้เฉพาะ LINE identity จาก signed event เดิม ไม่มี case data ไม่ broadcast ไปทั้งเขตหรือกลุ่ม ใช้ reply ก่อนเสมอและ push ตามงบใน C.2.3 ตรวจโควตาก่อนส่ง [LINE Messaging API reference](https://developers.line.biz/en/reference/messaging-api/)
 
 <a id="implementation-phases"></a>
 
@@ -740,7 +800,7 @@ n8n down: รับ event ลง DB ต่อเมื่อบันทึก�
 
 เมื่อผู้ใช้สั่งเริ่มพัฒนา ให้ implement ต่อที่ M01 แล้วเดินตามลำดับที่ dependency พร้อม ใช้ข้อมูลจำลองระหว่างพัฒนาโดยไม่รอ credentials จริงในส่วนที่ทดสอบได้ แยกรายงาน mocked tests ออกจาก live integration เสมอ ข้อมูลจำลองไม่ให้สิทธิ์ production และไม่แทนกอง/อำนาจที่หน่วยงานต้องรับรอง
 
-สิ่งที่ต้องเตรียมตามโมดูล: บัญชีและผู้รับรองสำหรับ M01; OA/HTTPS/credentials สำหรับ M03; host และ n8n metadata/secret สำหรับ M04; ThaiLLM API contract/model/key/โควตาสำหรับ M05; ทะเบียนและอำนาจจริงสำหรับ M06/M11; host/registry/backup/on-call สำหรับ M12 และผู้ตรวจรับสำหรับ M13 ไม่มีการจัดหา GPU หรือ self-host โมเดล
+สิ่งที่ต้องเตรียมตามโมดูล: บัญชีและผู้รับรองสำหรับ M01; OA/HTTPS/credentials สำหรับ M03 (เตรียม `faoj-staging` บน OCI ตาม E.2.1 ก่อน M03 เพื่อให้ LINE webhook มี HTTPS จริง); host และ n8n metadata/secret สำหรับ M04; ThaiLLM API contract/model/key/โควตาสำหรับ M05; ทะเบียนและอำนาจจริงสำหรับ M06/M11; host/registry/backup/on-call สำหรับ M12 และผู้ตรวจรับสำหรับ M13 ไม่มีการจัดหา GPU หรือ self-host โมเดล
 
 ถ้าโมดูลมี external dependency ที่ยังไม่พร้อม ให้ทำส่วนอิสระพร้อม tests แล้วบันทึกสถานะ/หลักฐานที่ขาด ไม่ทำ mock/stub เพื่อเปลี่ยน gate เป็นผ่าน ก่อนเปิด production ต้องแก้ blocker ด้านสิทธิ์ ข้อมูลเสีย ธุรกรรมซ้ำ และผ่าน G01–G10 พร้อมผู้รับรอง ขอบเขตการ deploy production ต้องได้รับคำสั่งแยกจากการพัฒนา production-ready
 
@@ -750,10 +810,11 @@ n8n down: รับ event ลง DB ต่อเมื่อบันทึก�
 | --- | --- |
 | ส่งกองและจัดคิวถูกตามกฎ | ใช้ S01–S16 เป็นข้อมูลตั้งต้น แปลงเป็น assertions ของ policy functions และเพิ่ม R02 พร้อมกรณีชนกฎ |
 | แยกผู้แจ้งรายบุคคล กอง และอำนาจ | ทดสอบผู้แจ้งคนอื่นในเขตเดียวกัน/ต่างเขต และเจ้าหน้าที่ต่างกองอ่าน/แก้/ดาวน์โหลด/API/export ไม่ได้; ทดสอบแอดมินทุกกองและบัญชีไม่มี role |
-| จำนวนและสถานะไม่เสียเมื่อชนกัน | ใช้ฐาน PostgreSQL แยกสำหรับ integration tests และ smoke test บน Supabase project ทดสอบ; สองรายการจ่ายพร้อมกัน กดรับช่วงพร้อมกัน และ action token ซ้ำ |
+| จำนวนและสถานะไม่เสียเมื่อชนกัน | ใช้ฐาน PostgreSQL แยกสำหรับ integration tests และ smoke test บน `faoj-staging` ของ OCI; สองรายการจ่ายพร้อมกัน กดรับช่วงพร้อมกัน และ action token ซ้ำ |
 | คนเห็นต่างได้อย่างถูกต้อง | เปลี่ยนกอง/priority ในสิทธิ์, ขอข้ามกฎโดยไม่มีสิทธิ์, กองไม่รับ, ข้อมูลใหม่ และข้อเสนอ AI เก่ามาถึงช้า |
 | AI ให้ข้อมูลที่ใช้ต่อได้ | ประเมินข้อความไทยที่ดึงรหัส/จำนวน/หน่วยคลุมเครือ ข้อมูลหาย เจตนาหลายอย่าง และคำสั่งแฝงในเอกสาร; จัดชุดประเมินที่ไม่ได้ใช้แก้ prompt |
-| ระบบกู้จากความล้มเหลว | จำลอง timeout/refusal/schema ไม่ผ่าน Supabase ไม่พร้อม/connection หลุด LINE เกินโควตา และ n8n หยุดระหว่าง workflow/หลัง Django ส่งข้อความแล้วแต่ก่อน complete; ตรวจคิวค้างและ retry โดยไม่ทำรายการซ้ำ |
+| ระบบกู้จากความล้มเหลว | จำลอง timeout/refusal/schema ไม่ผ่าน PostgreSQL ไม่พร้อม/connection หลุด LINE เกินโควตา และ n8n หยุดระหว่าง workflow/หลัง Django ส่งข้อความแล้วแต่ก่อน complete; ตรวจคิวค้างและ retry โดยไม่ทำรายการซ้ำ |
+| โควตา LINE ไม่รั่ว | ทดสอบว่าคำตอบบทสนทนาใช้ reply ก่อน deadline แม้ AI timeout, ข้อความหลายส่วนอยู่ใน request เดียว, tier 0–3/critical reserve/debounce ทำงาน, retry หลัง timeout ใช้ retry key เดิม, reconcile กับ consumption API และงบหมดแล้วเกิด deferred ไม่ใช่ push |
 | LINE และเว็บใช้งานร่วมกัน | ทดสอบ LINE OA จริงทั้งสามเส้นทาง และใช้ Playwright ครอบคลุมเบิกจ่ายบางส่วน คืนรอตรวจ และแจ้งปัญหาพร้อมเปลี่ยนข้อเสนอ รวมการใช้คีย์บอร์ดและหน้าจอแคบ |
 | ข้อมูลกู้คืนได้ | restore backup ลงสภาพแวดล้อมแยก ตรวจเรื่อง ประวัติ ไฟล์ และรายการงานค้าง; ไม่ให้การกู้คืนส่งแจ้งเตือนจริงซ้ำ |
 
@@ -782,7 +843,7 @@ M00 มี `migrate`, `test` และ `check --deploy` ของ Django แล�
 
 | ลำดับ | งาน | หลักฐานเสร็จ |
 | --- | --- | --- |
-| 1 | สร้างโครงการ Django และ config สำหรับ demo พร้อม Supabase Free (PostgreSQL) | เปิดหน้าเว็บและเชื่อมฐานข้อมูลได้จากสภาพแวดล้อมใหม่ |
+| 1 | สร้างโครงการ Django และ config พร้อม PostgreSQL (local/CI container แล้วใน M00; staging/production บน OCI ตาม E.2.1) | เปิดหน้าเว็บและเชื่อมฐานข้อมูลได้จากสภาพแวดล้อมใหม่ |
 | 2 | ทำ membership ชื่อจริง 18 เขต/4 กองจำลองและสิทธิ์บทบาท | ผู้แจ้งเปิดของคนอื่นแม้เขตเดียวกันไม่ได้ และเจ้าหน้าที่เปิดกองอื่นไม่ได้แม้แก้ URL |
 | 3 | ทำ models/migrations ขั้นแรกและ seed จาก JSON สองไฟล์ | ข้อมูลครบและ seed ซ้ำไม่เพิ่มข้อมูลซ้ำ |
 | 4 | ทำ Case/CaseLine กับบทสนทนา LINE และหน้าดูเรื่อง ฝอจ. | สร้างคำขอสามประเภทและเห็นเลขเรื่อง/เจ้าภาพ/สถานะ |
@@ -957,23 +1018,21 @@ Django monolith และ n8n container อยู่ใน Compose project เ�
 | ส่วน | ตัวเลือก production | ขอบเขต |
 | --- | --- | --- |
 | Backend/UI | Python 3.13, Django 5.2 LTS, Gunicorn, Templates/HTMX | บัญชีรายบุคคล สิทธิ์เจ้าของเรื่อง/กอง/แอดมิน ธุรกรรมและ audit |
-| Application DB | PostgreSQL 17 + psycopg 3 | baseline บนเครื่ององค์กร; Supabase managed เป็นทางเลือกเมื่อผ่าน recovery profile |
+| Application DB | PostgreSQL 17 + psycopg 3 ใน container บน OCI A1 | baseline ตาม E.2.1; VM/DB องค์กรเป็นทางเลือกภายหลัง |
 | Orchestration | n8n container, versioned workflow JSON, outbox claim API | workflow ตาม E.12; image pin version/digest และทดสอบกับ DB จริง |
 | n8n persistence | metadata DB/user แยก, persistent /home/node/.n8n, encryption key | สำรองและกู้คู่กับ workflow versions; บัญชีนี้ไม่มีสิทธิ์อ่าน business DB |
 | AI | external ThaiLLM API ผ่าน Django adapter | active profile/version และ secret ที่จำกัดแอดมินผู้พัฒนา; monitor auth/quota/latency |
 | LINE | Messaging API + signed webhook ใน Django | รับเฉพาะ private intake; ตรวจ source/registration/ownership และส่งผ่าน delivery service จุดเดียว |
 | Identity | Django sessions + admin-managed accounts/roles | ผู้แจ้งรับรองผ่าน LINE registration; SSO ไม่เป็น dependency บังคับของรุ่นนี้ |
 | Files | private Django storage + quarantine/scanner | download ตาม ownership/กอง/แอดมิน; production scan ก่อนเปิดดู |
-| Host | Linux VM, Docker/Compose, reverse proxy/TLS | public เฉพาะ ingress ที่จำเป็น; n8n editor อยู่ private/admin access; ไม่ mount Docker socket |
-| Backup | pgBackRest หรือ managed recovery ที่ผ่าน RPO/RTO | app DB, n8n metadata, private files, configuration และ secret/encryption keys แยกเก็บอย่างปลอดภัย |
-| CI/CD | GitHub Actions, OCI registry, deployment scripts | app/n8n digests + workflow revision + profile metadata เดียวตลอด promotion; ไม่มี secret ใน manifest |
+| Host | OCI Ampere A1 Always Free: `faoj-prod` 1 OCPU/8 GB + `faoj-staging` 1 OCPU/4 GB, Docker Compose, Caddy TLS | public เฉพาะ 80/443; SSH และ n8n editor ผ่าน OCI Bastion เท่านั้น; ไม่ mount Docker socket |
+| Backup | pgBackRest → OCI Object Storage (เข้ารหัส) + สำเนารายสัปดาห์นอก OCI | app DB, n8n metadata, private files, configuration และ secret/encryption keys แยกเก็บอย่างปลอดภัย |
+| CI/CD | GitHub Actions, OCI Container Registry (นับรวมโควตา Object Storage), deployment scripts | app/n8n digests + workflow revision + profile metadata เดียวตลอด promotion; ไม่มี secret ใน manifest |
 | Verification | Django tests, Playwright, workflow replay, secret/dependency/image scan, load tests | ต้องตรวจ n8n runtime/restore และสิทธิ์รายบุคคล/กองจริงก่อน production |
 
-ค่าใช้จ่ายประกอบด้วย compute, storage/backup, network, LINE, API usage และ CI/registry ไม่มีค่า GPU/model hosting ใน baseline n8n ใช้เงื่อนไข license ตาม C.2.2 จึงตรวจความเหมาะสมกับการใช้ภายในหน่วยงาน
+ค่า OCI เป้าหมายเป็น 0 ภายในงบ E.2.1; ค่าที่ยังเกิดได้คือ LINE, ThaiLLM API usage, domain และ CI minutes ที่เกินโควตาฟรีของ Git hosting ไม่มีค่า GPU/model hosting ใน baseline n8n ใช้เงื่อนไข license ตาม C.2.2 จึงตรวจความเหมาะสมกับการใช้ภายในหน่วยงาน
 
-Database profiles: local/CI ใช้ PostgreSQL container; demo app DB ใช้ Supabase Free ตาม C; production baseline ใช้ PostgreSQL 17 บน DB VM ที่ผ่าน restore drill Supabase managed ต้องใช้ recovery capability ที่ผ่าน RPO/RTO จริง n8n metadata ใช้ database/user ของตนเอง ไม่ใช้ service_role หรือ DB-owner ของแอป ทุก profile ตรวจ version, grants, TLS และ connection budget ก่อน deploy
-
-Supabase app schemas เป็น private และปิด Data API ที่ไม่ใช้ สิทธิ์ใน Django ต้องตรวจทุก request เพราะ auth.uid() ไม่ใช่ตัวตนของ Django session; หากเปิด Data API ภายหลังให้ทดสอบ ownership/division grants/RLS ด้วย [Supabase API security](https://supabase.com/docs/guides/api/securing-your-api)
+Database profiles: local/CI ใช้ PostgreSQL container; staging/production ใช้ PostgreSQL 17 container บน VM ของตนใน OCI ตาม E.2.1 ที่ผ่าน restore drill; VM องค์กรใช้ profile เดียวกันเมื่อย้าย n8n metadata ใช้ database/user ของตนเอง ไม่ใช้ service_role หรือ DB-owner ของแอป ทุก profile ตรวจ version, grants, TLS และ connection budget ก่อน deploy
 
 ```mermaid
 flowchart LR
@@ -992,7 +1051,81 @@ flowchart LR
     CI -. deploy .-> N
 ```
 
-เริ่ม pilot ด้วย app host และ recovery host ที่เตรียมไว้ แยก DB ตามความสามารถทีม ไม่ถือ Compose เครื่องเดียวเป็น HA Sizing เป็นจุดเริ่มทดสอบ: app+n8n 4 vCPU/8 GB RAM และ DB 4 vCPU/16 GB RAM บน SSD แล้ววัดด้วย workflow/จำนวน execution จริง รวม connection ของ Django, n8n, migration และ monitoring ให้มี reserve API concurrency/rate limit ใช้ค่าที่บัญชีผู้ให้บริการรองรับ ไม่อนุมานจากขนาดโมเดล
+เริ่ม pilot บน `faoj-prod` และใช้ `faoj-staging` เป็น recovery host แบบลดขนาดตาม E.2.1 ไม่ถือ Compose เครื่องเดียวเป็น HA Sizing ถูกจำกัดด้วยโควตา (1 OCPU/8 GB สำหรับ app+n8n+DB ของ production) จึงต้องวัดด้วย load test และ workflow/จำนวน execution จริงก่อนเปิดใช้ ถ้าไม่ผ่านเป้าหมายให้เจ้าของระบบเลือกปรับเป้า ย้ายไป VM องค์กร หรืออนุมัติค่าใช้จ่าย ไม่ขยายเกินโควตาเงียบ ๆ รวม connection ของ Django, n8n, migration และ monitoring ให้มี reserve API concurrency/rate limit ใช้ค่าที่บัญชีผู้ให้บริการรองรับ ไม่อนุมานจากขนาดโมเดล
+
+<a id="oracle-free-tier"></a>
+
+#### E.2.1 Oracle Cloud Always Free: แผนทรัพยากรและการคุมโควตา
+
+**การตัดสินใจ 6 ตุลาคม 2569:** staging และ production ของโครงการใช้ OCI ภายในโควตา Always Free ทั้งหมด VM ขององค์กรเป็นทางเลือกภายหลัง เป้าหมายคือ **ค่า OCI = 0** พร้อมตัวกันไม่ให้เกินโควตา ฟรีไม่ได้แปลว่าเงื่อนไขคงที่: ในปี 2569 Oracle ลดโควตา A1 จาก 4 OCPU/24 GB เหลือ 2 OCPU/12 GB และเครื่องที่เกินถูกปิด ตัวเลขด้านล่างตรวจกับเอกสาร Oracle เมื่อ 6 ตุลาคม 2569 ต้องตรวจซ้ำก่อนสร้างทรัพยากรและทุกไตรมาส [OCI Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm), [OCI Free Tier](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier.htm)
+
+**บัญชีและภูมิภาค**
+
+- ใช้ tenancy แยกเฉพาะโครงการนี้ เพราะโควตา Always Free นับรวมทั้ง tenancy ระบุเจ้าของบัญชี วิธีชำระเงินที่องค์กรรับรอง และผู้ดูแลอย่างน้อย 2 คนที่เปิด MFA
+- Home region เลือกตอนสมัครและเปลี่ยนไม่ได้ ส่วน Always Free compute สร้างได้เฉพาะ home region เสนอ **Singapore (ap-singapore-1)** เพราะใกล้ที่สุดและ OCI ยังไม่มี region ในไทย ข้อมูลจึงอยู่นอกประเทศ เจ้าของข้อมูลต้องรับรองตาม PDPA ก่อนเก็บข้อมูลผู้ใช้จริง (เงื่อนไข G02)
+- อัปเกรดเป็น **Pay As You Go** หลังสมัคร เพื่อไม่ให้ทรัพยากรถูกปิดเมื่อ trial หมด และเพื่อเลี่ยงการเรียกคืน instance ที่ Oracle ถือว่า idle (7 วันที่ CPU, network และ memory p95 ต่ำกว่า 20%) PAYG ไม่คิดเงินเมื่ออยู่ในโควตา แต่คิดทันทีเมื่อเกิน จึงต้องมีตัวกันด้านล่าง การยกเว้น idle reclaim ของ PAYG อ้างจาก FAQ/รายงานผู้ใช้ ให้ตรวจในบัญชีจริง
+
+**งบทรัพยากร** — ห้ามสร้างทรัพยากร OCI นอกตารางนี้ การเพิ่มต้องแก้ตารางและผ่าน review ก่อน
+
+| ทรัพยากร | โควตา Always Free | แผนใช้ | ส่วนเหลือ |
+| --- | --- | --- | --- |
+| Ampere A1 Flex | 2 OCPU + 12 GB รวมทั้ง tenancy (1,500 OCPU-ชม. และ 9,000 GB-ชม./เดือน) | `faoj-prod` 1 OCPU/8 GB + `faoj-staging` 1 OCPU/4 GB รันทั้งเดือน = 1,488 OCPU-ชม. และ 8,928 GB-ชม. (เดือน 31 วัน) | 0 — ห้ามสร้างเครื่องที่สามหรือ deploy แบบ blue/green สองเครื่อง |
+| AMD Micro | 2 เครื่อง 1/8 OCPU/1 GB | ไม่ใช้ เพราะ boot volume ขั้นต่ำ 47 GB จะกินโควตา block storage | — |
+| Block Volume | 200 GB รวม boot; volume backup 5 ชุด | boot 50 + 50 GB, data prod 70 GB, data staging 30 GB = 200 GB; backup: data prod ก่อน release ≤ 3 ชุด + boot prod 1 ชุด | 0 GB / backup 1 ชุด |
+| Object Storage | 20 GB (บัญชีจ่ายเงิน: Standard 10 + Infrequent 10 + Archive 10 GB), 50,000 requests/เดือน | pgBackRest ของ prod ≤ 8 GB (Standard), สำรองไฟล์แนบ ≤ 5 GB (Infrequent), image ใน OCIR ≤ 2 GB (เก็บ 5 รุ่นล่าสุด) รวม ≤ 15 GB | alert ที่ 16 GB และ 40,000 requests |
+| Outbound transfer | 10 TB/เดือน | webhook/ข้อความ/ไฟล์และสำเนา backup นอก OCI รวมไม่ถึง 100 GB | มาก |
+| Load Balancer | Flexible 1 ตัว 10 Mbps | ไม่ใช้ — Caddy บน VM รับ TLS เอง | — |
+| Vault | software keys ไม่จำกัด, secrets 150 รายการ | ประมาณ 20 secrets ต่อ environment | มาก |
+| Email Delivery | 3,000 ฉบับ/เดือน | password reset และอีเมลถึงผู้ดูแล | alert ที่ 2,000 |
+| Notifications | email 1,000/เดือน, HTTPS 1 ล้าน/เดือน | alarms และ budget alerts | มาก |
+| Monitoring / Logging | 500 ล้าน ingestion datapoints / 10 GB ต่อเดือน | metrics ของ VM + custom metrics ทุก 1–5 นาที ไม่ส่ง application log ทั้งหมดเข้า OCI Logging | มาก |
+| Bastion | ไม่มีค่าใช้จ่าย | SSH และ port-forward ไป n8n editor | — |
+
+ไม่ใช้: OCI Database with PostgreSQL และ Autonomous Database (ดู C.2.1), OKE, Functions, shape แบบเสียเงิน และ reserved public IP จนกว่าจะตรวจว่าไม่มีค่าใช้จ่าย
+
+**การจัดวางบนแต่ละ VM** (Ubuntu 24.04 aarch64 หรือ Oracle Linux 9, Docker Engine + Compose, security updates อัตโนมัติ)
+
+| บริการ | `faoj-prod` (8 GB) | `faoj-staging` (4 GB) | การเปิดเครือข่าย |
+| --- | --- | --- | --- |
+| OS + Oracle Cloud Agent | 0.8 GB | 0.6 GB | — |
+| PostgreSQL 17 (app DB + n8n DB แยก database/user) | 2.0 GB (`shared_buffers` 1 GB) | 0.8 GB (256 MB) | Docker network ภายในเท่านั้น |
+| Django/Gunicorn | 0.6 GB (3 workers) | 0.4 GB (2 workers) | ผ่าน Caddy |
+| n8n (main mode ไม่ใช้ queue mode/Redis) | 1.0 GB | 0.8 GB | editor bind `127.0.0.1` เข้าผ่าน Bastion |
+| ClamAV `clamd` | 1.5 GB | เปิดเฉพาะตอนทดสอบสแกน | local socket |
+| Caddy + งาน backup | 0.5 GB | 0.3 GB | Caddy เปิด 80/443 |
+| **รวม / เหลือ** | **6.4 / 1.6 GB** | **2.9 / 1.1 GB** | — |
+
+ตั้ง `mem_limit` ทุก container, swap file 2 GB และ alarm เมื่อ memory > 85% data volume mount ที่ `/srv/faoj` เก็บ PostgreSQL data, n8n `/home/node/.n8n`, private media และ backup spool Security list/NSG เปิด ingress เฉพาะ 80/443 (LINE ไม่มี IP ต้นทางคงที่) ไม่เปิด 22 และ PostgreSQL สู่ public
+
+**Image และสถาปัตยกรรม CPU:** A1 เป็น ARM64 จึง build application image แบบ multi-arch (`linux/arm64` สำหรับ OCI และ `linux/amd64` สำหรับ CI และ VM องค์กรในอนาคต) base images ที่ M00 ตรึง digest ไว้ (`python:3.13-slim-bookworm`, `postgres:17-bookworm`) เป็น multi-arch index ที่มี arm64 (ตรวจแล้ว 6 ตุลาคม 2569) และ image ของ M00 build/รัน healthy บน arm64 แล้ว ส่วน digest ของ n8n และ ClamAV ต้องตรวจว่ามี arm64 ก่อน pin
+
+**ตัวกันไม่ให้เกินโควตา**
+
+1. สร้างทุกทรัพยากรใน compartment `mea-faoj` และกำหนด quota policy (ตรวจชื่อ quota ด้วย `oci limits definition list` ก่อนใช้):
+
+   ```text
+   set compute-core quota standard-a1-core-count to 2 in compartment mea-faoj
+   set compute-memory quota standard-a1-memory-count to 12 in compartment mea-faoj
+   set block-storage quota total-storage-gb to 200 in compartment mea-faoj
+   ```
+
+   เพิ่ม `zero` quota สำหรับ shape/บริการแบบเสียเงินที่ไม่ได้ใช้ และให้ IAM policy ผู้ปฏิบัติการจัดการได้เฉพาะ compartment นี้ Quota policy ไม่คุม Object Storage และจำนวน request จึงต้องใช้ข้อ 2–4 ร่วมด้วย
+2. **Budget** ระดับ tenancy แจ้งผู้ดูแล 2 คนทันทีที่ค่าใช้จ่ายจริงหรือ forecast มากกว่า 0
+3. `make oci-quota-check` (M12) รันเป็น cron บน `faoj-prod` ด้วย instance principal ที่มีสิทธิ์ `inspect`/`read` เท่านั้น เทียบจำนวน OCPU/GB/volume/backup/bucket size/OCIR images กับตารางนี้ แล้วส่ง custom metric ให้ alarm โดย CI ไม่ต้องถือ OCI credential
+4. Retention อัตโนมัติ: OCIR เก็บ 5 รุ่นล่าสุด, pgBackRest `repo-retention-full=2` พร้อม `repo-bundle`/`repo-block` เพื่อลดจำนวน object และ request, lifecycle rule ของ bucket ไฟล์แนบ, volume backup เก็บตามตาราง
+5. Deploy แบบ in-place บนเครื่องเดิมเท่านั้น และห้ามสร้าง instance ทดแทนก่อนลบตัวเดิม (quota ข้อ 1 จะปฏิเสธอยู่แล้ว)
+
+**Backup และการกู้คืนภายในโควตา**
+
+- `faoj-prod`: pgBackRest (encrypted repo) → OCI Object Storage ผ่าน S3-compatible API ด้วย Customer Secret Key: full รายสัปดาห์, differential รายวัน และ WAL archive โดย `archive_timeout=900` ให้ RPO ≤ 15 นาทีตาม E.9 ครอบคลุมทั้ง app DB และ n8n DB เพราะอยู่ cluster เดียวกัน ไฟล์แนบสำรองแบบเข้ารหัสรายวันไป Infrequent Access สร้าง volume backup ก่อน release
+- `faoj-staging`: ใช้ `pg_dump` รายวันบน data volume ของตนเอง ไม่ archive WAL ขึ้น Object Storage เพื่อประหยัด requests
+- **สำเนานอก OCI** รายสัปดาห์ (full backup + ไฟล์แนบ แบบเข้ารหัส) ไปที่เก็บขององค์กร เพื่อรับมือบัญชีถูกระงับหรือ Oracle เปลี่ยนเงื่อนไข เก็บ encryption key ใน OCI Vault และสำเนา offline ที่แยกสิทธิ์
+- **กู้เมื่อ `faoj-prod` เสีย:** หยุด stack ของ staging แล้ว restore production ลง `faoj-staging` แบบลดขนาด (1 OCPU/4 GB, ClamAV ปิด และ quarantine ไฟล์ใหม่ทั้งหมด) ระหว่างสร้าง prod ใหม่ เป้า RTO ≤ 4 ชั่วโมงต้องพิสูจน์ใน restore drill ถ้าทั้งบัญชีหรือ region ใช้ไม่ได้ ให้ restore จากสำเนานอก OCI ลง VM องค์กร
+
+**ความเสี่ยงที่ยอมรับและเงื่อนไขย้ายไป VM องค์กร**
+
+- เครื่องเดียวไม่มี HA, Oracle reboot เพื่อบำรุงรักษาได้, free tier ไม่มี SLA/support และ A1 ใน region อาจไม่มี capacity ตอนสร้างเครื่องใหม่ จึงห้ามลบ `faoj-prod` โดยไม่มีแผนและต้องเก็บ boot volume backup
+- ย้ายไป VM องค์กร (ใช้ compose, image amd64 และ pgBackRest restore เดียวกัน) เมื่อเข้าเงื่อนไขใดเงื่อนไขหนึ่ง: load test บน `faoj-prod` ไม่ผ่านเป้า E.9, เจ้าของข้อมูลไม่อนุญาตให้เก็บที่ Singapore, ต้องการ HA/SLA, storage จะเกินงบภายใน 3 เดือน หรือ Oracle เปลี่ยนเงื่อนไขจนอยู่ในโควตาไม่ได้
 
 ### E.3 Environment, ตัวตน และข้อมูลที่เชื่อถือได้
 
@@ -1000,12 +1133,12 @@ flowchart LR
 | --- | --- | --- |
 | local | fixtures, API/LINE mock, outbound ปิด | นักพัฒนา; seed/reset ได้ตาม guard |
 | CI | DB/n8n ทดสอบ, fake provider/key, deterministic fixtures | ไม่มี credentials จริง ทดสอบสิทธิ์และ workflow failure |
-| staging | ข้อมูลจำลอง/ปกปิด, OA ทดสอบ, ThaiLLM API จริง | UAT/restore/load; allowlist ผู้รับและจำกัดงบ API |
-| production | ข้อมูลและบัญชีที่รับรอง, OA/API จริง | Django accounts/roles, private n8n editor, ปฏิเสธ seed/reset demo |
+| staging (OCI `faoj-staging`) | ข้อมูลจำลอง/ปกปิด, OA ทดสอบ, ThaiLLM API จริง | UAT/restore drill; allowlist ผู้รับและจำกัดงบ API; เป็น recovery host ของ production |
+| production (OCI `faoj-prod`) | ข้อมูลและบัญชีที่รับรอง, OA/API จริง | Django accounts/roles, private n8n editor ผ่าน Bastion, ปฏิเสธ seed/reset demo |
 
 แยก DB/users, LINE channel, AI profiles/secrets, n8n instance/credentials/volume, storage และ backup ต่อ environment เก็บเวลา UTC แสดง Asia/Bangkok และใช้ Decimal กับจำนวนที่แบ่งได้
 
-Config ที่ต้องเพิ่มเมื่อ implement: APP_ENV, PUBLIC_BASE_URL, DATABASE_URL, DATABASE_MIGRATION_URL, ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, LINE_ALLOWED_RECIPIENTS, AI_ENABLED, OUTBOUND_ENABLED, LEGACY_MODE, PRIVATE_MEDIA_ROOT; AI provider/base URL/protocol/model/timeout/token limits และ secret reference ตาม C.5; n8n image version/digest, editor URL, metadata DB parameters, polling/lease limits และ credential/encryption-key references แยก application secret, LINE credentials, AI key และ n8n secrets ออกจาก source/exports/logs ไม่กำหนดค่าจริงใน PROJECT.md
+Config ที่ต้องเพิ่มเมื่อ implement: APP_ENV, PUBLIC_BASE_URL, DATABASE_URL, DATABASE_MIGRATION_URL, ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, LINE_ALLOWED_RECIPIENTS, LINE_PUSH_MONTHLY_BUDGET, LINE_PUSH_CRITICAL_RESERVE_PERCENT, LINE_REPLY_DEADLINE_SECONDS, AI_ENABLED, OUTBOUND_ENABLED, LEGACY_MODE, PRIVATE_MEDIA_ROOT; AI provider/base URL/protocol/model/timeout/token limits และ secret reference ตาม C.5; n8n image version/digest, editor URL, metadata DB parameters, polling/lease limits และ credential/encryption-key references แยก application secret, LINE credentials, AI key และ n8n secrets ออกจาก source/exports/logs ไม่กำหนดค่าจริงใน PROJECT.md
 
 **LINE registration:** รับเฉพาะ source.type=user และ LINE user ID จาก event ที่ตรวจ signature แล้ว ผู้ใช้กรอกชื่อและเลือกเขต → RegistrationRequest pending → แอดมินตรวจและ approve/reject พร้อมเหตุผล → สร้าง active membership จึงส่งเรื่องได้ การเลือกเขตเป็นข้อมูลขอรับรอง ไม่เป็นการให้สิทธิ์เอง ระหว่างรอเห็นได้เฉพาะสถานะลงทะเบียนของตน Group/room event ไม่เข้าสู่ private intake และไม่ตอบข้อมูลเรื่องในกลุ่ม
 
@@ -1092,9 +1225,9 @@ n8n Schedule Trigger poll/claim ผ่าน Django API โดย Django ทำ 
 | ThaiLLM timeout/JSON ผิด | bounded retry ไม่เกินหนึ่งรอบ แล้ว needs_review; คำถามฟิลด์/เจ้าหน้าที่ทำต่อได้ ไม่ปิดเรื่องหรือเดารหัส |
 | n8n/container crash หรือ callback หาย | lease หมดอายุแล้ว claim ใหม่ด้วย event ID เดิม ตรวจ ActionReceipt/Delivery ก่อนทำซ้ำ; alert oldest pending/last successful poll; stale execution ถูกปฏิเสธ |
 | LINE 429/5xx | เคารพ Retry-After เมื่อมี ใช้ backoff+jitter และกำหนดอายุงาน; ไม่ retry แบบไม่จำกัด |
-| Reply token ใช้ไม่ได้ | ไม่ reuse token เดิมวนซ้ำ; เลือก push เมื่อผู้รับเข้าเงื่อนไขและยังไม่ส่งผลนั้นแล้ว |
-| ส่ง push แล้ว timeout | เก็บ unknown และใช้ retry key ที่ LINE รองรับกับ endpoint นั้น; เมื่อพิสูจน์ไม่ได้แสดงผลไม่แน่นอน ไม่อ้าง exactly-once |
-| ผู้ใช้ block/OA quota หมด | เก็บ delivery failure ให้ ฝอจ. ติดตาม; สถานะธุรกิจไม่ย้อนหรือกลายเป็นผู้ใช้ยืนยันแล้ว |
+| Reply token หมดเวลาหรือใช้แล้ว | ไม่ reuse token; คำตอบบทสนทนาต้องส่ง fallback ก่อน deadline ตาม C.2.3 ถ้ายังพลาดให้ push เฉพาะเมื่องบอนุญาต มิฉะนั้นเก็บ deferred แล้วตอบด้วย reply ครั้งถัดไป |
+| ส่ง push แล้ว timeout | เก็บ unknown (นับเข้างบ) และ retry ด้วย `X-Line-Retry-Key` เดิม; เมื่อพิสูจน์ไม่ได้แสดงผลไม่แน่นอน ไม่อ้าง exactly-once |
+| ผู้ใช้ block หรือโควตา/งบเดือนหมด | block เก็บ failed; โควตาหมดเก็บ deferred ตาม tier 3 ใน C.2.3 ให้ ฝอจ. ติดตาม; สถานะธุรกิจไม่ย้อนหรือกลายเป็นผู้ใช้ยืนยันแล้ว |
 | DB/ทะเบียนเดิมล่ม | ไม่แจ้งทำธุรกรรมสำเร็จ; คงคิวรอตรวจและแสดงเวลาข้อมูลล่าสุด |
 | เหตุอาจอันตราย | มีทาง flag ให้คนรับเรื่องกลางทันทีจากปุ่ม/กฎที่รับรอง ไม่ต้องรอโมเดล; ส่งตามช่องทางฉุกเฉินที่รับรองเท่านั้น |
 
@@ -1146,6 +1279,8 @@ Security scan gate: secret ที่ใช้งานได้และ critica
 
 Repository ต้องมี merge restrictions, required CI และ reviewer สำหรับ schema/permission/pipeline เปลี่ยนแปลง ตรวจความสามารถของแผน Git hosting จริงก่อนพึ่ง enforcement: GitHub Free private repository ไม่ได้ให้ environment protection ครบ หากไม่มี required reviewer gate ให้ CI ทำ continuous delivery จนได้ release artifact และให้ผู้ปฏิบัติการที่มีสิทธิ์บน host รัน deploy script หลังบันทึกการรับรอง โดยไม่ให้ CI ถือ production credential; หากต้องการ automatic gated deployment ให้ใช้แผน/ระบบ CI ที่รองรับจริง [GitHub environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
 
+**บน OCI:** `release.yml` build application image แบบ multi-arch แล้ว push ไป OCI Container Registry ด้วย auth token ที่ push ได้เฉพาะ repository ของโครงการ (CI ไม่มี credential ของ VM หรือ production DB) ผู้ปฏิบัติการเข้า VM ผ่าน OCI Bastion แล้วรัน `make deploy ENV=staging|production RELEASE=<digest>` เพื่อ pull ตาม digest และ deploy แบบ in-place เพราะโควตาไม่พอสำหรับเครื่องที่สอง ช่วงสลับ container ให้ Caddy ตอบ 503 พร้อมหน้า maintenance (เป้าไม่เกิน 1 นาที) แล้วตรวจ inbox/reconcile ตาม RB01 ไม่สมมติว่า LINE จะส่ง webhook ซ้ำให้
+
 Pin third-party actions ด้วย commit SHA และ container ด้วย digest ตรวจ update ผ่าน PR; `GITHUB_TOKEN` เริ่ม `contents:read` แล้วเพิ่มเฉพาะ job ห้ามใช้ privileged `pull_request_target` เพื่อ checkout/run code จาก PR ที่ไม่เชื่อถือ แยก runner ของงานทดสอบออกจาก deployment และไม่รัน PR บน host ที่มี production secrets; ใช้ OIDC เมื่อปลายทางรองรับ หรือ credential จำกัดขอบเขต/อายุที่ rotate ได้ [GitHub secure use](https://docs.github.com/en/actions/reference/security/secure-use)
 
 ลำดับ deploy ที่ scripts ต้องบังคับ:
@@ -1172,6 +1307,7 @@ Rollback ปกติคือกลับ image digest ก่อนหน้า
 | `make test-workflows`, `make import-workflows` (เพิ่มใน M04) | import versioned JSON แบบไม่ซ้ำและ replay กับ n8n container จริงโดยใช้ fake provider/LINE; ไม่มี credentials จริงใน artifact |
 | `manage.py import_ai_config` (เพิ่มใน M05) | developer-admin import environment/config เป็น candidate ใช้ test/activate/audit เดียวกับเว็บ; ห้ามพิมพ์ key |
 | `make restore-drill` | restore แยก environment โดย outbound ปิด สรุป RPO/RTO ที่วัดได้ |
+| `make oci-quota-check` (เพิ่มใน M12) | อ่านทรัพยากร OCI แบบ read-only เทียบงบ E.2.1 และ exit non-zero/ส่ง metric เมื่อเกินหรือใกล้เกิน |
 
 ### E.9 Observability, SLO และ runbooks
 
@@ -1183,19 +1319,19 @@ Rollback ปกติคือกลับ image digest ก่อนหน้า
 | Webhook durable acceptance | p95 ≤ 1 วินาที, p99 ≤ 2 วินาที ที่โหลดออกแบบ; ไม่รวมเวลาวิเคราะห์ AI |
 | หน้า queue/detail | p95 ≤ 2 วินาทีที่ 100 concurrent sessions กับ query pagination |
 | AI | p95 ≤ 15 วินาทีสำหรับ input ≤ 2,000 tokens/output ≤ 500; timeout 30 วินาทีแล้วให้คนทำต่อ; วัด queue waiting แยกจาก inference |
-| Load baseline | 2 LINE events/วินาทีต่อเนื่อง 30 นาทีและ burst 10/วินาที 5 นาที; history 100,000 cases/1,000,000 messages สำหรับ production staging ไม่ใช้ Supabase Free รองรับ dataset นี้โดยสมมติ |
+| Load baseline | 2 LINE events/วินาทีต่อเนื่อง 30 นาทีและ burst 10/วินาที 5 นาที; history 100,000 cases/1,000,000 messages; วัดบน `faoj-prod` ก่อนเปิดใช้ (ยังไม่มีข้อมูลจริง) ไม่สมมติว่า A1 1 OCPU/8 GB รองรับ ถ้าไม่ผ่านใช้เงื่อนไขย้ายใน E.2.1 |
 | ความถูกต้อง | กดซ้ำ/ทำพร้อมกันต้องไม่จ่ายเกินอนุมัติหรือสร้างผลธุรกรรมซ้ำ; security/authorization negative cases ผ่านทั้งหมด |
 | Recovery | RPO ≤ 15 นาทีของข้อมูลที่อยู่ใน backup scope, RTO ≤ 4 ชั่วโมง; ทดสอบทั้ง DB ไฟล์และ config ที่ต้องใช้กู้ |
 
 Load tests ใช้ [k6](https://grafana.com/docs/k6/latest/) สร้าง traffic ตาม E.9 โดยไม่ใช้บัญชี/รายการ production และรายงาน acceptance rate, errors, queue growth กับ resource saturation พร้อม latency ไม่รายงานเฉพาะ requests ที่สำเร็จ
 
-Metrics ขั้นต่ำ: request latency/error, invalid signature, inbox lag, oldest outbox age, n8n last successful poll/execution และ expired leases, retry/dead-letter, LINE quota/failure/unknown, AI validation failure/timeout/queue wait, override reason distribution, external unknown/reconciliation age, DB pool/disk/WAL archive lag, backup age และ certificate expiry ไม่มีชื่อบุคคล/LINE user ID เป็น metric label
+Metrics ขั้นต่ำ: request latency/error, invalid signature, inbox lag, oldest outbox age, n8n last successful poll/execution และ expired leases, retry/dead-letter, LINE quota/failure/unknown, AI validation failure/timeout/queue wait, override reason distribution, external unknown/reconciliation age, DB pool/disk/WAL archive lag, backup age และ certificate expiry การใช้โควตา OCI ตาม E.2.1 (OCPU/GB, block, Object Storage GB/requests, email) และค่าใช้จ่ายจริง/forecast ไม่มีชื่อบุคคล/LINE user ID เป็น metric label
 
-Alerts ตั้ง owner/on-call และ runbook ก่อนเปิดใช้ ตัวอย่าง threshold เริ่มต้น: core endpoint down ต่อเนื่อง 2 นาที, oldest pending job เกิน 5 นาที, backup/WAL lag เกิน 10 นาทีเมื่อ RPO 15 นาที, disk >80%, auth/signature failures ผิดปกติ ทดสอบ alert ถึงผู้รับจริงด้วยข้อความทดสอบที่ได้รับอนุญาตก่อน G08 การแจ้งเตือนเหล่านี้ไม่ใช่การยืนยันว่ามีผู้ตอบรับเหตุแล้ว
+Alerts ตั้ง owner/on-call และ runbook ก่อนเปิดใช้ ตัวอย่าง threshold เริ่มต้น: core endpoint down ต่อเนื่อง 2 นาที, oldest pending job เกิน 5 นาที, backup/WAL lag เกิน 10 นาทีเมื่อ RPO 15 นาที, disk >80%, auth/signature failures ผิดปกติ, LINE push ใช้ถึง 50/80/95% ของงบเดือนหรือ forecast เกินงบ ทดสอบ alert ถึงผู้รับจริงด้วยข้อความทดสอบที่ได้รับอนุญาตก่อน G08 การแจ้งเตือนเหล่านี้ไม่ใช่การยืนยันว่ามีผู้ตอบรับเหตุแล้ว
 
-Backup baseline self-hosted: pgBackRest full weekly + differential daily + continuous WAL archive ไป encrypted off-host repository กำหนด retention เริ่มต้น 14 วันสำหรับ recovery โดยเจ้าของระบบรับรองอีกครั้ง; ไฟล์แนบ immutable หลัง upload และ backup/off-host replication รอบไม่เกิน RPO เก็บ checksum/manifest ผูก attachment IDs ทดสอบกู้ไฟล์ที่ DB อ้างถึงเสมอ [pgBackRest guide](https://pgbackrest.org/user-guide.html)
+Backup baseline self-hosted: pgBackRest full weekly + differential daily + continuous WAL archive ไป encrypted repository บน OCI Object Storage และสำเนารายสัปดาห์นอก OCI ตาม E.2.1 กำหนด retention เริ่มต้น 14 วันสำหรับ recovery โดยเจ้าของระบบรับรองอีกครั้ง; ไฟล์แนบ immutable หลัง upload และ backup/off-host replication รอบไม่เกิน RPO เก็บ checksum/manifest ผูก attachment IDs ทดสอบกู้ไฟล์ที่ DB อ้างถึงเสมอ [pgBackRest guide](https://pgbackrest.org/user-guide.html)
 
-หากใช้ Supabase ให้ตรวจแผน backup/PITR ที่สมัครจริงและทดสอบ recovery; DB backup ไม่รวม binary objects ของ Storage และ custom role passwords ต้องเตรียมกู้แยก [Supabase backups](https://supabase.com/docs/guides/platform/backups)
+ขนาด repository, retention และจำนวน requests ต้องอยู่ในงบ Object Storage ของ E.2.1 วัดจริงบน staging ก่อนเปิดใช้; ถ้าข้อมูลโตจนจะเกินงบให้ทบทวน retention/การบีบอัดไฟล์แนบกับเจ้าของข้อมูลหรือใช้เงื่อนไขย้าย ไม่ลดรอบ backup เงียบ ๆ
 
 Runbooks ที่ต้องเขียนในเอกสารนี้เมื่อ implement:
 
@@ -1248,9 +1384,9 @@ Pilot เริ่มจากกลุ่มเขตที่ผู้ใช�
 | ผู้ใช้และผู้รับรอง | บัญชีรายบุคคล/กอง/บทบาทจำลองและ LINE registration fixtures | รายชื่อผู้รับรอง/แอดมินผู้พัฒนา/เจ้าหน้าที่จริงและหลักฐานปิดสิทธิ์; SSO เป็นทางเลือกต่อยอด |
 | ThaiLLM API | fake API สำหรับ CI และ AI profile draft | endpoint/protocol/auth/model ID/key/โควตาของบัญชีจริง พร้อมเงื่อนไขใช้ข้อมูลและผล live evaluation |
 | ระบบทะเบียน/API | fixtures + manual_reference contract | เจ้าของระบบยืนยันเอกสารหรือ API/idempotency/reconciliation |
-| Hosting/DB/n8n/network | environment template และ sizing เริ่มต้น | host owners, TLS/DNS, private editor, n8n metadata/encryption-key recovery, backup target และ load/restore report |
+| OCI tenancy/DNS/data location | งบทรัพยากร E.2.1, local Compose และ CI | เจ้าของบัญชี OCI และวิธีชำระเงิน PAYG, home region, ผู้ดูแล 2 คนพร้อม MFA, domain/subdomain และ DNS, การรับรองเก็บข้อมูลที่ Singapore, ปลายทางสำเนา backup นอก OCI, load/restore report บน OCI |
 | Git/registry/CI plan | GitHub Actions portable scripts | สิทธิ์ repository, runner/registry และ enforcement ที่แผนบริการให้จริง |
-| LINE OA/โควตา | test channel และ recipient allowlist | channel owner, credential rotation, quota/budget และผู้ติดตาม delivery failure |
+| LINE OA/โควตา | OA ทดสอบแพ็กเกจฟรี, recipient allowlist และงบ push ตาม C.2.3 | เจ้าของ OA/แพ็กเกจและเจ้าของงบที่อนุมัติการอัปเกรด, credential rotation, ค่า `LINE_PUSH_MONTHLY_BUDGET` ที่รับรอง และผู้ติดตาม delivery deferred/failure |
 | Retention/operating hours | staging-only defaults | data owner รับรอง policy และเวรรับผิดชอบก่อน G02/G08 |
 
 ### E.12 n8n Conversation & Orchestration ใน container
@@ -1280,7 +1416,7 @@ n8n เป็นองค์ประกอบที่เลือกสำห�
 ```text
 อ่าน PROJECT.md ส่วน A–B, C.4–C.5, E.3–E.10 และโมดูลที่ได้รับมอบหมาย
 ตรวจ code/AGENTS/dependencies จริงก่อนแก้ แล้ว implement เฉพาะโมดูลนี้ให้ทำงาน end-to-end ภายใน scope
-ใช้ Django monolith, PostgreSQL/Supabase, LINE OA ส่วนตัว, n8n container เป็น Conversation & Orchestration และ ThaiLLM API ภายนอกผ่าน active profile ไม่ self-host โมเดล
+ใช้ Django monolith, PostgreSQL (staging/production บน OCI Always Free ตาม E.2.1 ห้ามเพิ่มทรัพยากรนอกงบ), LINE OA ส่วนตัว, n8n container เป็น Conversation & Orchestration และ ThaiLLM API ภายนอกผ่าน active profile ไม่ self-host โมเดล
 รักษาชื่อจริง MEA 18 เขต ข้อมูลจำลองและกอง SIM-* ใช้เฉพาะสภาพแวดล้อมที่อนุญาต ไม่มี GIS
 ใช้ command/event/schema v1 ร่วมกัน ห้ามสร้าง auth/state/routing ซ้ำใน view, n8n workflow หรือ prompt
 นำ dependency ที่ done แล้วมาใช้ หากยังไม่มีให้ระบุ blocker และทำส่วนอิสระที่ตรวจได้ ไม่สร้าง stub ให้ผ่านเกณฑ์ปลอม
@@ -1299,7 +1435,7 @@ n8n เป็นองค์ประกอบที่เลือกสำห�
 | ID | ชิ้นงาน | ต้องมีโมดูลก่อน | จุดรับส่งหลัก | สถานะ |
 | --- | --- | --- | --- | --- |
 | M00 | Foundation + CI พื้นฐาน | — | settings, DB, commands, test runner | done (local) |
-| M01 | บัญชีรายบุคคล/กอง/สิทธิ์/รับรอง LINE | M00 | Actor, Membership, ChannelIdentity, RegistrationRequest | planned |
+| M01 | บัญชีรายบุคคล/กอง/สิทธิ์/รับรอง LINE | M00 | Actor, Membership, ChannelIdentity, RegistrationRequest | done (local) |
 | M02 | Case domain/transactions/audit | M01 | command v1, Case, ActionReceipt, OutboxEvent | planned |
 | M03 | LINE ส่วนตัว/ลงทะเบียน/ร่าง/ไฟล์ | M02 | WebhookInbox, ConversationDraft, ownership, submit_case | planned |
 | M04 | n8n container/Conversation & Orchestration | M02 | workflow JSON, claim/lease APIs, LINE delivery | planned |
@@ -1328,11 +1464,12 @@ n8n เป็นองค์ประกอบที่เลือกสำห�
 **ผล implement / หลักฐาน 5 ตุลาคม 2569:** M00 done ในขอบเขต Git local และ CI ในเครื่องตามที่ผู้ใช้เลือก; ไม่มี remote repository/commit หรือผล GitHub Actions และยังไม่ได้บังคับ merge ด้วย ruleset
 
 - Django 5.2.17, Python 3.13, psycopg 3.3.6 ใช้ `uv.lock`; uv 0.10.11 ถูกตรึงทั้ง development, CI และ image PostgreSQL 17 กับ Python base image ตรึง digest; container web รัน UID/GID 10001
-- `make check` ผ่าน Ruff, formatting, Django checks และ migration drift; `make test-module MODULE=M00` และ `make test` ผ่าน **10 tests บน PostgreSQL จริง** รวม roundtrip, config, guard, health failure และ isolated production `check --deploy` โดยไม่เชื่อม production DB
+- `make check` ผ่าน Ruff, formatting, Django checks และ migration drift; `make test-module MODULE=M00` และ `make test` ผ่าน **13 tests บน PostgreSQL จริง** รวม roundtrip, config, guard, health failure, readiness เมื่อมี migration ค้าง, ความสอดคล้องของ JSON ข้อมูลจำลอง และ isolated production `check --deploy` โดยไม่เชื่อม production DB
 - `make ci` ผ่าน 5 stages: migrate/check/test/Chromium smoke/security และเขียน `reports/ci.json` พร้อม logs; เคยพบ lint failure และ CI คืนค่า non-zero แม้ stage อื่นผ่าน เก็บหลักฐานใน `reports/ci-failure-observed.json` ไม่ถือว่า hosted required check ผ่านแล้ว
 - ทดลองสำเนา source ที่ Git อนุญาตจากโฟลเดอร์ใหม่ ไม่คัดลอก `.env`/`.venv`; bootstrap จาก lock สร้าง secret ใหม่ เริ่ม Compose ด้วย volume แยกที่มี **0 ตาราง**, readiness ก่อน migrate = 503; หลัง apply **18 Django framework migrations** แล้ว full stack/health/CI/module tests ผ่าน เก็บ `reports/clean-start.json` และ `reports/clean-*.log`; ลบเฉพาะ volume ทดสอบและเปิด local stack กลับแล้ว
 - หยุด PostgreSQL จริง: `/health/live/` = 200, `/health/ready/` = 503 พร้อมคำตอบขั้นต่ำ ไม่เผย exception; หลังเปิด DB = 200 บันทึก `reports/database-outage.json` การตรวจ core ไม่เรียก LINE/AI และไม่ขึ้นกับ model availability
 - `MODULE=M99` และ suite ว่างคืนค่า non-zero; `DemoCommand` กับ overridden `flush` ปฏิเสธ production/staging ก่อน write; `make guard` ตรวจ APP_ENV, DB name และ host ก่อน setup/migrate/build ในเครื่อง ทั้ง test runner และ fixture commands ในโมดูลถัดไปต้องใช้ guard นี้ต่อ
+- ปรับปรุง 6 ตุลาคม 2569: (1) Docker `HEALTHCHECK` เดิมยิง `127.0.0.1` เป็น Host จึงได้ 400 และ container เป็น unhealthy ทุกครั้งที่ `ALLOWED_HOSTS` ไม่มี `127.0.0.1` (คือทุก staging/production) — แก้ให้ส่ง Host แรกของ `ALLOWED_HOSTS` และทดสอบ container ด้วย `ALLOWED_HOSTS=faoj.example.test` แล้ว healthy; (2) `/health/ready/` ตรวจว่าไม่มี migration ค้าง ไม่ใช่แค่มีแถวใน `django_migrations` เพื่อไม่ให้รับ traffic เมื่อ code ใหม่ deploy ก่อน migrate (DB ว่าง = 503 ตามเดิม); (3) `scripts/e2e.py`/`security.py` ใช้ interpreter ปัจจุบันแทน path `.venv/bin/...`
 - Secret scan ของไฟล์ใน Git scope ไม่มี candidate ที่เหลือ และ dependency audit 42 packages ไม่พบ known vulnerability ณ รอบตรวจนี้ มี allowlist เฉพาะ dummy credentials/ชื่อ config ที่อ่านตรวจแล้ว; `.env`, ไฟล์นอก source scope และ reports ถูก ignore รายงาน scan ไม่เก็บค่าลับ
 
 **เริ่มใช้งาน local** — ต้องมี Python 3.13, Git, Make และ Docker Desktop/Compose ที่กำลังทำงาน; เครื่องใหม่ติดตั้ง uv ด้วย `python3 -m pip install uv==0.10.11` ก่อน bootstrap:
@@ -1352,7 +1489,7 @@ make smoke BASE_URL=http://127.0.0.1:8000
 
 เปิด `http://127.0.0.1:8000/` เป็นหน้า foundation; `make down` หยุด stack โดยเก็บ volume ไม่ใช่ reset ข้อมูล `make bootstrap` เก็บ `.env` ที่มีอยู่และ guard จะปฏิเสธ config นอก local/CI ห้ามนำ `.env.example` ที่ยังว่างไปรันตรง ๆ
 
-**ข้อจำกัดที่ยังต้อง implement:** business models/ทะเบียน 18 เขตและ seed ใน M01/M02/M06, LINE ส่วนตัวใน M03, n8n container/workflows ใน M04, external AI API/profile ใน M05 และ business UI ใน M10 ยังไม่มี M00 ทดสอบเพียงหน้า foundation, database และ security scan ของ source/dependencies; image scan/SBOM/release/deploy เป็น M12 และ user journeys เป็น M13 `DATABASE_MIGRATION_URL`/LINE/AI ใน `.env.example` เป็น reserved config ที่ยังไม่ถูกใช้; OIDC entries ที่มีจาก M00 เดิมเป็น optional legacy placeholders ไม่มี SSO runtime ต้องปรับ config templates และเพิ่ม n8n/profile references เมื่อทำโมดูลนั้น ไม่สรุปผล Supabase หรือ production จาก PostgreSQL local; G01–G10 ยังคง **ยังไม่ตรวจรับ**
+**ข้อจำกัดที่ยังต้อง implement:** business models/ทะเบียน 18 เขตและ seed ใน M01/M02/M06, LINE ส่วนตัวใน M03, n8n container/workflows ใน M04, external AI API/profile ใน M05 และ business UI ใน M10 ยังไม่มี M00 ทดสอบเพียงหน้า foundation, database และ security scan ของ source/dependencies; image scan/SBOM/release/deploy เป็น M12 และ user journeys เป็น M13 `DATABASE_MIGRATION_URL`/LINE/AI ใน `.env.example` เป็น reserved config ที่ยังไม่ถูกใช้; OIDC entries ที่มีจาก M00 เดิมเป็น optional legacy placeholders ไม่มี SSO runtime ต้องปรับ config templates และเพิ่ม n8n/profile references เมื่อทำโมดูลนั้น ไม่สรุปผล OCI หรือ production จาก PostgreSQL local; G01–G10 ยังคง **ยังไม่ตรวจรับ**
 
 
 ```text
@@ -1381,6 +1518,20 @@ role ว่าง deny; เลือกชื่อเขตไม่ให้�
 รัน make test-module MODULE=M01 รวม same-district other-user, cross-division, direct URL/API และ revoked session
 ```
 
+**ผล implement / หลักฐาน 6 ตุลาคม 2569:** M01 done ในเครื่อง (Git local, ยังไม่ commit/ไม่มี hosted CI)
+
+- Models ใน `operations/models.py` + migration `0001_m01_identity`: `District` (ชื่อจริง 18 เขต, `code` D01–D18 เป็นรหัสต้นแบบ, `official_code` ว่างจนได้รับรอง), `Division` (กองหรือบทบาทประสานงาน เช่น SIM-TRIAGE), `StaffProfile`, `RoleGrant` (เก็บประวัติให้/ถอน; DB constraint บังคับบทบาทระดับระบบไม่มีกอง บทบาทกองต้องมีกอง และห้ามซ้ำขณะ active), `Requester`, `ChannelIdentity` (unique channel + LINE user ID; active ต้องมี requester), `RegistrationRequest` (pending ได้ครั้งละหนึ่ง) และ `AuditEvent` แบบ append-only ที่ M02 จะใช้ต่อ
+- `operations/identity.py` เป็นจุดตรวจสิทธิ์กลาง: `staff_scope`/`can_access_division`/`filter_by_division` (own-division, admin เห็นทุกกอง), `resolve_requester`/`filter_by_requester` (own-requester แม้อยู่เขตเดียวกัน), `require_admin`/`require_developer_admin` อ่านสถานะจาก DB ทุก request จึงมีผลกับ session ที่เปิดอยู่ทันที บริการแอดมินทุกตัวบันทึก audit พร้อม actor/เหตุผล ไม่เก็บรหัสผ่าน
+- กันยกระดับสิทธิ์: แอดมินผู้พัฒนาให้/ถอนได้เฉพาะแอดมินผู้พัฒนา และใช้ได้เมื่อเป็นแอดมินด้วย; ห้ามถอน/ระงับแอดมินหรือแอดมินผู้พัฒนาคนสุดท้าย (lock แถว grant แล้วตรวจสิทธิ์ผู้กระทำซ้ำหลัง lock — ทดสอบสองแอดมินถอนกันพร้อมกันบน PostgreSQL เหลือหนึ่งคน); `bootstrap_admin` ใช้ได้เฉพาะเมื่อไม่มีแอดมิน active และรับรหัสผ่านจาก prompt/env ไม่ใช่ argv
+- เว็บ: login/logout, เปลี่ยนรหัสผ่าน, แอดมินตั้งรหัสผ่านชั่วคราว (แสดงครั้งเดียว บังคับเปลี่ยนและตัด session เดิม), บังคับออกจากระบบทุกเครื่อง, ระงับ/เปิดบัญชี; หน้า `/console/` (บัญชีไม่มีบทบาทเห็นเพียงสถานะรอกำหนดสิทธิ์), `/divisions/<code>/` (กองอื่นหรือไม่มีจริงตอบ 404 เหมือนกัน) และ `/console/admin/...` สำหรับผู้ใช้ บทบาท ย้ายกอง รับรอง/ปฏิเสธผู้แจ้ง และกอง ทุก POST มี CSRF; Django admin ไม่ได้ route เพื่อไม่ให้แก้สิทธิ์นอก service
+- คำสั่ง: `load_districts` (idempotent ใช้ได้ทุก environment), `seed_demo_units` (SIM-* 6 หน่วย เฉพาะ demo DB ตาม guard), `bootstrap_admin`, `prepare_e2e_user` (demo DB เท่านั้น) และ `make seed-demo`; image รวม JSON สองไฟล์เพื่อโหลดชื่อเขตใน container
+- `make test-module MODULE=M01` ผ่าน **26 tests** และ `make test` รวม **39 tests** บน PostgreSQL จริง ครอบคลุม no-role deny, cross-division ผ่าน URL ตรง, same-district other-requester, wrong district, ถอน/ย้ายกอง/ปิดกอง/ระงับ/บังคับ logout มีผลกับ session เดิม, non-admin เรียก admin URL/service ไม่ได้, CSRF, last admin/developer-admin, audit append-only, relink ต้องรับรองใหม่ และ concurrency; ตรวจ mutation 7 จุดของ guard สำคัญแล้ว tests จับได้ทุกจุด
+- `make ci` ผ่านครบ 5 stages; Chromium (390×844) login ด้วยคีย์บอร์ด เห็นเฉพาะ SIM-MTR, กองอื่น 404, หน้าแอดมิน 403 และ logout แล้วเข้าไม่ได้ (`reports/e2e-console.png`); container build ใหม่ healthy และรัน `load_districts` ใน container ได้
+
+**วิธีลองใช้ในเครื่อง:** `make migrate`, `make seed-demo`, แล้ว `python3 -m uv run --locked --env-file .env python manage.py bootstrap_admin --username <ชื่อ> --display-name "<ชื่อ-นามสกุล>"` (ใส่รหัสผ่านตาม prompt) จากนั้น `make dev` เปิด `http://127.0.0.1:8000/accounts/login/` เพื่อเพิ่มบัญชี กำหนดกอง/บทบาท และทดลองรับรองผู้แจ้ง (คำขอลงทะเบียนสร้างผ่าน `identity.submit_registration` จนกว่า M03 จะต่อ LINE)
+
+**ข้อจำกัดที่ยังเหลือ:** ยังไม่มีการรับ LINE event จริง (M03 ต่อเข้ากับ `submit_registration`/`resolve_requester`); ยังไม่มี login rate limiting/lockout และ password reset ทางอีเมล (E.7/M12 — ตอนนี้ใช้รหัสผ่านชั่วคราวจากแอดมิน); audit append-only บังคับระดับ application ส่วนสิทธิ์ DB role แยกเป็นงาน M02/M12; หน้า admin เป็นแบบพื้นฐาน รายงาน/คิวงานเป็นของ M10; กอง SIM-* และบัญชีทดสอบเป็นข้อมูลจำลอง G02 ยังคง **ยังไม่ตรวจรับ**
+
 <a id="module-m02"></a>
 
 ### M02 — Case domain, state machine และ audit
@@ -1406,12 +1557,13 @@ Implement M02: สร้าง contract v1 และ service สำหรับ 
 
 **ขอบเขตไฟล์/ผลส่งมอบ:** inbound `line.py`, signed webhook, registration adapter, inbox/draft/attachment models, scoped conversation APIs, `attachments.py`, private download และ signed-event fixtures
 
-**Acceptance:** source.type=user เท่านั้นสำหรับ private intake; follow ไม่ให้สิทธิ์เอง; pending user ไม่ส่ง/อ่าน case; raw signature/durable-before-2xx/batch/dedup/out-of-order ผ่าน; หลายร่างต้องเลือก, postback ผูก actor/revision/expiry; ผู้แจ้งอื่นแม้เขตเดียวกันอ่านไม่ได้; file size/MIME/traversal/quarantine ตรวจครบ
+**Acceptance:** source.type=user เท่านั้นสำหรับ private intake; follow ไม่ให้สิทธิ์เอง; pending user ไม่ส่ง/อ่าน case; raw signature/durable-before-2xx/batch/dedup/out-of-order ผ่าน; หลายร่างต้องเลือก, postback ผูก actor/revision/expiry; ผู้แจ้งอื่นแม้เขตเดียวกันอ่านไม่ได้; file size/MIME/traversal/quarantine ตรวจครบ; reply token เก็บพร้อม deadline และใช้ครั้งเดียว; rich menu เรื่องของฉัน/ติดตามเรื่องตอบด้วย reply ตาม C.2.3
 
 ```text
 Implement M03: signed LINE webhook เก็บ inbox+outbox ก่อน ACK ไม่รอ n8n/AI ใน request
 ให้ผู้ใช้แอด OA ลงทะเบียนชื่อ/เขตและรอแอดมินรับรองผ่าน M01 จากนั้นส่ง/ติดตามเฉพาะเรื่องตน
 Django เก็บ draft/revision; ส่ง event ให้ conversation-turn ของ M04 ประสานคำถามและยืนยัน
+ทำ rich menu และคำตอบสถานะแบบ reply ตาม C.2.3 เก็บ reply token พร้อม deadline
 โหลดไฟล์ด้วย official content API เก็บ private/quarantine และตรวจ ownership/division/admin ก่อนดู
 รัน make test-module MODULE=M03 พร้อม private/group/replay fixtures; แยก live LINE evidence ที่ยังรอ credentials
 ```
@@ -1424,13 +1576,14 @@ Django เก็บ draft/revision; ส่ง event ให้ conversation-turn 
 
 **ขอบเขตไฟล์/ผลส่งมอบ:** Compose n8n service/metadata/volume/secret references, `workflows/n8n/` JSON, scoped claim/renew/complete/fail APIs, orchestration/delivery services, outbound `line.py`, NotificationDelivery, retry/dead-letter และ metrics
 
-**Acceptance:** n8n container import/restart ได้; workflows conversation-turn/case-notification/reminder-recovery มีเวอร์ชันและไม่ active ซ้ำ; crash/duplicate/lease-expiry/stale result/recovery ไม่สร้างผลซ้ำ; Django เป็น LINE sender จุดเดียว; n8n ไม่มี business DB/AI key/admin-user rights; reply expiry/429/unknown delivery แสดงตามจริง; workflow ที่รอ M05 ต้องระบุยังไม่ผ่าน AI integration
+**Acceptance:** n8n container import/restart ได้; workflows conversation-turn/case-notification/reminder-recovery มีเวอร์ชันและไม่ active ซ้ำ; crash/duplicate/lease-expiry/stale result/recovery ไม่สร้างผลซ้ำ; Django เป็น LINE sender จุดเดียว; n8n ไม่มี business DB/AI key/admin-user rights; reply deadline/429/monthly limit/unknown delivery แสดงตามจริง; push ผ่านงบ C.2.3 (tier/reserve/debounce/retry key/reconcile consumption) และคำตอบบทสนทนาไม่กลายเป็น push เพราะ AI ช้า; workflow ที่รอ M05 ต้องระบุยังไม่ผ่าน AI integration
 
 ```text
 Implement M04: เพิ่ม n8n ใน container เป็น Conversation & Orchestration ตาม C.1/E.6/E.12
 ใช้ n8n Schedule Trigger เรียก Django outbox claim API พร้อม scoped service credential ไม่เพิ่ม Procrastinate อีกชุด
 workflow เรียก Django conversation, AI adapter และ delivery APIs พร้อม lease/revision/idempotency
 Django บันทึกผล/ส่ง LINE ตรวจ recipient ล่าสุดและ unknown outcome; ไม่ให้ retry ทั้ง workflow ส่งซ้ำแบบไม่ตรวจ
+บังคับงบ push ตาม C.2.3 พร้อม tests ของ tier/reserve/debounce/deferred และ reconcile กับ consumption API
 ส่ง workflow JSON ไม่มี secret พร้อม import/replay tests; รัน make test-module MODULE=M04 กับ PostgreSQL+n8n จริง
 ```
 
@@ -1527,7 +1680,7 @@ Implement M09: ทำแจ้งปัญหา/ส่งต่อ/ตอบร
 
 **Input/dependency:** M03/M05/M07/M08/M09
 
-**ขอบเขตไฟล์/ผลส่งมอบ:** `views.py`, `forms.py`, `reports.py`, templates/static, queue/detail/decision/partial/inspection/handoff screens, audit timeline และ scoped CSV export รวมหน้ารับรอง LINE/user/role จาก M01 และ AI configuration จาก M05 โดยใช้ services เดิม
+**ขอบเขตไฟล์/ผลส่งมอบ:** `views.py`, `forms.py`, `reports.py`, templates/static, queue/detail/decision/partial/inspection/handoff screens, audit timeline และ scoped CSV export รวมหน้ารับรอง LINE/user/role จาก M01, หน้าแอดมินแสดงการใช้โควตา LINE/forecast/tier และรายการ deferred และ AI configuration จาก M05 โดยใช้ services เดิม
 
 **Acceptance:** เห็น AI proposal แยก human decision, keyboard/mobile ใช้ได้, stale form แจ้ง conflict, role ที่ไม่มีสิทธิ์เรียก action URL ก็ไม่ผ่าน, คิวและ counts จำกัดกองของบัญชี เจ้าหน้าที่ทุกกองไม่เห็นกัน แอดมินสลับดูทุกกองได้; no-role/revoked user ถูกปฏิเสธ; AI settings เฉพาะ developer-admin; export/download ตรวจ requester/division scope และป้องกัน spreadsheet formula injection
 
@@ -1560,14 +1713,14 @@ Implement M11: เชื่อมทะเบียนตาม contract ที�
 
 ### M12 — Infrastructure, CI/CD และ operations
 
-**Input/dependency:** M04/M10/M11; hosting/registry/DB/n8n/ThaiLLM API และ owners ที่ระบุใน E.11
+**Input/dependency:** M04/M10/M11; OCI tenancy (PAYG), domain/DNS, ThaiLLM API และ owners ที่ระบุใน E.11; งบทรัพยากร E.2.1
 
-**ขอบเขตไฟล์/ผลส่งมอบ:** Docker/Compose production templates ของ Django+n8n, workflow import/version/activation, reverse proxy, deploy/rollback scripts, workflow release/staging/production/scheduled, scanner/SBOM config, metrics/alerts, backup/restore scripts และ RB01–RB07 ใน PROJECT.md
+**ขอบเขตไฟล์/ผลส่งมอบ:** `deploy/oci/` (Terraform/OCI Resource Manager สำหรับ compartment, quota policy, budget, VCN/NSG, Bastion, 2 A1 instances, volumes, bucket และ cloud-init), multi-arch image build, Caddy, TLS ภายในของ PostgreSQL, `make oci-quota-check`, Docker/Compose production templates ของ Django+n8n, workflow import/version/activation, reverse proxy, deploy/rollback scripts, workflow release/staging/production/scheduled, scanner/SBOM config, metrics/alerts, backup/restore scripts และ RB01–RB07 ใน PROJECT.md
 
-**Acceptance:** same app/n8n digests และ workflow revision staging→production, no production secrets in PR, gate บังคับได้จริงตาม Git hosting plan, migrations single-run/expand-contract, rollback rehearsal, outbound-off restore, app DB+n8n metadata/volume+file และ secret recovery RPO/RTO วัดได้ และมี alert owner; ไฟล์ config ที่ยังไม่ได้ deploy ไม่ถือว่าผ่าน runtime gate
+**Acceptance:** ทรัพยากรทั้งหมดตรงงบ E.2.1 และ `make oci-quota-check` ผ่าน, budget alert และ quota policy ทดสอบแล้วว่าปฏิเสธ/แจ้งเตือนได้จริง, restore production ลง `faoj-staging` ผ่าน, same app/n8n digests และ workflow revision staging→production, no production secrets in PR, gate บังคับได้จริงตาม Git hosting plan, migrations single-run/expand-contract, rollback rehearsal, outbound-off restore, app DB+n8n metadata/volume+file และ secret recovery RPO/RTO วัดได้ และมี alert owner; ไฟล์ config ที่ยังไม่ได้ deploy ไม่ถือว่าผ่าน runtime gate
 
 ```text
-Implement M12: ทำ production packaging และ CI/CD ตาม E.8 โดยใช้ image digest เดียวตลอด promotion
+Implement M12: ทำ OCI infrastructure ตาม E.2.1 ไม่เกินโควตา Always Free และ production packaging/CI/CD ตาม E.8 โดยใช้ image digest เดียวตลอด promotion
 แยก runners/secrets/environments; ถ้า Git hosting ไม่มี production protection ให้ใช้ controlled host deployment ตามแผน
 ทำ metrics/alerts, backup+restore ของ app DB/n8n metadata/volume/ไฟล์ และ secret/encryption keys แยกเก็บ และ runbooks พร้อม failure drills บน staging
 รัน make test-module MODULE=M12, make security, make smoke และ make restore-drill ใน environment ที่อนุญาต
@@ -1582,7 +1735,7 @@ Implement M12: ทำ production packaging และ CI/CD ตาม E.8 โด�
 
 **ขอบเขตไฟล์/ผลส่งมอบ:** end-to-end/load/eval reports, `release-manifest.json` ที่ไม่มี secret, acceptance matrix, training/demo script, open-risk register และสถานะ gates ใน PROJECT.md
 
-**Acceptance:** LINE OA ส่วนตัวจริง→n8n container→ThaiLLM API จริง→เว็บเฉพาะกอง/แอดมิน→ผล LINE ถึงเจ้าของเรื่อง ครบสามงาน; ทดสอบ P0/unknown/partial/override/own-requester/division/admin scope, LINE pending→approved, role changes และ model/key changes ทั้งสองช่องทาง; load+restore+rollback มีหลักฐาน; unresolved external gate ไม่ถูกเปลี่ยนเป็น pass ด้วย fixture และมี pilot rollout/go-no-go ที่ผู้รับผิดชอบรับรอง
+**Acceptance:** LINE OA ส่วนตัวจริง→n8n container→ThaiLLM API จริง→เว็บเฉพาะกอง/แอดมิน→ผล LINE ถึงเจ้าของเรื่อง ครบสามงาน; ทดสอบ P0/unknown/partial/override/own-requester/division/admin scope, LINE pending→approved, role changes และ model/key changes ทั้งสองช่องทาง; load+restore+rollback มีหลักฐาน; มีรายงาน push ต่อเรื่องและ forecast โควตา LINE จาก pilot พร้อมข้อเสนอแพ็กเกจ; unresolved external gate ไม่ถูกเปลี่ยนเป็น pass ด้วย fixture และมี pilot rollout/go-no-go ที่ผู้รับผิดชอบรับรอง
 
 ```text
 Implement M13: รวมระบบและตรวจ acceptance G01–G10 โดยอ้าง commit/image/model/policy เดียวกับ candidate release
@@ -1602,9 +1755,9 @@ Implement M13: รวมระบบและตรวจ acceptance G01–G10 �
 คำสั่งเริ่ม implementation ที่คัดลอกไปใช้ได้:
 
 ```text
-เริ่ม implement M01 ตาม PROJECT.md โดยใช้ shared instruction ใน F.1 และ M00 ที่มีหลักฐานแล้ว
-ทำบัญชีรายบุคคล กอง บทบาท การรับรองผู้แจ้ง LINE และ ownership/division/admin permission ตาม M01
-อัปเดตสถานะ M01 พร้อมหลักฐานเมื่อครบ acceptance; n8n/AI configuration implement ตาม M04/M05 ที่ปรับแล้ว
+เริ่ม implement M02 ตาม PROJECT.md โดยใช้ shared instruction ใน F.1 และ M00/M01 ที่มีหลักฐานแล้ว
+ใช้ permission functions ใน operations/identity.py และ AuditEvent เดิม ไม่สร้างการตรวจสิทธิ์ซ้ำ
+อัปเดตสถานะ M02 พร้อมหลักฐานเมื่อครบ acceptance; n8n/AI configuration implement ตาม M04/M05 ที่ปรับแล้ว
 ```
 
 เมื่อจบโมดูล ให้เปลี่ยน M01 ในคำสั่งเป็น ID ถัดไปตาม F.2 และระบุ dependency ที่ตรวจว่า done แล้ว การแบ่งงานนี้ทำให้ AI ส่งงานที่ review ได้เป็นส่วน ๆ โดยยังรักษากฎธุรกิจและ release gates ของระบบเดียวกัน

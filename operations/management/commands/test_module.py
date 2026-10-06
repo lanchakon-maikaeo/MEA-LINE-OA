@@ -1,7 +1,10 @@
 from django.core.management.base import CommandError
 from django.core.management.commands.test import Command as DjangoTest
 
-MODULE_TESTS = {"M00": "operations.tests.test_m00_foundation"}
+MODULE_TESTS = {
+    "M00": "operations.tests.test_m00_foundation",
+    "M01": "operations.tests.test_m01_identity",
+}
 
 
 class Command(DjangoTest):

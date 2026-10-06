@@ -37,6 +37,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "operations.middleware.StaffSessionMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 ROOT_URLCONF = "config.urls"
@@ -80,3 +81,7 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_ENVIRONMENT
 SECURE_HSTS_PRELOAD = SECURE_ENVIRONMENT
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "console"
+LOGOUT_REDIRECT_URL = "login"
+SESSION_COOKIE_AGE = 10 * 60 * 60

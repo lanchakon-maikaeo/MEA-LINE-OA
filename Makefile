@@ -3,7 +3,7 @@ UV = $(PYTHON) -m uv
 ENV_FILE = $(if $(wildcard .env),--env-file .env,)
 RUN = $(UV) run --locked $(ENV_FILE)
 
-.PHONY: bootstrap guard db migrate dev check test test-module test-e2e security ci build smoke down
+.PHONY: bootstrap guard db migrate seed-demo dev check test test-module test-e2e security ci build smoke down
 bootstrap:
 	$(PYTHON) scripts/bootstrap_env.py
 	$(UV) sync --locked
@@ -18,6 +18,10 @@ db: guard
 
 migrate: guard
 	$(RUN) python manage.py migrate --noinput
+
+seed-demo: guard
+	$(RUN) python manage.py load_districts
+	$(RUN) python manage.py seed_demo_units
 
 dev: db migrate
 	$(RUN) python manage.py runserver 127.0.0.1:8000

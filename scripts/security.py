@@ -23,6 +23,7 @@ if report:
     print("Secret scanner found candidates; inspect reports/secrets.json (values are hashed).")
     sys.exit(1)
 result = subprocess.run(
-    [".venv/bin/pip-audit", "--format=json", "--output=reports/dependencies.json"], check=False
+    [sys.executable, "-m", "pip_audit", "--format=json", "--output=reports/dependencies.json"],
+    check=False,
 )
 sys.exit(result.returncode)

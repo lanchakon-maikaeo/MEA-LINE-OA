@@ -1,0 +1,32 @@
+{% extends "operations/admin_base.html" %}
+{% block content %}
+<h1>รับรองผู้แจ้ง</h1>
+<p>การเลือกเขตของผู้แจ้งเป็นเพียงคำขอ ตรวจตัวตนและเขตก่อนรับรอง</p>
+<h2>รอรับรอง</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">ชื่อที่แจ้ง</th><th scope="col">เขตที่ขอ</th><th scope="col">ส่งเมื่อ</th><th scope="col">ตัดสิน</th></tr></thead>
+  <tbody>
+  {% for reg in pending %}
+    <tr>
+      <td>{{ reg.submitted_name }}</td><td>{{ reg.requested_district.name }}</td><td>{{ reg.created_at|date:"Y-m-d H:i" }}</td>
+      <td>
+        <form class="inline" method="post" action="{% url 'admin-registration-action' reg.pk 'approve' %}">
+          {% csrf_token %}<label>หมายเหตุ <input name="reason"></label><button type="submit">รับรอง</button>
+        </form>
+        <form class="inline" method="post" action="{% url 'admin-registration-action' reg.pk 'reject' %}">
+          {% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ปฏิเสธ</button>
+        </form>
+      </td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="4">ไม่มีคำขอที่รอรับรอง</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<h2>ตัดสินล่าสุด</h2>
+<ul>
+  {% for reg in recent %}
+    <li>{{ reg.submitted_name }} — {{ reg.requested_district.name }} — {{ reg.get_status_display }} โดย {{ reg.decided_by.username }} {{ reg.decided_at|date:"Y-m-d H:i" }}</li>
+  {% empty %}<li>ยังไม่มี</li>{% endfor %}
+</ul>
+{% endblock %}

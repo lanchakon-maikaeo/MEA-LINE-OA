@@ -1,0 +1,19 @@
+{% extends scope.is_admin|yesno:"operations/admin_base.html,operations/base.html" %}
+{% block content %}
+<h1>สวัสดี {{ user.staff_profile.display_name|default:user.username }}</h1>
+{% if not scope.has_any_access %}
+  <p role="status">บัญชีนี้ยังไม่ได้รับกองหรือบทบาท จึงยังเข้าถึงเรื่องไม่ได้ กรุณาติดต่อแอดมินระบบ</p>
+{% else %}
+  {% if scope.is_admin %}
+    <p>บทบาทระดับระบบ: แอดมินระบบ{% if scope.is_developer_admin %}, แอดมินผู้พัฒนา{% endif %} (ดูได้ทุกกอง)</p>
+  {% endif %}
+  {% if memberships %}
+    <h2>กองของฉัน</h2>
+    <ul>
+      {% for division, roles in memberships %}
+        <li><a href="{% url 'division-detail' division.code %}">{{ division.code }} {{ division.name }}</a> — {{ roles|join:", " }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endif %}
+{% endblock %}

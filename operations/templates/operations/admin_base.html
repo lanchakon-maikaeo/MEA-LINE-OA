@@ -1,0 +1,6 @@
+{% extends "operations/base.html" %}
+{% block admin_nav %}
+  <a href="{% url 'admin-users' %}">ผู้ใช้</a>
+  <a href="{% url 'admin-registrations' %}">รับรองผู้แจ้ง</a>
+  <a href="{% url 'admin-divisions' %}">กอง</a>
+{% endblock %}

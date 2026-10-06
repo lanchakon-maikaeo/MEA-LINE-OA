@@ -1,0 +1,16 @@
+{% extends "operations/base.html" %}
+{% block content %}
+<h1>{{ division.code }} {{ division.name }}</h1>
+<p>คิวงานของกองจะเพิ่มในโมดูลถัดไป (M10)</p>
+<h2>สมาชิก</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">ผู้ใช้</th><th scope="col">บทบาท</th></tr></thead>
+  <tbody>
+    {% for grant in grants %}
+      <tr><td>{{ grant.user.staff_profile.display_name|default:grant.user.username }}</td><td>{{ grant.get_role_display }}</td></tr>
+    {% empty %}
+      <tr><td colspan="2">ยังไม่มีสมาชิก</td></tr>
+    {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}
