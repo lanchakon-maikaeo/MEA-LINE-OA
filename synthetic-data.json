@@ -1,0 +1,102 @@
+{
+  "metadata": {
+    "data_classification": "real_district_names_with_synthetic_operations",
+    "contains_synthetic_data": true,
+    "district_names_are_real": true,
+    "district_ids_are_official": false,
+    "district_name_source": "https://opendata.mea.or.th/dataset/consumer-by-district-2569/resource/7ca06256-3b98-454e-8415-54772847c65a",
+    "district_names_checked_at": "2026-10-05",
+    "purpose": "ข้อมูลตัวอย่างเพื่อวิเคราะห์โครงการและออกแบบต้นแบบ",
+    "authoritative_inventory": false,
+    "snapshot_at": "2026-10-05T12:00:00+07:00",
+    "notes": [
+      "ชื่อเขตเป็นชื่อจริงจาก MEA; รหัส D01-D18 เป็นรหัสภายในต้นแบบ ไม่ใช่รหัสทางการ; รหัสอุปกรณ์ รุ่น จำนวน เลขเครื่อง และเรื่องเป็นข้อมูลจำลอง",
+      "มีเฉพาะชื่อเขตจริงที่เป็นข้อมูลสาธารณะ ไม่มีธุรกรรมหรือบัญชีผู้ใช้จริง ไม่มีการเชื่อมระบบสต็อกจริง และไม่มี GIS",
+      "เป็นยอด ณ จุดหนึ่งและตัวอย่างเรื่อง ไม่ใช่บัญชีธุรกรรมย้อนหลังครบชุด",
+      "reserved แยกจาก available แล้ว ไม่ต้องลบซ้ำ",
+      "ระบบสต็อกเดิมเป็นแหล่งยอดทางการเมื่อเข้าสู่ระยะใช้งานจริง"
+    ]
+  },
+  "districts": [
+    {"id": "D01", "name": "การไฟฟ้านครหลวงเขตวัดเลียบ"},
+    {"id": "D02", "name": "การไฟฟ้านครหลวงเขตคลองเตย"},
+    {"id": "D03", "name": "การไฟฟ้านครหลวงเขตยานนาวา"},
+    {"id": "D04", "name": "การไฟฟ้านครหลวงเขตบางกะปิ"},
+    {"id": "D05", "name": "การไฟฟ้านครหลวงเขตมีนบุรี"},
+    {"id": "D06", "name": "การไฟฟ้านครหลวงเขตสมุทรปราการ"},
+    {"id": "D07", "name": "การไฟฟ้านครหลวงเขตบางพลี"},
+    {"id": "D08", "name": "การไฟฟ้านครหลวงเขตสามเสน"},
+    {"id": "D09", "name": "การไฟฟ้านครหลวงเขตนนทบุรี"},
+    {"id": "D10", "name": "การไฟฟ้านครหลวงเขตบางใหญ่"},
+    {"id": "D11", "name": "การไฟฟ้านครหลวงเขตธนบุรี"},
+    {"id": "D12", "name": "การไฟฟ้านครหลวงเขตราษฎร์บูรณะ"},
+    {"id": "D13", "name": "การไฟฟ้านครหลวงเขตบางขุนเทียน"},
+    {"id": "D14", "name": "การไฟฟ้านครหลวงเขตบางเขน"},
+    {"id": "D15", "name": "การไฟฟ้านครหลวงเขตบางนา"},
+    {"id": "D16", "name": "การไฟฟ้านครหลวงเขตบางบัวทอง"},
+    {"id": "D17", "name": "การไฟฟ้านครหลวงเขตลาดกระบัง"},
+    {"id": "D18", "name": "การไฟฟ้านครหลวงเขตนวลจันทร์"}
+  ],
+  "items": [
+    {"id": "MTR_SYN_A", "category": "meter", "name": "มิเตอร์ไฟฟ้ารุ่นจำลอง A", "unit": "เครื่อง", "serialized": true},
+    {"id": "TRF_SYN_A", "category": "transformer", "name": "หม้อแปลงรุ่นจำลอง A", "unit": "เครื่อง", "serialized": true},
+    {"id": "FUSE_SYN_A", "category": "other", "name": "ฟิวส์รุ่นจำลอง A", "unit": "ชิ้น", "serialized": false},
+    {"id": "CB_SYN_A", "category": "other", "name": "เบรกเกอร์รุ่นจำลอง A", "unit": "ชิ้น", "serialized": false},
+    {"id": "CBL_SYN_A", "category": "other", "name": "สายไฟรุ่นจำลอง A", "unit": "เมตร", "serialized": false}
+  ],
+  "stock_snapshot": [
+    {"item_id": "MTR_SYN_A", "available": 3, "reserved": 1, "awaiting_inspection": 1, "awaiting_repair": 0, "total_on_hand": 5},
+    {"item_id": "TRF_SYN_A", "available": 2, "reserved": 0, "awaiting_inspection": 0, "awaiting_repair": 1, "total_on_hand": 3},
+    {"item_id": "FUSE_SYN_A", "available": 40, "reserved": 0, "awaiting_inspection": 0, "awaiting_repair": 0, "total_on_hand": 40},
+    {"item_id": "CB_SYN_A", "available": 8, "reserved": 0, "awaiting_inspection": 2, "awaiting_repair": 0, "total_on_hand": 10},
+    {"item_id": "CBL_SYN_A", "available": 100, "reserved": 0, "awaiting_inspection": 0, "awaiting_repair": 0, "total_on_hand": 100}
+  ],
+  "example_cases": [
+    {
+      "id": "REQ_SYN_001",
+      "district_id": "D01",
+      "type": "withdrawal",
+      "message": "ขอเบิกมิเตอร์รุ่นจำลอง A จำนวน 3 เครื่อง เพื่อเปลี่ยนอุปกรณ์",
+      "status": "partially_issued",
+      "lines": [
+        {"item_id": "MTR_SYN_A", "requested": 3, "approved": 2, "issued": 1, "receipt_confirmed": 1, "reserved_for_case": 1, "outstanding_approved": 1, "not_approved": 1, "not_approved_reason": "จำลองการอนุมัติบางส่วน", "issued_serials": ["MTR_SYN_006"], "reserved_serials": ["MTR_SYN_004"]}
+      ],
+      "expected_behavior": "แสดงจำนวนแยกกัน ค้างจ่ายตามอนุมัติ 1 เครื่อง และไม่ปิดเรื่องเพียงเพราะจ่ายครั้งแรกแล้ว"
+    },
+    {
+      "id": "REQ_SYN_002",
+      "district_id": "D02",
+      "type": "return",
+      "message": "ขอส่งคืนมิเตอร์รุ่นจำลอง A จำนวน 2 เครื่อง",
+      "status": "partially_received_awaiting_inspection",
+      "source_document": "ISSUE_HIST_SYN_020",
+      "lines": [
+        {"item_id": "MTR_SYN_A", "requested_return": 2, "physically_received": 1, "accepted_for_reuse": 0, "awaiting_inspection": 1, "outstanding_return": 1, "received_serials": ["MTR_SYN_005"]}
+      ],
+      "expected_behavior": "บันทึกรับไว้จริง 1 เครื่อง ติดตามอีก 1 เครื่อง และยังไม่เพิ่มยอดพร้อมจ่ายของเครื่องที่รอตรวจ"
+    },
+    {
+      "id": "REQ_SYN_003",
+      "district_id": "D03",
+      "type": "problem",
+      "message": "หม้อแปลงรุ่นจำลอง A หมายเลข TRF_SYN_004 ขัดข้อง ขอให้ตรวจสอบ",
+      "status": "awaiting_triage",
+      "item_id": "TRF_SYN_A",
+      "serial": "TRF_SYN_004",
+      "impact": null,
+      "priority": null,
+      "expected_behavior": "ถามผลกระทบเพิ่มเติมแล้วให้เจ้าหน้าที่คัดกรอง ไม่สร้างรายการคืนหรือเบิกทดแทนอัตโนมัติ"
+    },
+    {
+      "id": "REQ_SYN_004",
+      "district_id": "D04",
+      "type": "withdrawal",
+      "message": "ขอเบิกฟิวส์รุ่นจำลอง A จำนวน 50 ชิ้น",
+      "status": "awaiting_review",
+      "lines": [
+        {"item_id": "FUSE_SYN_A", "requested": 50, "approved": null, "issued": 0, "available_at_review": 40}
+      ],
+      "expected_behavior": "แจ้งว่ายอดพร้อมจ่ายจำลองน้อยกว่าจำนวนขอ รอการพิจารณาจ่ายบางส่วนหรือรอของ และไม่สัญญาจ่ายครบ 50 ชิ้น"
+    }
+  ]
+}

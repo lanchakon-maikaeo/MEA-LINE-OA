@@ -1,0 +1,43 @@
+name: mea-faoj-local
+services:
+  db:
+    image: postgres:17-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    environment:
+      POSTGRES_DB: mea_demo
+      POSTGRES_USER: mea_demo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap first}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mea_demo -d mea_demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  migrate:
+    build: .
+    image: mea-faoj:local
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://mea_demo:${POSTGRES_PASSWORD:?Run make bootstrap first}@db:5432/mea_demo
+    command: ["/app/.venv/bin/python", "manage.py", "migrate", "--noinput"]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+  web:
+    build: .
+    image: mea-faoj:local
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://mea_demo:${POSTGRES_PASSWORD:?Run make bootstrap first}@db:5432/mea_demo
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    init: true
+volumes:
+  postgres_data:

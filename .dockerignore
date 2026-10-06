@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+.venv
+__pycache__
+.ruff_cache
+reports
+Docs
+archive
+*.jpg
+*.jpeg
+PROJECT.md

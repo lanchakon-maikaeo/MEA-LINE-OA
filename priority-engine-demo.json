@@ -1,0 +1,131 @@
+{
+  "metadata": {
+    "is_synthetic": true,
+    "version": "DEMO-PE-1",
+    "purpose": "กองจำลองและสถานการณ์ตรวจแบบ Priority Engine",
+    "mode": "advisory_design_fixture",
+    "production_policy": false,
+    "auto_dispatch_enabled": false,
+    "stock_write_enabled": false,
+    "district_registry": "synthetic-data.json#districts",
+    "notes": [
+      "district_id อ้างรหัสภายใน D01-D18 ที่ผูกชื่อเขตจริงของ MEA ใน synthetic-data.json; เหตุการณ์ทั้งหมดเป็นเรื่องสมมติ ไม่ได้เกิดขึ้นจริงในเขตนั้น",
+      "ชื่อและรหัสกองเป็นข้อมูลจำลองตามที่ผู้ใช้อนุญาต ยังไม่ผูกกับกองจริง",
+      "expected เป็นผลที่ต้องการของแบบออกแบบ ไม่ใช่ผลทดสอบซอฟต์แวร์",
+      "ระดับ P0-P3 เป็นข้อเสนอสำหรับต้นแบบ ไม่มี SLA ทางการในชุดข้อมูลนี้",
+      "เวลาที่เกินกำหนดในสถานการณ์เป็นเหตุการณ์สมมติ ไม่ได้กำหนดระยะเวลาบริการจริง",
+      "null priority หมายถึงรอคัดกรอง ห้ามตีความเป็น P3",
+      "การบันทึกหรือส่งข้อความภายนอกยังไม่อยู่ในการดำเนินงานรอบนี้"
+    ]
+  },
+  "divisions": [
+    {"id": "SIM-MTR", "name": "กองงานมิเตอร์ (จำลอง)", "scope": ["meter_withdrawal", "meter_return", "meter_technical_problem"], "approval_authority": "separate_authority_registry_required"},
+    {"id": "SIM-TRF", "name": "กองงานหม้อแปลง (จำลอง)", "scope": ["transformer_withdrawal", "transformer_return", "transformer_technical_problem"], "approval_authority": "separate_authority_registry_required"},
+    {"id": "SIM-EQP", "name": "กองอุปกรณ์ไฟฟ้าอื่น (จำลอง)", "scope": ["listed_other_equipment_withdrawal", "listed_other_equipment_return", "listed_other_equipment_problem"], "listed_item_ids": ["FUSE_SYN_A", "CB_SYN_A", "CBL_SYN_A"], "approval_authority": "separate_authority_registry_required"},
+    {"id": "SIM-REG", "name": "กองทะเบียนและแผนจัดสรร (จำลอง)", "scope": ["registry_only_request", "registry_reconciliation_support", "allocation_planning_support"], "approval_authority": "separate_authority_registry_required"}
+  ],
+  "coordination_roles": [
+    {"id": "SIM-TRIAGE", "name": "จุดรับเรื่องกลาง ฝอจ. (บทบาทจำลอง)", "is_division": false, "scope": ["initial_case_ownership", "ambiguous_routing", "multi_division_coordination"]},
+    {"id": "SIM-SUPERVISOR", "name": "ผู้ประสานระดับฝ่าย (บทบาทจำลอง)", "is_division": false, "scope": ["routing_disputes", "unacknowledged_case_escalation"], "note": "ไม่ได้รับอำนาจอนุมัติธุรกรรมหรือข้อยกเว้นทุกชนิดโดยอัตโนมัติ"}
+  ],
+  "rule_ids": ["R01", "R02", "R03", "R04", "R05", "R06", "R07", "R08", "R09", "R10"],
+  "scenarios": [
+    {
+      "id": "S01", "district_id": "D01", "title": "เบิกมิเตอร์สำรอง",
+      "facts": {"intent": "withdrawal", "item_id": "MTR_SYN_A", "catalog_verified": true, "quantity": 1, "purpose": "สำรองตามรอบ", "severe_impact_reported": false, "data_complete": true},
+      "expected": {"rules": ["R01"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-MTR", "support_units": [], "suggested_priority": "P3", "next_action": "เสนอให้กองมิเตอร์ตอบรับงานเบิกและตรวจตามสิทธิ์"},
+      "must_not": ["อนุมัติเบิกเอง", "ตัดยอดสต็อก", "ถือว่าส่งข้อเสนอแล้วกองตอบรับงาน"]
+    },
+    {
+      "id": "S02", "district_id": "D02", "title": "คืนหม้อแปลงตามรอบ",
+      "facts": {"intent": "return", "item_id": "TRF_SYN_A", "catalog_verified": true, "quantity": 1, "purpose": "คืนตามรอบ", "condition": "not_inspected", "severe_impact_reported": false},
+      "expected": {"rules": ["R04"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-TRF", "support_units": [], "suggested_priority": "P3", "next_action": "ประสานรับคืน ตรวจจำนวน และรอผู้มีสิทธิ์ตรวจสภาพ"},
+      "must_not": ["เพิ่มยอดพร้อมจ่ายก่อนตรวจสภาพ", "ถือว่าคำขอคืนเท่ากับได้รับของจริง"]
+    },
+    {
+      "id": "S03", "district_id": "D04", "title": "ฟิวส์ไม่พอสำหรับงานสำคัญที่หยุดชะงัก",
+      "facts": {"intent": "withdrawal", "item_id": "FUSE_SYN_A", "catalog_verified": true, "requested": 50, "available": 40, "impact": "ผู้แจ้งรายงานว่างานสำคัญหยุดชะงัก", "immediate_hazard_reported": false},
+      "expected": {"rules": ["R03", "R08"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-EQP", "support_units": ["SIM-REG"], "suggested_priority": "P1", "next_action": "ให้ผู้มีอำนาจตรวจผลกระทบและพิจารณาแผนจัดสรร"},
+      "must_not": ["ลด priority เพราะของไม่พอ", "อนุมัติให้เขตนี้ได้ของก่อนเอง", "สัญญาจ่ายครบ 50 ชิ้น"]
+    },
+    {
+      "id": "S04", "district_id": "D02", "title": "เลขมิเตอร์ไม่ตรงระหว่างรับคืน",
+      "facts": {"intent": "return", "item_id": "MTR_SYN_A", "catalog_verified": true, "lifecycle": "receiving_in_progress", "serial_mismatch": true, "active_owner": "SIM-MTR", "severe_impact_reported": false, "routine_non_urgent_confirmed": true},
+      "expected": {"rules": ["R07"], "current_owner": "SIM-MTR", "proposed_owner": "SIM-MTR", "support_units": ["SIM-REG"], "suggested_priority": "P3", "next_action": "คงเจ้าภาพรับคืนและเปิดงานย่อยตรวจทะเบียน"},
+      "must_not": ["โยนทั้งเรื่องไปกองทะเบียน", "แก้เลขเครื่องทางการเอง", "ปล่อยของรอตรวจเป็นพร้อมจ่าย"]
+    },
+    {
+      "id": "S05", "district_id": "D05", "title": "ขอแก้ทะเบียนหลังการส่งมอบสิ้นสุด",
+      "facts": {"intent": "registry_correction", "item_id": "MTR_SYN_A", "catalog_verified": true, "lifecycle": "physical_handover_completed", "pending_physical_work": false, "severe_impact_reported": false, "routine_non_urgent_confirmed": true},
+      "expected": {"rules": ["R06"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-REG", "support_units": ["SIM-MTR"], "suggested_priority": "P3", "next_action": "ส่งตรวจเอกสารและขอหลักฐานจากกองมิเตอร์ก่อนผู้มีสิทธิ์แก้ทะเบียน"},
+      "must_not": ["เลือกกองจากชื่ออุปกรณ์อย่างเดียว", "แก้ทะเบียนก่อนอนุมัติตามสิทธิ์"]
+    },
+    {
+      "id": "S06", "district_id": "D06", "title": "ขอเบิกมิเตอร์และหม้อแปลงในเรื่องเดียว",
+      "facts": {"intent": "withdrawal", "item_ids": ["MTR_SYN_A", "TRF_SYN_A"], "catalog_verified": true, "impact": "มีแผนงานตามกำหนดที่ยืนยันแล้ว ยังไม่มีผลกระทบรุนแรง"},
+      "expected": {"rules": ["R09"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-TRIAGE", "support_units": ["SIM-MTR", "SIM-TRF"], "suggested_priority": "P2", "child_work_owners": ["SIM-MTR", "SIM-TRF"], "next_action": "ผู้ประสานถือเรื่องหลัก แยกคำขอที่อนุมัติและติดตามเป็นงานย่อยแต่ละกอง"},
+      "must_not": ["สร้างเจ้าภาพหลักสองรายโดยไม่มีผู้ประสาน", "ปิดทั้งเรื่องเพราะงานย่อยเดียวเสร็จ"]
+    },
+    {
+      "id": "S07", "district_id": "D07", "title": "ชื่ออุปกรณ์กำกวม",
+      "facts": {"intent": "withdrawal", "item_id": null, "catalog_verified": false, "message": "ขอเบิกตัวตัดไฟรุ่นเดิม", "impact": null},
+      "expected": {"rules": ["R10"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-TRIAGE", "support_units": [], "suggested_priority": null, "next_action": "ถามรหัสหรือรูปป้ายอุปกรณ์และผลกระทบ ให้คนตรวจปลายทาง"},
+      "must_not": ["เดาว่าเป็นเบรกเกอร์", "ส่งเข้า SIM-EQP เพียงเพราะเป็นของอื่น", "ใช้ข้อมูลว่างเป็น P3"]
+    },
+    {
+      "id": "S08", "district_id": "D03", "title": "หม้อแปลงขัดข้องแต่ผลกระทบยังไม่ทราบ",
+      "source_case_id": "REQ_SYN_003",
+      "facts": {"intent": "technical_problem", "item_id": "TRF_SYN_A", "catalog_verified": true, "reported_serial": "TRF_SYN_004", "impact": null},
+      "expected": {"rules": ["R05"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-TRF", "support_units": [], "suggested_priority": null, "next_action": "ถามผลกระทบพร้อมให้ผู้รับผิดชอบคัดกรองตามเวลาที่กำหนด"},
+      "must_not": ["ลดเป็น P3 เพราะไม่ทราบผลกระทบ", "สั่งเบิกทดแทนอัตโนมัติ", "สั่งปฏิบัติการไฟฟ้า"]
+    },
+    {
+      "id": "S09", "district_id": "D08", "title": "รายงานอันตรายขณะข้อมูลไม่ครบ",
+      "facts": {"intent": "technical_problem", "item_id": "TRF_SYN_A", "catalog_verified": true, "immediate_hazard_reported": true, "report_verified_by_expert": false, "data_complete": false},
+      "expected": {"rules": ["R05"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-TRF", "support_units": [], "suggested_priority": "P0", "next_action": "แจ้งผู้รับผิดชอบให้คัดกรองทันทีและประสานตามแผนที่รับรอง โดยใช้เฉพาะช่องทางที่กำหนดไว้"},
+      "must_not": ["รอเอกสารครบก่อนแจ้งคน", "ยืนยันว่าอันตรายเกิดจริงจากข้อความเดียว", "ออกคำสั่งตัดต่อไฟ", "อ้างว่าส่งหน่วยฉุกเฉินแล้วโดยไม่มีปลายทางหรือหลักฐาน"]
+    },
+    {
+      "id": "S10", "district_id": "D09", "title": "คนเปลี่ยนกองเพราะ AI เข้าใจผิด",
+      "facts": {"active_owner": "SIM-MTR", "agent_proposal": "SIM-MTR", "corrected_item_id": "CB_SYN_A", "new_evidence": "ตรวจป้ายอุปกรณ์แล้วเป็นเบรกเกอร์", "actor_can_propose_handoff": true, "new_target_accepted": false},
+      "expected": {"rules": ["R03"], "current_owner": "SIM-MTR", "proposed_owner": "SIM-EQP", "support_units": [], "decision": "allow_handoff_request_with_reason", "next_action": "เก็บข้อเสนอเดิมและหลักฐาน ส่งคำขอรับงานให้ SIM-EQP โดย SIM-MTR ยังติดตามจนตอบรับ"},
+      "must_not": ["บังคับให้ใช้กองที่ AI เลือก", "เปลี่ยนเจ้าภาพก่อนตอบรับ", "ตีความการแก้ AI เป็นความผิดพนักงาน"]
+    },
+    {
+      "id": "S11", "district_id": "D10", "title": "ขอจ่ายของที่ยังรอตรวจ",
+      "facts": {"active_owner": "SIM-MTR", "item_id": "MTR_SYN_A", "condition": "awaiting_inspection", "requested_action": "issue_as_ready", "policy_requires_inspection": true, "authorized_exception_present": false},
+      "expected": {"current_owner": "SIM-MTR", "decision": "do_not_execute_invalid_issue", "next_action": "อธิบายกติกาตรวจสภาพและส่งให้ผู้มีอำนาจตามกติกา หากไม่มีช่องทางยกเว้นให้รอขั้นตอนที่กำหนด"},
+      "must_not": ["ถือว่า human override ข้ามกติกาได้ทุกข้อ", "สร้างอำนาจยกเว้นขึ้นเอง", "จ่ายของตามข้อความสั่งข้ามเงื่อนไข"]
+    },
+    {
+      "id": "S12", "district_id": "D11", "title": "ยังไม่ตอบรับจนเกินกำหนดจำลอง",
+      "facts": {"active_owner": "SIM-TRIAGE", "pending_target": "SIM-EQP", "dispatch_status": "delivered", "acknowledged": false, "ack_deadline_passed": true, "delivery_and_system_health_checked": true, "escalation_due_under_demo_policy": true},
+      "expected": {"current_owner": "SIM-TRIAGE", "escalation_target": "SIM-SUPERVISOR", "decision": "escalate_unacknowledged_work", "next_action": "แสดงหลักฐานการส่งและเวลารอ ให้ผู้ประสานติดตามหรือจัดคนแทน"},
+      "must_not": ["ถือว่าความเงียบคือรับงาน", "ปิดเรื่องอัตโนมัติ", "ตัดสินว่าผู้รับละเลยงานจากเหตุการณ์เดียว"]
+    },
+    {
+      "id": "S13", "district_id": "D12", "title": "กฎหน้าที่หมดอายุ",
+      "facts": {"intent": "withdrawal", "item_id": "TRF_SYN_A", "catalog_verified": true, "responsibility_rule_active": false, "model_claimed_confidence": 0.99},
+      "expected": {"rules": ["R10"], "current_owner": "SIM-TRIAGE", "proposed_owner": "SIM-TRIAGE", "support_units": [], "suggested_priority": null, "next_action": "ให้คนตรวจหน้าที่ฉบับปัจจุบันและคัดกรองผลกระทบ"},
+      "must_not": ["ใช้ความมั่นใจของโมเดลข้ามกฎหมดอายุ", "ส่งอัตโนมัติตามความจำของโมเดล"]
+    },
+    {
+      "id": "S14", "district_id": "D13", "title": "สองกองส่งเรื่องกลับกัน",
+      "facts": {"active_owner": "SIM-MTR", "proposed_target": "SIM-REG", "target_acceptance": false, "routing_dispute": true, "proposed_target_already_visited": true},
+      "expected": {"current_owner": "SIM-MTR", "escalation_target": "SIM-SUPERVISOR", "decision": "manual_resolve_routing_dispute", "next_action": "ให้ผู้ประสานตัดสินเจ้าภาพจากหน้าที่และขั้นตอนงาน โดยเจ้าภาพเดิมยังติดตาม"},
+      "must_not": ["วนส่งระหว่างกองอัตโนมัติ", "ล้างเจ้าภาพ", "รีเซ็ตอายุเรื่อง"]
+    },
+    {
+      "id": "S15", "district_id": "D14", "title": "ลดระดับตามข้อมูลหน้างานใหม่โดยอยู่ในสิทธิ์",
+      "facts": {"active_owner": "SIM-EQP", "agent_suggested_priority": "P1", "human_selected_priority": "P2", "new_evidence": "ผู้รับผิดชอบยืนยันว่ามีอุปกรณ์สำรองและงานเดินต่อได้ตามแผน", "actor_can_change_priority": true, "violates_mandatory_priority_floor": false},
+      "expected": {"current_owner": "SIM-EQP", "decision": "allow_recorded_priority_change", "confirmed_priority": "P2", "next_action": "บันทึกเหตุผล หลักฐาน และผลต่อคิว ทบทวนอีกเมื่อมีข้อเท็จจริงใหม่"},
+      "must_not": ["ขอหัวหน้าทุกกรณีแม้อยู่ในสิทธิ์", "ย้ำให้กลับ P1 โดยไม่มีข้อมูลใหม่", "สรุปว่าคนถูกหรือ AI ผิดก่อนประเมินผล"]
+    },
+    {
+      "id": "S16", "district_id": "D15", "title": "ข้อเสนอเก่ามาหลังการตัดสินใจของคน",
+      "facts": {"active_owner": "SIM-EQP", "current_case_revision": 4, "recommendation_case_revision": 3, "confirmed_priority": "P2", "stale_recommended_priority": "P1"},
+      "expected": {"current_owner": "SIM-EQP", "decision": "retain_current_decision_and_mark_proposal_stale", "confirmed_priority": "P2", "next_action": "เก็บข้อเสนอเก่าเป็นประวัติ หากต้องประเมินใหม่ใช้งานรุ่นปัจจุบัน"},
+      "must_not": ["เขียนทับคำตัดสินคนด้วยผลเก่า", "ทำให้รายการย้อนสถานะโดยเงียบ ๆ"]
+    }
+  ]
+}
