@@ -1,0 +1,148 @@
+{
+ "version": "examples-v2",
+ "note": "Synthetic curated examples added 7 Oct 2569 after the security-v3 failures showed text fields running past the field's own phrase (references, times, specifications, locations) and cut marks. Same author as the harness; never part of a held-out set. Staff-reviewed real examples replace these before production.",
+ "examples": [
+  {
+   "id": "X01",
+   "text": "ขอเบิกฟิวส์ 15 ชิ้น เพื่อซ่อมตู้ควบคุมไฟถนน บริเวณซอย 12 ตามใบงาน WO-2210",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       15,
+       "ฟิวส์"
+      ]
+     ],
+     "fields": {
+      "purpose": "ซ่อมตู้ควบคุมไฟถนน"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X02",
+   "text": "เบิกสายไฟ 40 เมตร ใช้เดินสายอาคารพักคนงาน ระยะห่างเสา 35 เมตร",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CBL_SYN_A",
+       40,
+       "สายไฟ"
+      ]
+     ],
+     "fields": {
+      "purpose": "เดินสายอาคารพักคนงาน"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X03",
+   "text": "ขอคืนเบรกเกอร์ 3 ชิ้น เหตุผล: เปลี่ยนแบบตู้ สภาพ: ยังไม่แกะกล่อง เก็บไว้ที่คลังย่อยบางเขน",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "CB_SYN_A",
+       3,
+       "เบรกเกอร์"
+      ]
+     ],
+     "fields": {
+      "reason": "เปลี่ยนแบบตู้",
+      "condition": "ยังไม่แกะกล่อง"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X04",
+   "text": "ขอมิเตอร์ 2 เครื่อง สำหรับติดตั้งร้านค้าใหม่ เลขคำร้อง REQ-5501 นัดติดตั้ง 09.00 น.",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "MTR_SYN_A",
+       2,
+       "มิเตอร์"
+      ]
+     ],
+     "fields": {
+      "purpose": "ติดตั้งร้านค้าใหม่"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X05",
+   "text": "แจ้งปัญหาหม้อแปลง 1 เครื่อง อาการ: มีเสียงหึ่งตอนกลางคืน ผลกระทบ: ชาวบ้านร้องเรียน พิกัดเสา PEA-77",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "TRF_SYN_A",
+       null,
+       "หม้อแปลง"
+      ]
+     ],
+     "fields": {
+      "description": "มีเสียงหึ่งตอนกลางคืน",
+      "impact": "ชาวบ้านร้องเรียน"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X06",
+   "text": "เบิกเบรกเกอร์ 4 ชิ้น ใช้เปลี่ยนตู้ย่อยโรงสูบน้ำ พิกัดกระแส 63 แอมป์",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CB_SYN_A",
+       4,
+       "เบรกเกอร์"
+      ]
+     ],
+     "fields": {
+      "purpose": "เปลี่ยนตู้ย่อยโรงสูบน้ำ"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X07",
+   "text": "ขอเบิกสายไฟ 12 เมตร เพื่อซ่อมไฟสนาม [ตัดข้อความที่สั่งระบบ]",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CBL_SYN_A",
+       12,
+       "สายไฟ"
+      ]
+     ],
+     "fields": {
+      "purpose": "ซ่อมไฟสนาม"
+     }
+    }
+   ]
+  }
+ ]
+}

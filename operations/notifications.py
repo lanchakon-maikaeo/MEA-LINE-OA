@@ -1,0 +1,384 @@
+"""Notifications to requesters (M04): planning, the monthly message budget and push delivery.
+
+Planning turns domain events into NotificationDelivery rows plus `notification.requested`
+outbox events (sent later by n8n through the internal API). Sending re-checks the recipient,
+applies the budget tiers of C.2.3, batches a recipient's waiting notifications into one push
+(at most 5 messages) and records the real outcome. A push that may or may not have reached
+LINE is `unknown`, counts against the budget and is retried with the same X-Line-Retry-Key.
+"""
+
+import calendar
+import logging
+from dataclasses import asdict, dataclass
+from datetime import timedelta
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.db.models import Sum
+from django.utils import timezone
+
+from operations import identity as identity_services
+from operations import line_api, orchestration
+from operations.models import (
+    ChannelIdentity,
+    Decision,
+    LineQuotaSnapshot,
+    NotificationDelivery,
+    OutboxEvent,
+    RegistrationRequest,
+    Requester,
+)
+
+logger = logging.getLogger(__name__)
+N = NotificationDelivery
+ALERT_LEVELS = (50, 80, 95)  # percent of budget; plus "forecast" when the month will overrun
+
+# --- Budget ---------------------------------------------------------------------------------
+
+
+def month_key(now):
+    local = timezone.localtime(now)
+    return f"{local.year:04d}-{local.month:02d}"
+
+
+def _month_start(now):
+    return timezone.localtime(now).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _snapshot(now):
+    return LineQuotaSnapshot.objects.filter(month=month_key(now)).first()
+
+
+@dataclass(frozen=True)
+class BudgetState:
+    budget: int
+    used: int
+    tier: int
+    forecast: int
+    limit_reached: bool
+
+    @property
+    def percent(self):
+        return int(100 * self.used / self.budget) if self.budget else 100
+
+
+def budget_state(now=None):
+    now = now or timezone.now()
+    snapshot = _snapshot(now)
+    budget = settings.LINE_PUSH_MONTHLY_BUDGET
+    if snapshot and snapshot.quota is not None:
+        budget = min(budget, snapshot.quota)
+    if settings.APP_ENV != "production":
+        budget = min(budget, settings.LINE_PUSH_NONPRODUCTION_CAP)
+    local = (
+        N.objects.filter(
+            channel=N.Channel.LINE_PUSH,
+            status__in=[N.Status.SENT, N.Status.UNKNOWN],
+            sent_at__gte=_month_start(now),
+        ).aggregate(total=Sum("counted"))["total"]
+        or 0
+    )
+    used = max(local, snapshot.usage if snapshot else 0)
+    limit_reached = bool(snapshot and snapshot.limit_reached)
+    ratio = used / budget if budget else 1
+    if limit_reached or used >= budget:
+        tier = 3
+    elif ratio >= 0.8:
+        tier = 2
+    elif ratio >= 0.6:
+        tier = 1
+    else:
+        tier = 0
+    local_now = timezone.localtime(now)
+    days = calendar.monthrange(local_now.year, local_now.month)[1]
+    elapsed = max((now - _month_start(now)).total_seconds() / 86400, 1)
+    return BudgetState(budget, used, tier, int(used / elapsed * days), limit_reached)
+
+
+def allows(level, state):
+    """Normal notifications stop at the critical reserve (tier 2); nothing goes out at tier 3."""
+    if state.tier >= 3:
+        return False
+    if level == N.Level.CRITICAL:
+        return state.used + 1 <= state.budget
+    reserve = state.budget * settings.LINE_PUSH_CRITICAL_RESERVE_PERCENT / 100
+    return state.tier < 2 and state.used + 1 <= state.budget - reserve
+
+
+def push_enabled():
+    return bool(
+        settings.OUTBOUND_ENABLED
+        and settings.LINE_CHANNEL_ACCESS_TOKEN
+        and settings.LINE_PUSH_ENABLED
+    )
+
+
+# --- Planning --------------------------------------------------------------------------------
+
+
+def _case_identity(case):
+    return ChannelIdentity.objects.filter(
+        requester=case.requester, channel=ChannelIdentity.Channel.LINE, status="active"
+    ).first()
+
+
+def _create(event, kind, level, identity, text, case=None, registration=None):
+    if identity is None:
+        return None  # Requester without LINE: staff follow up; email arrives later.
+    now = timezone.now()
+    delay = timedelta(0)
+    if level == N.Level.NORMAL:
+        minutes = 60 if budget_state(now).tier == 1 else settings.LINE_PUSH_DEBOUNCE_MINUTES
+        delay = timedelta(minutes=minutes)
+    try:
+        with transaction.atomic():
+            delivery = N.objects.create(
+                kind=kind,
+                level=level,
+                identity=identity,
+                text=text,
+                case=case,
+                registration=registration,
+                source_event=event.event_id,
+                send_after=now + delay,
+            )
+    except IntegrityError:
+        return None  # Already planned for this event (worker retried after a crash).
+    OutboxEvent.objects.create(
+        event_type=orchestration.EVENT_NOTIFICATION,
+        subject_type="delivery",
+        subject_id=str(delivery.pk),
+        case=case,
+        case_revision=case.revision if case else None,
+        correlation_id=event.correlation_id,
+        payload={"delivery_id": delivery.pk, "kind": kind, "level": level},
+        occurred_at=now,
+        next_attempt_at=delivery.send_after,
+    )
+    return delivery
+
+
+def plan_for_event(event):
+    """Deliveries for the C.2.3 push table; every other change waits as 'มีอัปเดตใหม่'."""
+    if event.event_type == orchestration.EVENT_DECISION:
+        decision = (
+            Decision.objects.select_related("case")
+            .filter(action_id=event.payload.get("action_id"))
+            .first()
+        )
+        if decision is None:
+            return None
+        case = decision.case
+        if decision.action == "request_info":
+            text = f"เรื่อง {case.number}: เจ้าหน้าที่ขอข้อมูลเพิ่ม\n{decision.reason}\nตอบกลับในแชตนี้ได้เลย"
+            return _create(
+                event, "request_info", N.Level.CRITICAL, _case_identity(case), text, case
+            )
+        if decision.action == "decline":
+            text = f"เรื่อง {case.number} ไม่ได้รับเรื่อง\nเหตุผล: {decision.reason}"
+            return _create(event, "case_declined", N.Level.NORMAL, _case_identity(case), text, case)
+        if decision.action == "cancel" and decision.actor_id is not None:
+            text = f"เรื่อง {case.number} ถูกยกเลิกโดยเจ้าหน้าที่\nเหตุผล: {decision.reason}"
+            return _create(
+                event, "case_cancelled", N.Level.NORMAL, _case_identity(case), text, case
+            )
+        return None
+    if event.event_type == orchestration.EVENT_REGISTRATION:
+        registration = (
+            RegistrationRequest.objects.select_related("identity")
+            .filter(pk=event.subject_id)
+            .first()
+        )
+        if registration is None:
+            return None
+        if registration.status == RegistrationRequest.Status.APPROVED:
+            text = "ลงทะเบียนเรียบร้อยแล้ว กด 'ส่งเรื่องใหม่' เพื่อแจ้งเรื่องได้เลย"
+        elif registration.status == RegistrationRequest.Status.REJECTED:
+            text = "คำขอลงทะเบียนไม่ได้รับการรับรอง"
+            if registration.decision_reason:
+                text += f"\nเหตุผล: {registration.decision_reason}"
+            text += "\nพิมพ์ชื่อ-นามสกุลเพื่อส่งคำขอใหม่ได้"
+        else:
+            return None
+        return _create(
+            event,
+            "registration_result",
+            N.Level.NORMAL,
+            registration.identity,
+            text,
+            registration=registration,
+        )
+    return None  # case.submitted: the requester already got the case number by reply.
+
+
+# --- Sending -------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SendResult:
+    outcome: str
+    final: bool = True
+    retry_after: int | None = None
+
+
+def _recipient_problem(delivery):
+    """Re-checked at send time: ownership, membership, allowlist and follow state (E.6)."""
+    if delivery.channel != N.Channel.LINE_PUSH:
+        return "channel not enabled"
+    if not push_enabled():
+        return "push disabled"
+    identity = delivery.identity
+    if identity is None:
+        return "no LINE identity"
+    if (
+        settings.APP_ENV != "production"
+        and identity.external_id not in settings.LINE_ALLOWED_RECIPIENTS
+    ):
+        return "not in allowlist"
+    if not identity.is_following:
+        return "unfollowed or blocked"
+    if delivery.case_id is not None:
+        requester = delivery.case.requester
+        if (
+            identity.status != ChannelIdentity.Status.ACTIVE
+            or identity.requester_id != requester.pk
+            or requester.status != Requester.Status.ACTIVE
+        ):
+            return "recipient no longer owns the case"
+    if delivery.registration_id is not None and delivery.registration.identity_id != identity.pk:
+        return "registration belongs to another identity"
+    return ""
+
+
+def _finish(leader, status, detail="", counted=None):
+    fields = {"status": status, "detail": detail[:200]}
+    N.objects.filter(batch_leader=leader).exclude(pk=leader.pk).update(**fields)
+    if counted is not None:
+        fields["counted"] = counted
+    N.objects.filter(pk=leader.pk).update(**fields)
+
+
+def send(delivery_id, now=None):
+    """Send one planned delivery (with its recipient's other waiting ones) or retry an unknown."""
+    now = now or timezone.now()
+    with transaction.atomic():
+        delivery = (
+            N.objects.select_for_update(of=("self",))
+            .select_related("identity", "case__requester", "registration")
+            .get(pk=delivery_id)
+        )
+        if delivery.status == N.Status.PLANNED:
+            problem = _recipient_problem(delivery)
+            if problem:
+                delivery.status, delivery.detail = N.Status.SKIPPED, problem
+                delivery.save(update_fields=["status", "detail"])
+                return SendResult("skipped")
+            state = budget_state(now)
+            if not allows(delivery.level, state):
+                delivery.status, delivery.tier = N.Status.DEFERRED, state.tier
+                delivery.detail = f"budget tier {state.tier}"
+                delivery.save(update_fields=["status", "tier", "detail"])
+                return SendResult("deferred")
+            # Debounce: everything else waiting for this person goes in the same request.
+            others = list(
+                N.objects.select_for_update(skip_locked=True)
+                .filter(identity=delivery.identity, channel=N.Channel.LINE_PUSH)
+                .filter(status=N.Status.PLANNED)
+                .exclude(pk=delivery.pk)
+                .order_by("created_at")[:4]
+            )
+            members = [delivery, *others]
+            delivery.messages = [{"type": "text", "text": m.text[:5000]} for m in members]
+            delivery.counted = 1
+            for member in members:
+                member.status = N.Status.UNKNOWN
+                member.batch_leader = delivery
+                member.retry_key = delivery.retry_key
+                member.tier = state.tier
+                member.attempts += 1
+                member.sent_at = now
+                member.save()
+        elif delivery.status == N.Status.UNKNOWN and delivery.batch_leader_id == delivery.pk:
+            delivery.attempts += 1  # Same request, same retry key: LINE counts it once.
+            delivery.save(update_fields=["attempts"])
+        else:
+            return SendResult("already")
+        to, messages, key = delivery.identity.external_id, delivery.messages, delivery.retry_key
+    try:
+        line_api.push(to, messages, key)
+    except line_api.LineApiError as exc:
+        if exc.status == 409:
+            _finish(delivery, N.Status.SENT, "accepted earlier (retry key)")
+            return SendResult("sent")
+        if exc.status == 429 and "monthly limit" in exc.detail.lower():
+            LineQuotaSnapshot.objects.update_or_create(
+                month=month_key(now), defaults={"limit_reached": True}
+            )
+            _finish(delivery, N.Status.DEFERRED, "monthly limit reached", counted=0)
+            return SendResult("deferred")
+        if exc.status == 429 or exc.status >= 500:
+            N.objects.filter(pk=delivery.pk).update(detail=f"LINE {exc.status}, will retry")
+            return SendResult("retry", final=False, retry_after=exc.retry_after)
+        _finish(delivery, N.Status.FAILED, f"LINE {exc.status}", counted=0)
+        return SendResult("failed")
+    except OSError as exc:
+        # Timeout: LINE may have accepted it. Stays unknown (counted) and is retried.
+        N.objects.filter(pk=delivery.pk).update(detail=type(exc).__name__)
+        return SendResult("retry", final=False)
+    N.objects.filter(batch_leader=delivery).update(status=N.Status.SENT, detail="")
+    return SendResult("sent")
+
+
+# --- Maintenance (n8n reminder-recovery, hourly) ---------------------------------------------
+
+
+def reconcile(now=None):
+    """Read LINE's own quota and usage so manual OA Manager messages are counted too."""
+    now = now or timezone.now()
+    quota = line_api.call("/v2/bot/message/quota")
+    usage = line_api.call("/v2/bot/message/quota/consumption")
+    snapshot, _ = LineQuotaSnapshot.objects.get_or_create(month=month_key(now))
+    snapshot.quota = quota.get("value") if quota.get("type") == "limited" else None
+    snapshot.usage = int(usage.get("totalUsage") or 0)
+    snapshot.checked_at = now
+    snapshot.save(update_fields=["quota", "usage", "checked_at"])
+    return snapshot
+
+
+def maintenance(now=None):
+    now = now or timezone.now()
+    report = {"reconciled": False}
+    snapshot = _snapshot(now)
+    stale = (
+        snapshot is None
+        or snapshot.checked_at is None
+        or now - snapshot.checked_at > timedelta(minutes=55)
+    )
+    if settings.LINE_CHANNEL_ACCESS_TOKEN and stale:
+        try:
+            snapshot = reconcile(now)
+            report["reconciled"] = True
+        except (line_api.LineApiError, OSError) as exc:
+            report["reconcile_error"] = type(exc).__name__
+    state = budget_state(now)
+    snapshot, _ = LineQuotaSnapshot.objects.get_or_create(month=month_key(now))
+    reached = [str(level) for level in ALERT_LEVELS if state.percent >= level]
+    if state.forecast > state.budget:
+        reached.append("forecast")
+    new_alerts = [level for level in reached if level not in snapshot.alerted_levels]
+    if new_alerts:
+        snapshot.alerted_levels = sorted({*snapshot.alerted_levels, *new_alerts})
+        snapshot.save(update_fields=["alerted_levels"])
+        identity_services.audit(
+            None,
+            "line.budget_alert",
+            snapshot,
+            actor_label="system:budget",
+            levels=new_alerts,
+            used=state.used,
+            budget=state.budget,
+            forecast=state.forecast,
+        )
+        logger.warning("LINE push budget at %s%% (%s/%s)", state.percent, state.used, state.budget)
+    report.update(budget=asdict(state), alerts=new_alerts, outbox=orchestration.health(now))
+    return report

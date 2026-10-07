@@ -10,6 +10,14 @@ staticfiles/
 private-media/
 .DS_Store
 Docs/
+!Docs/
+Docs/*
+!Docs/m05-security-review.md
+!Docs/ai-security-v3-independent-authoring.md
+!Docs/adr/
+Docs/adr/*
+!Docs/adr/0001-ai-draft-authority-and-evaluation.md
+!Docs/adr/0002-ai-proposes-facts-rules-choose-division.md
 archive/
 *.jpg
 *.jpeg

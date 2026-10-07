@@ -1,10 +1,12 @@
-"""Identity, organisation and audit (M01), the case domain (M02) and LINE intake (M03)."""
+"""Identity and audit (M01), cases (M02), LINE intake (M03), orchestration (M04) and AI (M05)."""
 
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 
 class District(models.Model):
@@ -434,12 +436,17 @@ class ActionReceipt(models.Model):
 
 
 class OutboxEvent(models.Model):
-    """Intent to notify or orchestrate, committed with the change it describes (envelope v1)."""
+    """Intent to notify or orchestrate, committed with the change it describes (envelope v1).
+
+    Consumers claim events with a lease (M04); FAILED is the dead-letter state that only a
+    person with rights may requeue.
+    """
 
     class Status(models.TextChoices):
-        PENDING = "pending", "รอส่ง"
+        PENDING = "pending", "รอทำ"
+        LEASED = "leased", "กำลังทำ"
         DONE = "done", "เสร็จ"
-        FAILED = "failed", "ล้มเหลว"
+        FAILED = "failed", "ล้มเหลว (dead-letter)"
 
     event_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     event_type = models.CharField(max_length=64)
@@ -452,10 +459,20 @@ class OutboxEvent(models.Model):
     payload = models.JSONField(default=dict)
     occurred_at = models.DateTimeField()
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    lease_token = models.CharField(max_length=64, blank=True)
+    leased_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=200, blank=True)
 
     class Meta:
         ordering = ["id"]
-        indexes = [models.Index(fields=["status", "id"])]
+        indexes = [
+            models.Index(fields=["status", "id"]),
+            models.Index(fields=["event_type", "status", "next_attempt_at"]),
+        ]
         constraints = [
             models.CheckConstraint(
                 name="outbox_case_event_has_revision",
@@ -560,6 +577,8 @@ class Conversation(models.Model):
     )
     prompt = models.CharField(max_length=32, blank=True)
     prompt_data = models.JSONField(default=dict, blank=True)
+    # Case changes after this instant are shown as "มีอัปเดตใหม่" at the next turn (M04).
+    updates_seen_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
 
@@ -630,3 +649,618 @@ class Attachment(models.Model):
     class Meta:
         ordering = ["created_at"]
         indexes = [models.Index(fields=["scan_status", "created_at"])]
+
+
+# --- M04: delivery and message budget -------------------------------------------------------------
+
+
+class NotificationDelivery(models.Model):
+    """One notification to one recipient and its real outcome (never assumed delivered)."""
+
+    class Channel(models.TextChoices):
+        LINE_PUSH = "line_push", "LINE push"
+        EMAIL = "email", "อีเมล (ยังไม่เปิดใช้)"
+
+    class Level(models.TextChoices):
+        CRITICAL = "critical", "สำคัญ"
+        NORMAL = "normal", "ปกติ"
+
+    class Status(models.TextChoices):
+        PLANNED = "planned", "รอส่ง"
+        SENT = "sent", "LINE รับแล้ว"
+        UNKNOWN = "unknown", "ไม่ทราบผล"
+        FAILED = "failed", "ส่งไม่สำเร็จ"
+        DEFERRED = "deferred", "เลื่อน (งบข้อความ)"
+        SKIPPED = "skipped", "ไม่ส่ง"
+
+    channel = models.CharField(max_length=16, choices=Channel.choices, default=Channel.LINE_PUSH)
+    kind = models.CharField(max_length=32)
+    level = models.CharField(max_length=16, choices=Level.choices)
+    identity = models.ForeignKey(
+        ChannelIdentity, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    email = models.EmailField(blank=True)
+    case = models.ForeignKey(
+        Case, null=True, blank=True, on_delete=models.PROTECT, related_name="deliveries"
+    )
+    registration = models.ForeignKey(
+        RegistrationRequest, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    text = models.TextField()
+    # The domain event that caused it: replanning the same event never notifies twice.
+    source_event = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PLANNED)
+    send_after = models.DateTimeField()
+    # Pushes sharing one request (debounce batch) share the leader's retry key and messages.
+    batch_leader = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    retry_key = models.UUIDField(default=uuid.uuid4)
+    messages = models.JSONField(default=list, blank=True)
+    counted = models.PositiveSmallIntegerField(default=0)
+    tier = models.PositiveSmallIntegerField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    detail = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["identity", "status", "send_after"]),
+            models.Index(fields=["status", "sent_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_event", "kind"],
+                condition=Q(source_event__isnull=False),
+                name="delivery_once_per_source_event",
+            )
+        ]
+
+
+class LineQuotaSnapshot(models.Model):
+    """Monthly quota and usage reported by LINE, reconciled hourly; one row per month."""
+
+    month = models.CharField(max_length=7, unique=True)
+    quota = models.PositiveIntegerField(null=True, blank=True)
+    usage = models.PositiveIntegerField(default=0)
+    limit_reached = models.BooleanField(default=False)
+    alerted_levels = models.JSONField(default=list, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+
+
+# --- M05: AI provider configuration and runs ----------------------------------------------------
+
+
+class AICredential(models.Model):
+    """Provider endpoint and API key. The key is Fernet-encrypted and never shown again."""
+
+    name = models.CharField(max_length=64, unique=True)
+    base_url = models.URLField(max_length=200)
+    encrypted_key = models.TextField()
+    key_hint = models.CharField(max_length=8)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    rotated_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.name} (••••{self.key_hint})"
+
+
+class AIProfile(AppendOnlyModel):
+    """One model with its call limits. Changing anything means a new profile row."""
+
+    credential = models.ForeignKey(AICredential, on_delete=models.PROTECT, related_name="profiles")
+    model_id = models.CharField(max_length=100)
+    timeout_seconds = models.PositiveSmallIntegerField(default=10)
+    max_tokens = models.PositiveSmallIntegerField(default=800)
+    temperature = models.DecimalField(max_digits=3, decimal_places=2, default=Decimal("0.10"))
+    use_json_schema = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                name="ai_profile_timeout_bounds",
+                condition=Q(timeout_seconds__gte=2, timeout_seconds__lte=30),
+            ),
+            models.CheckConstraint(
+                name="ai_profile_tokens_bounds",
+                condition=Q(max_tokens__gte=64, max_tokens__lte=2048),
+            ),
+            models.CheckConstraint(
+                name="ai_profile_temperature_bounds",
+                condition=Q(temperature__gte=0, temperature__lte=1),
+            ),
+        ]
+
+    def __str__(self):
+        return f"#{self.pk} {self.model_id}"
+
+
+class AIConfigVersion(models.Model):
+    """Primary model plus ordered fallbacks; one version per AI task is active at a time."""
+
+    class Task(models.TextChoices):
+        EXTRACT = "extract", "สกัดร่างจากแชต (M05)"
+        TRIAGE = "triage", "เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06)"
+
+    class Status(models.TextChoices):
+        CANDIDATE = "candidate", "รอทดสอบ/ประเมิน"
+        ACTIVE = "active", "ใช้งานอยู่"
+        RETIRED = "retired", "เลิกใช้"
+        REJECTED = "rejected", "ไม่ผ่าน"
+
+    class Pipeline(models.TextChoices):
+        SINGLE = "single", "เรียกครั้งเดียว (extract-v1)"
+        HARNESS = "harness", "Harness (กรองคำสั่งแฝง + ตัวตรวจ + แก้ 1 รอบ + hedge)"
+
+    number = models.PositiveIntegerField(unique=True)
+    # Each task has its own evaluation gate and its own active version (ADR 0002).
+    task = models.CharField(max_length=16, choices=Task.choices, default=Task.EXTRACT)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CANDIDATE)
+    # How many similar reviewed examples are retrieved into the prompt (0 = none).
+    few_shot = models.PositiveSmallIntegerField(default=0)
+    # What runs around the models (operations/ai_harness.py); part of what is evaluated.
+    pipeline = models.CharField(max_length=16, choices=Pipeline.choices, default=Pipeline.SINGLE)
+    # Harness only: the model that labels message segments before extraction (ai_screen.py);
+    # empty = the primary. It only removes text; it never extracts or decides anything.
+    screen_profile = models.ForeignKey(
+        AIProfile, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    profiles = models.ManyToManyField(AIProfile, through="AIConfigEntry", related_name="+")
+    test_passed = models.BooleanField(null=True)
+    test_result = models.JSONField(default=dict, blank=True)
+    eval_passed = models.BooleanField(null=True)
+    eval_result = models.JSONField(default=dict, blank=True)
+    note = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    activated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["task"], condition=Q(status="active"), name="ai_single_active_per_task"
+            ),
+            models.CheckConstraint(name="ai_few_shot_bounds", condition=Q(few_shot__lte=5)),
+        ]
+
+    def chain(self):
+        return [entry.profile for entry in self.entries.select_related("profile__credential")]
+
+    def __str__(self):
+        return f"v{self.number}"
+
+
+class AIConfigEntry(models.Model):
+    version = models.ForeignKey(AIConfigVersion, on_delete=models.CASCADE, related_name="entries")
+    position = models.PositiveSmallIntegerField()  # 0 = primary, then fallbacks in order
+    profile = models.ForeignKey(AIProfile, on_delete=models.PROTECT, related_name="+")
+
+    class Meta:
+        ordering = ["position"]
+        constraints = [
+            models.UniqueConstraint(fields=["version", "position"], name="ai_entry_position"),
+            models.UniqueConstraint(fields=["version", "profile"], name="ai_entry_profile_once"),
+        ]
+
+
+class AIRun(models.Model):
+    """One AI extraction for one chat message, tied to the config version it started with."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอ"
+        RUNNING = "running", "กำลังเรียก AI"
+        APPLIED = "applied", "เติมร่างแล้ว"
+        FALLBACK = "fallback", "ถามทีละช่องแทน (เวลาไม่พอ)"
+        FAILED = "failed", "AI ใช้ไม่ได้ ถามทีละช่องแทน"
+        STALE = "stale", "ร่างเปลี่ยนระหว่างรอ"
+
+    identity = models.ForeignKey(ChannelIdentity, on_delete=models.PROTECT, related_name="+")
+    inbox = models.OneToOneField(WebhookInbox, on_delete=models.PROTECT, related_name="ai_run")
+    draft = models.ForeignKey(
+        ConversationDraft, null=True, blank=True, on_delete=models.PROTECT, related_name="ai_runs"
+    )
+    draft_revision = models.PositiveIntegerField(null=True, blank=True)
+    config_version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="+")
+    prompt_version = models.CharField(max_length=32)
+    schema_version = models.CharField(max_length=32)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    attempts = models.JSONField(default=list, blank=True)
+    result = models.JSONField(default=dict, blank=True)
+    corrections = models.PositiveSmallIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["status", "created_at"])]
+
+
+class AIEvalJob(models.Model):
+    """A held-out evaluation requested from the web; the worker runs it off the chat path."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "รอคิว"
+        RUNNING = "running", "กำลังประเมิน"
+        DONE = "done", "เสร็จ"
+        FAILED = "failed", "ล้มเหลว"
+
+    version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="eval_jobs")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    passed = models.BooleanField(null=True)
+    error = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["version"],
+                condition=Q(status__in=["queued", "running"]),
+                name="ai_one_open_eval_per_version",
+            )
+        ]
+
+
+class AIExample(models.Model):
+    """A reviewed message → extraction pair, retrieved by similarity as a prompt example."""
+
+    text = models.TextField(unique=True)
+    draft = models.JSONField(null=True, blank=True)
+    requests = models.JSONField(default=list)
+    source = models.CharField(max_length=64)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+# --- M06: routing, priority and authority -------------------------------------------------------
+
+
+class Priority(models.TextChoices):
+    """Proposed prototype levels (B.4), not official service levels. Empty = รอคัดกรอง."""
+
+    P0 = "P0", "P0 ต้องคัดกรองทันที"
+    P1 = "P1", "P1 เร่งด่วน"
+    P2 = "P2", "P2 ตามกำหนดงาน"
+    P3 = "P3", "P3 งานปกติ"
+
+
+class PolicyVersion(models.Model):
+    """One imported rule set (B.3-B.4). The document never changes after import; only the
+    status does. Exactly one version is active; an active version outside its dates applies
+    no rules (every case goes to people, R10)."""
+
+    class Status(models.TextChoices):
+        IMPORTED = "imported", "นำเข้าแล้ว (ยังไม่ใช้)"
+        ACTIVE = "active", "ใช้งานอยู่"
+        RETIRED = "retired", "เลิกใช้"
+
+    FROZEN = ("code", "document", "digest", "is_synthetic", "effective_from", "effective_until")
+
+    code = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.IMPORTED)
+    document = models.JSONField()
+    digest = models.CharField(max_length=64)
+    is_synthetic = models.BooleanField(default=False)
+    effective_from = models.DateTimeField()
+    effective_until = models.DateTimeField(null=True, blank=True)
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    imported_at = models.DateTimeField(auto_now_add=True)
+    # Who approved the rules (the rule owner) and their document; the admin only installs.
+    approved_by_name = models.CharField(max_length=200, blank=True)
+    approval_reference = models.CharField(max_length=200, blank=True)
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    activated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-imported_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["status"], condition=Q(status="active"), name="policy_single_active"
+            ),
+            models.CheckConstraint(
+                name="policy_dates_ordered",
+                condition=Q(effective_until__isnull=True)
+                | Q(effective_until__gt=models.F("effective_from")),
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            stored = type(self).objects.filter(pk=self.pk).values(*self.FROZEN).first()
+            if stored and any(stored[name] != getattr(self, name) for name in self.FROZEN):
+                raise ValueError("An imported policy cannot be edited; import a new version.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Policy versions are kept for the cases that cite them.")
+
+    def __str__(self):
+        return self.code
+
+
+class AuthorityGrant(models.Model):
+    """Authority for one activity (B.2): who may decide what, separate from duties (RoleGrant).
+
+    A role never implies authority. Scope narrows a grant: an empty division means every
+    division; item/category/quantity limits are for approval activities (M07).
+    """
+
+    class Activity(models.TextChoices):
+        PRIORITY_EXCEPTION = "priority_exception", "ข้อยกเว้นระดับความเร่งด่วน"
+        ROUTING_DECISION = "routing_decision", "ตัดสินเส้นทาง"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="authority_grants"
+    )
+    activity = models.CharField(max_length=32, choices=Activity.choices)
+    division = models.ForeignKey(Division, null=True, blank=True, on_delete=models.PROTECT)
+    category = models.CharField(max_length=16, choices=EquipmentType.Category.choices, blank=True)
+    item = models.ForeignKey(EquipmentType, null=True, blank=True, on_delete=models.PROTECT)
+    max_quantity = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    valid_from = models.DateTimeField()
+    valid_until = models.DateTimeField(null=True, blank=True)
+    reason = models.TextField()
+    # The approver or document behind the grant (G02 replaces synthetic grants).
+    approval_reference = models.CharField(max_length=200)
+    is_synthetic = models.BooleanField(default=False)
+    # Empty only for synthetic demo seeds; an admin never grants authority to themselves.
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    granted_at = models.DateTimeField(auto_now_add=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoke_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-granted_at"]
+        constraints = [
+            models.CheckConstraint(
+                name="authority_not_self_granted", condition=~Q(granted_by=models.F("user"))
+            ),
+            models.CheckConstraint(
+                name="authority_dates_ordered",
+                condition=Q(valid_until__isnull=True) | Q(valid_until__gt=models.F("valid_from")),
+            ),
+            models.CheckConstraint(
+                name="authority_quantity_positive",
+                condition=Q(max_quantity__isnull=True) | Q(max_quantity__gt=0),
+            ),
+        ]
+
+
+class AITriageRun(models.Model):
+    """AI facts for one case text (ADR 0002). Bound to the input it read, not to the revision:
+    decisions that do not change the requester's text keep the facts valid."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอ"
+        RUNNING = "running", "กำลังเรียก AI"
+        DONE = "done", "ได้ข้อเท็จจริงแล้ว"
+        FAILED = "failed", "AI ไม่ตอบ"
+        STALE = "stale", "ข้อความในเรื่องเปลี่ยนระหว่างรอ"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="ai_triage_runs")
+    case_revision = models.PositiveIntegerField()
+    input_digest = models.CharField(max_length=64)
+    config_version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="+")
+    prompt_version = models.CharField(max_length=32)
+    schema_version = models.CharField(max_length=32)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    attempts = models.JSONField(default=list, blank=True)
+    facts = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case", "input_digest", "config_version"], name="ai_triage_once_per_input"
+            )
+        ]
+
+
+class Recommendation(AppendOnlyModel):
+    """What the rules propose for one case revision under one policy version (B.7/B.8).
+
+    Never written onto the case: owner and priority change only through people's decisions.
+    A recommendation whose revision is older than the case is kept as a stale proposal.
+    """
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="recommendations")
+    case_revision = models.PositiveIntegerField()
+    policy_version = models.ForeignKey(
+        PolicyVersion, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    trigger = models.CharField(max_length=32)
+    facts = models.JSONField(default=dict)
+    rules = models.JSONField(default=list)
+    current_owner = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    proposed_owner = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    support_units = models.JSONField(default=list)
+    child_work_owners = models.JSONField(default=list)
+    suggested_priority = models.CharField(max_length=2, choices=Priority.choices, blank=True)
+    priority_floor = models.CharField(max_length=2, choices=Priority.choices, blank=True)
+    floor_basis = models.JSONField(default=list)
+    missing = models.JSONField(default=list)
+    next_action = models.TextField(blank=True)
+    notes = models.JSONField(default=list)
+    ai_run = models.ForeignKey(
+        AITriageRun, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    digest = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [models.Index(fields=["case", "case_revision"])]
+
+
+class CaseTriage(models.Model):
+    """M06 state beside the revisioned case: facts people confirmed, the priority levels kept
+    apart (B.4) and the current proposal. Rule-derived values here change without a revision."""
+
+    case = models.OneToOneField(
+        Case, primary_key=True, on_delete=models.PROTECT, related_name="triage"
+    )
+    # name -> {"value", "by", "at", "reason"}; people's facts win over AI and keyword flags.
+    staff_facts = models.JSONField(default=dict, blank=True)
+    suggested_priority = models.CharField(max_length=2, choices=Priority.choices, blank=True)
+    priority_floor = models.CharField(max_length=2, choices=Priority.choices, blank=True)
+    confirmed_priority = models.CharField(max_length=2, choices=Priority.choices, blank=True)
+    # The owner division when the level was confirmed: a new owner confirms again before
+    # completing triage (Q3), while the earlier level keeps the case's place in the queue.
+    confirmed_division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # An authority exception waives one floor for one basis: {"floor", "basis", "by", "at", ...}.
+    floor_exception = models.JSONField(default=dict, blank=True)
+    # What queues use: the higher of confirmed and floor; empty = รอคัดกรอง.
+    effective_priority = models.CharField(max_length=2, choices=Priority.choices, blank=True)
+    current_recommendation = models.ForeignKey(
+        Recommendation, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    policy_change_pending = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class Handoff(models.Model):
+    """การส่งต่อเรื่อง: the owner stays until the target accepts (B.3)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอตอบรับ"
+        ACCEPTED = "accepted", "ตอบรับแล้ว"
+        DECLINED = "declined", "ไม่ตอบรับ"
+        WITHDRAWN = "withdrawn", "ปิดเพื่อให้ผู้ประสานตัดสิน"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="handoffs")
+    from_division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    to_division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    reason_category = models.CharField(max_length=32, blank=True)
+    reason = models.TextField(blank=True)
+    recommendation = models.ForeignKey(
+        Recommendation, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    requested_at = models.DateTimeField()
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case"], condition=Q(status="pending"), name="handoff_one_pending_per_case"
+            ),
+            models.CheckConstraint(
+                name="handoff_changes_division",
+                condition=~Q(from_division=models.F("to_division")),
+            ),
+        ]
+
+
+class RoutingReview(models.Model):
+    """A routing decision by a coordinator with authority (การตัดสินเส้นทาง)."""
+
+    class Trigger(models.TextChoices):
+        DISPUTE = "dispute", "ข้อโต้แย้งเส้นทาง"
+        REQUESTED = "requested", "ขอผู้ประสานตัดสิน"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "รอผู้ประสานตัดสิน"
+        DECIDED = "decided", "ตัดสินแล้ว"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="routing_reviews")
+    trigger = models.CharField(max_length=16, choices=Trigger.choices)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    attempted_division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    opened_at = models.DateTimeField()
+    reason = models.TextField(blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    chosen_division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    decision_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case"], condition=Q(status="open"), name="routing_review_one_open_per_case"
+            )
+        ]
+
+
+class AckClock(models.Model):
+    """Time to respond (B.3/B.4): intake (submitted → triage started) and handoff (requested →
+    accepted/declined). Synthetic durations from the active policy; never an official SLA."""
+
+    class Kind(models.TextChoices):
+        INTAKE = "intake", "รอเริ่มคัดกรอง"
+        HANDOFF = "handoff", "รอตอบรับการส่งต่อ"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="ack_clocks")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    handoff = models.OneToOneField(
+        Handoff, null=True, blank=True, on_delete=models.PROTECT, related_name="clock"
+    )
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    started_at = models.DateTimeField()
+    priority = models.CharField(max_length=4, blank=True)
+    due_at = models.DateTimeField()
+    escalate_at = models.DateTimeField()
+    reminded_at = models.DateTimeField(null=True, blank=True)
+    escalated_at = models.DateTimeField(null=True, blank=True)
+    escalation_held_at = models.DateTimeField(null=True, blank=True)
+    hold_reason = models.CharField(max_length=200, blank=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case", "kind"],
+                condition=Q(stopped_at__isnull=True),
+                name="ack_clock_one_open_per_kind",
+            )
+        ]
+        indexes = [models.Index(fields=["stopped_at", "due_at"])]

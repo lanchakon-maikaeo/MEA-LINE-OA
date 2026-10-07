@@ -19,8 +19,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from operations.models import OutboxEvent, WebhookInbox
+from operations.orchestration import EVENT_CONVERSATION
 
-EVENT_CONVERSATION = "conversation.message_received"
 # Event types the conversation handles; others are kept but not dispatched.
 HANDLED = {"message", "postback", "follow", "unfollow", "join"}
 
@@ -92,6 +92,8 @@ def store_events(events):
                     correlation_id=uuid.uuid4(),
                     payload={"inbox_id": inbox.pk, "event_type": inbox.event_type},
                     occurred_at=inbox.occurred_at,
+                    # Turns run in event-time order even when LINE delivers out of order.
+                    next_attempt_at=min(inbox.occurred_at, now),
                 )
     return created
 

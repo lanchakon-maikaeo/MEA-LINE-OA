@@ -1,6 +1,15 @@
 from django import forms
+from django.contrib.auth import get_user_model
 
-from operations.models import District, Division, Role
+from operations.models import (
+    AIConfigVersion,
+    AICredential,
+    AIProfile,
+    AuthorityGrant,
+    District,
+    Division,
+    Role,
+)
 
 REASON = forms.CharField(label="เหตุผล", max_length=500, widget=forms.TextInput)
 
@@ -45,3 +54,126 @@ class RequesterCreateForm(forms.Form):
         label="เขต", queryset=District.objects.filter(is_active=True), to_field_name="code"
     )
     reason = forms.CharField(label="เหตุผล (เช่น ไม่ใช้ LINE)", max_length=500)
+
+
+class AICredentialForm(forms.Form):
+    name = forms.CharField(label="ชื่อ (เช่น thaillm)", max_length=64, initial="thaillm")
+    base_url = forms.CharField(
+        label="Base URL", max_length=200, initial="https://thaillm.or.th/api/v1"
+    )
+    api_key = forms.CharField(
+        label="API key (กรอกใหม่เท่านั้น ระบบไม่แสดงค่าเดิม)",
+        widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "off"}),
+    )
+    reason = forms.CharField(label="เหตุผล", max_length=500)
+
+
+class AIProfileForm(forms.Form):
+    credential = forms.ModelChoiceField(label="Credential", queryset=AICredential.objects.all())
+    model_id = forms.CharField(label="Model ID ตามผู้ให้บริการ", max_length=100)
+    timeout_seconds = forms.IntegerField(
+        label="Timeout (วินาที)", min_value=2, max_value=30, initial=10
+    )
+    max_tokens = forms.IntegerField(label="Max tokens", min_value=64, max_value=2048, initial=800)
+    temperature = forms.DecimalField(
+        label="Temperature", min_value=0, max_value=1, decimal_places=2, initial="0.10"
+    )
+    use_json_schema = forms.BooleanField(
+        label=(
+            "ให้ผู้ให้บริการบังคับ JSON schema (response_format) — เอาออกถ้าผู้ให้บริการไม่บังคับ "
+            "(เช่น OpenTyphoon) แล้วระบบจะใส่ schema ใน prompt แทน"
+        ),
+        required=False,
+        initial=True,
+    )
+
+
+class AIPresetForm(forms.Form):
+    pipeline = forms.ChoiceField(
+        label="รูปแบบการทำงานรอบโมเดล",
+        choices=AIConfigVersion.Pipeline.choices,
+        initial=AIConfigVersion.Pipeline.HARNESS,
+        widget=forms.RadioSelect,
+    )
+    use_json_schema = AIProfileForm.base_fields["use_json_schema"]
+
+
+class AIVersionForm(forms.Form):
+    task = forms.ChoiceField(
+        label="งานของ AI (แต่ละงานมีเกณฑ์ประเมินและรุ่นที่ใช้งานของตัวเอง)",
+        choices=AIConfigVersion.Task.choices,
+        initial=AIConfigVersion.Task.EXTRACT,
+        required=False,
+        widget=forms.RadioSelect,
+    )
+    primary = forms.ModelChoiceField(label="โมเดลหลัก", queryset=AIProfile.objects.all())
+    fallback_1 = forms.ModelChoiceField(
+        label="สำรอง 1", queryset=AIProfile.objects.all(), required=False
+    )
+    fallback_2 = forms.ModelChoiceField(
+        label="สำรอง 2", queryset=AIProfile.objects.all(), required=False
+    )
+    fallback_3 = forms.ModelChoiceField(
+        label="สำรอง 3", queryset=AIProfile.objects.all(), required=False
+    )
+    few_shot = forms.IntegerField(
+        label="จำนวนตัวอย่างที่ค้นมาใส่ prompt (0 = ไม่ใช้)", min_value=0, max_value=5, initial=0
+    )
+    pipeline = forms.ChoiceField(
+        label="รูปแบบการทำงานรอบโมเดล",
+        choices=AIConfigVersion.Pipeline.choices,
+        initial=AIConfigVersion.Pipeline.SINGLE,
+        widget=forms.RadioSelect,
+    )
+    screen_profile = forms.ModelChoiceField(
+        label="โมเดลคัดกรองข้อความสั่ง AI ก่อนสกัด (harness เท่านั้น ว่าง = โมเดลหลัก)",
+        queryset=AIProfile.objects.all(),
+        required=False,
+    )
+    note = forms.CharField(label="หมายเหตุ", max_length=500, required=False)
+
+    def profiles(self):
+        data = self.cleaned_data
+        return [
+            p
+            for p in (data["primary"], data["fallback_1"], data["fallback_2"], data["fallback_3"])
+            if p
+        ]
+
+
+DATETIME_LOCAL = ["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d"]
+
+
+class PolicyActivateForm(forms.Form):
+    approved_by_name = forms.CharField(label="ผู้รับรองกติกา (เจ้าของกติกา)", max_length=200)
+    approval_reference = forms.CharField(label="เลขเอกสารหรืออ้างอิงการรับรอง", max_length=200)
+    reason = forms.CharField(label="เหตุผล", max_length=500)
+
+
+class AuthorityGrantForm(forms.Form):
+    user = forms.ModelChoiceField(
+        label="ผู้ได้รับอำนาจ",
+        queryset=get_user_model()
+        .objects.filter(is_active=True, staff_profile__isnull=False)
+        .order_by("username"),
+    )
+    activity = forms.ChoiceField(label="กิจกรรม", choices=AuthorityGrant.Activity.choices)
+    division = forms.ModelChoiceField(
+        label="ขอบเขตกอง (ว่าง = ทุกกอง)",
+        queryset=Division.objects.filter(is_active=True),
+        required=False,
+    )
+    valid_from = forms.DateTimeField(
+        label="เริ่มมีผล (ว่าง = ตอนนี้)",
+        required=False,
+        input_formats=DATETIME_LOCAL,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    valid_until = forms.DateTimeField(
+        label="สิ้นสุด (ว่าง = ไม่กำหนด)",
+        required=False,
+        input_formats=DATETIME_LOCAL,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    approval_reference = forms.CharField(label="ผู้รับรองหรือเลขเอกสารอำนาจ", max_length=200)
+    reason = forms.CharField(label="เหตุผล", max_length=500)

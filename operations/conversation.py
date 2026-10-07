@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
 
 from operations import identity as identity_services
@@ -35,6 +35,7 @@ from operations.models import (
     Conversation,
     ConversationDraft,
     ConversationMessage,
+    Decision,
     District,
     EquipmentType,
     PostbackToken,
@@ -225,6 +226,9 @@ def _dispatch(inbox):
         return turn.replies, True
     turn.requester = requester
     _requester_turn(turn)
+    # Everything up to the end of this turn (including the user's own actions) has been seen.
+    conversation.updates_seen_at = timezone.now()
+    conversation.save(update_fields=["updates_seen_at", "updated_at"])
     return turn.replies, True
 
 
@@ -234,7 +238,7 @@ def _dispatch(inbox):
 def _event_text(turn):
     message = turn.event.get("message") or {}
     if turn.inbox.event_type == "message" and message.get("type") == "text":
-        return " ".join(str(message.get("text", "")).split())
+        return str(message.get("text", ""))
     return None
 
 
@@ -277,6 +281,7 @@ def _registration(turn):
         return
     text = _event_text(turn)
     if prompt == "reg_name" and text:
+        text = " ".join(text.split())
         if not 2 <= len(text) <= 200:
             turn.say("กรุณาพิมพ์ชื่อ-นามสกุล (2-200 ตัวอักษร)")
             return
@@ -333,6 +338,7 @@ def _requester_turn(turn):
     if expired.update(expiry_notified=True):
         turn.conversation.refresh_from_db()
         turn.say("ร่างเรื่องที่ไม่ได้ทำต่อเกิน 7 วันหมดอายุแล้ว")
+    _updates(turn)
     draft = turn.conversation.active_draft
     if draft is not None and draft.status != D.OPEN:
         draft = None
@@ -355,16 +361,50 @@ def _requester_turn(turn):
     if token is not None:
         return _token_action(turn, token, draft)
 
-    if text in MENU_WORDS:
-        return _static_postback(turn, MENU_WORDS[text], draft)
-    if text and CASE_NUMBER.match(text.upper()) and not _expects_text(draft):
-        return _case_detail(turn, text.upper())
+    command = " ".join(text.split()) if text is not None else None
+    if command in MENU_WORDS:
+        return _static_postback(turn, MENU_WORDS[command], draft)
+    if command and CASE_NUMBER.fullmatch(command.upper()) and not _expects_text(draft):
+        return _case_detail(turn, command.upper())
+    if text is not None and turn.conversation.prompt != "track":
+        from operations import ai_chat  # local: ai_chat builds on this module
+
+        if ai_chat.wants_ai(turn, draft, text):
+            return ai_chat.queue(turn, draft, text)
     if draft is not None and text is not None:
         return _draft_text(turn, draft, text)
     if turn.conversation.prompt == "track" and text:
         turn.say("ไม่พบเลขเรื่องในรูปแบบที่ถูกต้อง เช่น W69-000001")
         return
     _reprompt(turn, draft)
+
+
+def _updates(turn):
+    """Changes not pushed (C.2.3 'มีอัปเดตใหม่'): shown once, at the requester's next turn.
+
+    Only status changes count: handoffs, priorities and facts are internal (M06 Q10).
+    """
+    since = turn.conversation.updates_seen_at
+    if since is None:
+        return
+    status_changed = Decision.objects.filter(case=OuterRef("pk"), created_at__gt=since).exclude(
+        from_status=F("to_status")
+    )
+    changed = list(
+        services.visible_cases(_actor(turn))
+        .filter(Exists(status_changed))
+        .order_by("-updated_at")[:3]
+    )
+    lines = []
+    for case in changed:
+        line = f"{case.number} · {case.get_status_display()}"
+        if case.status == Case.Status.AWAITING_INFO:
+            asked = case.decisions.filter(action="request_info").order_by("-id").first()
+            if asked is not None:
+                line += f"\nเจ้าหน้าที่ขอข้อมูล: {asked.reason}"
+        lines.append(line)
+    if lines:
+        turn.say("มีอัปเดตใหม่\n" + "\n".join(lines))
 
 
 def _expects_text(draft):
@@ -747,6 +787,7 @@ def _parse_date(text):
 
 
 def _draft_text(turn, draft, text):
+    text = text.strip()
     step = draft.step
     data = draft.data
     if step == "item_search":
@@ -767,12 +808,18 @@ def _draft_text(turn, draft, text):
         return
     if step == "quantity":
         item = EquipmentType.objects.get(code=data["line"]["item_code"])
-        raw = text.translate(THAI_DIGITS).replace(",", "")
-        number = re.match(r"^\s*(\d+(?:\.\d+)?)", raw)
+        raw = text.translate(THAI_DIGITS)
+        number = re.fullmatch(
+            rf"\s*(\d+(?:,\d{{3}})*(?:\.\d+)?)\s*(?:{re.escape(item.unit)})?"
+            r"\s*(?:ครับ|ค่ะ|คะ)?\s*",
+            raw,
+        )
         try:
             if number is None:
                 raise CommandFailed(ErrorCode.VALIDATION_ERROR)
-            quantity = check_quantity_for_item(parse_quantity(number.group(1)), item)
+            quantity = check_quantity_for_item(
+                parse_quantity(number.group(1).replace(",", "")), item
+            )
         except CommandFailed:
             unit_rule = "ทศนิยมไม่เกิน 2 ตำแหน่ง" if item.is_divisible else "จำนวนเต็ม"
             turn.say(f"จำนวนไม่ถูกต้อง กรุณาพิมพ์ตัวเลขมากกว่า 0 เป็น{unit_rule}")
@@ -843,6 +890,9 @@ def _confirm(turn, draft):
             turn.say("ข้อมูลยังไม่ครบหรือไม่ถูกต้อง กรุณากรอกใหม่")
         return _ask(turn, draft)
     case = Case.objects.get(pk=result.case_id)
+    from operations import ai_chat  # local: ai_chat builds on this module
+
+    ai_chat.record_corrections(draft)
     _touch(draft, turn.now, status=D.SUBMITTED, case=case)
     Attachment.objects.filter(draft=draft).update(case=case)
     turn.conversation.active_draft = None

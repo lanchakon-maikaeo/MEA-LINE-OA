@@ -1,0 +1,115 @@
+{
+  "id": "faojRecovery0001",
+  "name": "FAOJ reminder-recovery v2",
+  "active": true,
+  "nodes": [
+    {
+      "id": "a7dc3a25-b6c5-563f-9c26-358d7d9c2054",
+      "name": "หมายเหตุ",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -260
+      ],
+      "parameters": {
+        "content": "## reminder-recovery v1\nEvery 15 minutes: Django reconciles LINE quota (hourly), raises budget alerts (50/80/95%/forecast) and reports the oldest waiting work and dead-letter count. Expired leases are re-claimed by the normal claim. Overdue-case reminders arrive with ServicePolicy (M06).",
+        "width": 420,
+        "height": 220
+      }
+    },
+    {
+      "id": "ef9e88b7-eaf1-5795-a38b-a70843312c5c",
+      "name": "ทุก 15 นาที",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8ee580f6-45a5-59fe-854a-ad8c91d130af",
+      "name": "Maintenance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://web:8000/internal/v1/maintenance",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "faojDjangoToken1",
+          "name": "Django internal token"
+        }
+      }
+    },
+    {
+      "id": "b5c5b2af-1eca-5a6e-99c2-50e2fc84152f",
+      "name": "สั่งทำงานเดี๋ยวนี้",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "ทุก 15 นาที": {
+      "main": [
+        [
+          {
+            "node": "Maintenance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "สั่งทำงานเดี๋ยวนี้": {
+      "main": [
+        [
+          {
+            "node": "Maintenance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "versionId": "be67651a-8f5c-52b2-8fe0-d9eb9fc6808f",
+  "pinData": {},
+  "meta": {
+    "faojVersion": 2
+  },
+  "tags": []
+}

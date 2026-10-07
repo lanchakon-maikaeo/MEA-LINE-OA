@@ -3,7 +3,7 @@ UV = $(PYTHON) -m uv
 ENV_FILE = $(if $(wildcard .env),--env-file .env,)
 RUN = $(UV) run --locked $(ENV_FILE)
 
-.PHONY: bootstrap guard db migrate seed-demo dev line-worker clamav tunnel check test test-module test-e2e security ci build smoke down
+.PHONY: bootstrap guard db migrate seed-demo dev line-worker clamav n8n n8n-import eval-ai tunnel check test test-module test-e2e security ci build smoke down
 bootstrap:
 	$(PYTHON) scripts/bootstrap_env.py
 	$(UV) sync --locked
@@ -23,17 +23,30 @@ seed-demo: guard
 	$(RUN) python manage.py load_districts
 	$(RUN) python manage.py seed_demo_units
 	$(RUN) python manage.py seed_demo_cases
+	$(RUN) python manage.py load_ai_examples
 
 dev: db migrate
 	$(RUN) python manage.py runserver 127.0.0.1:8000
 
 # Local/staging LINE turns and file scans until n8n (M04); webhook needs a public HTTPS URL.
-# Runs in the web container so attachments share its private-media volume and reach clamav.
+# The worker service (Compose) runs chat turns; this follows its log.
 line-worker:
-	docker compose exec web /app/.venv/bin/python manage.py process_line_inbox
+	docker compose logs -f worker
 
 clamav:
 	docker compose up -d clamav
+
+n8n:
+	docker compose up -d --wait n8n
+
+# Re-import the Django credential and workflows/n8n/*.json, publish active ones, restart n8n.
+n8n-import:
+	docker compose run --rm n8n-import
+	docker compose restart n8n
+
+# Held-out AI evaluation against the real provider API (not part of make ci).
+eval-ai:
+	$(RUN) python manage.py eval_ai $(if $(VERSION),--config-version $(VERSION),) $(if $(LIMIT),--limit $(LIMIT),) $(if $(DATASET),--dataset $(DATASET),) $(if $(PRIMARY_ONLY),--primary-only,)
 
 tunnel:
 	cloudflared tunnel --url http://127.0.0.1:8000

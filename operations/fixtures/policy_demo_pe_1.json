@@ -1,0 +1,33 @@
+{
+  "code": "DEMO-PE-1",
+  "is_synthetic": true,
+  "title": "กติกาจำลองการส่งเข้ากองและระดับความเร่งด่วน (B.3-B.4)",
+  "note": "ข้อมูลจำลองสำหรับต้นแบบ ไม่ใช่ผังองค์กร ระเบียบ หรือ SLA ทางการของ ฝอจ. ระยะเวลาเป็นค่าทดสอบที่เจ้าของบริการต้องกำหนดใหม่",
+  "effective_from": "2026-10-01T00:00:00+07:00",
+  "effective_until": null,
+  "units": {"intake": "SIM-TRIAGE", "coordinator": "SIM-SUPERVISOR", "registry": "SIM-REG"},
+  "responsibility": [
+    {"rule": "R01", "kinds": ["withdrawal"], "category": "meter", "owner": "SIM-MTR"},
+    {"rule": "R02", "kinds": ["withdrawal"], "category": "transformer", "owner": "SIM-TRF"},
+    {"rule": "R03", "kinds": ["withdrawal", "return", "problem"], "items": ["FUSE_SYN_A", "CB_SYN_A", "CBL_SYN_A"], "owner": "SIM-EQP"},
+    {"rule": "R04", "kinds": ["return"], "category": "meter", "owner": "SIM-MTR"},
+    {"rule": "R04", "kinds": ["return"], "category": "transformer", "owner": "SIM-TRF"},
+    {"rule": "R05", "kinds": ["problem"], "category": "meter", "owner": "SIM-MTR"},
+    {"rule": "R05", "kinds": ["problem"], "category": "transformer", "owner": "SIM-TRF"}
+  ],
+  "priority": {
+    "floors": {"hazard_reported": "P0"},
+    "ack_minutes": {"P0": 15, "P1": 120, "P2": 480, "P3": 1440, "none": 1440},
+    "remind_after": 1,
+    "escalate_after": 2
+  },
+  "hazard_terms": ["ไฟไหม้", "ไฟลุก", "ไหม้", "ควัน", "ประกายไฟ", "สะเก็ดไฟ", "ไฟช็อต", "ช็อต", "ไฟดูด", "ไฟรั่ว", "สายขาด", "ขาดห้อย", "ระเบิด", "น้ำมันรั่ว", "น้ำมันซึม", "ร้อนจัด", "กลิ่นไหม้", "เสาล้ม", "จะล้ม", "อันตราย", "บาดเจ็บ"],
+  "negations": ["ไม่มี", "ไม่ได้", "ไม่พบ", "ไม่เห็น", "ไม่"],
+  "handoff_reasons": {
+    "new_evidence": "ข้อมูลหน้างานใหม่",
+    "wrong_division": "ส่งผิดกอง",
+    "resource_limit": "ข้อจำกัดทรัพยากร",
+    "different_order": "ลำดับงานต่าง",
+    "outdated_rule": "กติกาล้าสมัย"
+  }
+}

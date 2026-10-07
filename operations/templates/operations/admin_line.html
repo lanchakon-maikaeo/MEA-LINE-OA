@@ -1,0 +1,31 @@
+{% extends "operations/admin_base.html" %}
+{% block content %}
+<h1>LINE งบข้อความ และงานค้าง</h1>
+<h2>งบการแจ้งเตือน (push) เดือนนี้</h2>
+<ul>
+  <li>ใช้แล้ว <strong>{{ state.used }}</strong> จากงบ {{ state.budget }} ({{ state.percent }}%) · tier {{ state.tier }}{% if state.limit_reached %} · LINE แจ้งว่าโควตาเต็ม{% endif %}</li>
+  <li>คาดการณ์สิ้นเดือน {{ state.forecast }} ข้อความ</li>
+  <li>ส่ง push: {{ push_enabled|yesno:"เปิด,ปิด (นอก production หรือยังไม่ตั้งค่า)" }}</li>
+  <li>ยอดจาก LINE ล่าสุด: {% if snapshot.checked_at %}{{ snapshot.usage }} / {{ snapshot.quota|default:"ไม่จำกัด" }} เมื่อ {{ snapshot.checked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เคยตรวจ{% endif %}{% if snapshot.alerted_levels %} · แจ้งเตือนแล้ว: {{ snapshot.alerted_levels|join:", " }}{% endif %}</li>
+</ul>
+<h2>การแจ้งเตือนที่ไม่ได้ส่งหรือไม่ทราบผล</h2>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">เมื่อ</th><th scope="col">เรื่อง</th><th scope="col">ชนิด</th><th scope="col">สถานะ</th><th scope="col">รายละเอียด</th></tr></thead>
+  <tbody>
+  {% for d in held %}
+    <tr><td>{{ d.created_at|date:"Y-m-d H:i" }}</td><td>{{ d.case.number|default:"-" }}</td><td>{{ d.kind }} ({{ d.get_level_display }})</td><td>{{ d.get_status_display }}</td><td>{{ d.detail }}</td></tr>
+  {% empty %}<tr><td colspan="5">ไม่มี</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+<h2>งานค้างและ dead-letter</h2>
+<p>รออยู่นานสุดต่อชนิดงาน (วินาที): {% for type, age in health.oldest_pending_seconds.items %}{{ type }} {{ age }}{% if not forloop.last %}, {% endif %}{% empty %}ไม่มีงานค้าง{% endfor %}</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">#</th><th scope="col">ชนิด</th><th scope="col">ครั้งที่ลอง</th><th scope="col">ข้อผิดพลาดล่าสุด</th><th scope="col">ลองใหม่</th></tr></thead>
+  <tbody>
+  {% for e in dead %}
+    <tr><td>{{ e.pk }}</td><td>{{ e.event_type }}</td><td>{{ e.attempts }}</td><td>{{ e.last_error }}</td>
+      <td><form class="inline" method="post" action="{% url 'admin-requeue' e.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ส่งกลับเข้าคิว</button></form></td></tr>
+  {% empty %}<tr><td colspan="5">ไม่มีงานใน dead-letter</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

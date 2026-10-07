@@ -75,7 +75,11 @@ SESSION_COOKIE_SECURE = SECURE_ENVIRONMENT
 CSRF_COOKIE_SECURE = SECURE_ENVIRONMENT
 SECURE_SSL_REDIRECT = SECURE_ENVIRONMENT
 # Only minimal health responses may be probed over HTTP inside the container network.
-SECURE_REDIRECT_EXEMPT = [r"^health/(live|ready)/$"]
+SECURE_REDIRECT_EXEMPT = [
+    r"^health/(live|ready)/$",
+    # n8n calls Django over the internal Compose network; the proxy must not expose /internal/.
+    r"^internal/v1/",
+]
 SECURE_HSTS_SECONDS = 31536000 if SECURE_ENVIRONMENT else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_ENVIRONMENT
 SECURE_HSTS_PRELOAD = SECURE_ENVIRONMENT
@@ -102,3 +106,29 @@ ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 ATTACHMENTS_PER_DRAFT = 10
 CLAMAV_HOST = os.environ.get("CLAMAV_HOST", "127.0.0.1")
 CLAMAV_PORT = int(os.environ.get("CLAMAV_PORT") or 53310)
+
+# --- Orchestration and message budget (M04) ---------------------------------------------------
+# Bearer token n8n uses for /internal/v1/ (scoped: claim/renew/complete/fail/send/maintenance).
+ORCHESTRATOR_TOKEN = os.environ.get("ORCHESTRATOR_TOKEN", "")
+# Push is off outside production unless explicitly enabled; one OA serves every environment.
+LINE_PUSH_ENABLED = os.environ.get("LINE_PUSH_ENABLED", "").lower() == "true" or (
+    APP_ENV == "production" and os.environ.get("LINE_PUSH_ENABLED", "").lower() != "false"
+)
+LINE_PUSH_MONTHLY_BUDGET = int(os.environ.get("LINE_PUSH_MONTHLY_BUDGET") or 300)
+LINE_PUSH_NONPRODUCTION_CAP = 10
+LINE_PUSH_CRITICAL_RESERVE_PERCENT = int(os.environ.get("LINE_PUSH_CRITICAL_RESERVE_PERCENT") or 20)
+LINE_PUSH_DEBOUNCE_MINUTES = int(os.environ.get("LINE_PUSH_DEBOUNCE_MINUTES") or 10)
+
+# --- AI (M05) ------------------------------------------------------------------------------
+AI_ENABLED = os.environ.get("AI_ENABLED", "false").lower() == "true"
+# Fernet key for API keys stored in the DB; kept outside the database.
+AI_SECRET_KEY = os.environ.get("AI_SECRET_KEY", "")
+AI_ALLOWED_HOSTS = frozenset(
+    h.strip().lower()
+    for h in os.environ.get("AI_ALLOWED_HOSTS", "thaillm.or.th,api.opentyphoon.ai").split(",")
+    if h.strip()
+)
+AI_TOTAL_BUDGET_SECONDS = 25
+AI_REPLY_FALLBACK_SECONDS = 35
+# Harness pipeline: start the next model in parallel when the current one is this slow.
+AI_HEDGE_AFTER_SECONDS = float(os.environ.get("AI_HEDGE_AFTER_SECONDS", "6"))

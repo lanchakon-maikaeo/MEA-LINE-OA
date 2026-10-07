@@ -132,6 +132,31 @@ class StaffScopeTests(IdentityTestCase):
 
 
 class AdminGuardTests(IdentityTestCase):
+    def test_account_management_cannot_bypass_developer_role(self):
+        original = self.root.password
+        actions = (
+            lambda: identity.reset_password(self.admin, self.root, "reset"),
+            lambda: identity.set_staff_active(self.admin, self.root, False, "suspend"),
+            lambda: identity.revoke_sessions(self.admin, self.root, "revoke"),
+            lambda: identity.revoke_role(
+                self.admin, RoleGrant.objects.get(user=self.root, role=Role.ADMIN), "revoke"
+            ),
+        )
+        for action in actions:
+            with self.subTest(action=action), self.assertRaises(PermissionDenied):
+                action()
+        self.root.refresh_from_db()
+        self.assertEqual(self.root.password, original)
+        self.assertFalse(AuditEvent.objects.filter(action="staff.password_reset").exists())
+        dormant = make_staff("dormant", (Role.DEVELOPER_ADMIN, None))
+        with self.assertRaises(PermissionDenied):
+            identity.reset_password(self.admin, dormant, "reset")
+        with self.assertRaises(PermissionDenied):
+            identity.grant_role(self.admin, dormant, Role.ADMIN)
+        password = identity.reset_password(self.root, self.root, "own account")
+        self.root.refresh_from_db()
+        self.assertTrue(self.root.check_password(password))
+
     def test_only_admins_change_accounts(self):
         for actor in (self.meter, self.norole):
             with self.subTest(actor=actor.username), self.assertRaises(PermissionDenied):
@@ -164,9 +189,9 @@ class AdminGuardTests(IdentityTestCase):
         root_dev = RoleGrant.objects.get(user=self.root, role=Role.DEVELOPER_ADMIN)
         with self.assertRaises(ValidationError):
             identity.revoke_role(self.root, root_dev, "ไม่ใช้แล้ว")
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(PermissionDenied):
             identity.revoke_role(self.admin, root_admin, "ไม่ใช้แล้ว")
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(PermissionDenied):
             identity.set_staff_active(self.admin, self.root, False, "ไม่ใช้แล้ว")
         admin_grant = RoleGrant.objects.get(user=self.admin, role=Role.ADMIN)
         identity.revoke_role(self.root, admin_grant, "เหลือผู้ดูแลคนเดียว")

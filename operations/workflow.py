@@ -2,7 +2,8 @@
 
 Every action lists, per case kind, the statuses it may start from and the statuses it may lead
 to. Actions owned by later modules are part of the matrix but disabled until that module
-implements their guards; services refuse them instead of pretending success.
+implements their guards; services refuse them instead of pretending success. M06 enables
+routing, handoff and priority decisions (operations/routing.py).
 """
 
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ OPEN = frozenset(set(S) - TERMINAL)
 
 # Placeholder target: return to the status recorded when the case was paused.
 RESUME = "resume"
+ENABLED_MODULES = frozenset({"M02", "M06"})
 
 
 @dataclass(frozen=True)
@@ -43,7 +45,7 @@ class ActionSpec:
 
     @property
     def enabled(self):
-        return self.module == "M02"
+        return self.module in ENABLED_MODULES
 
     def targets(self, kind, status):
         return self.transitions.get(kind, {}).get(status, frozenset())
@@ -131,13 +133,44 @@ ACTIONS = {
             },
         ),
         ActionSpec(
-            "request_handoff", "ขอส่งต่อกอง", "M06", _per_kind(lambda k, st: _same(_working(st)))
+            "request_handoff", "ส่งต่อเรื่อง", "M06", _per_kind(lambda k, st: _same(_working(st)))
         ),
         ActionSpec(
             "accept_handoff", "ตอบรับงาน", "M06", _per_kind(lambda k, st: _same(_working(st)))
         ),
         ActionSpec(
-            "decline_handoff", "ไม่ตอบรับงาน", "M06", _per_kind(lambda k, st: _same(_working(st)))
+            "decline_handoff",
+            "ไม่ตอบรับงาน",
+            "M06",
+            _per_kind(lambda k, st: _same(_working(st))),
+            reason_required=True,
+        ),
+        ActionSpec(
+            "request_routing_decision",
+            "ขอผู้ประสานตัดสิน",
+            "M06",
+            _per_kind(lambda k, st: _same(_working(st))),
+            reason_required=True,
+        ),
+        ActionSpec(
+            "decide_routing",
+            "ตัดสินเส้นทาง",
+            "M06",
+            _per_kind(lambda k, st: _same(_working(st))),
+            reason_required=True,
+        ),
+        ActionSpec(
+            "set_priority",
+            "ยืนยันระดับความเร่งด่วน",
+            "M06",
+            _per_kind(lambda k, st: _same(_working(st))),
+        ),
+        ActionSpec(
+            "record_facts",
+            "ยืนยัน/แก้ข้อเท็จจริง",
+            "M06",
+            _per_kind(lambda k, st: _same(_working(st))),
+            reason_required=True,
         ),
         ActionSpec(
             "approve",

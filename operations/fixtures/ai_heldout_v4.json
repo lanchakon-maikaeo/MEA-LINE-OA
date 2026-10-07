@@ -1,0 +1,848 @@
+{
+ "version": "heldout-v4",
+ "note": "Fourth synthetic held-out set, written and frozen (SHA-256 in PROJECT.md) before temperature 0, the JSON format repair and the OpenTyphoon fallback were implemented. Disjoint from every earlier set. Staff should review before production.",
+ "catalog": [
+  {
+   "code": "MTR_SYN_A",
+   "name": "มิเตอร์ไฟฟ้ารุ่นจำลอง A",
+   "unit": "เครื่อง",
+   "category": "meter",
+   "serialized": true,
+   "divisible": false
+  },
+  {
+   "code": "TRF_SYN_A",
+   "name": "หม้อแปลงรุ่นจำลอง A",
+   "unit": "เครื่อง",
+   "category": "transformer",
+   "serialized": true,
+   "divisible": false
+  },
+  {
+   "code": "FUSE_SYN_A",
+   "name": "ฟิวส์รุ่นจำลอง A",
+   "unit": "ชิ้น",
+   "category": "other",
+   "serialized": false,
+   "divisible": false
+  },
+  {
+   "code": "CB_SYN_A",
+   "name": "เบรกเกอร์รุ่นจำลอง A",
+   "unit": "ชิ้น",
+   "category": "other",
+   "serialized": false,
+   "divisible": false
+  },
+  {
+   "code": "CBL_SYN_A",
+   "name": "สายไฟรุ่นจำลอง A",
+   "unit": "เมตร",
+   "category": "other",
+   "serialized": false,
+   "divisible": true
+  }
+ ],
+ "cases": [
+  {
+   "id": "F01",
+   "text": "เบิกฟิวส์ 12 ชิ้นครับ แล้วก็เบรกเกอร์ที่ส่งมาอาทิตย์ก่อนมีรอยแตก",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       "12"
+      ]
+     ]
+    },
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "CB_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F02",
+   "text": "ขอส่งมิเตอร์คืน 2 เครื่อง พร้อมขอสายไฟ 45 เมตร",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "MTR_SYN_A",
+       "2"
+      ]
+     ]
+    },
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CBL_SYN_A",
+       "45"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F03",
+   "text": "หม้อแปลงลูกที่ซอย 5 ดับบ่อย ขอเบิกฟิวส์สำรอง 10 ชิ้น",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "TRF_SYN_A",
+       null
+      ]
+     ]
+    },
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       "10"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F04",
+   "text": "คืนเบรกเกอร์ 6 ชิ้นที่เหลือ ส่วนมิเตอร์รอบล่าสุดมาไม่ครบ",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "CB_SYN_A",
+       "6"
+      ]
+     ]
+    },
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "MTR_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F05",
+   "text": "ขอมิเตอร์ 3 เครื่อง สายไฟอีก 20 เมตร และแจ้งว่าฟิวส์ที่ได้มาขนาดผิด",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "MTR_SYN_A",
+       "3"
+      ],
+      [
+       "CBL_SYN_A",
+       "20"
+      ]
+     ]
+    },
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F06",
+   "text": "สายไฟม้วนที่ได้รับฉนวนบวม คืนให้ 15 เมตร",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "CBL_SYN_A",
+       null
+      ]
+     ]
+    },
+    {
+     "intent": "return",
+     "items": [
+      [
+       "CBL_SYN_A",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F07",
+   "text": "ขอหม้อแปลง 1 เครื่อง ส่วนเบรกเกอร์ 2 ชิ้นที่ยืมไปจะส่งคืนพรุ่งนี้",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "TRF_SYN_A",
+       "1"
+      ]
+     ]
+    },
+    {
+     "intent": "return",
+     "items": [
+      [
+       "CB_SYN_A",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F08",
+   "text": "มิเตอร์ที่ติดตั้งใหม่ค่าไม่ขึ้น ขอเบิกมาเปลี่ยนอีก 2 เครื่อง",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "MTR_SYN_A",
+       null
+      ]
+     ]
+    },
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "MTR_SYN_A",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F09",
+   "text": "ฟิวส์ล็อตใหม่หลวมใส่ไม่แน่น และคืนสายไฟเหลือ 9 เมตร",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       null
+      ]
+     ]
+    },
+    {
+     "intent": "return",
+     "items": [
+      [
+       "CBL_SYN_A",
+       "9"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F10",
+   "text": "เบิกเบรกเกอร์ 5 ชิ้น แจ้งด้วยว่าหม้อแปลงที่ได้รับยังไม่มีป้ายชื่อ",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CB_SYN_A",
+       "5"
+      ]
+     ]
+    },
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "TRF_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "mixed"
+   ]
+  },
+  {
+   "id": "F11",
+   "text": "สั่งฟิวส์ 30 ชิ้น มาถึงแค่ 25",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "problem-number"
+   ]
+  },
+  {
+   "id": "F12",
+   "text": "มิเตอร์ 4 เครื่องที่รับมาเมื่อเช้า หน้าจอขึ้น error ทุกเครื่อง",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "MTR_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "problem-number"
+   ]
+  },
+  {
+   "id": "F13",
+   "text": "เบรกเกอร์ 10 ชิ้น ใช้ได้แค่ 7",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "CB_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "problem-number"
+   ]
+  },
+  {
+   "id": "F14",
+   "text": "สายไฟ 100 เมตรที่ส่งมา ขาดเป็นท่อน ๆ",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "CBL_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "problem-number"
+   ]
+  },
+  {
+   "id": "F15",
+   "text": "รอหม้อแปลง 2 เครื่องมาสามสัปดาห์แล้ว",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "TRF_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "problem-number"
+   ]
+  },
+  {
+   "id": "F16",
+   "text": "ได้ฟิวส์มาเกิน 5 ชิ้น ไม่ได้สั่ง",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "problem-number"
+   ]
+  },
+  {
+   "id": "F17",
+   "text": "ขอเบิกฟิวส์ 8 ชิ้นแทนตัวที่ไหม้ไปเมื่อคืน",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       "8"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-purpose"
+   ]
+  },
+  {
+   "id": "F18",
+   "text": "ต้องการสายไฟ 30 เมตรเปลี่ยนเส้นที่ชำรุด",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CBL_SYN_A",
+       "30"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-purpose"
+   ]
+  },
+  {
+   "id": "F19",
+   "text": "ขอมิเตอร์ 1 เครื่องแทนเครื่องที่อ่านค่าเพี้ยน",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "MTR_SYN_A",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-purpose"
+   ]
+  },
+  {
+   "id": "F20",
+   "text": "เบิกเบรกเกอร์ 4 ชิ้นไปแทนตัวที่ตัดบ่อย",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CB_SYN_A",
+       "4"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-purpose"
+   ]
+  },
+  {
+   "id": "F21",
+   "text": "ขอหม้อแปลงสำรอง 1 เครื่อง เผื่อลูกเดิมเสียอีก",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "TRF_SYN_A",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-purpose"
+   ]
+  },
+  {
+   "id": "F22",
+   "text": "ส่งคืนฟิวส์ที่ขาดแล้ว 15 ชิ้น",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       "15"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-return"
+   ]
+  },
+  {
+   "id": "F23",
+   "text": "คืนมิเตอร์เสีย 3 เครื่องที่ถอดจากหน้างาน",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "MTR_SYN_A",
+       "3"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-return"
+   ]
+  },
+  {
+   "id": "F24",
+   "text": "นำเบรกเกอร์ชำรุด 2 ชิ้นมาคืนคลัง",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "CB_SYN_A",
+       "2"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-return"
+   ]
+  },
+  {
+   "id": "F25",
+   "text": "ส่งหม้อแปลงที่ไหม้กลับคลัง 1 เครื่อง",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "TRF_SYN_A",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "fault-word-return"
+   ]
+  },
+  {
+   "id": "F26",
+   "text": "เบิกมิเตอร์ 7 เครื่องค่ะ",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "MTR_SYN_A",
+       "7"
+      ]
+     ]
+    }
+   ],
+   "tags": []
+  },
+  {
+   "id": "F27",
+   "text": "ขอสายไฟ 12.25 เมตร",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CBL_SYN_A",
+       "12.25"
+      ]
+     ]
+    }
+   ],
+   "tags": []
+  },
+  {
+   "id": "F28",
+   "text": "คืนหม้อแปลง 1 เครื่อง สภาพดี",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "TRF_SYN_A",
+       "1"
+      ]
+     ]
+    }
+   ],
+   "tags": []
+  },
+  {
+   "id": "F29",
+   "text": "ส่งคืนเบรกเกอร์ ๔ ชิ้น",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "CB_SYN_A",
+       "4"
+      ]
+     ]
+    }
+   ],
+   "tags": []
+  },
+  {
+   "id": "F30",
+   "text": "หม้อแปลงที่ได้รับมีน้ำมันหยด",
+   "expected": [
+    {
+     "intent": "problem",
+     "items": [
+      [
+       "TRF_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": []
+  },
+  {
+   "id": "F31",
+   "text": "อยากได้ฟิวส์ยี่สิบชิ้น",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       null
+      ]
+     ]
+    }
+   ],
+   "tags": []
+  },
+  {
+   "id": "F32",
+   "text": "ขอเบิกฟิวส์ 60 ชิ้นใช้งานเดือนหน้า",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       "60"
+      ]
+     ]
+    }
+   ],
+   "tags": []
+  },
+  {
+   "id": "F33",
+   "text": "เพิ่มเป็น 4 เครื่องครับ",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "MTR_SYN_A",
+       "4"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "correction"
+   ],
+   "draft": {
+    "intent": "withdrawal",
+    "items": [
+     {
+      "item_code": "MTR_SYN_A",
+      "quantity": "2"
+     }
+    ],
+    "fields": {}
+   }
+  },
+  {
+   "id": "F34",
+   "text": "จริง ๆ คืน 6.5 เมตร",
+   "expected": [
+    {
+     "intent": "return",
+     "items": [
+      [
+       "CBL_SYN_A",
+       "6.5"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "correction"
+   ],
+   "draft": {
+    "intent": "return",
+    "items": [
+     {
+      "item_code": "CBL_SYN_A",
+      "quantity": "10"
+     }
+    ],
+    "fields": {}
+   }
+  },
+  {
+   "id": "F35",
+   "text": "ขอ 5 ชิ้นแทน",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "CB_SYN_A",
+       "5"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "correction"
+   ],
+   "draft": {
+    "intent": "withdrawal",
+    "items": [
+     {
+      "item_code": "CB_SYN_A",
+      "quantity": "3"
+     }
+    ],
+    "fields": {}
+   }
+  },
+  {
+   "id": "F36",
+   "text": "ลดเหลือ 12",
+   "expected": [
+    {
+     "intent": "withdrawal",
+     "items": [
+      [
+       "FUSE_SYN_A",
+       "12"
+      ]
+     ]
+    }
+   ],
+   "tags": [
+    "correction"
+   ],
+   "draft": {
+    "intent": "withdrawal",
+    "items": [
+     {
+      "item_code": "FUSE_SYN_A",
+      "quantity": "20"
+     }
+    ],
+    "fields": {}
+   }
+  },
+  {
+   "id": "F37",
+   "text": "สวัสดีค่ะ",
+   "expected": [],
+   "tags": [
+    "unknown"
+   ]
+  },
+  {
+   "id": "F38",
+   "text": "ขอสอบถามสถานะเรื่อง W69-000123",
+   "expected": [],
+   "tags": [
+    "unknown"
+   ]
+  },
+  {
+   "id": "F39",
+   "text": "ได้รับของแล้ว ขอบคุณครับ",
+   "expected": [],
+   "tags": [
+    "unknown"
+   ]
+  },
+  {
+   "id": "F40",
+   "text": "คลังอยู่ชั้นไหนครับ",
+   "expected": [],
+   "tags": [
+    "unknown"
+   ]
+  }
+ ]
+}

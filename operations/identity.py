@@ -5,6 +5,7 @@ next request of sessions that are already open. Callers never pass roles or dist
 """
 
 import secrets
+import uuid
 from dataclasses import dataclass, field
 
 from django.contrib.auth import get_user_model
@@ -13,6 +14,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from operations import orchestration
 from operations.models import (
     DIVISION_ROLES,
     GLOBAL_ROLES,
@@ -20,6 +22,7 @@ from operations.models import (
     ChannelIdentity,
     District,
     Division,
+    OutboxEvent,
     RegistrationRequest,
     Requester,
     Role,
@@ -166,6 +169,14 @@ def _require_admin_locked(actor, locked):
         raise PermissionDenied("Admin permission required.")
 
 
+def _require_account_admin(actor, user, locked):
+    """A password reset or reactivation must not bypass the developer-role boundary."""
+    _require_admin_locked(actor, locked)
+    if any(u == user.pk and role == Role.DEVELOPER_ADMIN for u, role, _ in locked):
+        if (actor.pk, Role.DEVELOPER_ADMIN, True) not in locked:
+            raise PermissionDenied("Only a developer-admin can manage this account.")
+
+
 def _ensure_admins_remain(locked, removing_user_id=None, removing_role=None):
     """Raise if the change would leave no active admin or developer-admin."""
     remaining = [
@@ -213,6 +224,10 @@ def grant_role(actor, user, role, division=None, reason=""):
         raise ValidationError("Global roles cannot be scoped to a division.")
     if role in DIVISION_ROLES and (division is None or not division.is_active):
         raise ValidationError("Division roles need an active division.")
+    locked = _lock_active_admins()
+    _require_account_admin(actor, user, locked)
+    if role == Role.DEVELOPER_ADMIN and (actor.pk, Role.DEVELOPER_ADMIN, True) not in locked:
+        raise PermissionDenied("Only a developer-admin can grant developer-admin.")
     user = User.objects.select_for_update().get(pk=user.pk)
     if not user.is_active:
         raise ValidationError("Cannot grant roles to a suspended account.")
@@ -246,6 +261,7 @@ def revoke_role(actor, grant, reason):
     locked = _lock_active_admins()
     _require_admin_locked(actor, locked)
     grant = RoleGrant.objects.select_for_update().get(pk=grant.pk)
+    _require_account_admin(actor, grant.user, locked)
     if grant.revoked_at is not None:
         raise ValidationError("Role is already revoked.")
     if grant.role in GLOBAL_ROLES:
@@ -307,7 +323,7 @@ def set_staff_active(actor, user, active, reason):
     reason = _require_reason(reason)
     require_admin(actor)
     locked = _lock_active_admins()
-    _require_admin_locked(actor, locked)
+    _require_account_admin(actor, user, locked)
     user = User.objects.select_for_update().get(pk=user.pk)
     if user.is_active == active:
         raise ValidationError("Account already has this status.")
@@ -323,6 +339,7 @@ def set_staff_active(actor, user, active, reason):
 def revoke_sessions(actor, user, reason):
     reason = _require_reason(reason)
     require_admin(actor)
+    _require_account_admin(actor, user, _lock_active_admins())
     _end_sessions(user)
     audit(actor, "staff.sessions_revoked", user, reason)
 
@@ -332,6 +349,8 @@ def reset_password(actor, user, reason):
     """Admin-initiated reset: one-time password, forced change, and all sessions ended."""
     reason = _require_reason(reason)
     require_admin(actor)
+    _require_account_admin(actor, user, _lock_active_admins())
+    user = User.objects.select_for_update().get(pk=user.pk)
     password = _new_temporary_password()
     user.set_password(password)
     user.save(update_fields=["password"])
@@ -450,6 +469,18 @@ def registration_status(channel, external_id):
     )
 
 
+def _registration_event(registration):
+    """Dispatch intent for the registration-result notification (planned by the worker, M04)."""
+    OutboxEvent.objects.create(
+        event_type=orchestration.EVENT_REGISTRATION,
+        subject_type="registration",
+        subject_id=str(registration.pk),
+        correlation_id=uuid.uuid4(),
+        payload={"status": registration.status, "identity_id": registration.identity_id},
+        occurred_at=timezone.now(),
+    )
+
+
 @transaction.atomic
 def cancel_registration(channel, external_id):
     """The requester withdraws their own pending request (from the signed chat identity)."""
@@ -489,6 +520,7 @@ def approve_registration(actor, registration, reason=""):
     registration.decided_at = timezone.now()
     registration.decision_reason = reason.strip()
     registration.save(update_fields=["status", "decided_by", "decided_at", "decision_reason"])
+    _registration_event(registration)
     audit(
         actor,
         "registration.approved",
@@ -512,6 +544,7 @@ def reject_registration(actor, registration, reason):
     registration.decided_at = timezone.now()
     registration.decision_reason = reason
     registration.save(update_fields=["status", "decided_by", "decided_at", "decision_reason"])
+    _registration_event(registration)
     audit(actor, "registration.rejected", registration, reason)
 
 

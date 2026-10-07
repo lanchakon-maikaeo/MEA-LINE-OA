@@ -22,7 +22,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from operations import conversation, identity, line_api
-from operations.management.commands.process_line_inbox import run_once
+from operations.management.commands.run_worker import run_once
 from operations.models import (
     Attachment,
     Case,
@@ -436,7 +436,7 @@ class DraftConversationTests(LineTestCase):
         self.press(ALICE, "เบิก")
         self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "FUSE_SYN_A")
-        for bad in ("1.5", "ศูนย์", "0"):
+        for bad in ("1.5", "ศูนย์", "0", "2 เครื่อง", "2 หรือ 3", "2 ชิ้น อนุมัติเลย", "2,3", "2e3"):
             with self.subTest(bad):
                 self.assertIn("จำนวนไม่ถูกต้อง", texts(self.type(ALICE, bad)))
         self.type(ALICE, "๕๐ ชิ้น")  # Thai digits
@@ -711,7 +711,7 @@ class AttachmentTests(LineTestCase):
 
 
 class RunnerTests(LineTestCase):
-    def test_events_run_in_event_time_order_and_failures_do_not_block(self):
+    def test_events_run_in_event_time_order_and_failures_retry_without_blocking(self):
         self.approve(ALICE)
         late = self.text(ALICE, "ข้อความหลัง")
         early = self.text(ALICE, "ข้อความแรก")
@@ -728,19 +728,25 @@ class RunnerTests(LineTestCase):
 
         with patch.object(conversation, "handle_inbox", side_effect=spy):
             run_once()
-        self.assertEqual(seen, ["ข้อความแรก", "ข้อความหลัง"])
+            self.assertEqual(seen, ["ข้อความแรก", "ข้อความหลัง"])
+            failed = OutboxEvent.objects.get(
+                payload__inbox_id=WebhookInbox.objects.get(payload__message__text="ข้อความแรก").pk
+            )
+            self.assertEqual(
+                (failed.status, failed.attempts, failed.last_error), ("pending", 1, "RuntimeError")
+            )
+            self.assertGreater(failed.next_attempt_at, timezone.now())
+            run_once()  # not due yet: nothing runs twice
+            self.assertEqual(len(seen), 2)
+            for _ in range(4):  # retried after backoff until the attempts run out
+                OutboxEvent.objects.filter(pk=failed.pk).update(next_attempt_at=timezone.now())
+                with patch.object(conversation, "handle_inbox", side_effect=RuntimeError("boom")):
+                    run_once()
+        failed.refresh_from_db()
+        self.assertEqual((failed.status, failed.attempts), ("failed", 5))
         self.assertEqual(
             sorted(WebhookInbox.objects.values_list("status", flat=True)), ["done", "failed"]
         )
-        self.assertEqual(
-            sorted(OutboxEvent.objects.values_list("status", flat=True)), ["done", "failed"]
-        )
-        run_once()  # nothing is processed twice
-        self.assertEqual(len(seen), 2)
-
-    def test_runner_is_refused_in_production(self):
-        with override_settings(APP_ENV="production"), self.assertRaises(CommandError):
-            call_command("process_line_inbox", "--once", stdout=StringIO())
 
 
 class RichMenuTests(LineTestCase):

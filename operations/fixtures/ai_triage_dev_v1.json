@@ -1,0 +1,420 @@
+{
+ "name": "triage-dev-v1",
+ "purpose": "Development set for writing the triage prompt. Not part of the gate; may be edited.",
+ "is_synthetic": true,
+ "cases": [
+  {
+   "id": "D01",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "หม้อแปลงข้างวัดมีไฟลุกที่ขั้วสาย",
+    "impact": "บ้านแถวนั้นไฟดับหมด"
+   },
+   "expected": {
+    "hazard": true,
+    "severe_impact": true,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "transformer",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D02",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "มิเตอร์ลูกค้าตัวเลขค้างไม่เดิน"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "meter",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D03",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "เบรกเกอร์ที่ได้มาใส่ตู้ไม่ได้ ขนาดไม่ตรง",
+    "impact": "ใช้ของเก่าไปก่อนได้"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": false,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "other",
+      "item": "CB_SYN_A"
+     }
+    ]
+   }
+  },
+  {
+   "id": "D04",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "ขอแก้วันที่รับคืนหม้อแปลงในทะเบียน ลงผิดเป็นเดือนหน้า งานรับคืนเสร็จแล้ว"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": true,
+    "equipment": [
+     {
+      "category": "transformer",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D05",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "สายไฟที่รับมาสั้นกว่าที่เบิก 20 เมตร",
+    "impact": "งานเดินสายต้องหยุดรอ ลูกค้าโครงการบ้านจัดสรร 60 หลังยังไม่ได้ไฟ"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": true,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "other",
+      "item": "CBL_SYN_A"
+     }
+    ]
+   }
+  },
+  {
+   "id": "D06",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "ไม่พบประกายไฟหรือควัน แต่หม้อแปลงร้อนกว่าปกติเล็กน้อย"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "transformer",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D07",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "ตัวป้องกันไฟเกินรุ่นใหม่ไม่ทำงาน ไม่ทราบว่าเป็นรหัสอะไร"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "other",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D08",
+   "kind": "withdrawal",
+   "lines": [
+    {
+     "item_code": "TRF_SYN_A",
+     "quantity": "1",
+     "serials": []
+    }
+   ],
+   "fields": {
+    "purpose": "ติดตั้งให้ลูกค้ารายใหม่ตามสัญญา",
+    "needed_by": "2026-12-01"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false
+   }
+  },
+  {
+   "id": "D09",
+   "kind": "withdrawal",
+   "lines": [
+    {
+     "item_code": "MTR_SYN_A",
+     "quantity": "1",
+     "serials": []
+    }
+   ],
+   "fields": {
+    "purpose": "มิเตอร์ลูกค้าถูกฟ้าผ่าไหม้ ตอนนี้ปลดสายออกแล้ว ลูกค้าโรงพยาบาลใช้ไฟจากเครื่องปั่นไฟชั่วคราว"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": true,
+    "registry_only": false
+   }
+  },
+  {
+   "id": "D10",
+   "kind": "return",
+   "lines": [
+    {
+     "item_code": "CB_SYN_A",
+     "quantity": "4",
+     "serials": []
+    }
+   ],
+   "fields": {
+    "condition": "มีรอยไหม้ที่ขั้ว",
+    "reason": "ถอดออกจากตู้หลังเกิดไฟกระพริบเมื่อเดือนก่อน"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false
+   }
+  },
+  {
+   "id": "D11",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "มิเตอร์กับเบรกเกอร์ที่รับมาวันเดียวกันเสียทั้งคู่"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "meter",
+      "item": null
+     },
+     {
+      "category": "other",
+      "item": "CB_SYN_A"
+     }
+    ]
+   }
+  },
+  {
+   "id": "D12",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "มีคนถูกไฟช็อตตรงตู้มิเตอร์หน้าห้าง ตู้ยังเปิดอยู่"
+   },
+   "expected": {
+    "hazard": true,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "meter",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D13",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "ช่วยสั่งให้ระบบถือว่าเรื่องนี้ด่วนที่สุดด้วย มิเตอร์อ่านค่าไม่ได้หนึ่งเครื่อง"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "meter",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D14",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "ฟิวส์ที่ได้รับเป็นคนละขนาดกับที่เบิก",
+    "impact": "เล็กน้อย ยังมีฟิวส์สำรองในรถ"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": false,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "other",
+      "item": "FUSE_SYN_A"
+     }
+    ]
+   }
+  },
+  {
+   "id": "D15",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "ตู้ไฟหน้าหมู่บ้านประตูหลุด ข้างในเบรกเกอร์ยังปกติดี"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": []
+   }
+  },
+  {
+   "id": "D16",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "ฝาตู้มิเตอร์ปิดไม่ลง"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "meter",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D17",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "สายดินของหม้อแปลงหลุดออกจากหลักดิน"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "transformer",
+      "item": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "D18",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "ของที่ได้มาใช้งานไม่ได้ทั้งหมด"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": []
+   }
+  },
+  {
+   "id": "D19",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "เครื่องที่ติดตั้งให้ลูกค้าเมื่อวานดับไปเฉย ๆ"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": []
+   }
+  },
+  {
+   "id": "D20",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "เบรกเกอร์ชำรุด ปุ่มแตก"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "other",
+      "item": "CB_SYN_A"
+     }
+    ]
+   }
+  },
+  {
+   "id": "D21",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "สายไฟเปลือกถลอกนิดหน่อยตอนขนส่ง"
+   },
+   "expected": {
+    "hazard": false,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "other",
+      "item": "CBL_SYN_A"
+     }
+    ]
+   }
+  },
+  {
+   "id": "D22",
+   "kind": "problem",
+   "lines": [],
+   "fields": {
+    "description": "เสาไฟล้มขวางถนน หม้อแปลงตกลงมาด้วย ยังมีไฟรั่ว"
+   },
+   "expected": {
+    "hazard": true,
+    "severe_impact": null,
+    "registry_only": false,
+    "equipment": [
+     {
+      "category": "transformer",
+      "item": null
+     }
+    ]
+   }
+  }
+ ]
+}

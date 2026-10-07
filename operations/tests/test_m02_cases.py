@@ -230,7 +230,10 @@ class TransitionMatrixTests(CaseTestCase):
                 self.assertEqual(
                     {str(s) for s in spec.transitions[kind]}, per_kind[kind], (action, kind)
                 )
-        enabled = {name for name, spec in workflow.ACTIONS.items() if spec.enabled}
+        # M06 enables its own actions; their matrix is tested in test_m06_policy.
+        enabled = {
+            name for name, spec in workflow.ACTIONS.items() if spec.enabled and spec.module == "M02"
+        }
         self.assertEqual(enabled, set(EXPECTED_SOURCES))
 
     def test_every_enabled_action_from_every_status_is_allowed_exactly_per_matrix(self):

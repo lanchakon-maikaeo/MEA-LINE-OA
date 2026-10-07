@@ -1,0 +1,167 @@
+{
+  "id": "faojConvAi000001",
+  "name": "FAOJ conversation-ai v1",
+  "active": true,
+  "nodes": [
+    {
+      "id": "ba0e52bd-7d93-594e-bd51-977ba7ce9097",
+      "name": "หมายเหตุ",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -260
+      ],
+      "parameters": {
+        "content": "## conversation-ai v1\nEvery 2 s: claim `conversation.ai_requested` and ask Django to run the AI step.\nDjango calls ThaiLLM (primary, then fallbacks within 25 s), validates the proposal against the catalog and the user's words, fills the draft and answers with the message's own reply token. If nothing answers within 35 s the Django worker sends the field-by-field question instead. This workflow holds no AI key and chooses no model, URL or recipient.",
+        "width": 460,
+        "height": 240
+      }
+    },
+    {
+      "id": "06e0c56f-d6fb-522f-b71e-18adcfec9473",
+      "name": "ทุก 2 วินาที",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "f997bbce-b5de-5325-b987-4f47b55c099f",
+      "name": "Claim AI work",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://web:8000/internal/v1/outbox/claim",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"event_types\": [\"conversation.ai_requested\"], \"limit\": 3, \"lease_seconds\": 60}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "faojDjangoToken1",
+          "name": "Django internal token"
+        }
+      }
+    },
+    {
+      "id": "05f03c19-50cd-516f-bce1-47d4add55c3a",
+      "name": "แยกทีละงาน",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "fieldToSplitOut": "events",
+        "options": {}
+      }
+    },
+    {
+      "id": "d86532df-7158-5633-9e0c-a74d5d5d331b",
+      "name": "Run AI step in Django",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://web:8000/internal/v1/ai/extract",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $json.event_id, lease_token: $json.lease_token }) }}",
+        "options": {
+          "timeout": 45000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "faojDjangoToken1",
+          "name": "Django internal token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "ทุก 2 วินาที": {
+      "main": [
+        [
+          {
+            "node": "Claim AI work",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim AI work": {
+      "main": [
+        [
+          {
+            "node": "แยกทีละงาน",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "แยกทีละงาน": {
+      "main": [
+        [
+          {
+            "node": "Run AI step in Django",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "versionId": "b6487982-1c18-59b7-a6ad-b366276bd716",
+  "pinData": {},
+  "meta": {
+    "faojVersion": 1
+  },
+  "tags": []
+}

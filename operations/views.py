@@ -1,5 +1,6 @@
 from functools import wraps
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
@@ -9,13 +10,32 @@ from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.views.decorators.http import require_POST, require_safe
 
-from operations import attachments, forms, identity
+from operations import (
+    ai,
+    ai_eval,
+    attachments,
+    forms,
+    identity,
+    notifications,
+    orchestration,
+    policy,
+)
 from operations.models import (
+    AIConfigVersion,
+    AICredential,
+    AIProfile,
+    AIRun,
     Attachment,
+    AuthorityGrant,
     Division,
+    LineQuotaSnapshot,
+    NotificationDelivery,
+    OutboxEvent,
+    PolicyVersion,
     RegistrationRequest,
     Requester,
     Role,
@@ -355,3 +375,274 @@ def admin_division_action(request, pk, action):
     else:
         raise Http404
     return redirect("admin-divisions")
+
+
+@admin_required
+@require_safe
+def admin_line(request):
+    """Message budget, deliveries that did not go out, and the outbox dead-letter view."""
+    state = notifications.budget_state()
+    return render(
+        request,
+        "operations/admin_line.html",
+        {
+            "state": state,
+            "snapshot": LineQuotaSnapshot.objects.filter(
+                month=notifications.month_key(timezone.now())
+            ).first(),
+            "push_enabled": notifications.push_enabled(),
+            "held": NotificationDelivery.objects.filter(
+                status__in=["deferred", "unknown", "failed"]
+            ).select_related("case")[:50],
+            "dead": OutboxEvent.objects.filter(status=OutboxEvent.Status.FAILED).order_by("-id")[
+                :50
+            ],
+            "health": orchestration.health(),
+        },
+    )
+
+
+@admin_required
+@require_POST
+def admin_requeue(request, pk):
+    event = get_object_or_404(OutboxEvent, pk=pk)
+    reason = request.POST.get("reason", "").strip()
+    if not reason:
+        messages.error(request, "ต้องระบุเหตุผล")
+    elif orchestration.requeue(event):
+        identity.audit(request.user, "outbox.requeued", event, reason, event_type=event.event_type)
+        messages.success(request, "ส่งงานกลับเข้าคิวแล้ว")
+    else:
+        messages.error(request, "งานนี้ไม่ได้อยู่ใน dead-letter แล้ว")
+    return redirect("admin-line")
+
+
+# --- Rules and authority (M06) ----------------------------------------------------------------
+
+
+@admin_required
+def admin_policy(request):
+    """Rule versions (imported by command, activated here) and authority grants (Q7/Q16)."""
+    grant_form = forms.AuthorityGrantForm(request.POST or None)
+    if request.method == "POST":
+        if grant_form.is_valid():
+            d = grant_form.cleaned_data
+            _run(
+                request,
+                lambda: policy.grant_authority(
+                    request.user,
+                    d["user"],
+                    d["activity"],
+                    d["reason"],
+                    d["approval_reference"],
+                    d["division"],
+                    d["valid_from"],
+                    d["valid_until"],
+                ),
+                "บันทึกอำนาจแล้ว",
+            )
+            return redirect("admin-policy")
+        messages.error(request, "ข้อมูลอำนาจไม่ครบหรือไม่ถูกต้อง")
+    return render(
+        request,
+        "operations/admin_policy.html",
+        {
+            "versions": PolicyVersion.objects.select_related("activated_by"),
+            "grants": AuthorityGrant.objects.select_related(
+                "user__staff_profile", "division", "granted_by", "revoked_by"
+            ),
+            "activate_form": forms.PolicyActivateForm(),
+            "grant_form": grant_form,
+            "now": timezone.now(),
+        },
+    )
+
+
+@admin_required
+@require_POST
+def admin_policy_action(request, action, pk):
+    if action == "activate":
+        version = get_object_or_404(PolicyVersion, pk=pk)
+        form = forms.PolicyActivateForm(request.POST)
+        if form.is_valid():
+            d = form.cleaned_data
+            _run(
+                request,
+                lambda: policy.activate_policy(
+                    request.user,
+                    version,
+                    d["approved_by_name"],
+                    d["approval_reference"],
+                    d["reason"],
+                ),
+                f"เปิดใช้ {version.code} แล้ว ข้อเสนอของเรื่องที่เปิดอยู่ถูกคำนวณใหม่ "
+                "(กองเจ้าภาพและระดับที่ยืนยันแล้วไม่เปลี่ยน)",
+            )
+        else:
+            messages.error(request, "ระบุผู้รับรอง เลขอ้างอิง และเหตุผล")
+    elif action == "revoke":
+        grant = get_object_or_404(AuthorityGrant, pk=pk)
+        _run(
+            request,
+            lambda: policy.revoke_authority(request.user, grant, request.POST.get("reason", "")),
+            "ถอนอำนาจแล้ว",
+        )
+    else:
+        raise Http404
+    return redirect("admin-policy")
+
+
+# --- AI configuration (developer-admin only) ----------------------------------------------------
+
+
+def developer_admin_required(view):
+    @login_required
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if not identity.staff_scope(request.user).is_developer_admin:
+            raise PermissionDenied
+        return view(request, *args, **kwargs)
+
+    return wrapper
+
+
+@developer_admin_required
+@require_safe
+def admin_ai(request):
+    versions = list(
+        AIConfigVersion.objects.select_related("screen_profile").prefetch_related(
+            "entries__profile__credential", "eval_jobs"
+        )
+    )
+    for version in versions:
+        version.blocker = ai.activation_blocker(version)
+        version.last_job = next(iter(version.eval_jobs.all()), None)
+    return render(
+        request,
+        "operations/admin_ai.html",
+        {
+            "credentials": AICredential.objects.all(),
+            "profiles": AIProfile.objects.select_related("credential").order_by("-pk"),
+            "versions": versions,
+            "active": next(
+                (v for v in versions if v.status == "active" and v.task == "extract"), None
+            ),
+            "active_triage": next(
+                (v for v in versions if v.status == "active" and v.task == "triage"), None
+            ),
+            "switchable": [v for v in versions if v.blocker is None],
+            "presets": ai.preset_status(),
+            "gate": ai.EVAL_GATE,
+            "preset_form": forms.AIPresetForm(),
+            "runs": AIRun.objects.select_related("config_version").order_by("-pk")[:20],
+            "ai_enabled": settings.AI_ENABLED,
+            "credential_form": forms.AICredentialForm(),
+            "profile_form": forms.AIProfileForm(),
+            "version_form": forms.AIVersionForm(),
+        },
+    )
+
+
+@developer_admin_required
+@require_POST
+def admin_ai_action(request, action, pk=None):
+    actor, data = request.user, request.POST
+    reason = data.get("reason", "")
+    if action == "credential":
+        form = forms.AICredentialForm(data)
+        if form.is_valid():
+            d = form.cleaned_data
+            _run(
+                request,
+                lambda: ai.save_credential(
+                    actor, d["name"], d["base_url"], d["api_key"], d["reason"]
+                ),
+                "บันทึก credential แล้ว (เข้ารหัส)",
+            )
+        else:
+            messages.error(request, "ข้อมูล credential ไม่ครบ")
+    elif action == "profile":
+        form = forms.AIProfileForm(data)
+        if form.is_valid():
+            d = form.cleaned_data
+            _run(
+                request,
+                lambda: ai.create_profile(
+                    actor,
+                    d["credential"],
+                    d["model_id"],
+                    d["timeout_seconds"],
+                    d["max_tokens"],
+                    d["temperature"],
+                    d["use_json_schema"],
+                ),
+                "เพิ่มโปรไฟล์แล้ว",
+            )
+        else:
+            messages.error(request, "ข้อมูลโปรไฟล์ไม่ถูกต้อง")
+    elif action == "version":
+        form = forms.AIVersionForm(data)
+        if form.is_valid():
+            d = form.cleaned_data
+            _run(
+                request,
+                lambda: ai.create_version(
+                    actor,
+                    form.profiles(),
+                    d["note"],
+                    d["few_shot"],
+                    d["pipeline"],
+                    d["screen_profile"],
+                    d["task"] or AIConfigVersion.Task.EXTRACT,
+                ),
+                "สร้างรุ่นการตั้งค่าแล้ว (รอทดสอบและประเมิน)",
+            )
+        else:
+            messages.error(request, "เลือกโมเดลหลักและรูปแบบการทำงานก่อน")
+    elif action == "preset":
+        form = forms.AIPresetForm(data)
+        key = data.get("preset", "")
+        if form.is_valid():
+            d = form.cleaned_data
+            version = _run(
+                request,
+                lambda: ai.create_preset_version(actor, key, d["pipeline"], d["use_json_schema"]),
+                "สร้างรุ่นใหม่จากโมเดลสำเร็จรูปแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อ → ประเมิน → เปลี่ยน",
+            )
+            if version is not None:
+                return redirect(f"{reverse('admin-ai')}#v{version.number}")
+        else:
+            messages.error(request, "เลือกรูปแบบการทำงานก่อน")
+    elif action == "switch":
+        version = AIConfigVersion.objects.filter(pk=data.get("version") or None).first()
+        if version is None:
+            messages.error(request, "เลือกรุ่นที่จะเปลี่ยนไปใช้")
+        else:
+            _run(
+                request,
+                lambda: ai.activate(actor, version, reason),
+                f"เปลี่ยนไปใช้ v{version.number} แล้ว ({version.get_task_display()}: งานใหม่ใช้รุ่นนี้)",
+            )
+    elif action in {"test", "evaluate", "activate", "reject"}:
+        version = get_object_or_404(AIConfigVersion, pk=pk)
+        operation = {
+            "test": lambda: ai.test_version(actor, version),
+            "evaluate": lambda: ai_eval.request_eval(actor, version),
+            "activate": lambda: ai.activate(actor, version, reason),
+            "reject": lambda: ai.reject(actor, version, reason),
+        }[action]
+        _run(
+            request,
+            operation,
+            {
+                "test": "ทดสอบแล้ว",
+                "evaluate": (
+                    "เข้าคิวประเมินแล้ว (worker ประเมินบน heldout-v1 + redteam-v1 ใช้เวลาหลายนาที)"
+                ),
+                "activate": "เปิดใช้แล้ว",
+                "reject": "ทำเครื่องหมายไม่ใช้แล้ว",
+            }[action],
+        )
+    else:
+        raise Http404
+    return redirect("admin-ai")

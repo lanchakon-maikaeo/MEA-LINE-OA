@@ -3,6 +3,8 @@
 Each accepted command commits the case change, its Decision, AuditEvent, OutboxEvent and
 ActionReceipt in one transaction, or nothing at all. Permissions are re-read from the database
 on every call, including when a stored result is replayed for a repeated idempotency key.
+M06 adds routing decisions (operations/routing.py) and a fresh proposal after every decision
+(operations/policy.py), in the same transaction.
 """
 
 import hashlib
@@ -13,9 +15,10 @@ from functools import wraps
 
 from django.contrib.auth import get_user_model
 from django.db import InterfaceError, OperationalError, connection, transaction
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
-from operations import identity, workflow
+from operations import identity, policy, routing, workflow
 from operations.contracts import (
     EVENT_CASE_SUBMITTED,
     EVENT_DECISION_RECORDED,
@@ -32,6 +35,7 @@ from operations.contracts import (
     parse_submission,
 )
 from operations.models import (
+    AckClock,
     ActionReceipt,
     Case,
     CaseLine,
@@ -39,9 +43,11 @@ from operations.models import (
     Decision,
     Division,
     EquipmentType,
+    Handoff,
     OutboxEvent,
     Requester,
     Role,
+    RoutingReview,
 )
 
 User = get_user_model()
@@ -93,10 +99,43 @@ def _resolve(actor):
     return _Context(label=actor.key, user=actor.user, scope=scope)
 
 
+def _waiting_for_coordinator(case_ref):
+    """Open routing review or an escalated clock: what routing-authority holders see (M06)."""
+    return Q(
+        Exists(RoutingReview.objects.filter(case=case_ref, status=RoutingReview.Status.OPEN))
+    ) | Q(
+        Exists(
+            AckClock.objects.filter(
+                case=case_ref, stopped_at__isnull=True, escalated_at__isnull=False
+            )
+        )
+    )
+
+
+def _staff_condition(ctx):
+    """Owner division, a handoff waiting for one of their divisions, or a routing decision
+    within their authority. Other divisions' queues stay closed (B.2)."""
+    divisions = list(ctx.scope.division_roles)
+    condition = Q(owner_division__in=divisions) | Q(
+        Exists(
+            Handoff.objects.filter(
+                case=OuterRef("pk"), status=Handoff.Status.PENDING, to_division__in=divisions
+            )
+        )
+    )
+    scope = policy.routing_scope(ctx.user)
+    if scope:
+        waiting = _waiting_for_coordinator(OuterRef("pk"))
+        condition |= waiting if scope == "all" else waiting & Q(owner_division__in=scope)
+    return condition
+
+
 def _can_view(ctx, case):
     if ctx.requester is not None:
         return case.requester_id == ctx.requester.pk
-    return identity.can_access_division(ctx.scope, case.owner_division_id)
+    if identity.can_access_division(ctx.scope, case.owner_division_id):
+        return True
+    return Case.objects.filter(_staff_condition(ctx), pk=case.pk).exists()
 
 
 def _is_member(ctx, division_id, roles=None):
@@ -113,7 +152,9 @@ def visible_cases(actor):
     cases = Case.objects.select_related("district", "owner_division", "requester")
     if ctx.requester is not None:
         return identity.filter_by_requester(cases, ctx.requester)
-    return identity.filter_by_division(cases, ctx.scope, "owner_division")
+    if ctx.scope.is_admin:
+        return cases
+    return cases.filter(_staff_condition(ctx))
 
 
 def _parse_case_id(case_id):
@@ -323,7 +364,9 @@ def submit_case(actor, *, idempotency_key, payload):
             line.case = case
         CaseLine.objects.bulk_create(lines)
         data = {"channel": case.channel, "on_behalf": ctx.requester is None}
-        return _record(ctx, case, "submit", "", "", data, EVENT_CASE_SUBMITTED, key, request_hash)
+        result = _record(ctx, case, "submit", "", "", data, EVENT_CASE_SUBMITTED, key, request_hash)
+        policy.after_submit(case)
+        return result
 
 
 # --- Transitions -----------------------------------------------------------------------------
@@ -411,6 +454,7 @@ HANDLERS = {
     "resume": _unpause,
     "cancel": _cancel,
     "decline": _decline,
+    **routing.HANDLERS,
 }
 
 
@@ -445,7 +489,8 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         targets = spec.targets(case.kind, case.status)
         if not targets:
             fail(ErrorCode.INVALID_TRANSITION, f"{action} is not allowed while {case.status}.")
-        # M02 actions have exactly one target; RESUME is resolved by the handler.
+        # Every action has exactly one target per kind and status; RESUME is resolved by the
+        # handler.
         (target,) = targets
         from_status = case.status
         data = HANDLERS[action](ctx, case, payload, reason, target)
@@ -455,6 +500,8 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         if case.status in workflow.TERMINAL:
             case.ended_at = now
         case.save()
-        return _record(
+        result = _record(
             ctx, case, action, from_status, reason, data, EVENT_DECISION_RECORDED, key, request_hash
         )
+        policy.after_decision(case, action, actor_is_staff=ctx.requester is None)
+        return result

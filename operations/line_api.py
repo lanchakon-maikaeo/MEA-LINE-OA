@@ -14,18 +14,20 @@ MESSAGE_ID = re.compile(r"^\d{1,32}$")
 
 
 class LineApiError(Exception):
-    def __init__(self, status, detail=""):
+    def __init__(self, status, detail="", retry_after=None):
         super().__init__(f"LINE API {status}: {detail}")
         self.status = status
         self.detail = detail
+        self.retry_after = retry_after
 
 
 class ContentTooLarge(Exception):
     pass
 
 
-def _request(url, data=None, timeout=10, content_type=None, method=None):
+def _request(url, data=None, timeout=10, content_type=None, method=None, extra_headers=None):
     headers = {"Authorization": f"Bearer {settings.LINE_CHANNEL_ACCESS_TOKEN}"}
+    headers.update(extra_headers or {})
     if data is not None and content_type is None:
         headers["Content-Type"] = "application/json"
         data = json.dumps(data, ensure_ascii=False).encode()
@@ -61,6 +63,28 @@ def reply(reply_token, messages):
             return
     except urllib.error.HTTPError as exc:
         raise LineApiError(exc.code, exc.read(300).decode(errors="replace")) from exc
+
+
+def _retry_after(exc):
+    try:
+        return int(exc.headers.get("Retry-After", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def push(to, messages, retry_key):
+    """Push to one user. The retry key makes a retried request count once (409 = accepted)."""
+    try:
+        with _request(
+            f"{settings.LINE_API_BASE}/v2/bot/message/push",
+            {"to": to, "messages": messages[:5]},
+            extra_headers={"X-Line-Retry-Key": str(retry_key)},
+        ):
+            return
+    except urllib.error.HTTPError as exc:
+        raise LineApiError(
+            exc.code, exc.read(300).decode(errors="replace"), _retry_after(exc)
+        ) from exc
 
 
 def fetch_content(message_id, max_bytes):

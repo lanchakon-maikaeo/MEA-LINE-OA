@@ -44,6 +44,91 @@ services:
       migrate:
         condition: service_completed_successfully
     init: true
+  worker:
+    # Chat turns and notification planning (M04); exactly one replica keeps per-user order.
+    image: mea-faoj:local
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://mea_demo:${POSTGRES_PASSWORD:?Run make bootstrap first}@db:5432/mea_demo
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+      PRIVATE_MEDIA_ROOT: /data/private-media
+    volumes:
+      - private_media:/data/private-media
+    command: ["/app/.venv/bin/python", "manage.py", "run_worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/worker-heartbeat') > 60)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+  n8n-db-init:
+    image: postgres:17-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap first}
+      N8N_DB_PASSWORD: ${N8N_DB_PASSWORD:?Run make bootstrap first}
+    volumes:
+      - ./deploy/n8n/init-db.sql:/init-db.sql:ro
+    entrypoint: ["sh", "-c", "psql -h db -U mea_demo -d mea_demo -v ON_ERROR_STOP=1 -v pw=\"$$N8N_DB_PASSWORD\" -f /init-db.sql"]
+    depends_on:
+      db:
+        condition: service_healthy
+  n8n:
+    image: n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: db
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:?Run make bootstrap first}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Run make bootstrap first}
+      GENERIC_TIMEZONE: Asia/Bangkok
+      TZ: Asia/Bangkok
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_SECURE_COOKIE: "false"  # editor is reachable only on 127.0.0.1 over plain HTTP
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "168"
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      n8n-db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+  n8n-import:
+    # One-off: make n8n-import (service credential + versioned workflows from workflows/n8n/).
+    image: n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b
+    profiles: ["tools"]
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: db
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:?Run make bootstrap first}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Run make bootstrap first}
+      ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN:?Run make bootstrap first}
+    volumes:
+      - ./workflows/n8n:/workflows:ro
+      - ./deploy/n8n/import.sh:/import.sh:ro
+    entrypoint: ["sh", "/import.sh"]
+    depends_on:
+      n8n-db-init:
+        condition: service_completed_successfully
   clamav:
     # Multi-arch (arm64 for OCI A1); clamd + freshclam signature updates in one container.
     image: clamav/clamav-debian:1.4@sha256:6d0680780fd29855cb7018f68272cb520821f614259e2066f8ec669069ac91b3
@@ -61,3 +146,4 @@ volumes:
   postgres_data:
   private_media:
   clamav_db:
+  n8n_data:

@@ -111,7 +111,13 @@ KIND_FIELDS = {
 }
 LINE_FIELDS = {"item_code", "quantity", "serials"}
 ACTION_FIELDS = {"reason"}
-ACTION_EXTRA_FIELDS = {"assign": {"assignee_id"}}
+ACTION_EXTRA_FIELDS = {
+    "assign": {"assignee_id"},
+    "request_handoff": {"to_division", "reason_category"},
+    "decide_routing": {"division"},
+    "set_priority": {"priority"},
+    "record_facts": {"facts", "clear"},
+}
 
 
 def clean_idempotency_key(value):

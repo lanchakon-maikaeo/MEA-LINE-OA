@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from operations import line, views
+from operations import internal_api, line, views
 
 urlpatterns = [
     path("", views.index, name="index"),
@@ -21,6 +21,14 @@ urlpatterns = [
         name="password_change",
     ),
     path("webhooks/line", line.webhook, name="line-webhook"),
+    path("internal/v1/outbox/claim", internal_api.claim),
+    path("internal/v1/outbox/renew", internal_api.renew),
+    path("internal/v1/outbox/complete", internal_api.complete),
+    path("internal/v1/outbox/fail", internal_api.fail),
+    path("internal/v1/notifications/send", internal_api.send_notification),
+    path("internal/v1/maintenance", internal_api.maintenance),
+    path("internal/v1/ai/extract", internal_api.ai_extract),
+    path("internal/v1/ai/triage", internal_api.ai_triage),
     path("attachments/<uuid:pk>/", views.attachment_download, name="attachment-download"),
     path("console/", views.console, name="console"),
     path("divisions/<str:code>/", views.division_detail, name="division-detail"),
@@ -39,6 +47,21 @@ urlpatterns = [
         name="admin-registration-action",
     ),
     path("console/admin/requesters/new/", views.admin_requester_new, name="admin-requester-new"),
+    path("console/admin/line/", views.admin_line, name="admin-line"),
+    path("console/admin/policy/", views.admin_policy, name="admin-policy"),
+    path(
+        "console/admin/policy/<slug:action>/<int:pk>/",
+        views.admin_policy_action,
+        name="admin-policy-action",
+    ),
+    path("console/admin/ai/", views.admin_ai, name="admin-ai"),
+    path("console/admin/ai/<slug:action>/", views.admin_ai_action, name="admin-ai-action"),
+    path(
+        "console/admin/ai/<slug:action>/<int:pk>/",
+        views.admin_ai_action,
+        name="admin-ai-version-action",
+    ),
+    path("console/admin/line/requeue/<int:pk>/", views.admin_requeue, name="admin-requeue"),
     path("console/admin/divisions/", views.admin_divisions, name="admin-divisions"),
     path(
         "console/admin/divisions/<int:pk>/<slug:action>/",
