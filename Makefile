@@ -23,6 +23,7 @@ seed-demo: guard
 	$(RUN) python manage.py load_districts
 	$(RUN) python manage.py seed_demo_units
 	$(RUN) python manage.py seed_demo_cases
+	$(RUN) python manage.py seed_fake_inventory
 	$(RUN) python manage.py load_ai_examples
 
 dev: db migrate

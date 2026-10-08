@@ -1,9 +1,16 @@
 {% extends "operations/base.html" %}
-{% block admin_nav %}
-  <a href="{% url 'admin-users' %}">ผู้ใช้</a>
-  <a href="{% url 'admin-registrations' %}">รับรองผู้แจ้ง</a>
-  <a href="{% url 'admin-divisions' %}">กอง</a>
-  <a href="{% url 'admin-line' %}">LINE และงานค้าง</a>
-  <a href="{% url 'admin-policy' %}">กติกาและอำนาจ</a>
-  <a href="{% url 'admin-ai' %}">AI</a>
+{% block subnav %}
+<nav class="subnav" aria-label="เมนูแอดมิน">
+  <div class="subnav__inner">
+    {% with n=nav.url_name %}
+    <a href="{% url 'admin-users' %}"{% if n == 'admin-users' or n == 'admin-user-new' or n == 'admin-user-detail' or n == 'admin-user-action' %} aria-current="page"{% endif %}>ผู้ใช้</a>
+    <a href="{% url 'admin-registrations' %}"{% if n == 'admin-registrations' %} aria-current="page"{% endif %}>รับรองผู้แจ้ง</a>
+    <a href="{% url 'admin-divisions' %}"{% if n == 'admin-divisions' %} aria-current="page"{% endif %}>กอง</a>
+    <a href="{% url 'admin-line' %}"{% if n == 'admin-line' %} aria-current="page"{% endif %}>LINE และงานค้าง</a>
+    <a href="{% url 'admin-policy' %}"{% if n == 'admin-policy' %} aria-current="page"{% endif %}>กติกาและอำนาจ</a>
+    <a href="{% url 'admin-inventory' %}"{% if n == 'admin-inventory' %} aria-current="page"{% endif %}>คลังของ</a>
+    {% if nav.scope.is_developer_admin %}<a href="{% url 'admin-ai' %}"{% if n == 'admin-ai' %} aria-current="page"{% endif %}>AI</a>{% endif %}
+    {% endwith %}
+  </div>
+</nav>
 {% endblock %}

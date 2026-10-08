@@ -1,3 +1,10 @@
-<!doctype html>
-<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ไม่มีสิทธิ์</title></head>
-<body><main><h1>ไม่มีสิทธิ์เข้าถึง</h1><p><a href="/console/">กลับหน้าหลัก</a></p></main></body></html>
+{% extends "operations/base.html" %}
+{% block title %}ไม่มีสิทธิ์ — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="auth">
+  <span class="eyebrow">403</span>
+  <h1>ไม่มีสิทธิ์เข้าหน้านี้</h1>
+  <p class="lede">หน้านี้สำหรับบทบาทอื่น ถ้าต้องใช้งาน กรุณาขอสิทธิ์จากแอดมินระบบ</p>
+  <p class="mt-24"><a class="btn" href="{% url 'console' %}">กลับหน้าแรก</a></p>
+</div>
+{% endblock %}

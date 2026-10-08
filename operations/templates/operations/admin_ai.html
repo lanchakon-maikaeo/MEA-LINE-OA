@@ -1,7 +1,7 @@
 {% extends "operations/admin_base.html" %}
 {% block content %}
-<h1>การตั้งค่า AI</h1>
-<p>เฉพาะแอดมินผู้พัฒนา · AI ในแชต: <strong>{{ ai_enabled|yesno:"เปิด,ปิด (AI_ENABLED)" }}</strong> · ทุกการเปลี่ยนแปลงผ่าน ทดสอบ → ประเมิน → เปลี่ยนไปใช้ และบันทึก audit</p>
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมินผู้พัฒนา</span><h1>การตั้งค่า AI</h1></div></div>
+<p class="lede mb-24">เฉพาะแอดมินผู้พัฒนา · AI ในแชต: <strong>{{ ai_enabled|yesno:"เปิด,ปิด (AI_ENABLED)" }}</strong> · ทุกการเปลี่ยนแปลงผ่าน ทดสอบ → ประเมิน → เปลี่ยนไปใช้ และบันทึก audit</p>
 
 <h2 id="switch">รุ่นที่ใช้งานอยู่</h2>
 <p>AI มีสองงาน แต่ละงานมีรุ่นที่ใช้งานและเกณฑ์ประเมินแยกกัน: สกัดร่างจากแชต (M05) และเสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06 ไม่เลือกกองหรือระดับเอง ADR 0002)</p>

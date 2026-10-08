@@ -1,7 +1,6 @@
 {% extends "operations/admin_base.html" %}
 {% block content %}
-<h1>{{ target.staff_profile.display_name|default:target.username }} ({{ target.username }})</h1>
-<p>สถานะ: {{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</p>
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · ผู้ใช้</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>
 
 <h2>บทบาท</h2>
 <div class="table-wrap"><table>
@@ -24,6 +23,7 @@
   </tbody>
 </table></div>
 
+<div class="form-grid">
 <form method="post" action="{% url 'admin-user-action' target.pk 'grant' %}">
   <fieldset><legend>เพิ่มบทบาท</legend>{% csrf_token %}{{ grant_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
 </form>
@@ -42,4 +42,5 @@
   <fieldset><legend>ตั้งรหัสผ่านชั่วคราว</legend>{% csrf_token %}
     <label>เหตุผล <input name="reason" required></label> <button type="submit">ยืนยัน</button></fieldset>
 </form>
+</div>
 {% endblock %}

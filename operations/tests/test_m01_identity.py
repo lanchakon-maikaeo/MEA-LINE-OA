@@ -123,9 +123,13 @@ class StaffScopeTests(IdentityTestCase):
             fetch_redirect_response=False,
         )
         client = self.client_for(self.meter)
-        self.assertEqual(client.get("/console/").status_code, 200)
+        self.assertEqual(client.get("/account/").status_code, 200)
         identity.set_staff_active(self.admin, self.meter, False, "ลาออก")
-        self.assertEqual(client.get("/console/").status_code, 302)
+        self.assertRedirects(
+            client.get("/account/"),
+            "/accounts/login/?next=/account/",
+            fetch_redirect_response=False,
+        )
         self.assertFalse(identity.staff_scope(self.meter).has_any_access)
         with self.assertRaises(ValidationError):
             identity.grant_role(self.admin, self.meter, Role.STAFF, self.trf)
@@ -242,7 +246,7 @@ class AdminGuardTests(IdentityTestCase):
         ):
             with self.subTest(url=url):
                 self.assertEqual(client.get(url).status_code, 200)
-        self.assertContains(self.client_for(self.meter).get("/console/"), "เจ้าหน้าที่กอง")
+        self.assertContains(self.client_for(self.meter).get("/account/"), "เจ้าหน้าที่กอง")
 
     def test_admin_actions_require_csrf_token(self):
         client = Client(enforce_csrf_checks=True)
@@ -271,8 +275,9 @@ class PasswordTests(IdentityTestCase):
                 "new_password2": new_password,
             },
         )
-        self.assertRedirects(response, "/console/")
-        self.assertEqual(client.get("/console/").status_code, 200)
+        self.assertRedirects(response, "/start/", fetch_redirect_response=False)
+        # M10 round 2 Q9: a one-division account lands on its queue.
+        self.assertRedirects(client.get("/start/"), "/divisions/SIM-MTR/")
 
     def test_login_page_and_logout(self):
         client = Client()

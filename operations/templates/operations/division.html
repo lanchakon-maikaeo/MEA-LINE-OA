@@ -1,16 +1,69 @@
 {% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}{% if division %}คิว {{ division.code }}{% else %}คิวทุกกอง{% endif %} — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_id %}queue{% endblock %}
 {% block content %}
-<h1>{{ division.code }} {{ division.name }}</h1>
-<p>คิวงานของกองจะเพิ่มในโมดูลถัดไป (M10)</p>
-<h2>สมาชิก</h2>
-<div class="table-wrap"><table>
-  <thead><tr><th scope="col">ผู้ใช้</th><th scope="col">บทบาท</th></tr></thead>
-  <tbody>
-    {% for grant in grants %}
-      <tr><td>{{ grant.user.staff_profile.display_name|default:grant.user.username }}</td><td>{{ grant.get_role_display }}</td></tr>
-    {% empty %}
-      <tr><td colspan="2">ยังไม่มีสมาชิก</td></tr>
-    {% endfor %}
-  </tbody>
-</table></div>
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">คิวงาน{% if division and division.is_synthetic %} · <span class="tag tag--synthetic">กองจำลอง</span>{% endif %}</span>
+    {% if division %}
+      <h1>{{ division.code }} {{ division.name }}</h1>
+    {% else %}
+      <h1>ทุกกอง</h1>
+      <p class="lede">แอดมินดูได้อย่างเดียว ทุกครั้งที่เปิดเรื่องของกองที่คุณไม่ได้สังกัด ระบบจะบันทึกไว้</p>
+    {% endif %}
+  </div>
+  <div class="page-head__actions">
+    {% if nav.is_intake and division.is_intake %}<a class="btn" href="{% url 'case-new' %}" data-tour="new-case-button">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
+    <a class="btn btn--secondary" href="{% if division %}{% url 'division-export' division.code %}{% else %}{% url 'queue-all-export' %}{% endif %}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}" data-tour="export">ดาวน์โหลด CSV</a>
+  </div>
+</div>
+
+<form class="toolbar" method="get" data-autosubmit aria-label="ตัวกรองคิว" data-tour="queue-filters">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <div class="filters">
+    <label class="visually-hidden" for="f-kind">ชนิดเรื่อง</label>
+    <select id="f-kind" name="kind" class="pill-select{% if filters.kind %} is-set{% endif %}">
+      <option value="">ทุกชนิด</option>
+      {% for value, label in kinds %}<option value="{{ value }}"{% if filters.kind == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <label class="visually-hidden" for="f-priority">ระดับ</label>
+    <select id="f-priority" name="priority" class="pill-select{% if filters.priority %} is-set{% endif %}">
+      <option value="">ทุกระดับ</option>
+      {% for value, label in levels %}<option value="{{ value }}"{% if filters.priority == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <label class="visually-hidden" for="f-status">สถานะ</label>
+    <select id="f-status" name="status" class="pill-select{% if filters.status %} is-set{% endif %}">
+      <option value="">ทุกสถานะ</option>
+      {% for value, label in statuses %}<option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <label class="visually-hidden" for="f-district">เขต</label>
+    <select id="f-district" name="district" class="pill-select{% if filters.district %} is-set{% endif %}">
+      <option value="">ทุกเขต</option>
+      {% for d in districts %}<option value="{{ d.pk }}"{% if filters.district == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.name }}</option>{% endfor %}
+    </select>
+    <label class="check-pill"><input type="checkbox" name="overdue" value="1"{% if filters.overdue %} checked{% endif %}> เกินกรอบเวลา</label>
+    <button class="btn btn--sm filters__apply" type="submit">ใช้ตัวกรอง</button>
+    {% if filters.active %}<a class="btn btn--ghost btn--sm" href="?tab={{ tab }}&amp;clear=1">ล้างตัวกรอง</a>{% endif %}
+  </div>
+  {% if filters.preset %}<p class="muted">ตั้งตัวกรองให้ตามบทบาทของคุณแล้ว</p>{% endif %}
+</form>
+
+{% include "operations/_queue_body.html" %}
+
+{% if members %}
+<details class="disclosure mt-24">
+  <summary>สมาชิกกอง ({{ members|length }})</summary>
+  <div class="disclosure__body table-wrap">
+    <table>
+      <thead><tr><th scope="col">ผู้ใช้</th><th scope="col">บทบาท</th></tr></thead>
+      <tbody>
+        {% for grant in members %}
+          <tr><td>{{ grant.user.staff_profile.display_name|default:grant.user.username }}</td><td>{{ grant.get_role_display }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+{% endif %}
 {% endblock %}

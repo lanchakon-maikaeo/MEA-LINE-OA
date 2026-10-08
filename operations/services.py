@@ -4,7 +4,8 @@ Each accepted command commits the case change, its Decision, AuditEvent, OutboxE
 ActionReceipt in one transaction, or nothing at all. Permissions are re-read from the database
 on every call, including when a stored result is replayed for a repeated idempotency key.
 M06 adds routing decisions (operations/routing.py) and a fresh proposal after every decision
-(operations/policy.py), in the same transaction.
+(operations/policy.py), in the same transaction. M07 adds withdrawal fulfilment
+(operations/fulfilment.py) and the inventory seam (operations/inventory.py).
 """
 
 import hashlib
@@ -18,7 +19,17 @@ from django.db import InterfaceError, OperationalError, connection, transaction
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
-from operations import identity, policy, routing, workflow
+from operations import (
+    coordination,
+    fulfilment,
+    identity,
+    policy,
+    problems,
+    registry,
+    returns,
+    routing,
+    workflow,
+)
 from operations.contracts import (
     EVENT_CASE_SUBMITTED,
     EVENT_DECISION_RECORDED,
@@ -40,6 +51,7 @@ from operations.models import (
     Case,
     CaseLine,
     CaseNumberCounter,
+    ChildWork,
     Decision,
     Division,
     EquipmentType,
@@ -100,16 +112,31 @@ def _resolve(actor):
 
 
 def _waiting_for_coordinator(case_ref):
-    """Open routing review or an escalated clock: what routing-authority holders see (M06)."""
-    return Q(
-        Exists(RoutingReview.objects.filter(case=case_ref, status=RoutingReview.Status.OPEN))
-    ) | Q(
-        Exists(
-            AckClock.objects.filter(
-                case=case_ref, stopped_at__isnull=True, escalated_at__isnull=False
+    """Open routing review, an unanswered (escalated) intake/handoff/child request, or child work
+    a coordinator must place: what routing-authority holders see (M06, M09 Q6)."""
+    return (
+        Q(Exists(RoutingReview.objects.filter(case=case_ref, status=RoutingReview.Status.OPEN)))
+        | Q(
+            Exists(
+                AckClock.objects.filter(
+                    case=case_ref,
+                    stopped_at__isnull=True,
+                    escalated_at__isnull=False,
+                    kind__in=[
+                        AckClock.Kind.INTAKE,
+                        AckClock.Kind.HANDOFF,
+                        AckClock.Kind.CHILD_ACCEPT,
+                    ],
+                )
             )
         )
+        | Q(Exists(ChildWork.objects.filter(case=case_ref, status=ChildWork.Status.DISPUTED)))
     )
+
+
+def coordinator_waiting_condition():
+    """What waits for a routing-authority holder, for the M10 "รอฉันตัดสิน" tab."""
+    return _waiting_for_coordinator(OuterRef("pk"))
 
 
 def _staff_condition(ctx):
@@ -127,6 +154,15 @@ def _staff_condition(ctx):
     if scope:
         waiting = _waiting_for_coordinator(OuterRef("pk"))
         condition |= waiting if scope == "all" else waiting & Q(owner_division__in=scope)
+    # M07 Q12: approval/allocation authority holders see withdrawals waiting for them; Q4:
+    # intake staff see deliveries waiting for a receipt they may record on the district's behalf.
+    condition |= coordination.child_condition(divisions)  # M09 Q6: child divisions read
+    condition |= fulfilment.authority_condition(ctx.user)
+    condition |= returns.certification_condition(ctx.user)  # M08 Q9: conflicts to decide
+    condition |= registry.case_condition(divisions)  # M11: registry staff read cases citing SAP
+    intake = Division.objects.filter(is_intake=True).values_list("pk", flat=True).first()
+    if intake in divisions:
+        condition |= fulfilment.receipt_condition()
     return condition
 
 
@@ -430,10 +466,20 @@ def _cancel(ctx, case, payload, reason, target):
         # Requesters may withdraw their own case only before work has started.
         if case.status not in {S.SUBMITTED, S.TRIAGE}:
             fail(ErrorCode.FORBIDDEN, "The case can no longer be cancelled by the requester.")
+    elif case.kind == Case.Kind.WITHDRAWAL and fulfilment.approved(case):
+        # M07 Q7: after approval only approval authority cancels, and says what happens to
+        # goods already issued; outstanding approvals end with the case.
+        data = fulfilment.cancel_after_approval(ctx, case, payload, reason)
+        case.status, case.resume_status = target, ""
+        return data
     else:
         _require_owner_staff(ctx, case)
         if not reason:
             fail(ErrorCode.VALIDATION_ERROR, "A reason is required.")
+        if case.kind == Case.Kind.RETURN:
+            returns.cancel_guard(case)  # M08 Q8: goods that arrived must be inspected
+    if payload.get("resolution") or payload.get("reference"):
+        fail(ErrorCode.VALIDATION_ERROR, "Nothing was approved; no resolution is needed.")
     case.status, case.resume_status = target, ""
     return {}
 
@@ -455,7 +501,28 @@ HANDLERS = {
     "cancel": _cancel,
     "decline": _decline,
     **routing.HANDLERS,
+    **fulfilment.HANDLERS,
+    **returns.HANDLERS,
+    **coordination.HANDLERS,
+    **problems.HANDLERS,
 }
+
+# Shared lifecycle actions: each kind has its own rules (M07 Q6, M08 Q11/Q13, M09 Q1-Q4).
+BY_KIND = {
+    "confirm": {Case.Kind.WITHDRAWAL: fulfilment.confirm, Case.Kind.PROBLEM: problems.confirm},
+    "close": {
+        Case.Kind.WITHDRAWAL: fulfilment.close,
+        Case.Kind.RETURN: returns.close,
+        Case.Kind.PROBLEM: problems.close,
+    },
+    "reopen": {Case.Kind.PROBLEM: problems.reopen},
+}
+
+
+def _handler(action, case):
+    if action in BY_KIND:
+        return BY_KIND[action][case.kind]
+    return HANDLERS[action]
 
 
 @_dependency_guard
@@ -480,7 +547,7 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         replayed = _replay(ctx, action, key, request_hash)
         if replayed is not None:
             return replayed
-        if not spec.enabled:
+        if not spec.enabled_for(case.kind):
             fail(ErrorCode.ACTION_NOT_ENABLED, f"{action} arrives with {spec.module}.")
         payload = parse_action_payload(action, payload)
         reason = clean_reason(payload, spec.reason_required)
@@ -489,15 +556,19 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         targets = spec.targets(case.kind, case.status)
         if not targets:
             fail(ErrorCode.INVALID_TRANSITION, f"{action} is not allowed while {case.status}.")
-        # Every action has exactly one target per kind and status; RESUME is resolved by the
-        # handler.
-        (target,) = targets
+        # One target, or (M07) several the handler chooses from by the line counters; RESUME is
+        # resolved by the handler.
+        target = next(iter(targets)) if len(targets) == 1 else targets
         from_status = case.status
-        data = HANDLERS[action](ctx, case, payload, reason, target)
+        data = _handler(action, case)(ctx, case, payload, reason, target)
+        if len(targets) > 1 and case.status not in targets:
+            raise RuntimeError(f"{action} chose {case.status}, outside the matrix.")
+        coordination.after_action(case)  # M09: R09 child work ends with its lines or the case
+        routing.end_with_case(case, ctx.user)  # a waiting handoff ends with the case
         now = timezone.now()
         case.revision += 1
         case.updated_at = now
-        if case.status in workflow.TERMINAL:
+        if case.status in workflow.TERMINAL and from_status not in workflow.TERMINAL:
             case.ended_at = now
         case.save()
         result = _record(

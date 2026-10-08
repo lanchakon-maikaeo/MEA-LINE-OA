@@ -44,3 +44,31 @@ class StaffSessionMiddleware:
         if raw is None:
             return True
         return datetime.fromisoformat(raw) <= profile.sessions_valid_after
+
+
+# M10 Q3: pages load only their own CSS, HTMX, fonts and images; no inline script or style.
+CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self' data:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]
+)
+
+
+class ContentSecurityPolicyMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        return response

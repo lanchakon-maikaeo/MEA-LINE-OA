@@ -7,7 +7,7 @@ by themselves: each change here is a person's decision with the authority the ba
 
 from django.utils import timezone
 
-from operations import policy
+from operations import coordination, policy, workflow
 from operations.contracts import ErrorCode, fail
 from operations.models import (
     AckClock,
@@ -76,6 +76,19 @@ def _move_owner(case, division):
     case.owner_division = division
     case.assignee = None  # M02: a new owner division starts without a responsible person
     return previous
+
+
+def end_with_case(case, actor=None):
+    """A case that ended (cancelled, rejected, closed) takes its waiting handoff with it, so the
+    target division is no longer asked to accept work that is over."""
+    if case.status not in workflow.TERMINAL:
+        return
+    Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).update(
+        status=Handoff.Status.ENDED,
+        decided_by=actor,
+        decided_at=timezone.now(),
+        decision_reason=f"เรื่อง{case.get_status_display()}ก่อนตอบรับ",
+    )
 
 
 def request_handoff(ctx, case, payload, reason, target):
@@ -199,8 +212,13 @@ def decide_routing(ctx, case, payload, reason, target):
     ):
         fail(ErrorCode.FORBIDDEN, "Routing decisions need an active routing authority.")
     review = _open_review(case)
+    # Only unanswered intake/handoff clocks reach the coordinator; work deadlines go to the
+    # division's supervisors (M09 Q9).
     escalated = AckClock.objects.filter(
-        case=case, stopped_at__isnull=True, escalated_at__isnull=False
+        case=case,
+        stopped_at__isnull=True,
+        escalated_at__isnull=False,
+        kind__in=[AckClock.Kind.INTAKE, AckClock.Kind.HANDOFF],
     ).exists()
     if review is None and not escalated:
         fail(ErrorCode.VALIDATION_ERROR, "Nothing is waiting for a coordinator on this case.")
@@ -338,6 +356,13 @@ def complete_triage(ctx, case, payload, reason, target):
     rules = state.current_recommendation.rules if state.current_recommendation else []
     if case.owner_division.is_intake and "R09" not in rules:
         fail(ErrorCode.VALIDATION_ERROR, "Hand the case to the responsible division first.")
+    if "R09" in rules:
+        missing = coordination.r09_ready(case, state.current_recommendation)
+        if missing:
+            fail(
+                ErrorCode.VALIDATION_ERROR,
+                f"เรื่องหลายกอง (R09) ต้องส่งงานย่อยครบก่อนจบคัดกรอง: {', '.join(missing)} (M09 Q18)",
+            )
     if not state.confirmed_priority or state.confirmed_division_id != case.owner_division_id:
         fail(ErrorCode.VALIDATION_ERROR, "The owner division confirms the priority first.")
     floor = state.priority_floor

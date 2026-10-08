@@ -1,3 +1,4 @@
+import json
 from functools import wraps
 
 from django.conf import settings
@@ -20,26 +21,32 @@ from operations import (
     attachments,
     forms,
     identity,
+    inventory,
     notifications,
     orchestration,
     policy,
+    queues,
 )
 from operations.models import (
     AIConfigVersion,
     AICredential,
     AIProfile,
     AIRun,
+    Allocation,
     Attachment,
     AuthorityGrant,
     Division,
+    EquipmentType,
+    FakeStock,
     LineQuotaSnapshot,
     NotificationDelivery,
     OutboxEvent,
     PolicyVersion,
     RegistrationRequest,
     Requester,
-    Role,
     RoleGrant,
+    StockMovement,
+    StockSnapshot,
 )
 
 User = get_user_model()
@@ -71,7 +78,7 @@ def ready(request):
 
 class StaffPasswordChangeView(PasswordChangeView):
     template_name = "operations/password_change.html"
-    success_url = reverse_lazy("console")
+    success_url = reverse_lazy("start")
 
     def form_valid(self, form):
         response = super().form_valid(form)
@@ -80,55 +87,22 @@ class StaffPasswordChangeView(PasswordChangeView):
         return response
 
 
-@login_required
-@require_safe
-def console(request):
-    scope = identity.staff_scope(request.user)
-    divisions = Division.objects.filter(pk__in=list(scope.division_roles), is_active=True)
-    return render(
-        request,
-        "operations/console.html",
-        {
-            "scope": scope,
-            "memberships": [
-                (d, sorted(Role(r).label for r in scope.division_roles[d.pk])) for d in divisions
-            ],
-        },
-    )
-
-
-@login_required
-@require_safe
-def division_detail(request, code):
-    scope = identity.staff_scope(request.user)
-    division = Division.objects.filter(code=code, is_active=True).first()
-    # Unknown and out-of-scope divisions look the same, so URLs reveal nothing.
-    if division is None or not identity.can_access_division(scope, division.pk):
-        raise Http404
-    grants = (
-        RoleGrant.objects.filter(division=division, revoked_at__isnull=True, user__is_active=True)
-        .select_related("user__staff_profile")
-        .order_by("user__username", "role")
-    )
-    return render(request, "operations/division.html", {"division": division, "grants": grants})
-
-
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
 
 
 @login_required
 @require_safe
 def attachment_download(request, pk):
-    """Scanned-clean files of cases in the viewer's divisions only; everything else is 404."""
+    """Scanned-clean files of cases the viewer may see; everything else is 404."""
     attachment = (
         Attachment.objects.select_related("case")
         .filter(pk=pk, case__isnull=False, scan_status=Attachment.ScanStatus.CLEAN)
         .first()
     )
-    scope = identity.staff_scope(request.user)
-    if attachment is None or not identity.can_access_division(
-        scope, attachment.case.owner_division_id
-    ):
+    # Same scope as the case page (M10 round 2 Q1/Q2): whoever may see the case.
+    if attachment is None or not identity.staff_scope(request.user).has_any_access:
+        raise Http404
+    if not queues.visible(request.user).filter(pk=attachment.case_id).exists():
         raise Http404
     path = attachments.storage_dir() / attachment.storage_name
     if not attachment.storage_name or not path.is_file():
@@ -438,6 +412,9 @@ def admin_policy(request):
                     d["division"],
                     d["valid_from"],
                     d["valid_until"],
+                    category=d["category"],
+                    item=d["item"],
+                    max_quantity=d["max_quantity"],
                 ),
                 "บันทึกอำนาจแล้ว",
             )
@@ -449,7 +426,7 @@ def admin_policy(request):
         {
             "versions": PolicyVersion.objects.select_related("activated_by"),
             "grants": AuthorityGrant.objects.select_related(
-                "user__staff_profile", "division", "granted_by", "revoked_by"
+                "user__staff_profile", "division", "item", "granted_by", "revoked_by"
             ),
             "activate_form": forms.PolicyActivateForm(),
             "grant_form": grant_form,
@@ -490,6 +467,93 @@ def admin_policy_action(request, action, pk):
     else:
         raise Http404
     return redirect("admin-policy")
+
+
+# --- Inventory seam (M07) ----------------------------------------------------------------------
+
+
+@admin_required
+@require_safe
+def admin_inventory(request):
+    """Ready figures per item, who waits for them, allocations, and the fake store's history."""
+    now = timezone.now()
+    rows = []
+    for item in EquipmentType.objects.filter(is_active=True).order_by("code"):
+        figures = inventory.availability(item, now)
+        rows.append(
+            {
+                "item": item,
+                "figures": figures,
+                "demand": inventory.demand(item),
+                "contended": inventory.contended(item, now),
+                "allocated": inventory.active_allocated(item),
+                "fake": FakeStock.objects.filter(item=item).first(),
+                "serials": inventory.available_serials(item),
+                "snapshot": StockSnapshot.objects.filter(item=item).order_by("-as_of").first(),
+            }
+        )
+    return render(
+        request,
+        "operations/admin_inventory.html",
+        {
+            "mode": inventory.mode(),
+            "stale_hours": settings.INVENTORY_STALE_HOURS,
+            "rows": rows,
+            "allocations": Allocation.objects.filter(ended_at__isnull=True).select_related(
+                "case", "item", "allocated_by"
+            ),
+            "movements": StockMovement.objects.select_related("item", "case").order_by("-id")[:30],
+            "adjust_form": forms.InventoryAdjustForm(),
+            "import_form": forms.SnapshotImportForm(),
+        },
+    )
+
+
+@admin_required
+@require_POST
+def admin_inventory_action(request, action):
+    if action == "adjust":
+        form = forms.InventoryAdjustForm(request.POST)
+        if form.is_valid():
+            d = form.cleaned_data
+            _run(
+                request,
+                lambda: inventory.adjust_fake(
+                    request.user,
+                    d["item"],
+                    d["delta"],
+                    d["reason"],
+                    d["add_serials"].split(),
+                    d["remove_serials"].split(),
+                    bucket=d["bucket"] or "available",
+                ),
+                "ปรับคลังจำลองแล้ว",
+            )
+        else:
+            messages.error(request, "ข้อมูลการปรับไม่ครบ")
+    elif action == "import":
+        form = forms.SnapshotImportForm(request.POST)
+        if form.is_valid():
+            d = form.cleaned_data
+            try:
+                rows = json.loads(d["rows"])
+            except ValueError:
+                rows = None
+            if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+                messages.error(request, "ยอดต้องเป็นรายการ JSON ของ object")
+            else:
+                _run(
+                    request,
+                    lambda: inventory.import_snapshot(
+                        request.user, rows, d["as_of"], d["source"], d["is_synthetic"]
+                    ),
+                    "นำเข้ายอดแล้ว",
+                )
+        else:
+            messages.error(request, "ข้อมูลนำเข้าไม่ครบ")
+    else:
+        raise Http404
+    return redirect("admin-inventory")
 
 
 # --- AI configuration (developer-admin only) ----------------------------------------------------

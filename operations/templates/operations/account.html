@@ -1,0 +1,33 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}บัญชีของฉัน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_class %}page--reading{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">บัญชีของฉัน</span>
+    <h1>{{ user.staff_profile.display_name|default:user.username }}</h1>
+  </div>
+  <div class="page-head__actions"><a class="btn" href="{% url 'password_change' %}">เปลี่ยนรหัสผ่าน</a></div>
+</div>
+<section class="section">
+  <div class="section-head"><h2>ข้อมูลบัญชี</h2></div>
+  <dl class="kv">
+    <div><dt>ชื่อผู้ใช้</dt><dd>{{ user.username }}</dd></div>
+    <div><dt>อีเมล</dt><dd>{{ user.email|default:"ยังไม่ได้ตั้ง" }}<br><span class="muted">ใช้รับการแจ้งเตือนเจ้าหน้าที่ แก้ได้โดยแอดมินระบบ</span></dd></div>
+    <div><dt>บทบาทระดับระบบ</dt><dd>{% if scope.is_admin %}แอดมินระบบ{% if scope.is_developer_admin %} · แอดมินผู้พัฒนา{% endif %}{% else %}-{% endif %}</dd></div>
+  </dl>
+</section>
+<section class="section">
+  <div class="section-head"><h2>กองและบทบาท</h2></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">กอง</th><th scope="col">บทบาท</th><th scope="col">ตั้งแต่</th></tr></thead>
+    <tbody>
+      {% for g in grants %}{% if g.division %}
+        <tr><td><a href="{% url 'division-detail' g.division.code %}">{{ g.division.code }}</a> <span class="muted">{{ g.division.name }}</span></td><td>{{ g.get_role_display }}</td><td class="num">{{ g.granted_at|thai_date }}</td></tr>
+      {% endif %}{% empty %}<tr><td colspan="3" class="muted">ยังไม่มีกองหรือบทบาท</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted">บทบาทกำหนดการกระทำที่ทำได้ ทุกบทบาทในกองเห็นเรื่องชุดเดียวกัน</p>
+</section>
+{% endblock %}

@@ -18,6 +18,9 @@ Docs/*
 Docs/adr/*
 !Docs/adr/0001-ai-draft-authority-and-evaluation.md
 !Docs/adr/0002-ai-proposes-facts-rules-choose-division.md
+!Docs/adr/0003-no-local-stock-allocate-only-on-contention.md
+!Docs/adr/0004-multi-division-case-stays-one-case.md
+!Docs/adr/0005-reconcile-with-sap-by-export-files.md
 archive/
 *.jpg
 *.jpeg

@@ -4,7 +4,7 @@ from pathlib import Path
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 
-from config.environment import read_environment, require_demo_database
+from config.environment import inventory_mode, read_environment, require_demo_database
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 APP_ENV, SECRET_KEY, DATABASE_URL, ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS = read_environment(
@@ -32,6 +32,8 @@ INSTALLED_APPS = [
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "operations.middleware.ContentSecurityPolicyMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -52,6 +54,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "operations.web.navigation",
             ]
         },
     }
@@ -68,6 +71,18 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# M10: WhiteNoise serves the locked CSS/HTMX/fonts; hashed names (collectstatic at image build)
+# outside local/CI, straight from the app directories otherwise.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        if SECURE_ENVIRONMENT
+        else "django.contrib.staticfiles.storage.StaticFilesStorage"
+    },
+}
+WHITENOISE_USE_FINDERS = not SECURE_ENVIRONMENT
+WHITENOISE_AUTOREFRESH = DEBUG
 MEDIA_ROOT = Path(os.environ.get("PRIVATE_MEDIA_ROOT") or BASE_DIR / "private-media")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TEST_RUNNER = "operations.testing.NonEmptyTestRunner"
@@ -86,7 +101,7 @@ SECURE_HSTS_PRELOAD = SECURE_ENVIRONMENT
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 LOGIN_URL = "login"
-LOGIN_REDIRECT_URL = "console"
+LOGIN_REDIRECT_URL = "start"
 LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_AGE = 10 * 60 * 60
 
@@ -132,3 +147,35 @@ AI_TOTAL_BUDGET_SECONDS = 25
 AI_REPLY_FALLBACK_SECONDS = 35
 # Harness pipeline: start the next model in parallel when the current one is this slow.
 AI_HEDGE_AFTER_SECONDS = float(os.environ.get("AI_HEDGE_AFTER_SECONDS", "6"))
+
+# --- Inventory seam (M07, ADR 0003) ----------------------------------------------------------
+# fake: the synthetic inventory stands in for the registry (never in production);
+# manual_reference: staff issue in the registry first and record its document number here.
+INVENTORY_MODE = inventory_mode(APP_ENV, os.environ.get("INVENTORY_MODE", ""))
+# Imported registry figures older than this are shown as stale; shortage becomes unknown.
+INVENTORY_STALE_HOURS = int(os.environ.get("INVENTORY_STALE_HOURS") or 24)
+# A delivery nobody confirmed may be closed by the owner division after this many days (Q6).
+RECEIPT_NO_RESPONSE_DAYS = 7
+
+# --- Staff web and staff email (M10) -------------------------------------------------------------
+# การแจ้งเตือนเจ้าหน้าที่: off until addresses and SMTP are agreed (round 1 Q10). Locally the
+# file backend writes each message under reports/emails instead of sending it.
+STAFF_EMAIL_ENABLED = os.environ.get("STAFF_EMAIL_ENABLED", "false").lower() == "true"
+STAFF_WEB_BASE_URL = os.environ.get("STAFF_WEB_BASE_URL", "") or (
+    CSRF_TRUSTED_ORIGINS[0] if CSRF_TRUSTED_ORIGINS else ""
+)
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND") or (
+    "django.core.mail.backends.smtp.EmailBackend"
+    if SECURE_ENVIRONMENT
+    else "django.core.mail.backends.filebased.EmailBackend"
+)
+EMAIL_FILE_PATH = BASE_DIR / "reports" / "emails"
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT") or 587)
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_TIMEOUT = 10
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "faoj-noreply@example.invalid")
+# CSV export (round 1 Q12) and closed-case window of the queues.
+EXPORT_MAX_ROWS = 5000

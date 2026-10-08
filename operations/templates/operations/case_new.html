@@ -1,0 +1,78 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}บันทึกเรื่องแทนผู้แจ้ง — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_class %}page--reading{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">กองรับเรื่องกลาง</span>
+    <h1>บันทึกเรื่องแทนผู้แจ้ง</h1>
+    <p class="lede">ใช้เมื่อเขตแจ้งทางโทรศัพท์ หนังสือ หรือมาที่เคาน์เตอร์ เรื่องจะเข้าคิวคัดกรองเหมือนเรื่องจาก LINE</p>
+  </div>
+</div>
+{% for error in errors %}<div class="notice notice--error mb-24" role="alert">{% icon "alert" %}<div class="notice__body">{{ error }}</div></div>{% endfor %}
+<form class="new-case" method="post" data-tour="new-case">
+  {% csrf_token %}
+  <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+  <div class="field">
+    <label for="nc-requester">ผู้แจ้ง <span class="req" aria-hidden="true">*</span></label>
+    <select id="nc-requester" name="requester_id" required>
+      <option value="">— เลือกผู้แจ้งที่รับรองแล้ว —</option>
+      {% for r in requesters %}<option value="{{ r.pk }}"{% if values.requester_id == r.pk|stringformat:"s" %} selected{% endif %}>{{ r.display_name }} · {{ r.district.name }}</option>{% endfor %}
+    </select>
+    <span class="helptext">ยังไม่มีชื่อ? แอดมินรับรองผู้แจ้งโดยตรงได้ที่หน้ารับรองผู้แจ้ง</span>
+  </div>
+  <fieldset class="choice-field">
+    <legend>ชนิดเรื่อง <span class="req" aria-hidden="true">*</span></legend>
+    {% for value, label in kinds %}<label class="choice"><input type="radio" name="kind" value="{{ value }}" required{% if values.kind == value %} checked{% endif %}> <span>{{ label }}</span></label>{% endfor %}
+  </fieldset>
+  <div class="form-grid">
+    <div class="field">
+      <label for="nc-channel">เขตแจ้งทาง <span class="req" aria-hidden="true">*</span></label>
+      <select id="nc-channel" name="channel" required>{% for value, label in channels %}<option value="{{ value }}"{% if values.channel == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    </div>
+    <div class="field">
+      <label for="nc-related">อ้างเรื่องเดิม (ถ้ามี)</label>
+      <input id="nc-related" name="related_case_number" value="{{ values.related_case_number|default:'' }}" placeholder="เช่น P69-000001" autocomplete="off">
+    </div>
+  </div>
+  <div class="field">
+    <label for="nc-note">บันทึกการรับแจ้ง <span class="req" aria-hidden="true">*</span></label>
+    <textarea id="nc-note" name="intake_note" rows="2" required placeholder="ใครแจ้ง เมื่อไร">{{ values.intake_note|default:'' }}</textarea>
+  </div>
+
+  <div class="kind-group kind-withdrawal">
+    <h2 class="kind-title">ข้อมูลเรื่องเบิก</h2>
+    <div class="field"><label for="nc-purpose">จะนำไปใช้ทำอะไร</label><textarea id="nc-purpose" name="purpose" rows="2">{{ values.purpose|default:'' }}</textarea></div>
+    <div class="field"><label for="nc-needed">ต้องการภายในวันที่</label><input id="nc-needed" name="needed_by" type="date" value="{{ values.needed_by|default:'' }}"></div>
+  </div>
+  <div class="kind-group kind-return">
+    <h2 class="kind-title">ข้อมูลเรื่องคืน</h2>
+    <div class="field"><label for="nc-condition">สภาพของ</label><input id="nc-condition" name="condition" value="{{ values.condition|default:'' }}"></div>
+    <div class="field"><label for="nc-reason">เหตุผลที่คืน</label><input id="nc-reason" name="reason" value="{{ values.reason|default:'' }}"></div>
+    <div class="field"><label for="nc-source">เอกสารการจ่ายเดิม (ถ้ามี)</label><input id="nc-source" name="source_reference" value="{{ values.source_reference|default:'' }}"></div>
+  </div>
+  <div class="kind-group kind-problem">
+    <h2 class="kind-title">ข้อมูลเรื่องแจ้งปัญหา</h2>
+    <div class="field"><label for="nc-description">อาการหรือปัญหาที่พบ</label><textarea id="nc-description" name="description" rows="3">{{ values.description|default:'' }}</textarea></div>
+    <div class="field"><label for="nc-impact">ผลกระทบต่อผู้ใช้ไฟ</label><textarea id="nc-impact" name="impact" rows="2">{{ values.impact|default:'' }}</textarea></div>
+  </div>
+
+  <fieldset class="lines-field">
+    <legend>รายการอุปกรณ์</legend>
+    <p class="helptext">เรื่องเบิกและคืนต้องมีอย่างน้อย 1 รายการ เรื่องเบิกไม่ต้องใส่เลขเครื่อง (ระบุตอนจ่าย)</p>
+    {% for row in rows %}
+      <div class="line-row">
+        <label class="line-row__field"><span>อุปกรณ์</span>
+          <select name="row-{{ row.i }}-item"><option value="">—</option>{% for item in items %}<option value="{{ item.code }}"{% if row.item == item.code %} selected{% endif %}>{{ item.code }} {{ item.name }}</option>{% endfor %}</select>
+        </label>
+        <div class="line-row__inputs">
+          <label class="line-row__field"><span>จำนวน</span><input name="row-{{ row.i }}-quantity" value="{{ row.quantity }}" inputmode="decimal" autocomplete="off"></label>
+          <label class="line-row__field"><span>เลขเครื่อง (คืน/แจ้งปัญหา)</span><input name="row-{{ row.i }}-serials" value="{{ row.serials }}" autocomplete="off"></label>
+        </div>
+      </div>
+    {% endfor %}
+  </fieldset>
+  <div class="form-actions"><button type="submit">บันทึกเรื่อง</button><a class="btn btn--secondary" href="{% url 'console' %}">ยกเลิก</a></div>
+</form>
+{% endblock %}

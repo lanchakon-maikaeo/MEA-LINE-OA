@@ -1,0 +1,39 @@
+{% load ui %}<div id="queue-body"
+     hx-get="{{ request.path }}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;page={{ pager.number }}"
+     hx-trigger="every 60s, poll"
+     hx-swap="outerHTML"
+     data-poll>
+  <nav class="chips" aria-label="แท็บคิว" data-tour="queue-tabs">
+    {% for key, label, count in tabs %}
+      <a class="chip" href="?tab={{ key }}{% if base_query %}&amp;{{ base_query }}{% endif %}"{% if key == tab %} aria-current="page"{% endif %}>
+        {{ label }} <span class="chip__count{% if key == 'decide' and count %} chip__count--alert{% endif %}">{{ count }}</span>
+      </a>
+    {% endfor %}
+    {% if registry_count is not None %}
+      <a class="chip" href="{% url 'registry' %}{% if division and registry_count and not nav.registry %}?tab=with_division{% endif %}">ไม่ตรงทะเบียน <span class="chip__count{% if registry_count %} chip__count--alert{% endif %}">{{ registry_count }}</span></a>
+    {% endif %}
+  </nav>
+
+  <div class="cluster mt-18 mb-24">
+    <span class="muted">{{ pager.total }} เรื่อง{% if tab != "closed" %} · เรียงตามความเร่งด่วน วันที่ต้องใช้ และเวลาที่ยื่น{% else %} · ที่ปิดในช่วง 30 วัน{% endif %}</span>
+    <span class="poll-note">อัปเดต {{ now|thai_short }} น.</span>
+  </div>
+
+  {% if rows %}
+    <ol class="queue" aria-label="รายการเรื่อง">
+      {% for row in rows %}{% include "operations/_queue_row.html" %}{% endfor %}
+    </ol>
+    {% if pager.pages > 1 %}
+      <nav class="pager" aria-label="หน้า">
+        {% if pager.number > 1 %}<a class="btn btn--secondary btn--sm" href="?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;page={{ pager.number|add:'-1' }}">ก่อนหน้า</a>{% else %}<span></span>{% endif %}
+        <span>หน้า {{ pager.number }} / {{ pager.pages }}</span>
+        {% if pager.number < pager.pages %}<a class="btn btn--secondary btn--sm" href="?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;page={{ pager.number|add:'1' }}">ถัดไป</a>{% else %}<span></span>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="empty">
+      <strong>ไม่มีเรื่องในแท็บนี้</strong>
+      {% if filters.active %}ลองล้างตัวกรองหรือเลือกแท็บอื่น{% else %}มีเรื่องใหม่เมื่อไร จะขึ้นที่นี่เอง{% endif %}
+    </div>
+  {% endif %}
+</div>

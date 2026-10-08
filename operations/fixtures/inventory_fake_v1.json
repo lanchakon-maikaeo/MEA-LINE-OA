@@ -1,0 +1,39 @@
+{
+  "name": "inventory-fake-v1",
+  "purpose": "คลังจำลอง (M07 Q1): the stock_snapshot of synthetic-data.json with serials, for non-production use only.",
+  "is_synthetic": true,
+  "source": "synthetic-data.json stock_snapshot 2026-10-05T12:00:00+07:00",
+  "notes": [
+    "Counts equal synthetic-data.json stock_snapshot; serials are synthetic and follow the example cases there.",
+    "MTR_SYN_004 is the serial REQ_SYN_001 has reserved in the registry; MTR_SYN_005 came back with REQ_SYN_002 and waits for inspection.",
+    "MTR_SYN_006 was already issued to D01 and MTR_SYN_007 is still with D02, so neither is on hand; TRF_SYN_004 is the faulty transformer of REQ_SYN_003 at D03."
+  ],
+  "stock": [
+    {
+      "item": "MTR_SYN_A",
+      "available": 3,
+      "reserved": 1,
+      "awaiting_inspection": 1,
+      "awaiting_repair": 0,
+      "serials": {
+        "available": ["MTR_SYN_001", "MTR_SYN_002", "MTR_SYN_003"],
+        "reserved": ["MTR_SYN_004"],
+        "awaiting_inspection": ["MTR_SYN_005"]
+      }
+    },
+    {
+      "item": "TRF_SYN_A",
+      "available": 2,
+      "reserved": 0,
+      "awaiting_inspection": 0,
+      "awaiting_repair": 1,
+      "serials": {
+        "available": ["TRF_SYN_001", "TRF_SYN_002"],
+        "awaiting_repair": ["TRF_SYN_003"]
+      }
+    },
+    {"item": "FUSE_SYN_A", "available": 40, "reserved": 0, "awaiting_inspection": 0, "awaiting_repair": 0},
+    {"item": "CB_SYN_A", "available": 8, "reserved": 0, "awaiting_inspection": 2, "awaiting_repair": 0},
+    {"item": "CBL_SYN_A", "available": 100, "reserved": 0, "awaiting_inspection": 0, "awaiting_repair": 0}
+  ]
+}

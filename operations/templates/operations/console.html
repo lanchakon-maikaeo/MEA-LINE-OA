@@ -1,19 +1,39 @@
-{% extends scope.is_admin|yesno:"operations/admin_base.html,operations/base.html" %}
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}ภาพรวม — ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
-<h1>สวัสดี {{ user.staff_profile.display_name|default:user.username }}</h1>
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">ภาพรวม</span>
+    <h1>สวัสดี {{ user.staff_profile.display_name|default:user.username }}</h1>
+    {% if scope.is_admin %}<p class="lede">แอดมินระบบ{% if scope.is_developer_admin %} · แอดมินผู้พัฒนา{% endif %} · ดูคิวได้ทุกกอง (อ่านอย่างเดียว) ส่วนการบันทึกทำได้เฉพาะกองที่คุณมีบทบาท</p>{% endif %}
+  </div>
+  {% if scope.is_admin %}<div class="page-head__actions"><a class="btn" href="{% url 'queue-all' %}">คิวทุกกอง</a></div>{% endif %}
+</div>
+
 {% if not scope.has_any_access %}
-  <p role="status">บัญชีนี้ยังไม่ได้รับกองหรือบทบาท จึงยังเข้าถึงเรื่องไม่ได้ กรุณาติดต่อแอดมินระบบ</p>
+  <div class="empty" role="status">
+    <strong>บัญชีนี้ยังไม่ได้รับกองหรือบทบาท</strong>
+    จึงยังเปิดดูเรื่องไม่ได้ ติดต่อแอดมินระบบเพื่อขอสิทธิ์
+  </div>
 {% else %}
-  {% if scope.is_admin %}
-    <p>บทบาทระดับระบบ: แอดมินระบบ{% if scope.is_developer_admin %}, แอดมินผู้พัฒนา{% endif %} (ดูได้ทุกกอง)</p>
-  {% endif %}
-  {% if memberships %}
-    <h2>กองของฉัน</h2>
-    <ul>
-      {% for division, roles in memberships %}
-        <li><a href="{% url 'division-detail' division.code %}">{{ division.code }} {{ division.name }}</a> — {{ roles|join:", " }}</li>
-      {% endfor %}
-    </ul>
-  {% endif %}
+  <div class="division-cards">
+    {% for card in cards %}
+      <section class="division-card" aria-labelledby="div-{{ card.division.code }}">
+        <div class="division-card__head">
+          <h2 id="div-{{ card.division.code }}"><a href="{% url 'division-detail' card.division.code %}">{{ card.division.code }}</a></h2>
+          <span class="muted">{{ card.division.name }}</span>
+        </div>
+        <div class="stats">
+          <a class="stat" href="{% url 'division-detail' card.division.code %}?tab=host"><span class="stat__label">เรื่องที่ต้องทำ</span><span class="stat__value">{{ card.open }}</span></a>
+          <a class="stat{% if card.overdue %} stat--alert{% endif %}" href="{% url 'division-detail' card.division.code %}?tab=host&amp;overdue=1"><span class="stat__label">เกินกรอบเวลา</span><span class="stat__value">{{ card.overdue }}</span></a>
+          <a class="stat" href="{% url 'division-detail' card.division.code %}?tab=mine"><span class="stat__label">งานของฉัน</span><span class="stat__value">{{ card.mine }}</span></a>
+        </div>
+        {% if card.roles %}<p class="muted mt-8">บทบาท: {{ card.roles|join:", " }}</p>{% endif %}
+      </section>
+    {% empty %}
+      <div class="empty"><strong>ยังไม่มีกองที่ใช้งาน</strong></div>
+    {% endfor %}
+  </div>
 {% endif %}
 {% endblock %}

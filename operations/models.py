@@ -1,11 +1,13 @@
-"""Identity and audit (M01), cases (M02), LINE intake (M03), orchestration (M04) and AI (M05)."""
+"""Identity and audit (M01), cases (M02), LINE intake (M03), orchestration (M04), AI (M05),
+routing (M06), withdrawal fulfilment with the inventory seam (M07), returns (M08) and problems,
+child work and service-calendar deadlines (M09)."""
 
 import uuid
 from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 
@@ -253,6 +255,8 @@ class EquipmentType(models.Model):
     is_divisible = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     is_synthetic = models.BooleanField(default=False)
+    # M11 Q5: the registry's (SAP) material code; one per item, empty until mapped.
+    official_code = models.CharField(max_length=40, blank=True)
 
     class Meta:
         ordering = ["code"]
@@ -260,7 +264,12 @@ class EquipmentType(models.Model):
             models.CheckConstraint(
                 name="equipment_serialized_is_whole",
                 condition=~Q(is_serialized=True, is_divisible=True),
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["official_code"],
+                condition=~Q(official_code=""),
+                name="equipment_official_code_unique",
+            ),
         ]
 
     def __str__(self):
@@ -360,13 +369,32 @@ class Case(models.Model):
 
 
 class CaseLine(models.Model):
-    """รายการของในเรื่อง. Problem lines may omit quantity; M07-M09 add fulfilment counters."""
+    """รายการของในเรื่อง. Problem lines may omit quantity.
+
+    Withdrawal counters (M07, E.5): requested, approved (None = not decided yet), issued,
+    received and terminated are kept apart; ส่วนค้างจ่าย = approved - issued - terminated. The
+    database refuses counters that would issue more than was approved.
+    """
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="lines")
     line_no = models.PositiveSmallIntegerField()
     item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
     requested_quantity = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     serials = models.JSONField(default=list, blank=True)
+    approved_quantity = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    approval_reason = models.TextField(blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    issued_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    received_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    terminated_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    # Return counters (M08): arrived and counted for this line / outstanding return stopped.
+    returned_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    return_terminated_quantity = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0")
+    )
 
     class Meta:
         ordering = ["case", "line_no"]
@@ -376,7 +404,47 @@ class CaseLine(models.Model):
                 name="caseline_quantity_positive",
                 condition=Q(requested_quantity__isnull=True) | Q(requested_quantity__gt=0),
             ),
+            models.CheckConstraint(
+                name="caseline_approved_within_request",
+                condition=Q(approved_quantity__isnull=True)
+                | Q(
+                    approved_quantity__gte=0, approved_quantity__lte=models.F("requested_quantity")
+                ),
+            ),
+            models.CheckConstraint(
+                name="caseline_counters_not_negative",
+                condition=Q(issued_quantity__gte=0, received_quantity__gte=0)
+                & Q(terminated_quantity__gte=0)
+                & Q(returned_quantity__gte=0, return_terminated_quantity__gte=0),
+            ),
+            models.CheckConstraint(
+                name="caseline_fulfilment_within_approval",
+                condition=Q(
+                    approved_quantity__isnull=True, issued_quantity=0, terminated_quantity=0
+                )
+                | Q(
+                    approved_quantity__gte=models.F("issued_quantity")
+                    + models.F("terminated_quantity")
+                ),
+            ),
         ]
+
+    @property
+    def outstanding(self):
+        """ส่วนค้างจ่าย: approved but neither issued nor terminated (0 before a decision)."""
+        if self.approved_quantity is None:
+            return Decimal("0")
+        return self.approved_quantity - self.issued_quantity - self.terminated_quantity
+
+    @property
+    def return_outstanding(self):
+        """ส่วนค้างส่งคืน: asked to return, not arrived (counted) and not stopped."""
+        left = (
+            (self.requested_quantity or Decimal("0"))
+            - self.returned_quantity
+            - self.return_terminated_quantity
+        )
+        return max(left, Decimal("0"))
 
 
 class CaseNumberCounter(models.Model):
@@ -610,7 +678,8 @@ class PostbackToken(models.Model):
 
 
 class Attachment(models.Model):
-    """A file from LINE kept private: fetched via the content API, quarantined until scanned."""
+    """A file kept private and quarantined until scanned: from LINE (fetched via the content
+    API) or uploaded by staff on the case page (M10 Q11, never sent to the requester)."""
 
     class ScanStatus(models.TextChoices):
         PENDING_FETCH = "pending_fetch", "รอดึงไฟล์"
@@ -620,9 +689,17 @@ class Attachment(models.Model):
         REJECTED = "rejected", "ไม่รับไฟล์"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    identity = models.ForeignKey(ChannelIdentity, on_delete=models.PROTECT, related_name="+")
-    inbox = models.OneToOneField(WebhookInbox, on_delete=models.PROTECT, related_name="+")
-    line_message_id = models.CharField(max_length=64)
+    identity = models.ForeignKey(
+        ChannelIdentity, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    inbox = models.OneToOneField(
+        WebhookInbox, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    line_message_id = models.CharField(max_length=64, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    note = models.CharField(max_length=200, blank=True)
     draft = models.ForeignKey(
         ConversationDraft,
         null=True,
@@ -632,6 +709,10 @@ class Attachment(models.Model):
     )
     case = models.ForeignKey(
         Case, null=True, blank=True, on_delete=models.PROTECT, related_name="attachments"
+    )
+    # M11 Q3/Q13: evidence of the registry document behind a manual_reference fact.
+    registry_record = models.ForeignKey(
+        "RegistryRecord", null=True, blank=True, on_delete=models.PROTECT, related_name="evidence"
     )
     declared_name = models.CharField(max_length=200, blank=True)
     content_type = models.CharField(max_length=64, blank=True)
@@ -649,6 +730,20 @@ class Attachment(models.Model):
     class Meta:
         ordering = ["created_at"]
         indexes = [models.Index(fields=["scan_status", "created_at"])]
+        constraints = [
+            models.CheckConstraint(
+                name="attachment_one_source",
+                condition=(
+                    Q(identity__isnull=False, inbox__isnull=False, uploaded_by__isnull=True)
+                    | Q(
+                        identity__isnull=True,
+                        inbox__isnull=True,
+                        uploaded_by__isnull=False,
+                        case__isnull=False,
+                    )
+                ),
+            )
+        ]
 
 
 # --- M04: delivery and message budget -------------------------------------------------------------
@@ -680,6 +775,10 @@ class NotificationDelivery(models.Model):
         ChannelIdentity, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     email = models.EmailField(blank=True)
+    # M10: the staff member an email is for, re-checked (active, still in scope) when sending.
+    recipient_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     case = models.ForeignKey(
         Case, null=True, blank=True, on_delete=models.PROTECT, related_name="deliveries"
     )
@@ -696,6 +795,8 @@ class NotificationDelivery(models.Model):
         "self", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     retry_key = models.UUIDField(default=uuid.uuid4)
+    # A prepared LINE message (e.g. a receipt card with buttons); plain `text` otherwise.
+    message = models.JSONField(default=dict, blank=True)
     messages = models.JSONField(default=list, blank=True)
     counted = models.PositiveSmallIntegerField(default=0)
     tier = models.PositiveSmallIntegerField(null=True, blank=True)
@@ -1005,12 +1106,16 @@ class AuthorityGrant(models.Model):
     """Authority for one activity (B.2): who may decide what, separate from duties (RoleGrant).
 
     A role never implies authority. Scope narrows a grant: an empty division means every
-    division; item/category/quantity limits are for approval activities (M07).
+    division; category/item narrow M07 activities, and max_quantity caps the approved quantity
+    of one line, so it needs an item (units differ within a category, M07 Q2).
     """
 
     class Activity(models.TextChoices):
         PRIORITY_EXCEPTION = "priority_exception", "ข้อยกเว้นระดับความเร่งด่วน"
         ROUTING_DECISION = "routing_decision", "ตัดสินเส้นทาง"
+        WITHDRAWAL_APPROVAL = "withdrawal_approval", "อนุมัติเบิก"
+        ALLOCATION = "allocation", "จัดสรรของขาด"
+        CONDITION_CERTIFICATION = "condition_certification", "รับรองสภาพ"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="authority_grants"
@@ -1050,6 +1155,10 @@ class AuthorityGrant(models.Model):
             models.CheckConstraint(
                 name="authority_quantity_positive",
                 condition=Q(max_quantity__isnull=True) | Q(max_quantity__gt=0),
+            ),
+            models.CheckConstraint(
+                name="authority_quantity_needs_item",
+                condition=Q(max_quantity__isnull=True) | Q(item__isnull=False),
             ),
         ]
 
@@ -1157,6 +1266,7 @@ class Handoff(models.Model):
         ACCEPTED = "accepted", "ตอบรับแล้ว"
         DECLINED = "declined", "ไม่ตอบรับ"
         WITHDRAWN = "withdrawn", "ปิดเพื่อให้ผู้ประสานตัดสิน"
+        ENDED = "ended", "ปิดพร้อมเรื่อง"
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="handoffs")
     from_division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
@@ -1232,17 +1342,33 @@ class RoutingReview(models.Model):
 
 class AckClock(models.Model):
     """Time to respond (B.3/B.4): intake (submitted → triage started) and handoff (requested →
-    accepted/declined). Synthetic durations from the active policy; never an official SLA."""
+    accepted/declined), and since M09 the work deadlines (กรอบเวลา) of FAOJ's own steps.
+    Synthetic durations from the active policy, counted on its service calendar (P0 continuous);
+    never an official SLA. Work deadlines stop while the district has the turn or a supervisor
+    approved a pause (paused_minutes, B.4); the case's total age keeps running."""
 
     class Kind(models.TextChoices):
         INTAKE = "intake", "รอเริ่มคัดกรอง"
         HANDOFF = "handoff", "รอตอบรับการส่งต่อ"
+        FIRST_RESPONSE = "first_response", "ตรวจครั้งแรก"
+        RESOLVE = "resolve", "แก้ไข"
+        APPROVAL = "approval", "รออนุมัติ"
+        ISSUE = "issue", "รอจ่าย"
+        INSPECTION = "inspection", "รอตรวจของคืน"
+        CHILD_ACCEPT = "child_accept", "รอตอบรับงานย่อย"
+        CHILD_RESULT = "child_result", "รอผลงานย่อย"
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="ack_clocks")
     kind = models.CharField(max_length=16, choices=Kind.choices)
     handoff = models.OneToOneField(
         Handoff, null=True, blank=True, on_delete=models.PROTECT, related_name="clock"
     )
+    child_work = models.ForeignKey(
+        "ChildWork", null=True, blank=True, on_delete=models.PROTECT, related_name="clocks"
+    )
+    # Business minutes of approved pauses since the start; while paused the sweep skips it.
+    paused_minutes = models.PositiveIntegerField(default=0)
+    paused_at = models.DateTimeField(null=True, blank=True)
     division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
     started_at = models.DateTimeField()
     priority = models.CharField(max_length=4, blank=True)
@@ -1259,8 +1385,788 @@ class AckClock(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["case", "kind"],
-                condition=Q(stopped_at__isnull=True),
+                condition=Q(stopped_at__isnull=True, child_work__isnull=True),
                 name="ack_clock_one_open_per_kind",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["child_work", "kind"],
+                condition=Q(stopped_at__isnull=True, child_work__isnull=False),
+                name="ack_clock_one_open_per_child",
+            ),
         ]
         indexes = [models.Index(fields=["stopped_at", "due_at"])]
+
+    @property
+    def work(self):
+        """A FAOJ work deadline (not an answer to a handoff or a child request)."""
+        return self.kind not in {self.Kind.INTAKE, self.Kind.HANDOFF, self.Kind.CHILD_ACCEPT}
+
+
+# --- M07: withdrawal fulfilment and the inventory seam (ADR 0003) ------------------------------
+
+
+class Delivery(models.Model):
+    """การส่งมอบ: goods that really left the store once (Q5); the unit the district confirms."""
+
+    class Status(models.TextChoices):
+        AWAITING = "awaiting", "รอยืนยันรับ"
+        CONFIRMED = "confirmed", "ยืนยันรับครบ"
+        MISMATCH = "mismatch", "แจ้งไม่ตรง"
+        RESOLVED = "resolved", "ปิดส่วนต่างแล้ว"
+        UNCONFIRMED = "unconfirmed", "ปิดโดยผู้แจ้งไม่ตอบ"
+
+    class Mode(models.TextChoices):
+        FAKE = "fake", "คลังจำลอง"
+        MANUAL = "manual_reference", "อ้างเลขเอกสาร"
+
+    class Resolution(models.TextChoices):
+        ISSUE_ERROR = "issue_error", "บันทึกจ่ายผิด"
+        LOST = "lost", "ของหายหรือเสียหายระหว่างส่ง"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="deliveries_out")
+    seq = models.PositiveSmallIntegerField()
+    mode = models.CharField(max_length=16, choices=Mode.choices)
+    document_number = models.CharField(max_length=64)
+    recipient_name = models.CharField(max_length=200)
+    note = models.TextField(blank=True)
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    issued_at = models.DateTimeField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.AWAITING)
+    # Manual mode only: recorded although the imported figures looked short (reconcile, M11).
+    stock_flag = models.CharField(max_length=200, blank=True)
+    resolution = models.CharField(max_length=16, choices=Resolution.choices, blank=True)
+    resolution_reason = models.TextField(blank=True)
+    resolution_reference = models.CharField(max_length=100, blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["case", "seq"]
+        constraints = [
+            models.UniqueConstraint(fields=["case", "seq"], name="delivery_unique_seq"),
+            models.CheckConstraint(
+                name="delivery_resolution_when_resolved",
+                condition=Q(status="resolved", resolution__gt="")
+                | (~Q(status="resolved") & Q(resolution="")),
+            ),
+        ]
+
+    @property
+    def settled(self):
+        return self.status in {self.Status.CONFIRMED, self.Status.RESOLVED, self.Status.UNCONFIRMED}
+
+
+class DeliveryLine(models.Model):
+    """What one delivery recorded for one line; corrections are ledger rows, never edits."""
+
+    delivery = models.ForeignKey(Delivery, on_delete=models.PROTECT, related_name="lines")
+    line = models.ForeignKey(CaseLine, on_delete=models.PROTECT, related_name="delivery_lines")
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    serials = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ["delivery", "line__line_no"]
+        constraints = [
+            models.UniqueConstraint(fields=["delivery", "line"], name="delivery_line_unique"),
+            models.CheckConstraint(name="delivery_line_positive", condition=Q(quantity__gt=0)),
+        ]
+
+
+class FulfilmentEntry(AppendOnlyModel):
+    """Line ledger (E.5): each change of a withdrawal counter, who made it and at which revision."""
+
+    class Kind(models.TextChoices):
+        APPROVED = "approved", "อนุมัติ"
+        ISSUED = "issued", "จ่าย"
+        CORRECTED = "corrected", "แก้รายการจ่าย"
+        RECEIVED = "received", "ยืนยันรับ"
+        TERMINATED = "terminated", "ยุติส่วนค้าง"
+        RETURNED = "returned", "รับของคืน"
+        RETURN_TERMINATED = "return_terminated", "ยุติส่วนค้างส่งคืน"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="+")
+    line = models.ForeignKey(CaseLine, on_delete=models.PROTECT, related_name="ledger")
+    kind = models.CharField(max_length=24, choices=Kind.choices)
+    # A signed change of the counter (corrections and recounts may be negative).
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    serials = models.JSONField(default=list, blank=True)
+    delivery = models.ForeignKey(
+        Delivery, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    actor_label = models.CharField(max_length=64)
+    case_revision = models.PositiveIntegerField()
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
+class Receipt(AppendOnlyModel):
+    """การยืนยันรับของ for one delivery. A later receipt (a recount) supersedes; history stays."""
+
+    class Result(models.TextChoices):
+        FULL = "full", "ได้รับครบ"
+        MISMATCH = "mismatch", "ไม่ตรง"
+
+    delivery = models.ForeignKey(Delivery, on_delete=models.PROTECT, related_name="receipts")
+    result = models.CharField(max_length=16, choices=Result.choices)
+    # [{"line_no": 1, "quantity": "2", "serials": [...]}]: what the district really got.
+    lines = models.JSONField(default=list)
+    requester = models.ForeignKey(
+        Requester, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # Intake staff recording the district's answer on its behalf (with channel and note, Q4).
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    channel = models.CharField(max_length=16, choices=Case.Channel.choices)
+    note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                name="receipt_by_requester_or_staff",
+                condition=Q(requester__isnull=False, recorded_by__isnull=True)
+                | Q(requester__isnull=True, recorded_by__isnull=False),
+            )
+        ]
+
+
+class IssuedSerial(models.Model):
+    """A serial out with a district: at most one active issue per item and serial (Q11)."""
+
+    item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
+    serial = models.CharField(max_length=64)
+    delivery_line = models.ForeignKey(
+        DeliveryLine, on_delete=models.PROTECT, related_name="issued_serials"
+    )
+    active = models.BooleanField(default=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    end_reason = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "serial"],
+                condition=Q(active=True),
+                name="issued_serial_one_active",
+            )
+        ]
+
+
+class Allocation(models.Model):
+    """การจัดสรร (Q8/Q20): how much of short stock one case line may receive."""
+
+    class End(models.TextChoices):
+        USED = "used", "จ่ายครบตามที่จัดสรร"
+        REPLACED = "replaced", "จัดสรรใหม่"
+        VOID_STOCK = "void_stock", "ยอดลดต่ำกว่าที่จัดสรร"
+        CASE_ENDED = "case_ended", "ไม่มีส่วนค้างแล้ว"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="allocations")
+    line = models.ForeignKey(CaseLine, on_delete=models.PROTECT, related_name="allocations")
+    item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    used_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    reason = models.TextField()
+    allocated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    grant = models.ForeignKey(AuthorityGrant, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    end_reason = models.CharField(max_length=16, choices=End.choices, blank=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                name="allocation_used_within_quantity",
+                condition=Q(quantity__gt=0, used_quantity__gte=0)
+                & Q(used_quantity__lte=models.F("quantity")),
+            ),
+            models.UniqueConstraint(
+                fields=["line"], condition=Q(ended_at__isnull=True), name="allocation_one_active"
+            ),
+        ]
+
+    @property
+    def remaining(self):
+        return self.quantity - self.used_quantity
+
+
+class FakeStock(models.Model):
+    """คลังจำลอง (Q1): stands in for the registry outside production; synthetic numbers only."""
+
+    item = models.OneToOneField(EquipmentType, on_delete=models.PROTECT, related_name="fake_stock")
+    available = models.DecimalField(max_digits=12, decimal_places=2)
+    reserved = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    awaiting_inspection = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    awaiting_repair = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["item__code"]
+        constraints = [
+            models.CheckConstraint(
+                name="fake_stock_not_negative",
+                condition=Q(available__gte=0, reserved__gte=0)
+                & Q(awaiting_inspection__gte=0, awaiting_repair__gte=0),
+            )
+        ]
+
+
+class FakeSerial(models.Model):
+    """A serial in the fake inventory and where it is now."""
+
+    class Status(models.TextChoices):
+        AVAILABLE = "available", "พร้อมจ่าย"
+        RESERVED = "reserved", "กันไว้ในระบบเดิม"
+        ISSUED = "issued", "จ่ายแล้ว"
+        AWAITING_INSPECTION = "awaiting_inspection", "รอตรวจ"
+        AWAITING_REPAIR = "awaiting_repair", "รอซ่อม"
+        DISPOSED = "disposed", "ออกจากคลังแล้ว"
+
+    item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
+    serial = models.CharField(max_length=64)
+    status = models.CharField(max_length=24, choices=Status.choices)
+    case = models.ForeignKey(
+        Case, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["item__code", "serial"]
+        constraints = [
+            models.UniqueConstraint(fields=["item", "serial"], name="fake_serial_unique")
+        ]
+
+
+class StockMovement(AppendOnlyModel):
+    """Every change of the fake inventory, with a reason (adjustments mirror registry fixes)."""
+
+    class Kind(models.TextChoices):
+        SEED = "seed", "ตั้งต้นข้อมูลจำลอง"
+        ISSUE = "issue", "จ่าย"
+        ADJUST = "adjust", "ปรับยอด"
+        RECEIVE = "receive", "รับของคืนรอตรวจ"
+        INSPECT = "inspect", "ผลตรวจสภาพ"
+        RETURN_OUT = "return_out", "ส่งกลับเขต"
+
+    item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    serials = models.JSONField(default=list, blank=True)
+    document_number = models.CharField(max_length=64, blank=True)
+    case = models.ForeignKey(
+        Case, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    actor_label = models.CharField(max_length=64, blank=True)
+    reason = models.TextField(blank=True)
+    # Bucket changes besides "available" (M08), e.g. {"awaiting_inspection": "1"}.
+    changes = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
+class StockSnapshot(AppendOnlyModel):
+    """Registry figures imported for manual_reference mode (Q10): advisory, never official here."""
+
+    item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
+    available = models.DecimalField(max_digits=12, decimal_places=2)
+    reserved = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    awaiting_inspection = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    awaiting_repair = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    total_on_hand = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    as_of = models.DateTimeField()
+    source = models.CharField(max_length=200)
+    is_synthetic = models.BooleanField(default=False)
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    imported_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["item", "-as_of", "-id"]
+        indexes = [models.Index(fields=["item", "as_of"])]
+        constraints = [
+            models.CheckConstraint(
+                name="snapshot_available_not_negative", condition=Q(available__gte=0)
+            )
+        ]
+
+
+# --- M08: returns, inspection and discrepancies ---------------------------------------------------
+
+
+class ReturnArrival(models.Model):
+    """การรับของคืน: what physically arrived once (Q2), counted by a receiver."""
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="arrivals")
+    seq = models.PositiveSmallIntegerField()
+    mode = models.CharField(max_length=16, choices=Delivery.Mode.choices)
+    document_number = models.CharField(max_length=64, blank=True)
+    carrier_name = models.CharField(max_length=200)
+    note = models.TextField(blank=True)
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    received_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["case", "seq"]
+        constraints = [
+            models.UniqueConstraint(fields=["case", "seq"], name="return_arrival_unique_seq")
+        ]
+
+
+class ReturnUnit(models.Model):
+    """One inspectable unit: a serial, or a counted quantity of one item in one arrival (Q9).
+
+    A unit outside the request (ส่วนต่างการรับคืน, Q3) counts for no line and cannot be judged
+    until a person records what it is (Q10).
+    """
+
+    class Status(models.TextChoices):
+        AWAITING = "awaiting", "รอตรวจ"
+        FINAL = "final", "ตรวจแล้ว"
+        CONFLICT = "conflict", "ผลตรวจขัดกัน"
+        SENT_BACK = "sent_back", "ส่งกลับเขต"
+
+    class Discrepancy(models.TextChoices):
+        OUTSIDE_REQUEST = "outside_request", "ไม่อยู่ในคำขอ"
+        EXCESS = "excess", "จำนวนเกินคำขอ"
+        DUPLICATE_STORE = "duplicate_store", "เลขซ้ำกับของในคลัง"
+        DUPLICATE_CASE = "duplicate_case", "เลขซ้ำกับของที่รับไว้แล้ว"
+        OTHER_DISTRICT = "other_district", "จ่ายให้เขตอื่น"
+
+    class Resolution(models.TextChoices):
+        ACCEPTED = "accepted", "นับเป็นของคืนของเรื่องนี้"
+        SENT_BACK = "sent_back", "ไม่รับ ส่งกลับเขต"
+        REGISTRY_ADJUSTED = "registry_adjusted", "ปรับในทะเบียนแล้ว"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="return_units")
+    seq = models.PositiveSmallIntegerField()
+    arrival = models.ForeignKey(ReturnArrival, on_delete=models.PROTECT, related_name="units")
+    line = models.ForeignKey(
+        CaseLine, null=True, blank=True, on_delete=models.PROTECT, related_name="return_units"
+    )
+    item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
+    serial = models.CharField(max_length=64, blank=True)
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.AWAITING)
+    discrepancy = models.CharField(max_length=24, choices=Discrepancy.choices, blank=True)
+    discrepancy_note = models.CharField(max_length=200, blank=True)
+    resolution = models.CharField(max_length=24, choices=Resolution.choices, blank=True)
+    resolution_reason = models.TextField(blank=True)
+    resolution_reference = models.CharField(max_length=100, blank=True)
+    replaces_serial = models.CharField(max_length=64, blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    # The issue of this serial by this system that the arrival closed (Q4), if any.
+    issued_serial = models.ForeignKey(
+        IssuedSerial, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    final_split = models.JSONField(default=dict, blank=True)
+    # Where the fake store holds this unit now, e.g. {"awaiting_inspection": "1"}; empty = not held.
+    placed = models.JSONField(default=dict, blank=True)
+    conflict_note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["case", "seq"]
+        constraints = [
+            models.UniqueConstraint(fields=["case", "seq"], name="return_unit_unique_seq"),
+            models.CheckConstraint(name="return_unit_positive", condition=Q(quantity__gt=0)),
+            models.CheckConstraint(
+                name="return_unit_resolution_needs_discrepancy",
+                condition=Q(resolution="") | ~Q(discrepancy=""),
+            ),
+        ]
+
+    @property
+    def open_discrepancy(self):
+        return bool(self.discrepancy) and not self.resolution
+
+    @property
+    def counted(self):
+        """Counts as returned for its line (matching, or a discrepancy a person accepted)."""
+        if self.line_id is None or self.status == self.Status.SENT_BACK:
+            return False
+        return not self.discrepancy or self.resolution in {
+            self.Resolution.ACCEPTED,
+            self.Resolution.REGISTRY_ADJUSTED,
+        }
+
+
+class Inspection(AppendOnlyModel):
+    """การตรวจสภาพ of one unit: a split {outcome: quantity}; never overwritten (Q9)."""
+
+    class Kind(models.TextChoices):
+        INSPECT = "inspect", "ผลตรวจ"
+        DECIDE = "decide", "ตัดสินผลตรวจขัดกัน"
+
+    unit = models.ForeignKey(ReturnUnit, on_delete=models.PROTECT, related_name="inspections")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    split = models.JSONField()
+    reason = models.TextField(blank=True)
+    reference = models.CharField(max_length=100, blank=True)
+    inspector = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    grant = models.ForeignKey(
+        AuthorityGrant, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
+# --- M09: problems, child work and deadline pauses ----------------------------------------------
+
+
+class ChildWork(models.Model):
+    """งานย่อย (M09 Q6): part of a case given to another division; the case keeps its owner.
+
+    For R09 withdrawals and returns the child work names the lines it covers; once accepted,
+    those lines are handled by the child division (ADR 0004).
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอตอบรับ"
+        DISPUTED = "disputed", "รอผู้ประสานตัดสิน"
+        ACCEPTED = "accepted", "รับแล้ว"
+        DECLINED = "declined", "ไม่รับ"
+        DONE = "done", "เสร็จ"
+        FAILED = "failed", "ทำไม่ได้"
+        CANCELLED = "cancelled", "ยกเลิก"
+
+    OPEN = ("pending", "disputed", "accepted")
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="child_works")
+    seq = models.PositiveSmallIntegerField()
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    rule = models.CharField(max_length=8, blank=True)
+    task = models.TextField()
+    deliverable = models.TextField(blank=True)
+    lines = models.ManyToManyField(CaseLine, blank=True, related_name="child_works")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    requested_at = models.DateTimeField()
+    answered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    answered_at = models.DateTimeField(null=True, blank=True)
+    answer_reason = models.TextField(blank=True)
+    result_summary = models.TextField(blank=True)
+    finished_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["case", "seq"]
+        constraints = [
+            models.UniqueConstraint(fields=["case", "seq"], name="child_work_unique_seq"),
+            models.UniqueConstraint(
+                fields=["case", "division"],
+                condition=Q(status__in=["pending", "disputed", "accepted"]),
+                name="child_work_one_open_per_division",
+            ),
+        ]
+
+    @property
+    def is_open(self):
+        return self.status in self.OPEN
+
+
+class DeadlinePause(models.Model):
+    """A stop of the case's work deadlines (B.4, M09 Q12): the district's turn while waiting for
+    information, or a pause a supervisor approved while the case is on hold."""
+
+    class Kind(models.TextChoices):
+        AWAITING_INFO = "awaiting_info", "รอข้อมูลจากเขต"
+        SUPERVISOR = "supervisor", "ผู้กำกับงานอนุมัติพัก"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="deadline_pauses")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    reason = models.TextField(blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["case", "started_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case"], condition=Q(ended_at__isnull=True), name="deadline_one_open_pause"
+            )
+        ]
+
+
+class ProblemResolution(AppendOnlyModel):
+    """ผลการแก้ปัญหา (M09 Q1/Q15): what the owner division did, for the requester to accept."""
+
+    class Category(models.TextChoices):
+        FIXED = "fixed", "แก้แล้ว"
+        NO_FAULT = "no_fault", "ตรวจแล้วไม่พบปัญหา"
+        EXTERNAL = "external", "ส่งหน่วยงานนอก ฝอจ. ตามแผนที่รับรอง"
+        NEEDS_CASE = "needs_case", "ต้องมีเรื่องเบิกหรือคืนแยก"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="resolutions")
+    category = models.CharField(max_length=16, choices=Category.choices)
+    # Shown to the requester in LINE; the internal note stays with staff (Q15).
+    message = models.TextField()
+    internal_note = models.TextField(blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
+# --- M11: registry (SAP) reconciliation and external operations --------------------------------
+
+
+class RegistryConfig(models.Model):
+    """How SAP exports are read (one row, admin-edited, M11 Q14–Q16)."""
+
+    column_aliases = models.JSONField(default=dict, blank=True)
+    movement_types = models.JSONField(default=dict, blank=True)
+    storage_locations = models.JSONField(default=list, blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class RegistryImport(models.Model):
+    """One uploaded SAP export, kept with its file and summary; never deleted (Q21)."""
+
+    class Kind(models.TextChoices):
+        DOCUMENTS = "documents", "รายการเอกสาร"
+        SERIALS = "serials", "เลขเครื่องของเอกสาร"
+        BALANCES = "balances", "ยอดคงเหลือ"
+
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    original_name = models.CharField(max_length=200)
+    storage_name = models.CharField(max_length=64)
+    sha256 = models.CharField(max_length=64, unique=True)
+    size = models.PositiveIntegerField()
+    period_from = models.DateField(null=True, blank=True)
+    period_to = models.DateField(null=True, blank=True)
+    exported_at = models.DateTimeField()
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    rows = models.PositiveIntegerField(default=0)
+    summary = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+        constraints = [
+            models.CheckConstraint(
+                name="registry_import_period_order",
+                condition=Q(period_from__isnull=True)
+                | Q(period_to__isnull=True)
+                | Q(period_from__lte=F("period_to")),
+            )
+        ]
+
+
+class RegistryDocumentLine(models.Model):
+    """One line of a SAP document as exported (documents or serials file)."""
+
+    class Kind(models.TextChoices):
+        ISSUE = "issue", "จ่าย"
+        RETURN = "return", "รับคืน"
+        STATUS = "status", "เปลี่ยนสถานะของ"
+        REVERSAL = "reversal", "กลับรายการ"
+        OTHER = "other", "อื่น ๆ"
+
+    source = models.ForeignKey(RegistryImport, on_delete=models.PROTECT, related_name="lines")
+    document_number = models.CharField(max_length=64)
+    line_no = models.PositiveIntegerField(default=0)
+    movement_type = models.CharField(max_length=16, blank=True)
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.OTHER)
+    official_code = models.CharField(max_length=40, blank=True)
+    quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    serials = models.JSONField(default=list, blank=True)
+    posting_date = models.DateField(null=True, blank=True)
+    reference = models.CharField(max_length=200, blank=True)
+    case_number = models.CharField(max_length=16, blank=True)
+    reversed_document = models.CharField(max_length=64, blank=True)
+    plant = models.CharField(max_length=16, blank=True)
+    storage_location = models.CharField(max_length=16, blank=True)
+
+    class Meta:
+        ordering = ["source", "document_number", "line_no", "id"]
+        indexes = [
+            models.Index(fields=["document_number"]),
+            models.Index(fields=["case_number"]),
+        ]
+
+
+class RegistryRecord(models.Model):
+    """A fact this system recorded against a registry document (manual_reference, M11)."""
+
+    class Kind(models.TextChoices):
+        ISSUE = "issue", "จ่าย"
+        RETURN = "return", "รับคืน"
+        STATUS = "status", "ผลตรวจสภาพ"
+        ADJUSTMENT = "adjustment", "ปิดส่วนต่าง"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="registry_records")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    action = models.CharField(max_length=40)
+    source = models.CharField(max_length=40)  # e.g. "delivery:2", "unit:3"
+    document_number = models.CharField(max_length=64)
+    lines = models.JSONField(default=list)
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    recorded_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["recorded_at", "id"]
+        indexes = [models.Index(fields=["document_number"])]
+
+
+class RegistryDiscrepancy(models.Model):
+    """ส่วนต่างทะเบียน: this system and the registry disagree; a person decides (M11 Q10–Q12)."""
+
+    class Kind(models.TextChoices):
+        NOT_FOUND = "not_found", "ไม่พบเอกสารในทะเบียน"
+        QUANTITY = "quantity", "จำนวนไม่ตรง"
+        SERIALS = "serials", "เลขเครื่องไม่ตรง"
+        TYPE = "type", "ประเภทไม่ตรงหรือถูกกลับรายการ"
+        NO_CODE = "no_code", "ของไม่มีรหัสทางการ"
+        UNRECORDED = "unrecorded", "เอกสารอ้างเลขเรื่องแต่ไม่มีบันทึก"
+        EVIDENCE = "evidence", "หลักฐานใช้ไม่ได้"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "รอตรวจ"
+        WITH_DIVISION = "with_division", "รอกองที่บันทึกตรวจ"
+        WAITING_REGISTRY = "waiting_registry", "รอทะเบียนแก้"
+        RESOLVED = "resolved", "ปิดแล้ว"
+
+    class Resolution(models.TextChoices):
+        MATCHED = "matched", "เทียบตรงแล้ว"
+        NUMBER_FIXED = "number_fixed", "แก้เลขเอกสารแล้ว"
+        ACCEPTED = "accepted", "ยอมรับส่วนต่าง"
+        EVIDENCE_REPLACED = "evidence_replaced", "แนบหลักฐานใหม่แล้ว"
+
+    class Answer(models.TextChoices):
+        REGISTRY_WRONG = "registry_wrong", "ระบบนี้ถูก ทะเบียนต้องแก้"
+        FIXED_HERE = "fixed_here", "แก้ข้อมูลในระบบนี้แล้ว"
+
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    case = models.ForeignKey(
+        Case, null=True, blank=True, on_delete=models.PROTECT, related_name="registry_discrepancies"
+    )
+    record = models.ForeignKey(
+        RegistryRecord,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="discrepancies",
+    )
+    document_number = models.CharField(max_length=64, blank=True)
+    expected = models.JSONField(default=dict, blank=True)
+    found = models.JSONField(default=dict, blank=True)
+    detail = models.CharField(max_length=300, blank=True)
+    found_by = models.ForeignKey(
+        RegistryImport, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    opened_at = models.DateTimeField()
+    division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    division_note = models.TextField(blank=True)
+    division_answer = models.CharField(max_length=16, choices=Answer.choices, blank=True)
+    division_answer_note = models.TextField(blank=True)
+    answered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    answered_at = models.DateTimeField(null=True, blank=True)
+    registry_reference = models.CharField(max_length=64, blank=True)
+    resolution = models.CharField(max_length=20, choices=Resolution.choices, blank=True)
+    resolution_reason = models.TextField(blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["opened_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["record", "kind"],
+                condition=~Q(status="resolved") & Q(record__isnull=False),
+                name="registry_discrepancy_one_open_per_record",
+            ),
+            models.UniqueConstraint(
+                fields=["document_number", "kind"],
+                condition=~Q(status="resolved") & Q(record__isnull=True),
+                name="registry_discrepancy_one_open_per_document",
+            ),
+        ]
+
+
+class ExternalOperation(models.Model):
+    """A write to the registry (api_confirmed, M11): one stable operation per idempotency key;
+    an unknown outcome is reconciled by asking the registry, never by sending again blind."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอส่ง"
+        CONFIRMED = "confirmed", "ระบบเดิมยืนยันแล้ว"
+        FAILED = "failed", "ระบบเดิมปฏิเสธ"
+        UNKNOWN = "unknown", "ไม่ทราบผล"
+
+    operation_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    kind = models.CharField(max_length=32)
+    idempotency_key = models.CharField(max_length=128, unique=True)
+    fingerprint = models.CharField(max_length=64)
+    request = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    external_reference = models.CharField(max_length=64, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    queries = models.PositiveSmallIntegerField(default=0)
+    last_error = models.CharField(max_length=200, blank=True)
+    history = models.JSONField(default=list, blank=True)
+    callbacks = models.JSONField(default=list, blank=True)
+    case = models.ForeignKey(
+        Case, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]

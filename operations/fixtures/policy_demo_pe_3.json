@@ -1,0 +1,315 @@
+{
+ "code": "DEMO-PE-3",
+ "is_synthetic": true,
+ "title": "กติกาจำลองการส่งเข้ากอง ระดับความเร่งด่วน คำเรียกอุปกรณ์ ปฏิทินบริการ และกรอบเวลา (B.3-B.4, M06, M09 Q7-Q17)",
+ "note": "ข้อมูลจำลองสำหรับต้นแบบ ไม่ใช่ผังองค์กร ระเบียบ หรือ SLA ทางการของ ฝอจ. DEMO-PE-3 เพิ่มปฏิทินบริการ (จันทร์-ศุกร์ 07:30-12:00 และ 13:00-15:30 น. = 7 ชั่วโมงทำการ ตามที่ผู้ใช้กำหนด) วันหยุดจำลอง กรอบเวลาของงานฝั่ง ฝอจ. เป็นนาที (P0 นับต่อเนื่อง P1-P3 นับเวลาทำการ 1 วันทำการ = 420 นาที) และข้อความช่องทางฉุกเฉินจำลอง เจ้าของบริการต้องกำหนดค่าจริงแทน",
+ "effective_from": "2026-10-01T00:00:00+07:00",
+ "effective_until": null,
+ "units": {
+  "intake": "SIM-TRIAGE",
+  "coordinator": "SIM-SUPERVISOR",
+  "registry": "SIM-REG"
+ },
+ "responsibility": [
+  {
+   "rule": "R01",
+   "kinds": [
+    "withdrawal"
+   ],
+   "category": "meter",
+   "owner": "SIM-MTR"
+  },
+  {
+   "rule": "R02",
+   "kinds": [
+    "withdrawal"
+   ],
+   "category": "transformer",
+   "owner": "SIM-TRF"
+  },
+  {
+   "rule": "R03",
+   "kinds": [
+    "withdrawal",
+    "return",
+    "problem"
+   ],
+   "items": [
+    "FUSE_SYN_A",
+    "CB_SYN_A",
+    "CBL_SYN_A"
+   ],
+   "owner": "SIM-EQP"
+  },
+  {
+   "rule": "R04",
+   "kinds": [
+    "return"
+   ],
+   "category": "meter",
+   "owner": "SIM-MTR"
+  },
+  {
+   "rule": "R04",
+   "kinds": [
+    "return"
+   ],
+   "category": "transformer",
+   "owner": "SIM-TRF"
+  },
+  {
+   "rule": "R05",
+   "kinds": [
+    "problem"
+   ],
+   "category": "meter",
+   "owner": "SIM-MTR"
+  },
+  {
+   "rule": "R05",
+   "kinds": [
+    "problem"
+   ],
+   "category": "transformer",
+   "owner": "SIM-TRF"
+  }
+ ],
+ "priority": {
+  "floors": {
+   "hazard_reported": "P0"
+  },
+  "ack_minutes": {
+   "P0": 15,
+   "P1": 120,
+   "P2": 480,
+   "P3": 1440,
+   "none": 1440
+  },
+  "remind_after": 1,
+  "escalate_after": 2
+ },
+ "hazard_terms": [
+  "ไฟไหม้",
+  "ไฟลุก",
+  "ไหม้",
+  "ควัน",
+  "ประกายไฟ",
+  "สะเก็ดไฟ",
+  "ไฟช็อต",
+  "ช็อต",
+  "ไฟดูด",
+  "ไฟรั่ว",
+  "สายขาด",
+  "ขาดห้อย",
+  "ระเบิด",
+  "น้ำมันรั่ว",
+  "น้ำมันซึม",
+  "ร้อนจัด",
+  "กลิ่นไหม้",
+  "เสาล้ม",
+  "จะล้ม",
+  "อันตราย",
+  "บาดเจ็บ"
+ ],
+ "negations": [
+  "ไม่มี",
+  "ไม่ได้",
+  "ไม่พบ",
+  "ไม่เห็น",
+  "ไม่"
+ ],
+ "handoff_reasons": {
+  "new_evidence": "ข้อมูลหน้างานใหม่",
+  "wrong_division": "ส่งผิดกอง",
+  "resource_limit": "ข้อจำกัดทรัพยากร",
+  "different_order": "ลำดับงานต่าง",
+  "outdated_rule": "กติกาล้าสมัย"
+ },
+ "equipment_terms": [
+  {
+   "term": "มิเตอร์",
+   "category": "meter",
+   "items": [
+    "MTR_SYN_A"
+   ]
+  },
+  {
+   "term": "มาตรวัดไฟ",
+   "category": "meter",
+   "items": [
+    "MTR_SYN_A"
+   ]
+  },
+  {
+   "term": "เครื่องวัดหน่วยไฟ",
+   "category": "meter",
+   "items": [
+    "MTR_SYN_A"
+   ]
+  },
+  {
+   "term": "หม้อวัดไฟ",
+   "category": "meter",
+   "items": [
+    "MTR_SYN_A"
+   ]
+  },
+  {
+   "term": "หม้อแปลง",
+   "category": "transformer",
+   "items": [
+    "TRF_SYN_A"
+   ]
+  },
+  {
+   "term": "ทรานส์ฟอร์มเมอร์",
+   "category": "transformer",
+   "items": [
+    "TRF_SYN_A"
+   ]
+  },
+  {
+   "term": "transformer",
+   "category": "transformer",
+   "items": [
+    "TRF_SYN_A"
+   ]
+  },
+  {
+   "term": "ฟิวส์",
+   "category": "other",
+   "items": [
+    "FUSE_SYN_A"
+   ]
+  },
+  {
+   "term": "เบรกเกอร์",
+   "category": "other",
+   "items": [
+    "CB_SYN_A"
+   ]
+  },
+  {
+   "term": "เบรคเกอร์",
+   "category": "other",
+   "items": [
+    "CB_SYN_A"
+   ]
+  },
+  {
+   "term": "สายไฟ",
+   "category": "other",
+   "items": [
+    "CBL_SYN_A"
+   ]
+  },
+  {
+   "term": "สายเคเบิล",
+   "category": "other",
+   "items": [
+    "CBL_SYN_A"
+   ]
+  },
+  {
+   "term": "เคเบิล",
+   "category": "other",
+   "items": [
+    "CBL_SYN_A"
+   ]
+  }
+ ],
+ "calendar": {
+  "timezone": "Asia/Bangkok",
+  "weekdays": [
+   1,
+   2,
+   3,
+   4,
+   5
+  ],
+  "periods": [
+   [
+    "07:30",
+    "12:00"
+   ],
+   [
+    "13:00",
+    "15:30"
+   ]
+  ],
+  "holidays": [
+   "2026-10-13",
+   "2026-10-23",
+   "2026-12-07",
+   "2026-12-10",
+   "2026-12-31",
+   "2027-01-01",
+   "2027-04-13",
+   "2027-04-14",
+   "2027-04-15"
+  ],
+  "continuous_priorities": [
+   "P0"
+  ],
+  "holidays_note": "วันหยุดจำลองจากวันหยุดราชการบางวัน ต้องแทนด้วยปฏิทินจริงของหน่วยงาน"
+ },
+ "deadlines": {
+  "ack": {
+   "P0": 15,
+   "P1": 120,
+   "P2": 420,
+   "P3": 1260,
+   "none": 1260
+  },
+  "child_accept": {
+   "P0": 15,
+   "P1": 120,
+   "P2": 420,
+   "P3": 1260,
+   "none": 1260
+  },
+  "first_response": {
+   "P0": 15,
+   "P1": 120,
+   "P2": 420,
+   "P3": 840,
+   "none": 840
+  },
+  "resolve": {
+   "P0": 240,
+   "P1": 420,
+   "P2": 1260,
+   "P3": 2100,
+   "none": 2100
+  },
+  "child_result": {
+   "P0": 240,
+   "P1": 420,
+   "P2": 1260,
+   "P3": 2100,
+   "none": 2100
+  },
+  "approval": {
+   "P0": 60,
+   "P1": 240,
+   "P2": 420,
+   "P3": 1260,
+   "none": 1260
+  },
+  "inspection": {
+   "P0": 60,
+   "P1": 240,
+   "P2": 420,
+   "P3": 1260,
+   "none": 1260
+  },
+  "issue": {
+   "P0": 240,
+   "P1": 420,
+   "P2": 1260,
+   "P3": 2100,
+   "none": 2100
+  }
+ },
+ "emergency_guidance": "หากมีอันตรายต่อชีวิตหรือทรัพย์สินขณะนี้ ให้ออกห่างจากจุดเกิดเหตุและแจ้งช่องทางฉุกเฉินที่หน่วยงานกำหนดทันที (ข้อความจำลอง รอแผนฉุกเฉินที่รับรอง) เจ้าหน้าที่จะคัดกรองเรื่องนี้เป็นลำดับแรก"
+}

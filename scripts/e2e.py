@@ -7,7 +7,193 @@ import time
 from pathlib import Path
 from urllib.request import urlopen
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
+
+RUN = secrets.token_hex(3).upper()
+
+
+def sign_in(browser, base_url, username, password, phone=False):
+    """A fresh context per account (sessions never mix); keyboard-only sign-in."""
+    viewport = {"width": 390, "height": 844} if phone else {"width": 1366, "height": 900}
+    page = browser.new_context(viewport=viewport).new_page()
+    page.goto(base_url + "/accounts/login/")
+    page.get_by_label("ชื่อผู้ใช้").fill(username)
+    page.get_by_label("รหัสผ่าน").fill(password)
+    with page.expect_navigation(url="**/divisions/**"):
+        page.keyboard.press("Enter")
+    return page
+
+
+def act(page, label, fill=None, submit=None):
+    """Open an action from the case page (HTMX form), fill it and save; the page reloads."""
+    link = page.locator("#actions").get_by_role("link", name=label, exact=True).first
+    if not link.is_visible():  # irreversible actions sit behind the "ย้อนกลับไม่ได้" toggle
+        page.locator("#actions details.more > summary").click()
+    link.click()
+    form = page.locator("#action-slot form")
+    expect(form).to_be_visible()
+    for step in fill or []:
+        step(form)
+    page.evaluate("window.e2eStale = true")  # gone once HX-Redirect loads the page again
+    with page.expect_response(lambda r: r.request.method == "POST" and "/act/" in r.url) as sent:
+        form.get_by_role("button", name=submit or f"บันทึก: {label}").click(no_wait_after=True)
+    if sent.value.status != 204:
+        expect(page.locator("#action-slot .notice").first).to_be_visible()
+        notices = page.locator("#action-slot .notice").all_inner_texts()
+        raise AssertionError(f"{label} ({sent.value.status}): {notices}")
+    page.wait_for_function("() => window.e2eStale !== true")
+    page.wait_for_load_state()
+    expect(page.locator(".notice--success")).to_contain_text("บันทึกแล้ว")
+
+
+def open_case(page, base_url, number):
+    page.goto(f"{base_url}/cases/{number}/")
+    expect(page.get_by_role("heading", name=number)).to_be_visible()
+
+
+def file_case(page, base_url, kind, rows, **fields):
+    """Intake files a case for the synthetic requester on the web form (round 1 Q16)."""
+    page.goto(base_url + "/cases/new/")
+    page.locator("#nc-requester").select_option(label="ผู้แจ้งทดสอบ E2E · การไฟฟ้านครหลวงเขตวัดเลียบ")
+    page.locator(f"input[name=kind][value={kind}]").check()
+    page.locator("#nc-note").fill(f"e2e {RUN}: เขตโทรแจ้ง")
+    for name, value in fields.items():
+        page.locator(f"[name={name}]").fill(value)
+    for i, (item, quantity, serials) in enumerate(rows):
+        page.locator(f"[name=row-{i}-item]").select_option(item)
+        page.locator(f"[name=row-{i}-quantity]").fill(quantity)
+        page.locator(f"[name=row-{i}-serials]").fill(serials)
+    with page.expect_navigation():
+        page.get_by_role("button", name="บันทึกเรื่อง").click()
+    number = page.locator("h1").inner_text().strip()
+    assert page.url.endswith(f"/cases/{number}/"), page.url
+    return number
+
+
+def triage_to(browser, base_url, password, number, division, staff):
+    intake = sign_in(browser, base_url, "e2e-intake", password)
+    open_case(intake, base_url, number)
+    act(intake, "เริ่มคัดกรอง")
+    act(intake, "ส่งต่อให้กองอื่น", [lambda f: f.locator("[name=to_division]").select_option(division)])
+    intake.context.close()
+    owner = sign_in(browser, base_url, staff, password)
+    open_case(owner, base_url, number)
+    act(owner, "รับงานนี้")
+    act(owner, "ยืนยันระดับความเร่งด่วน", [lambda f: f.locator("[name=priority]").select_option("P3")])
+    act(owner, "คัดกรองเสร็จ ส่งดำเนินการ")
+    owner.context.close()
+
+
+def journeys(browser, base_url, password):
+    # 1. Withdrawal, partly issued: 10 fuses asked and approved, 4 issued, 6 outstanding.
+    intake = sign_in(browser, base_url, "e2e-intake", password)
+    number = file_case(
+        intake, base_url, "withdrawal", [("FUSE_SYN_A", "10", "")], purpose="เปลี่ยนฟิวส์ตู้ย่อย"
+    )
+    intake.context.close()
+    triage_to(browser, base_url, password, number, "SIM-EQP", "e2e-eqp")
+    approver = sign_in(browser, base_url, "e2e-approver", password)
+    open_case(approver, base_url, number)
+    act(approver, "อนุมัติ", [lambda f: f.locator("[name=line-1-quantity]").fill("10")])
+    issuer = sign_in(browser, base_url, "e2e-issuer", password)
+    open_case(issuer, base_url, number)
+    act(
+        issuer,
+        "บันทึกการจ่ายของ",
+        [
+            lambda f: f.locator("[name=recipient_name]").fill("ผู้รับทดสอบ"),
+            lambda f: f.locator("[name=line-1-quantity]").fill("4"),
+        ],
+    )
+    expect(issuer.locator("[data-tour=lines]")).to_contain_text("จ่ายบางส่วน")
+    issuer.screenshot(path="reports/e2e-m10-withdrawal.png", full_page=True)
+    issuer.context.close()
+    # The approver stops the rest (irreversible: the form asks for a tick first).
+    approver.reload()
+    act(
+        approver,
+        "ยุติส่วนที่ค้างจ่าย",
+        [
+            lambda f: f.locator("[name=lines][value='1']").check(),
+            lambda f: f.locator("[name=reason]").fill("เขตแจ้งว่าใช้เท่าที่ได้รับ"),
+            lambda f: f.locator("[name=confirm_irreversible]").check(),
+        ],
+        submit="ยืนยัน: ยุติส่วนที่ค้างจ่าย",
+    )
+    approver.context.close()
+
+    # 2. Return waiting for inspection: the receiver records what arrived.
+    intake = sign_in(browser, base_url, "e2e-intake", password)
+    returned = f"E2E-{RUN}"
+    number = file_case(
+        intake,
+        base_url,
+        "return",
+        [("MTR_SYN_A", "1", returned)],
+        condition="ชำรุด",
+        reason="ถอดเปลี่ยน",
+    )
+    intake.context.close()
+    triage_to(browser, base_url, password, number, "SIM-MTR", "e2e-meter")
+    receiver = sign_in(browser, base_url, "e2e-receiver", password)
+    open_case(receiver, base_url, number)
+    act(
+        receiver,
+        "บันทึกรับของคืน",
+        [
+            lambda f: f.locator("[name=line-1-serials]").fill(returned),
+            lambda f: f.locator("[name=carrier_name]").fill("พนักงานเขต"),
+        ],
+    )
+    expect(receiver.locator("[data-tour=units]")).to_contain_text("รอตรวจ")
+    receiver.screenshot(path="reports/e2e-m10-return.png", full_page=True)
+    receiver.context.close()
+
+    # 3. Hazard problem on a phone: P0 at once; a route against the proposal needs a reason.
+    intake = sign_in(browser, base_url, "e2e-intake", password, phone=True)
+    number = file_case(
+        intake,
+        base_url,
+        "problem",
+        [("TRF_SYN_A", "", "")],
+        description="มีควันขึ้นที่หม้อแปลง เสียงดังผิดปกติ",
+    )
+    expect(intake.locator("[data-tour=hazard]")).to_be_visible()
+    expect(intake.locator(".case-head .prio--P0")).to_be_visible()
+    # Keyboard only: the primary button is reachable and opens its form.
+    act(intake, "เริ่มคัดกรอง")
+    intake.locator("#actions").get_by_role("link", name="ส่งต่อให้กองอื่น").focus()
+    intake.keyboard.press("Enter")
+    form = intake.locator("#action-slot form")
+    expect(form).to_be_visible()
+    form.locator("[name=to_division]").select_option("SIM-MTR")
+    form.locator("[name=reason]").fill("ช่างกองมิเตอร์อยู่หน้างาน")
+    form.get_by_role("button", name="บันทึก: ส่งต่อให้กองอื่น").click()
+    expect(intake.locator("#action-slot .notice--error")).to_contain_text("ต่างจากข้อเสนอ")
+    expect(form.locator("[name=reason]")).to_have_value("ช่างกองมิเตอร์อยู่หน้างาน")
+    form = intake.locator("#action-slot form")
+    form.locator("[name=to_division]").select_option("SIM-MTR")
+    form.locator("[name=reason_category]").select_option("new_evidence")
+    with intake.expect_navigation():
+        form.get_by_role("button", name="บันทึก: ส่งต่อให้กองอื่น").click()
+    handoff = intake.locator("[data-tour=actions] .handoff")
+    expect(handoff).to_contain_text("รอ SIM-MTR ตอบรับการส่งต่อ")
+    expect(handoff).to_contain_text("ส่งต่างจากที่ระบบเสนอ (ระบบเสนอ SIM-TRF)")
+    expect(handoff).to_contain_text("ช่างกองมิเตอร์อยู่หน้างาน")
+    intake.screenshot(path="reports/e2e-m10-problem-phone.png", full_page=True)
+    # Cancelling ends the waiting handoff, so no test case is left in SIM-MTR's incoming tab.
+    act(
+        intake,
+        "ยกเลิกเรื่อง",
+        [
+            lambda f: f.locator("[name=reason]").fill(f"e2e {RUN}: จบการทดสอบ"),
+            lambda f: f.locator("[name=confirm_irreversible]").check(),
+        ],
+        submit="ยืนยัน: ยกเลิกเรื่อง",
+    )
+    expect(intake.locator(".handoff")).to_have_count(0)
+    intake.context.close()
+
 
 with socket.socket() as sock:
     sock.bind(("127.0.0.1", 0))
@@ -42,8 +228,10 @@ with Path("reports/e2e-server.log").open("w") as log:
             page = browser.new_page(viewport={"width": 390, "height": 844})
             page.goto(base_url)
             assert page.get_by_role("heading", name="ระบบรับเรื่อง ฝอจ.").count() == 1
+            # M10: skip link first, then the brand, then the staff sign-in button.
             page.keyboard.press("Tab")
-            assert page.locator(":focus").get_attribute("href") == "/health/live/"
+            assert page.locator(":focus").get_attribute("href") == "#main"
+            page.get_by_role("link", name="สถานะเว็บ").focus()
             page.keyboard.press("Enter")
             page.wait_for_url("**/health/live/")
             assert page.request.get(base_url + "/health/ready/").json() == {"status": "ok"}
@@ -56,20 +244,29 @@ with Path("reports/e2e-server.log").open("w") as log:
             page.keyboard.press("Tab")
             page.keyboard.type(env["E2E_PASSWORD"])
             page.keyboard.press("Enter")
-            page.wait_for_url("**/console/")
-            assert page.get_by_role("link", name="SIM-MTR กองงานมิเตอร์ (จำลอง)").count() == 1
-            page.screenshot(path="reports/e2e-console.png")
+            # M10 round 2 Q9: one division lands straight on its queue.
+            page.wait_for_url("**/divisions/SIM-MTR/")
+            assert page.get_by_role("heading", name="SIM-MTR กองงานมิเตอร์ (จำลอง)").count() == 1
+            assert page.get_by_role("link", name="แอดมิน").count() == 0
+            page.screenshot(path="reports/e2e-console.png", full_page=True)
             assert page.goto(base_url + "/divisions/SIM-TRF/").status == 404
             assert page.goto(base_url + "/console/admin/users/").status == 403
             assert page.goto(base_url + "/divisions/SIM-MTR/").status == 200
+            page.get_by_label("บัญชีของ").click()
             page.get_by_role("button", name="ออกจากระบบ").click()
             page.wait_for_url("**/accounts/login/")
             assert page.goto(base_url + "/divisions/SIM-MTR/").url.startswith(
                 base_url + "/accounts/login/"
             )
+            journeys(browser, base_url, env["E2E_PASSWORD"])
             browser.close()
         print("PASS Chromium: Thai landing, keyboard link, database readiness")
         print("PASS Chromium: keyboard login, own-division scope, admin denied, logout")
+        print("PASS Chromium: M10 withdrawal partly issued (filed for requester, approve, issue)")
+        print("PASS Chromium: M10 return waiting for inspection (receive on the case page)")
+        print(
+            "PASS Chromium: M10 hazard problem, route chosen against the proposal (phone, keyboard)"
+        )
     finally:
         process.terminate()
         try:

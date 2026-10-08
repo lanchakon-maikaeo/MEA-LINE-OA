@@ -1,0 +1,49 @@
+{% load ui %}<section class="action-form{% if demo %} action-form--demo{% endif %}" aria-labelledby="af-title" data-tour="action-form"{% if demo %} data-demo{% endif %}>
+  {% if demo %}<p class="demo-ribbon">{% icon "spark" "sm" %} ตัวอย่างฟอร์มสำหรับสาธิต · ลองกรอกดูได้ แต่ระบบจะไม่บันทึก</p>{% endif %}
+  <div class="action-form__head">
+    <div>
+      <span class="eyebrow">{{ case.number }} · {{ case.get_status_display }}</span>
+      <h2 id="af-title">{{ form.label }}</h2>
+    </div>
+    <a class="icon-btn" href="{% url 'case-detail' case.number %}" data-close-action aria-label="ปิดฟอร์ม">✕</a>
+  </div>
+  {% if form.intro %}<p class="lede mb-24">{{ form.intro }}</p>{% endif %}
+  {% if form.picker|length > 1 %}
+    <nav class="chips mb-24" aria-label="เลือกรายการที่จะทำ">
+      {% for value, title, q in form.picker %}
+        <a class="chip" href="{% url 'case-action' case.number form.action %}?{{ q }}" hx-get="{% url 'case-action' case.number form.action %}?{{ q }}" hx-target="#action-slot" hx-swap="innerHTML"{% for f in form.fields %}{% if f.kind == "hidden" and f.value|stringformat:"s" == value|stringformat:"s" %} aria-current="page"{% endif %}{% endfor %}>{{ title }}</a>
+      {% endfor %}
+    </nav>
+  {% endif %}
+  {% if conflict is not None %}
+    <div class="notice notice--warning mb-24" role="alert">{% icon "alert" %}
+      <div class="notice__body"><strong>เรื่องนี้มีการเปลี่ยนแปลงระหว่างที่คุณกรอก</strong>
+        {% if conflict %}มีคนบันทึก: {{ conflict|join:", " }}. {% endif %}ข้อความที่กรอกยังอยู่ ตรวจอีกครั้งแล้วกดบันทึกได้เลย
+      </div>
+    </div>
+  {% endif %}
+  {% for error in errors %}
+    <div class="notice notice--error mb-24" role="alert">{% icon "alert" %}<div class="notice__body">{{ error }}</div></div>
+  {% endfor %}
+  {% if demo %}
+  <form data-demo-form>
+    {% for f in form.fields %}{% include "operations/_field.html" %}{% endfor %}
+    <div class="form-actions">
+      <button type="button" disabled>สาธิต: {{ form.label }} (ไม่บันทึก)</button>
+    </div>
+  </form>
+  {% else %}
+  <form method="post" action="{% url 'case-action' case.number form.action %}" enctype="multipart/form-data"
+        hx-post="{% url 'case-action' case.number form.action %}" hx-encoding="multipart/form-data"
+        hx-target="#action-slot" hx-swap="innerHTML show:#action-slot:top" hx-disabled-elt="find button[type=submit]">
+    {% csrf_token %}
+    <input type="hidden" name="revision" value="{{ revision }}">
+    <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+    {% for f in form.fields %}{% include "operations/_field.html" %}{% endfor %}
+    <div class="form-actions">
+      <button type="submit">{% if form.irreversible %}ยืนยัน{% else %}บันทึก{% endif %}: {{ form.label }}</button>
+      <a class="btn btn--secondary" href="{% url 'case-detail' case.number %}" data-close-action>ยกเลิก</a>
+    </div>
+  </form>
+  {% endif %}
+</section>

@@ -1,0 +1,342 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}{{ case.number }} — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_id %}case{% endblock %}
+{% block page_kind %}{{ case.kind }}{% endblock %}
+{% block content %}
+<ol class="crumbs">
+  <li>{% if back_division %}<a href="{% url 'division-detail' back_division %}">คิว {{ back_division }}</a>{% else %}<a href="{% url 'console' %}">ภาพรวม</a>{% endif %}</li>
+  <li aria-current="page">{{ case.number }}</li>
+</ol>
+
+<div class="case-head" data-tour="case-head">
+  <span class="eyebrow">{{ case.get_kind_display }} · ยื่นทาง {{ case.get_channel_display }}</span>
+  <div class="case-head__title">
+    <h1>{{ case.number }}</h1>
+    {% prio page.level %}
+    {% status_tag case %}
+  </div>
+  <dl class="facts">
+    <div><dt>กองเจ้าภาพ</dt><dd>{{ case.owner_division.code }} {{ case.owner_division.name }}</dd></div>
+    <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
+    <div><dt>เขต</dt><dd>{{ case.district.name }}</dd></div>
+    <div><dt>ผู้แจ้ง</dt><dd>{{ case.requester.display_name }}</dd></div>
+    <div><dt>ยื่นเมื่อ</dt><dd class="num">{{ case.submitted_at|thai_datetime }}</dd></div>
+    {% if case.needed_by %}<div><dt>ต้องการภายใน</dt><dd class="num">{{ case.needed_by|thai_date }}</dd></div>{% endif %}
+    {% if page.update_due %}<div><dt>กำหนดอัปเดตที่ผู้แจ้งเห็น</dt><dd class="num">{{ page.update_due|thai_datetime }}</dd></div>{% endif %}
+    {% if case.ended_at %}<div><dt>ปิดเมื่อ</dt><dd class="num">{{ case.ended_at|thai_datetime }}</dd></div>{% endif %}
+  </dl>
+</div>
+
+{% if page.hazard %}
+  <div class="hazard" role="alert" data-tour="hazard">
+    {% icon "alert" %}
+    <div><strong>แจ้งเหตุอันตราย · ระดับฉุกเฉิน ต้องคัดกรองทันที</strong>{% if page.hazard_guidance %}<p class="pre">{{ page.hazard_guidance }}</p>{% endif %}</div>
+  </div>
+{% endif %}
+
+<div id="revision-watch" hx-get="{% url 'case-revision' case.number %}?r={{ case.revision }}" hx-trigger="every 30s, poll" hx-swap="innerHTML" data-poll aria-live="polite"></div>
+
+<div class="detail">
+  <div class="detail__main">
+    <div id="action-slot" aria-live="polite"></div>
+
+    {% if page.texts %}
+    <section class="section" aria-labelledby="s-request">
+      <div class="section-head"><h2 id="s-request">ข้อความจากผู้แจ้ง</h2></div>
+      {% for label, text in page.texts %}
+        <div class="labelled"><p class="labelled__label">{{ label }}</p><div class="prose-block">{{ text }}</div></div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    <section class="section" aria-labelledby="s-lines" data-tour="lines">
+      <div class="section-head">
+        <h2 id="s-lines">รายการอุปกรณ์</h2>
+        {% if page.lines.partially_issued %}<span class="tag">จ่ายบางส่วน</span>{% elif page.lines.partially_returned %}<span class="tag">คืนบางส่วน</span>{% endif %}
+      </div>
+      <div class="table-wrap">
+        {% if case.kind == "withdrawal" %}
+        <table>
+          <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอ</th><th scope="col" class="num">อนุมัติ</th><th scope="col" class="num">จ่ายแล้ว</th><th scope="col" class="num">เขตรับแล้ว</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างจ่าย</th></tr></thead>
+          <tbody>
+          {% for l in page.lines.lines %}
+            <tr>
+              <td class="num">{{ l.line_no }}</td>
+              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}{% if l.approval_reason %}<br><span class="muted">{{ l.approval_reason }}</span>{% endif %}</td>
+              <td class="num">{{ l.requested }}</td>
+              <td class="num">{{ l.approved }}</td>
+              <td class="num">{{ l.issued }}</td>
+              <td class="num">{{ l.received }}</td>
+              <td class="num">{{ l.terminated }}</td>
+              <td class="num{% if l.outstanding != '0' and l.outstanding != '-' %} t-strong{% endif %}">{{ l.outstanding }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% elif case.kind == "return" %}
+        <table>
+          <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอคืน</th><th scope="col" class="num">มาถึง</th><th scope="col" class="num">พร้อมใช้</th><th scope="col" class="num">ซ่อม</th><th scope="col" class="num">อื่น ๆ</th><th scope="col" class="num">รอตรวจ</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างส่งคืน</th></tr></thead>
+          <tbody>
+          {% for l in page.lines.lines %}
+            <tr>
+              <td class="num">{{ l.line_no }}</td>
+              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% if l.requested_serials %}<br><span class="muted">{{ l.requested_serials|join:", " }}</span>{% endif %}{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}</td>
+              <td class="num">{{ l.requested }}</td><td class="num">{{ l.arrived }}</td><td class="num">{{ l.ready }}</td><td class="num">{{ l.repair }}</td><td class="num">{{ l.other }}</td><td class="num">{{ l.awaiting }}</td><td class="num">{{ l.terminated }}</td>
+              <td class="num{% if l.outstanding != '0' %} t-strong{% endif %}">{{ l.outstanding }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <table>
+          <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">จำนวน</th><th scope="col">เลขเครื่อง</th></tr></thead>
+          <tbody>
+          {% for l in page.lines.lines %}
+            <tr><td class="num">{{ l.line_no }}</td><td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }}</span></td><td class="num">{{ l.requested }}</td><td>{{ l.serials|join:", "|default:"-" }}</td></tr>
+          {% empty %}<tr><td colspan="4" class="muted">ไม่ได้ระบุรายการของ</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </section>
+
+    {% if case.kind == "withdrawal" and page.lines.deliveries %}
+    <section class="section" aria-labelledby="s-deliveries" data-tour="deliveries">
+      <div class="section-head"><h2 id="s-deliveries">การส่งมอบ</h2><span class="muted">{{ page.lines.deliveries|length }} ครั้ง</span></div>
+      <div class="cards">
+        {% for d in page.lines.deliveries %}
+          <article class="card">
+            <div class="card__head"><h3>ครั้งที่ {{ d.seq }} · เอกสาร {{ d.document_number }}</h3><span class="tag{% if d.status == 'confirmed' or d.status == 'resolved' %} tag--closed{% endif %}">{{ d.status_label }}</span></div>
+            <ul class="stack-sm">
+              {% for dl in d.lines %}<li>#{{ dl.line_no }} {{ dl.item }} × {{ dl.quantity }} {{ dl.unit }}{% if dl.serials %} <span class="muted">({{ dl.serials|join:", " }})</span>{% endif %}</li>{% endfor %}
+            </ul>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if case.kind == "return" %}
+    <section class="section" aria-labelledby="s-units" data-tour="units">
+      <div class="section-head"><h2 id="s-units">ของที่รับคืนและการตรวจ</h2>{% if page.lines.no_source_document %}<span class="flag flag--info">ไม่มีเอกสารอ้างอิงการจ่าย</span>{% endif %}</div>
+      {% if page.lines.instructions %}<div class="notice notice--info mb-24">{% icon "info" %}<div class="notice__body"><strong>วิธีส่งคืนที่แจ้งเขต</strong>{{ page.lines.instructions }}</div></div>{% endif %}
+      {% if page.lines.units %}
+      <div class="table-wrap"><table>
+        <thead><tr><th scope="col">หน่วย</th><th scope="col">รายการ</th><th scope="col">เลขเครื่อง/จำนวน</th><th scope="col">สถานะ</th><th scope="col">หมายเหตุ</th></tr></thead>
+        <tbody>
+        {% for u in page.lines.units %}
+          <tr><td class="num">{{ u.unit }} <span class="muted">(ครั้งที่ {{ u.arrival }})</span></td><td>{{ u.item }}</td><td>{{ u.serial|default:u.quantity }}</td><td>{{ u.status_label }}</td>
+            <td>{% if u.discrepancy %}<span class="t-alert">{{ u.discrepancy }}</span>{% if u.resolution %} → {{ u.resolution }}{% endif %}<br>{% endif %}{% if u.flag %}<span class="t-alert">{{ u.flag }}</span><br>{% endif %}{% if u.source %}<span class="muted">มาจาก {{ u.source }}</span>{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+      {% else %}<div class="empty"><strong>ยังไม่มีของมาถึง</strong>ผู้รับคืนบันทึกเมื่อของมาถึงจริง</div>{% endif %}
+    </section>
+    {% endif %}
+
+    {% if page.children %}
+    <section class="section" aria-labelledby="s-children" data-tour="children">
+      <div class="section-head"><h2 id="s-children">งานย่อย</h2><span class="muted">เรื่องหลักยังอยู่ที่ {{ case.owner_division.code }}</span></div>
+      <div class="cards">
+        {% for w in page.children %}
+          <article class="card">
+            <div class="card__head"><h3>งานย่อย {{ w.seq }} · {{ w.division.code }}{% if w.rule %} <span class="muted">({{ w.rule }})</span>{% endif %}</h3><span class="tag{% if w.status == 'done' %} tag--closed{% elif not w.is_open %} tag--muted{% endif %}">{{ w.get_status_display }}</span></div>
+            <p>{{ w.task }}</p>
+            {% if w.deliverable %}<p class="muted">ผลที่ต้องส่ง: {{ w.deliverable }}</p>{% endif %}
+            {% if w.line_numbers %}<p class="muted">รายการที่ครอบ: {% for n in w.line_numbers %}#{{ n }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+            {% if w.result_summary %}<p class="mt-8"><span class="strong">ผล:</span> {{ w.result_summary }}</p>{% endif %}
+            {% if w.answer_reason %}<p class="muted">เหตุผล: {{ w.answer_reason }}</p>{% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if page.problem %}
+    <section class="section" aria-labelledby="s-resolution" data-tour="resolution">
+      <div class="section-head"><h2 id="s-resolution">ผลการแก้ปัญหา</h2>{% if page.problem.reopens %}<span class="tag">เปิดใหม่ {{ page.problem.reopens }} ครั้ง</span>{% endif %}</div>
+      {% if page.problem.resolution %}
+        <div class="card">
+          <div class="card__head"><h3>{{ page.problem.resolution.category_label }}</h3></div>
+          <p class="pre">{{ page.problem.resolution.message }}</p>
+          {% if page.problem.resolution.internal_note %}<p class="muted mt-8">บันทึกภายใน (ผู้แจ้งไม่เห็น): {{ page.problem.resolution.internal_note }}</p>{% endif %}
+        </div>
+      {% else %}<div class="empty"><strong>ยังไม่มีผลการแก้ปัญหา</strong>ผู้แก้ปัญหาของกองเจ้าภาพบันทึกเมื่องานเสร็จ</div>{% endif %}
+      {% if page.problem.disputes %}
+        <ul class="stack-sm mt-18">
+          {% for d in page.problem.disputes %}<li class="notice notice--warning"><div class="notice__body"><strong>ผู้แจ้งโต้แย้งผล</strong>{{ d.reason }}</div></li>{% endfor %}
+        </ul>
+        {% if page.problem.repeat_dispute %}<p class="flag flag--alert mt-8">โต้แย้งซ้ำ — แจ้งผู้กำกับงานแล้ว</p>{% endif %}
+      {% endif %}
+    </section>
+    {% endif %}
+
+    {% if page.registry %}
+    <section class="section" aria-labelledby="s-registry">
+      <div class="section-head"><h2 id="s-registry">เอกสารทะเบียน (SAP)</h2><span class="muted">{{ page.registry|length }} รายการ</span></div>
+      <ul class="stack-sm">
+        {% for f in page.registry %}
+          <li class="card">
+            <div class="cluster"><span class="strong">{{ f.record.get_kind_display }} · เอกสาร {{ f.record.document_number }}</span><span class="tag {{ f.tone }}">{{ f.label }}</span></div>
+            <p class="muted">บันทึกโดย {{ f.record.recorded_by.staff_profile.display_name|default:f.record.recorded_by.username }} ({{ f.record.division.code }}) · {{ f.record.recorded_at|thai_short }}</p>
+            {% for d in f.open %}<p class="flag"><a href="{% url 'registry-discrepancy' d.pk %}">{{ d.get_kind_display }}</a> · {{ d.get_status_display }}</p>{% endfor %}
+            {% if f.evidence %}<ul class="files mt-8">{% for a in f.evidence %}<li class="file">{% icon "clip" %}{% if a.scan_status == "clean" %}<a href="{% url 'attachment-download' a.pk %}">{{ a.declared_name }}</a>{% else %}<span>{{ a.declared_name }}</span>{% endif %}<span class="muted">หลักฐาน · {{ a.get_scan_status_display }}</span></li>{% endfor %}</ul>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    <section class="section" aria-labelledby="s-files" data-tour="files">
+      <div class="section-head"><h2 id="s-files">ไฟล์แนบ</h2><span class="muted">{{ page.attachments|length }} ไฟล์</span></div>
+      {% if page.attachments %}
+        <ul class="files">
+          {% for a in page.attachments %}
+            <li class="file">{% icon "clip" %}
+              {% if a.scan_status == "clean" %}<a href="{% url 'attachment-download' a.pk %}">{{ a.declared_name|default:"ไฟล์แนบ" }}</a>{% else %}<span>{{ a.declared_name|default:"ไฟล์แนบ" }}</span>{% endif %}
+              <span class="muted">{{ a.get_scan_status_display }}{% if a.size %} · {{ a.size|filesizeformat }}{% endif %}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}<p class="muted">ไม่มีไฟล์แนบ</p>{% endif %}
+      {% if can_upload %}
+        <form class="upload mt-18" method="post" action="{% url 'case-upload' case.number %}" enctype="multipart/form-data">
+          {% csrf_token %}
+          <label class="visually-hidden" for="upload-files">เลือกไฟล์</label>
+          <input id="upload-files" name="files" type="file" multiple accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" required>
+          <label class="visually-hidden" for="upload-note">คำอธิบายไฟล์</label>
+          <input id="upload-note" name="note" placeholder="คำอธิบายสั้น ๆ (ไม่บังคับ)" maxlength="200">
+          <button class="btn--sm" type="submit">{% icon "clip" "sm" %} แนบไฟล์</button>
+        </form>
+        <p class="helptext">JPG, PNG หรือ PDF ครั้งละไม่เกิน 5 ไฟล์ ไฟล์ละไม่เกิน 10 MB ไฟล์จะเปิดได้หลังสแกนไวรัส และไม่ส่งถึงผู้แจ้ง</p>
+      {% endif %}
+    </section>
+
+    {% if page.related %}
+    <section class="section" aria-labelledby="s-related">
+      <div class="section-head"><h2 id="s-related">เรื่องที่เกี่ยวข้อง</h2></div>
+      <ul class="cluster">{% for c, can_see in page.related %}<li>{% if can_see %}<a class="chip" href="{% url 'case-detail' c.number %}">{{ c.number }}</a>{% else %}<span class="chip">{{ c.number }} <span class="muted">(กองอื่น)</span></span>{% endif %}</li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+
+    <section class="section" aria-labelledby="s-timeline" data-tour="timeline">
+      <details class="disclosure" open>
+        <summary id="s-timeline">ไทม์ไลน์ ({{ page.timeline|length }})</summary>
+        <div class="disclosure__body">
+          <ol class="timeline">
+            {% for e in page.timeline %}
+              <li class="{% if e.system %}timeline__system{% endif %}">
+                <time datetime="{{ e.at|date:'c' }}">{{ e.at|thai_datetime }}</time>
+                <div>
+                  <div class="timeline__what">{{ e.what }}</div>
+                  <div class="timeline__who">{{ e.who }}{% if e.status %} · {{ e.status }}{% endif %}</div>
+                  {% if e.why %}<p class="timeline__why">{{ e.why }}</p>{% endif %}
+                </div>
+              </li>
+            {% endfor %}
+          </ol>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <aside class="detail__aside" aria-label="กรอบเวลา ข้อเสนอ และการกระทำ">
+    <section class="panel" aria-labelledby="a-clocks" data-tour="clocks">
+      <div class="panel__head"><h2 id="a-clocks">กรอบเวลา</h2>{% icon "clock" %}</div>
+      {% if page.clocks %}
+        <ul class="clock-list">
+          {% for c in page.clocks %}
+            <li>
+              <span class="strong">{{ c.label }} · {{ c.division }}</span>
+              {% if c.paused %}<span class="due due--paused">พักอยู่</span>{% elif c.remaining < 0 %}<span class="due due--over">เกิน {{ c.remaining|duration }}</span>{% else %}<span class="due">เหลือ {{ c.remaining|duration }}</span>{% endif %}
+              <span class="muted">กำหนด {{ c.due_at|thai_datetime }}{% if c.continuous %} · นับต่อเนื่อง (ฉุกเฉิน){% else %} · นับเฉพาะเวลาทำการ{% endif %}{% if c.paused_minutes %} · พักแล้ว {{ c.paused_minutes|duration }}{% endif %}{% if c.escalated %} · <span class="t-alert">ยกระดับแล้ว</span>{% elif c.held %} · ยังไม่ยกระดับ (ระบบมีปัญหา){% elif c.reminded and c.overdue %} · <span class="t-alert">เตือนแล้ว</span>{% endif %}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}<p class="muted">ไม่มีกรอบเวลาที่เปิดอยู่</p>{% endif %}
+    </section>
+
+    <section class="panel" id="actions" aria-labelledby="a-actions" data-tour="actions">
+      <div class="panel__head"><h2 id="a-actions">สิ่งที่ทำได้</h2></div>
+      {% with h=page.handoff %}{% if h %}
+        <div class="handoff mb-24">
+          <p class="flag">รอ {{ h.to }} ตอบรับการส่งต่อ</p>
+          <p class="muted">ส่งจาก {{ h.from }} โดย {{ h.by }} · {{ h.at|thai_short }}</p>
+          {% if h.against_proposal %}<p class="flag flag--info">ส่งต่างจากที่ระบบเสนอ (ระบบเสนอ {{ h.proposed }})</p>{% endif %}
+          {% if h.reason %}<p class="handoff__reason"><span class="muted">เหตุผล{% if h.category %} · {{ h.category }}{% endif %}</span>{{ h.reason }}</p>{% endif %}
+        </div>
+      {% endif %}{% endwith %}
+      {% if page.review %}<p class="flag mb-8">เรื่องนี้รอผู้ประสานตัดสิน</p>{% endif %}
+      {% if offers %}
+        <div class="action-list">
+          {% for o in offers %}{% if not o.irreversible %}
+            <a class="btn {% if o.primary %}btn--block{% else %}btn--secondary btn--sm{% endif %}" href="{% url 'case-action' case.number o.name %}" hx-get="{% url 'case-action' case.number o.name %}" hx-target="#action-slot" hx-swap="innerHTML show:#action-slot:top"{% if o.primary %} data-tour="primary-action"{% endif %}>{{ o.label }}</a>
+          {% endif %}{% endfor %}
+        </div>
+        {% if has_irreversible %}
+        <details class="more mt-18">
+          <summary class="muted">ตัวเลือกที่ย้อนกลับไม่ได้ (ยกเลิก ไม่อนุมัติ ยุติ)</summary>
+          <div class="action-list mt-8">
+            {% for o in offers %}{% if o.irreversible %}
+              <a class="btn btn--outline btn--sm" href="{% url 'case-action' case.number o.name %}" hx-get="{% url 'case-action' case.number o.name %}" hx-target="#action-slot" hx-swap="innerHTML show:#action-slot:top">{{ o.label }}</a>
+            {% endif %}{% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      {% else %}
+        <p class="muted">ตอนนี้ยังไม่มีขั้นที่บัญชีคุณต้องทำในเรื่องนี้</p>
+      {% endif %}
+    </section>
+
+    {% if page.decisions %}
+    <section class="panel" aria-labelledby="a-decisions" data-tour="decisions">
+      <div class="panel__head"><h2 id="a-decisions">การตัดสินของเจ้าหน้าที่</h2></div>
+      <ul class="stack-sm">
+        {% for d in page.decisions %}
+          <li class="decision"><span class="decision__mark">{% icon "check" %}</span><div><span class="strong">{{ d.what }}</span><br><span class="muted">ยืนยันโดย {{ d.by }}{% if d.division %} · {{ d.division }}{% endif %}{% if d.at %} · {{ d.at|thai_short }}{% endif %}</span></div></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% with p=page.proposal %}
+    {% if p %}
+    <section class="panel panel--proposal" aria-labelledby="a-proposal" data-tour="proposal">
+      <div class="panel__head"><h2 id="a-proposal">ข้อเสนอจากระบบ</h2><span class="tag tag--proposal">{% icon "spark" "sm" %} ข้อเสนอ</span></div>
+      {% if p.stale %}<div class="notice notice--warning mb-24"><div class="notice__body">ข้อเสนอนี้คิดไว้ก่อนเรื่องมีการเปลี่ยนแปลง อาจไม่ตรงกับข้อมูลล่าสุด</div></div>{% endif %}
+      {% if p.policy_change_pending %}<p class="flag flag--info mb-24">กติการุ่นใหม่เสนอต่างจากที่ยืนยันไว้</p>{% endif %}
+      <dl class="kv">
+        <div><dt>กองที่เสนอ</dt><dd><span class="strong">{{ p.proposed_owner }}</span>{% if p.owner_changes %} <span class="muted">(ตอนนี้ {{ p.current_owner }})</span>{% endif %}</dd></div>
+        <div><dt>ระดับที่เสนอ</dt><dd>{% prio p.priority.suggested %}{% if p.priority.floor %} <span class="muted">ห้ามต่ำกว่า{{ p.priority.floor|level_name }}</span>{% endif %}</dd></div>
+        {% if p.rule_rows %}<div><dt>กติกา</dt><dd>{% for rule, title in p.rule_rows %}<span class="strong">{{ rule }}</span> {{ title }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</dd></div>{% endif %}
+        {% if p.support_units %}<div><dt>หน่วยสนับสนุน</dt><dd>{{ p.support_units|join:", " }}</dd></div>{% endif %}
+        {% if p.child_work_owners %}<div><dt>งานย่อยที่เสนอ</dt><dd>{{ p.child_work_owners|join:", " }}</dd></div>{% endif %}
+        {% if p.next_action %}<div><dt>ควรทำต่อ</dt><dd>{{ p.next_action }}</dd></div>{% endif %}
+        {% if p.missing_labels %}<div><dt>ข้อมูลที่ยังขาด</dt><dd class="flag--info">{{ p.missing_labels|join:", " }}</dd></div>{% endif %}
+      </dl>
+      <details class="disclosure mt-18">
+        <summary>ข้อเท็จจริงและที่มา ({{ p.fact_rows|length }})</summary>
+        <div class="disclosure__body">
+          <dl class="kv">
+            {% for f in p.fact_rows %}
+              <div><dt>{{ f.label }}</dt><dd><span class="strong">{{ f.value }}</span><br><span class="{% if f.confirmed %}muted{% else %}flag flag--info{% endif %}">{{ f.source_label|default:f.source }}</span>{% if f.evidence %}<br><span class="muted">“{{ f.evidence }}”</span>{% endif %}</dd></div>
+            {% endfor %}
+          </dl>
+          {% if p.notes %}<ul class="stack-sm mt-18">{% for n in p.notes %}<li class="muted">{{ n }}</li>{% endfor %}</ul>{% endif %}
+        </div>
+      </details>
+      <p class="panel__note mt-18">กติกา {{ p.policy.code|default:"-" }}{% if p.policy.synthetic %} (จำลอง){% endif %} · ยังไม่ใช่การตัดสิน เจ้าหน้าที่เป็นผู้ยืนยัน</p>
+    </section>
+    {% endif %}
+    {% endwith %}
+  </aside>
+</div>
+{% if primary %}
+<div class="mobile-actions">
+  <a class="btn" href="{% url 'case-action' case.number primary.name %}" hx-get="{% url 'case-action' case.number primary.name %}" hx-target="#action-slot" hx-swap="innerHTML show:#action-slot:top">{{ primary.label }}</a>
+  {% if offers|length > 1 %}<a class="btn btn--secondary" href="#actions">อื่น ๆ</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

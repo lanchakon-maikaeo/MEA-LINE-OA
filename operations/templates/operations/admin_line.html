@@ -1,8 +1,14 @@
 {% extends "operations/admin_base.html" %}
 {% block content %}
-<h1>LINE งบข้อความ และงานค้าง</h1>
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>LINE งบข้อความ และงานค้าง</h1></div></div>
 <h2>งบการแจ้งเตือน (push) เดือนนี้</h2>
-<ul>
+<div class="stats mt-18 mb-24">
+  <div class="stat stat--dark"><span class="stat__label">ใช้แล้ว / งบ</span><span class="stat__value">{{ state.used }}<small class="muted"> / {{ state.budget }}</small></span></div>
+  <div class="stat"><span class="stat__label">คาดการณ์สิ้นเดือน</span><span class="stat__value">{{ state.forecast }}</span></div>
+  <div class="stat"><span class="stat__label">tier</span><span class="stat__value">{{ state.tier }}</span></div>
+</div>
+<progress class="{% if state.percent >= 80 %}is-alert{% endif %}" max="100" value="{{ state.percent }}" aria-label="ใช้งบไปแล้ว {{ state.percent }}%">{{ state.percent }}%</progress>
+<ul class="stack-sm mt-18">
   <li>ใช้แล้ว <strong>{{ state.used }}</strong> จากงบ {{ state.budget }} ({{ state.percent }}%) · tier {{ state.tier }}{% if state.limit_reached %} · LINE แจ้งว่าโควตาเต็ม{% endif %}</li>
   <li>คาดการณ์สิ้นเดือน {{ state.forecast }} ข้อความ</li>
   <li>ส่ง push: {{ push_enabled|yesno:"เปิด,ปิด (นอก production หรือยังไม่ตั้งค่า)" }}</li>

@@ -13,6 +13,7 @@ from operations import (
     notifications,
     orchestration,
     policy,
+    staff_email,
 )
 from operations.models import OutboxEvent, PostbackToken, WebhookInbox
 
@@ -52,6 +53,7 @@ def handle_event(event):
         ai_chat.start_loading(inbox_id)  # only when the message went to AI
     else:
         notifications.plan_for_event(event)
+        staff_email.plan_for_event(event)  # M10: การแจ้งเตือนเจ้าหน้าที่
 
 
 def run_once(limit=20):

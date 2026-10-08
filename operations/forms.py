@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django import forms
 from django.contrib.auth import get_user_model
 
@@ -8,6 +10,7 @@ from operations.models import (
     AuthorityGrant,
     District,
     Division,
+    EquipmentType,
     Role,
 )
 
@@ -163,6 +166,24 @@ class AuthorityGrantForm(forms.Form):
         queryset=Division.objects.filter(is_active=True),
         required=False,
     )
+    # M07 Q2: approval/allocation may narrow to a category or an item; a cap needs an item.
+    category = forms.ChoiceField(
+        label="หมวดของ (อนุมัติเบิก/จัดสรร/รับรองสภาพเท่านั้น; ว่าง = ทุกหมวด)",
+        choices=[("", "ทุกหมวด"), *EquipmentType.Category.choices],
+        required=False,
+    )
+    item = forms.ModelChoiceField(
+        label="รายการของ (ว่าง = ทุกรายการ)",
+        queryset=EquipmentType.objects.filter(is_active=True),
+        required=False,
+    )
+    max_quantity = forms.DecimalField(
+        label="จำนวนอนุมัติสูงสุดต่อรายการ (ต้องระบุรายการของ)",
+        required=False,
+        min_value=Decimal("0.01"),
+        max_digits=12,
+        decimal_places=2,
+    )
     valid_from = forms.DateTimeField(
         label="เริ่มมีผล (ว่าง = ตอนนี้)",
         required=False,
@@ -177,3 +198,47 @@ class AuthorityGrantForm(forms.Form):
     )
     approval_reference = forms.CharField(label="ผู้รับรองหรือเลขเอกสารอำนาจ", max_length=200)
     reason = forms.CharField(label="เหตุผล", max_length=500)
+
+
+class InventoryAdjustForm(forms.Form):
+    """An admin correction of the fake store (M07 Q18), like a registry correction document."""
+
+    item = forms.ModelChoiceField(
+        label="รายการของ", queryset=EquipmentType.objects.filter(is_active=True)
+    )
+    bucket = forms.ChoiceField(
+        label="ยอดที่ปรับ",
+        choices=[
+            ("available", "พร้อมจ่าย"),
+            ("awaiting_inspection", "รอตรวจ"),
+            ("awaiting_repair", "รอซ่อม"),
+        ],
+        initial="available",
+        required=False,
+    )
+    delta = forms.DecimalField(
+        label="เปลี่ยนยอดพร้อมจ่าย (+/-)", max_digits=12, decimal_places=2, initial=0
+    )
+    add_serials = forms.CharField(
+        label="เพิ่มเลขเครื่อง (คั่นด้วยเว้นวรรค)", required=False, max_length=2000
+    )
+    remove_serials = forms.CharField(
+        label="นำเลขเครื่องออก (คั่นด้วยเว้นวรรค)", required=False, max_length=2000
+    )
+    reason = forms.CharField(label="เหตุผล/เลขเอกสารอ้างอิง", max_length=500)
+
+
+class SnapshotImportForm(forms.Form):
+    """Registry figures for manual_reference mode (M07 Q10)."""
+
+    rows = forms.CharField(
+        label='ยอดเป็น JSON เช่น [{"item_id": "FUSE_SYN_A", "available": 40}]',
+        widget=forms.Textarea(attrs={"rows": 6}),
+    )
+    as_of = forms.DateTimeField(
+        label="ยอด ณ เวลา (as_of)",
+        input_formats=DATETIME_LOCAL,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    source = forms.CharField(label="แหล่งยอด (ระบบ/เอกสาร)", max_length=200)
+    is_synthetic = forms.BooleanField(label="เป็นข้อมูลจำลอง", required=False)

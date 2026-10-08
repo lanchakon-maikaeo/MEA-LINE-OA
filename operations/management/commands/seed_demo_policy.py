@@ -10,9 +10,12 @@ class Command(DemoCommand):
         "demo DB only). Real policies come from the rule owner through import_policy (G02)."
     )
 
+    def add_arguments(self, parser):
+        parser.add_argument("--source", default=str(policy.DEMO_POLICY))
+
     @transaction.atomic
-    def handle_demo(self, *args, **options):
-        version = policy.import_policy(policy.load_document())
+    def handle_demo(self, *args, source, **options):
+        version = policy.import_policy(policy.load_document(source))
         active = policy.active_policy()
         # The newest synthetic demo replaces an older synthetic demo; real policies stay.
         if active is None or (active.is_synthetic and active.code < version.code):

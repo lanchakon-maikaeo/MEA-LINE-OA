@@ -122,7 +122,7 @@ def _case_identity(case):
     ).first()
 
 
-def _create(event, kind, level, identity, text, case=None, registration=None):
+def _create(event, kind, level, identity, text, case=None, registration=None, message=None):
     if identity is None:
         return None  # Requester without LINE: staff follow up; email arrives later.
     now = timezone.now()
@@ -137,6 +137,7 @@ def _create(event, kind, level, identity, text, case=None, registration=None):
                 level=level,
                 identity=identity,
                 text=text,
+                message=message or {},
                 case=case,
                 registration=registration,
                 source_event=event.event_id,
@@ -182,7 +183,7 @@ def plan_for_event(event):
             return _create(
                 event, "case_cancelled", N.Level.NORMAL, _case_identity(case), text, case
             )
-        return None
+        return _plan_fulfilment(event, decision, case)
     if event.event_type == orchestration.EVENT_REGISTRATION:
         registration = (
             RegistrationRequest.objects.select_related("identity")
@@ -208,7 +209,87 @@ def plan_for_event(event):
             text,
             registration=registration,
         )
-    return None  # case.submitted: the requester already got the case number by reply.
+    if event.event_type == orchestration.EVENT_CASE_SUBMITTED:
+        return _plan_hazard_ack(event)
+    return None
+
+
+def _plan_hazard_ack(event):
+    """M09 Q10 / push table P0: a case filed for the requester by staff with a reported hazard
+    is acknowledged at once with the emergency guidance (LINE submissions got it by reply)."""
+    from operations import policy
+    from operations.models import Case
+
+    case = Case.objects.filter(pk=event.subject_id).first()
+    if case is None or case.channel == Case.Channel.LINE:
+        return None
+    guidance = policy.hazard_guidance(case)
+    if not guidance:
+        return None
+    text = f"รับเรื่อง {case.number} แล้ว (เจ้าหน้าที่บันทึกแทน)\nคำแนะนำเร่งด่วน: {guidance}"
+    return _create(event, "hazard_ack", N.Level.CRITICAL, _case_identity(case), text, case)
+
+
+def _plan_fulfilment(event, decision, case):
+    """M07 Q15: a delivery asks the district to confirm (critical, with buttons); not approved
+    and closed by staff are normal; partial approval waits as 'มีอัปเดตใหม่'. M08 Q12: the first
+    return instructions are critical (the district must act); a closed return is normal with
+    the per-line result; arrivals and inspections wait as 'มีอัปเดตใหม่'."""
+    identity = _case_identity(case)
+    if decision.action == "resolve":
+        from operations import problem_chat  # local: builds LINE cards on services
+
+        card = problem_chat.resolution_card(case, identity)
+        if card is None:
+            return None
+        text, message = card
+        return _create(
+            event, "resolution_request", N.Level.CRITICAL, identity, text, case, message=message
+        )
+    if decision.action == "return_instructions":
+        if not decision.data.get("first"):
+            return None
+        data = decision.data
+        when = " ถึง ".join(x for x in (data.get("from_date"), data.get("to_date")) if x)
+        text = f"เรื่อง {case.number}: ส่งของคืนได้ที่ {data['place']}"
+        if when:
+            text += f"\nช่วงวันที่ {when}"
+        if data.get("note"):
+            text += f"\n{data['note']}"
+        return _create(event, "return_instructions", N.Level.CRITICAL, identity, text, case)
+    if (
+        case.kind == "return"
+        and decision.to_status == "closed"
+        and decision.from_status != "closed"
+    ):
+        from operations import returns
+
+        text = f"เรื่อง {case.number} รับคืนครบแล้ว\n{returns.status_text(case)}"
+        return _create(event, "case_closed", N.Level.NORMAL, identity, text, case)
+    if decision.action == "issue":
+        from operations import receipts  # local: receipts builds LINE cards on conversation
+
+        card = receipts.delivery_card(case, decision.data.get("delivery"), identity)
+        if card is None:
+            return None
+        text, message = card
+        return _create(
+            event, "receipt_request", N.Level.CRITICAL, identity, text, case, message=message
+        )
+    if decision.to_status == "rejected" and decision.action in {"approve", "deny_approval"}:
+        text = f"เรื่อง {case.number} ไม่ได้รับอนุมัติ"
+        if decision.reason:
+            text += f"\nเหตุผล: {decision.reason}"
+        return _create(event, "case_not_approved", N.Level.NORMAL, identity, text, case)
+    staff_closed = decision.actor_id is not None and decision.from_status != decision.to_status
+    if staff_closed and decision.to_status == "closed":
+        text = f"เรื่อง {case.number} ปิดแล้ว"
+        if decision.data.get("outcome"):
+            text += f" ({decision.data['outcome']})"
+        if decision.reason:
+            text += f"\nเหตุผล: {decision.reason}"
+        return _create(event, "case_closed", N.Level.NORMAL, identity, text, case)
+    return None
 
 
 # --- Sending -------------------------------------------------------------------------------
@@ -261,6 +342,10 @@ def _finish(leader, status, detail="", counted=None):
 def send(delivery_id, now=None):
     """Send one planned delivery (with its recipient's other waiting ones) or retry an unknown."""
     now = now or timezone.now()
+    if N.objects.filter(pk=delivery_id, channel=N.Channel.EMAIL).exists():
+        from operations import staff_email  # M10: staff email shares the outbox path
+
+        return staff_email.send(delivery_id, now)
     with transaction.atomic():
         delivery = (
             N.objects.select_for_update(of=("self",))
@@ -288,7 +373,9 @@ def send(delivery_id, now=None):
                 .order_by("created_at")[:4]
             )
             members = [delivery, *others]
-            delivery.messages = [{"type": "text", "text": m.text[:5000]} for m in members]
+            delivery.messages = [
+                m.message or {"type": "text", "text": m.text[:5000]} for m in members
+            ]
             delivery.counted = 1
             for member in members:
                 member.status = N.Status.UNKNOWN

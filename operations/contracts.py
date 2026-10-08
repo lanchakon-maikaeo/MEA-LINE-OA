@@ -105,8 +105,15 @@ QUANTITY = re.compile(r"^\d{1,10}(\.\d+)?$")
 STAFF_CHANNELS = frozenset({Case.Channel.PHONE, Case.Channel.LETTER, Case.Channel.COUNTER})
 ON_BEHALF_FIELDS = {"requester_id", "channel", "intake_note"}
 KIND_FIELDS = {
-    Case.Kind.WITHDRAWAL: {"required": {"purpose"}, "optional": {"needed_by"}},
-    Case.Kind.RETURN: {"required": {"condition", "reason"}, "optional": {"source_reference"}},
+    # M09 Q5: withdrawals and returns may refer to the requester's earlier case (e.g. a problem).
+    Case.Kind.WITHDRAWAL: {
+        "required": {"purpose"},
+        "optional": {"needed_by", "related_case_number"},
+    },
+    Case.Kind.RETURN: {
+        "required": {"condition", "reason"},
+        "optional": {"source_reference", "related_case_number"},
+    },
     Case.Kind.PROBLEM: {"required": {"description"}, "optional": {"impact", "related_case_number"}},
 }
 LINE_FIELDS = {"item_code", "quantity", "serials"}
@@ -117,7 +124,42 @@ ACTION_EXTRA_FIELDS = {
     "decide_routing": {"division"},
     "set_priority": {"priority"},
     "record_facts": {"facts", "clear"},
+    # M07: lines are [{"line_no": n, ...}] of the case; deliveries are numbered per case.
+    "approve": {"lines"},
+    "allocate": {"lines"},
+    "issue": {"lines", "recipient_name", "document_number"},
+    "confirm": {"delivery", "result", "lines", "channel", "intake_note"},  # M07; M09 uses channel
+    "resolve_discrepancy": {"delivery", "resolution", "reference", "lines"},
+    "terminate_outstanding": {"lines"},
+    "cancel": {"resolution", "reference"},
+    "close": {"reference"},
+    # M08: units are numbered per case; split maps ready/repair/other (or pending) to amounts.
+    "return_instructions": {"place", "from_date", "to_date", "note"},
+    "receive": {"items", "carrier_name", "document_number"},
+    "inspect": {"unit", "split", "reference"},
+    "decide_inspection": {"unit", "split", "reference"},
+    "resolve_return_discrepancy": {"unit", "resolution", "reference", "replaces"},
+    "terminate_return": {"lines", "category", "reference"},
+    # M09: children are numbered per case; an intake answer carries channel and intake_note.
+    "resolve": {"category", "message", "internal_note"},
+    "dispute_resolution": {"channel", "intake_note"},
+    "request_child_work": {"division", "task", "deliverable", "rule", "lines"},
+    "accept_child_work": {"child"},
+    "decline_child_work": {"child"},
+    "decide_child_work": {"child", "division"},
+    "finish_child_work": {"child", "result", "summary"},
+    "cancel_child_work": {"child"},
 }
+# M11 Q3/Q13: in manual_reference mode these cite a registry document and carry its evidence.
+for _action in (
+    "issue",
+    "receive",
+    "inspect",
+    "decide_inspection",
+    "resolve_discrepancy",
+    "resolve_return_discrepancy",
+):
+    ACTION_EXTRA_FIELDS[_action] = ACTION_EXTRA_FIELDS[_action] | {"evidence"}
 
 
 def clean_idempotency_key(value):
@@ -284,6 +326,14 @@ def clean_reason(payload, required):
     return _text(payload, "reason", required)
 
 
+def clean_text(payload, name, required, max_length=TEXT_MAX):
+    return _text(payload, name, required, max_length)
+
+
+def clean_serials(raw):
+    return _serials(raw)
+
+
 def parse_action_payload(action, payload):
     payload = {} if payload is None else payload
     _reject_unknown(payload, ACTION_FIELDS | ACTION_EXTRA_FIELDS.get(action, set()), "payload")
@@ -314,6 +364,7 @@ def contract_document():
                 "label": spec.label,
                 "module": spec.module,
                 "enabled": spec.enabled,
+                "enabled_kinds": spec.enabled_kinds,
                 "reason_required": spec.reason_required,
                 "payload": sorted(ACTION_FIELDS | ACTION_EXTRA_FIELDS.get(spec.name, set())),
             }

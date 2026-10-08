@@ -1,0 +1,61 @@
+{% load ui %}{% if f.kind == "hidden" %}<input type="hidden" name="{{ f.name }}" value="{{ f.value|default:'' }}">
+{% elif f.kind == "lines" %}
+<fieldset class="lines-field">
+  <legend>{{ f.label }}</legend>
+  {% if f.help %}<p class="helptext">{{ f.help }}</p>{% endif %}
+  {% for row in f.rows %}
+    <div class="line-row">
+      <div class="line-row__what"><span class="strong">{{ row.label }}</span><span class="muted">{{ row.hint }}</span></div>
+      <div class="line-row__inputs">
+        {% for col, title, kind in f.columns %}
+          <label class="line-row__field"><span>{{ title }}</span>
+            <input name="line-{{ row.no }}-{{ col }}" value="{{ row.current|lookup:col }}"{% if kind == "number" %} inputmode="decimal" autocomplete="off"{% endif %}>
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+  {% empty %}<p class="muted">ไม่มีรายการที่ทำได้</p>{% endfor %}
+</fieldset>
+{% elif f.kind == "checks" %}
+<fieldset class="choice-field">
+  <legend>{{ f.label }}{% if f.required %} <span class="req" aria-hidden="true">*</span>{% endif %}</legend>
+  {% for value, title in f.choices %}
+    <label class="choice"><input type="checkbox" name="{{ f.name }}" value="{{ value }}"{% if value in f.value %} checked{% endif %}> <span>{{ title }}</span></label>
+  {% endfor %}
+</fieldset>
+{% elif f.kind == "radio" %}
+<fieldset class="choice-field">
+  <legend>{{ f.label }}{% if f.required %} <span class="req" aria-hidden="true">*</span>{% endif %}</legend>
+  {% for value, title in f.choices %}
+    <label class="choice"><input type="radio" name="{{ f.name }}" value="{{ value }}"{% if f.required %} required{% endif %}{% if value|stringformat:"s" == f.value|stringformat:"s" %} checked{% endif %}> <span>{{ title }}</span></label>
+  {% endfor %}
+</fieldset>
+{% elif f.kind == "split" %}
+<fieldset class="choice-field">
+  <legend>{{ f.label }}</legend>
+  <div class="split-grid">
+    {% for key, title in f.choices %}
+      <label class="field"><span>{{ title }}</span><input name="split-{{ key }}" value="{{ f.value|lookup:key }}" inputmode="decimal" autocomplete="off"></label>
+    {% endfor %}
+  </div>
+</fieldset>
+{% else %}
+<div class="field">
+  <label for="af-{{ f.name }}">{{ f.label }}{% if f.required %} <span class="req" aria-hidden="true">*</span>{% endif %}</label>
+  {% if f.kind == "textarea" %}
+    <textarea id="af-{{ f.name }}" name="{{ f.name }}" rows="3"{% if f.required %} required{% endif %}>{{ f.value|default:'' }}</textarea>
+  {% elif f.kind == "select" %}
+    <select id="af-{{ f.name }}" name="{{ f.name }}"{% if f.required %} required{% endif %}>
+      {% if f.required %}<option value="">— เลือก —</option>{% endif %}
+      {% for value, title in f.choices %}<option value="{{ value }}"{% if value|stringformat:"s" == f.value|stringformat:"s" %} selected{% endif %}>{{ title }}</option>{% endfor %}
+    </select>
+  {% elif f.kind == "file" %}
+    <input id="af-{{ f.name }}" name="{{ f.name }}" type="file" multiple accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"{% if f.required %} required{% endif %}>
+  {% elif f.kind == "date" %}
+    <input id="af-{{ f.name }}" name="{{ f.name }}" type="date" value="{{ f.value|default:'' }}"{% if f.required %} required{% endif %}>
+  {% else %}
+    <input id="af-{{ f.name }}" name="{{ f.name }}" value="{{ f.value|default:'' }}"{% if f.required %} required{% endif %} autocomplete="off">
+  {% endif %}
+  {% if f.help %}<span class="helptext">{{ f.help }}</span>{% endif %}
+</div>
+{% endif %}

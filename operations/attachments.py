@@ -154,6 +154,11 @@ def process_pending(limit=20):
             attachment.refresh_from_db()
         if attachment.scan_status == S.PENDING_SCAN:
             scan(attachment)
+        if attachment.registry_record_id:
+            from operations import registry  # M11: evidence that failed opens a discrepancy
+
+            attachment.refresh_from_db()
+            registry.after_scan(attachment)
     return len(pending)
 
 

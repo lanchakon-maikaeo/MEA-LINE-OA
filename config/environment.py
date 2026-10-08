@@ -71,3 +71,16 @@ def read_environment(env):
     if secure and not origins:
         raise ImproperlyConfigured("HTTPS CSRF_TRUSTED_ORIGINS are required outside local/CI.")
     return app_env, secret, url, hosts, origins
+
+
+def inventory_mode(app_env, value):
+    """M07 Q1: the fake inventory stands in for the registry anywhere but production."""
+    mode = (value or "").strip() or ("manual_reference" if app_env == "production" else "fake")
+    if mode == "api_confirmed":
+        # M11 Q2: SAP cannot be connected; the write contract exists but no adapter is certified.
+        raise ImproperlyConfigured("api_confirmed waits for a registry API contract (M11/G06).")
+    if mode not in {"fake", "manual_reference"}:
+        raise ImproperlyConfigured("INVENTORY_MODE must be fake or manual_reference.")
+    if app_env == "production" and mode == "fake":
+        raise ImproperlyConfigured("The fake inventory is refused in production (M07 Q1).")
+    return mode

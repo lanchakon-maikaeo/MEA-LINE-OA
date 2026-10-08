@@ -1,0 +1,115 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}ส่วนต่างทะเบียน {{ d.document_number }} — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="ตำแหน่ง"><a href="{% url 'registry' %}">กระทบยอดทะเบียน</a> / ส่วนต่าง #{{ d.pk }}</nav>
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">ส่วนต่างทะเบียน · {{ d.get_kind_display }}</span>
+    <h1>เอกสาร {{ d.document_number|default:"-" }}</h1>
+    <p class="lede">{{ d.detail }}</p>
+  </div>
+  <div class="page-head__actions"><span class="tag tag--muted">{{ d.get_status_display }}</span></div>
+</div>
+
+<div class="detail">
+  <div class="stack">
+    <section class="section" aria-labelledby="g-compare">
+      <div class="section-head"><h2 id="g-compare">เทียบสองฝั่ง</h2></div>
+      <dl class="kv">
+        <div><dt>เรื่อง</dt><dd>{% if d.case %}<a href="{% url 'case-detail' d.case.number %}">{{ d.case.number }}</a> · {{ d.case.get_kind_display }} · {{ d.case.get_status_display }}{% else %}ไม่ผูกเรื่อง (เลขเรื่องที่ SAP อ้างไม่มีในระบบ){% endif %}</dd></div>
+        {% if record %}
+          <div><dt>ระบบนี้บันทึก</dt><dd>{{ record.get_kind_display }} · เอกสาร {{ record.document_number }} · {{ record.recorded_at|thai_datetime }} · กอง {{ record.division.code }}
+            <ul class="stack-sm mt-8">{% for line in record.lines %}<li>{{ line.item }}{% if line.official_code %} (รหัสพัสดุ {{ line.official_code }}){% else %} <span class="t-alert">(ยังไม่มีรหัสทางการ)</span>{% endif %} · {{ line.quantity }}{% if line.serials %} · เลขเครื่อง {{ line.serials|join:", " }}{% endif %}</li>{% endfor %}</ul>
+          </dd></div>
+        {% endif %}
+        {% if d.expected %}<div><dt>ฝั่งระบบนี้</dt><dd class="pre">{% for k, v in d.expected.items %}{{ k }}: {{ v }}{% if not forloop.last %}
+{% endif %}{% endfor %}</dd></div>{% endif %}
+        <div><dt>ฝั่ง SAP</dt><dd class="pre">{% for k, v in d.found.items %}{{ k }}: {{ v }}{% if not forloop.last %}
+{% endif %}{% empty %}ไม่พบในไฟล์{% endfor %}</dd></div>
+        <div><dt>พบเมื่อ</dt><dd>{{ d.opened_at|thai_datetime }}{% if d.found_by %} จากไฟล์ {{ d.found_by.original_name }}{% endif %}</dd></div>
+        {% if d.division_note %}<div><dt>ส่งให้กองตรวจ</dt><dd>{{ d.division.code }}: {{ d.division_note }}</dd></div>{% endif %}
+        {% if d.division_answer %}<div><dt>กองตอบ</dt><dd>{{ d.get_division_answer_display }} — {{ d.division_answer_note }} <span class="muted">({{ d.answered_at|thai_short }})</span></dd></div>{% endif %}
+        {% if d.registry_reference %}<div><dt>เอกสารแก้ไขของ SAP</dt><dd>{{ d.registry_reference }}</dd></div>{% endif %}
+        {% if d.resolution %}<div><dt>ผล</dt><dd>{{ d.get_resolution_display }}{% if d.resolution_reason %} — {{ d.resolution_reason }}{% endif %}{% if d.resolved_at %} <span class="muted">({{ d.resolved_at|thai_short }})</span>{% endif %}</dd></div>{% endif %}
+      </dl>
+    </section>
+
+    {% if record %}
+    <section class="section" aria-labelledby="g-evidence">
+      <div class="section-head"><h2 id="g-evidence">หลักฐาน</h2><span class="muted">{{ evidence|length }} ไฟล์</span></div>
+      {% if evidence %}
+        <ul class="files">{% for a in evidence %}<li class="file">{% icon "clip" %}{% if a.scan_status == "clean" %}<a href="{% url 'attachment-download' a.pk %}">{{ a.declared_name }}</a>{% else %}<span>{{ a.declared_name }}</span>{% endif %}<span class="muted">{{ a.get_scan_status_display }}</span></li>{% endfor %}</ul>
+      {% else %}<p class="muted">ไม่มีไฟล์หลักฐาน</p>{% endif %}
+      {% if can_add_evidence %}
+        <form class="upload mt-18" method="post" enctype="multipart/form-data">
+          {% csrf_token %}<input type="hidden" name="action" value="add_evidence">
+          <label class="visually-hidden" for="g-files">เลือกไฟล์</label>
+          <input id="g-files" name="files" type="file" multiple accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" required>
+          <button class="btn--sm" type="submit">{% icon "clip" "sm" %} แนบหลักฐานใหม่</button>
+        </form>
+      {% endif %}
+    </section>
+    {% endif %}
+  </div>
+
+  <aside class="detail__aside stack">
+    {% if answers %}
+    <section class="panel" aria-labelledby="g-answer">
+      <div class="panel__head"><h2 id="g-answer">ผลการตรวจของกอง</h2></div>
+      <p class="muted">{{ d.division_note }}</p>
+      <form class="stack-sm" method="post">{% csrf_token %}<input type="hidden" name="action" value="answer">
+        <fieldset class="choice-field"><legend>ผลการตรวจ <span class="req">*</span></legend>
+          {% for value, label in answer_choices %}<label class="choice"><input type="radio" name="answer" value="{{ value }}" required> <span>{{ label }}</span></label>{% endfor %}
+        </fieldset>
+        <div class="field"><label for="g-anote">อธิบาย <span class="req">*</span></label><textarea id="g-anote" name="note" rows="3" required></textarea>
+          <span class="helptext">ถ้าข้อมูลในระบบนี้ผิด บอกว่าแก้อย่างไร เช่น บันทึกผลส่วนต่างการส่งมอบแล้ว</span></div>
+        <button class="btn btn--block" type="submit">ส่งผลกลับกองทะเบียน</button>
+      </form>
+    </section>
+    {% endif %}
+
+    {% if decides %}
+    <section class="panel" aria-labelledby="g-decide">
+      <div class="panel__head"><h2 id="g-decide">ตัดสินส่วนต่าง</h2></div>
+      <div class="stack">
+        {% if record and d.kind != "evidence" and d.kind != "no_code" %}
+        <details class="disclosure"><summary>แก้เลขเอกสารที่กรอกผิด</summary>
+          <form class="disclosure__body stack-sm" method="post">{% csrf_token %}<input type="hidden" name="action" value="fix_number">
+            <div class="field"><label for="g-number">เลขเอกสาร SAP ที่ถูก <span class="req">*</span></label><input id="g-number" name="number" required autocomplete="off"></div>
+            <div class="field"><label for="g-nreason">เหตุผล <span class="req">*</span></label><textarea id="g-nreason" name="reason" rows="2" required></textarea></div>
+            <button class="btn btn--sm" type="submit">แก้เลขและเทียบใหม่</button>
+          </form>
+        </details>
+        {% endif %}
+        {% if d.status != "with_division" %}
+        <details class="disclosure"><summary>ส่งให้กองที่บันทึกตรวจ</summary>
+          <form class="disclosure__body stack-sm" method="post">{% csrf_token %}<input type="hidden" name="action" value="send_to_division">
+            <div class="field"><label for="g-note">ให้ตรวจอะไร <span class="req">*</span></label><textarea id="g-note" name="note" rows="2" required></textarea></div>
+            <button class="btn btn--sm" type="submit">ส่งให้กองตรวจ</button>
+          </form>
+        </details>
+        {% endif %}
+        {% if d.kind != "evidence" and d.status != "waiting_registry" %}
+        <details class="disclosure"><summary>ระบบนี้ถูก รอ SAP แก้</summary>
+          <form class="disclosure__body stack-sm" method="post">{% csrf_token %}<input type="hidden" name="action" value="wait_for_registry">
+            <div class="field"><label for="g-ref">เลขเอกสารแก้ไขของ SAP <span class="req">*</span></label><input id="g-ref" name="reference" required autocomplete="off"></div>
+            <div class="field"><label for="g-wreason">เหตุผล <span class="req">*</span></label><textarea id="g-wreason" name="reason" rows="2" required></textarea></div>
+            <button class="btn btn--sm" type="submit">รอไฟล์ SAP รอบหน้า</button>
+            <p class="helptext">ปิดเองเมื่อไฟล์ที่นำเข้าครั้งต่อไปตรงกัน</p>
+          </form>
+        </details>
+        {% endif %}
+        <details class="disclosure"><summary>ยอมรับส่วนต่าง</summary>
+          <form class="disclosure__body stack-sm" method="post">{% csrf_token %}<input type="hidden" name="action" value="accept">
+            <div class="field"><label for="g-areason">เหตุผล <span class="req">*</span></label><textarea id="g-areason" name="reason" rows="2" required></textarea></div>
+            <button class="btn btn--sm btn--outline" type="submit">ยอมรับและปิด</button>
+            <p class="helptext">จะไม่เปิดส่วนต่างชนิดนี้ซ้ำกับบันทึกเดิม</p>
+          </form>
+        </details>
+      </div>
+    </section>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

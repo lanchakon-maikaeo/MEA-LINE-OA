@@ -1,0 +1,1075 @@
+"""Actions on the case page (M10 round 1 Q9, round 2 Q6/Q8).
+
+`available` decides which buttons a viewer sees, mirroring the handlers' own checks so the page
+does not offer what will be refused; services.perform_action still decides every request.
+Each action has a small form (fields) and a parser that turns the posted form into the action
+payload of contract v1. Nothing here changes a case by itself.
+"""
+
+import re
+from dataclasses import dataclass, field
+
+from django.conf import settings
+from django.utils import timezone
+
+from operations import (
+    coordination,
+    identity,
+    inventory,
+    policy,
+    queues,
+    registry,
+    returns,
+    workflow,
+)
+from operations.fulfilment import CANCEL_RESOLUTIONS
+from operations.models import (
+    AuthorityGrant,
+    Case,
+    CaseTriage,
+    ChildWork,
+    Delivery,
+    Division,
+    ProblemResolution,
+    ReturnUnit,
+    Role,
+    RoleGrant,
+)
+
+S = Case.Status
+K = Case.Kind
+A = AuthorityGrant.Activity
+U = ReturnUnit
+
+# Button wording on the page (the timeline keeps the matrix labels).
+BUTTON_LABELS = {
+    "start_triage": "เริ่มคัดกรอง",
+    "claim": "รับเป็นผู้รับผิดชอบ",
+    "assign": "มอบหมายผู้รับผิดชอบ",
+    "request_info": "ขอข้อมูลเพิ่มจากเขต",
+    "info_received": "ได้ข้อมูลครบแล้ว",
+    "hold": "พักเรื่องไว้ก่อน",
+    "resume": "ทำต่อ",
+    "cancel": "ยกเลิกเรื่อง",
+    "decline": "ไม่รับเรื่อง",
+    "complete_triage": "คัดกรองเสร็จ ส่งดำเนินการ",
+    "request_handoff": "ส่งต่อให้กองอื่น",
+    "accept_handoff": "รับงานนี้",
+    "decline_handoff": "ไม่รับงานนี้",
+    "request_routing_decision": "ขอให้ผู้ประสานตัดสิน",
+    "decide_routing": "ตัดสินว่ากองใดรับ",
+    "set_priority": "ยืนยันระดับความเร่งด่วน",
+    "record_facts": "แก้ข้อเท็จจริง",
+    "approve": "อนุมัติ",
+    "deny_approval": "ไม่อนุมัติ",
+    "allocate": "จัดสรรของที่มีไม่พอ",
+    "issue": "บันทึกการจ่ายของ",
+    "terminate_outstanding": "ยุติส่วนที่ค้างจ่าย",
+    "resolve_discrepancy": "ปิดส่วนต่างการส่งมอบ",
+    "confirm": "บันทึกคำตอบแทนเขต",
+    "dispute_resolution": "บันทึกการโต้แย้งแทนเขต",
+    "close": "ปิดเรื่อง",
+    "reopen": "เปิดเรื่องใหม่",
+    "return_instructions": "แจ้งวิธีส่งคืน",
+    "receive": "บันทึกรับของคืน",
+    "inspect": "บันทึกผลตรวจสภาพ",
+    "decide_inspection": "ตัดสินผลตรวจที่ขัดกัน",
+    "resolve_return_discrepancy": "ปิดส่วนต่างการรับคืน",
+    "terminate_return": "ยุติส่วนที่ค้างส่งคืน",
+    "resolve": "บันทึกผลการแก้ปัญหา",
+    "request_child_work": "สร้างงานย่อย",
+    "accept_child_work": "รับงานย่อย",
+    "decline_child_work": "ไม่รับงานย่อย",
+    "decide_child_work": "ตัดสินงานย่อย",
+    "finish_child_work": "บันทึกผลงานย่อย",
+    "cancel_child_work": "ยกเลิกงานย่อย",
+    "pause_deadlines": "พักกรอบเวลา",
+}
+
+# Hard to undo: the form asks for an explicit tick before saving (round 1 Q9).
+IRREVERSIBLE = frozenset(
+    {
+        "cancel",
+        "decline",
+        "deny_approval",
+        "terminate_outstanding",
+        "terminate_return",
+        "cancel_child_work",
+        "close",
+        "decline_handoff",
+        "decline_child_work",
+    }
+)
+
+# Round 2 Q6: the one black button, first match wins.
+PRIMARY_ORDER = [
+    "start_triage",
+    "accept_handoff",
+    "accept_child_work",
+    "decide_routing",
+    "decide_child_work",
+    "decide_inspection",
+    "approve",
+    "issue",
+    "receive",
+    "inspect",
+    "resolve",
+    "finish_child_work",
+    "info_received",
+    "resume",
+    "confirm",
+    "request_handoff",
+    "complete_triage",
+]
+
+STAFF_CHANNELS = [
+    ("phone", "โทรศัพท์"),
+    ("letter", "หนังสือ"),
+    ("counter", "หน้าเคาน์เตอร์"),
+]
+
+
+# --- What the viewer may do ------------------------------------------------------------------
+
+
+@dataclass
+class Situation:
+    """Everything the availability rules look at, read once per page."""
+
+    user: object
+    case: Case
+    roles: dict
+    lines: list
+    line_division: dict
+    handoff: object
+    review_open: bool
+    routing: object
+    children: list
+    deliveries: list
+    units: list
+    intake_id: int | None
+    now: object = field(default_factory=timezone.now)
+
+    def member(self, division_id, roles=None):
+        held = self.roles.get(division_id, frozenset())
+        return bool(held if roles is None else held & set(roles))
+
+    @property
+    def owner(self):
+        return self.case.owner_division_id
+
+    def grant(self, activity):
+        return any(
+            g.division_id in (None, self.owner)
+            for g in policy.active_grants(self.user, activity, self.now)
+        )
+
+    @property
+    def routes(self):
+        return self.routing == "all" or bool(self.routing and self.owner in self.routing)
+
+
+def situation(user, case):
+    from operations.models import Handoff, RoutingReview
+
+    scope = identity.staff_scope(user)
+    lines = list(case.lines.select_related("item", "case").order_by("line_no"))
+    intake = Division.objects.filter(is_intake=True, is_active=True).first()
+    return Situation(
+        user=user,
+        case=case,
+        roles=dict(scope.division_roles),
+        lines=lines,
+        line_division={line.line_no: coordination.division_of(line) for line in lines},
+        handoff=Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).first(),
+        review_open=RoutingReview.objects.filter(
+            case=case, status=RoutingReview.Status.OPEN
+        ).exists(),
+        routing=policy.routing_scope(user),
+        children=list(ChildWork.objects.filter(case=case).select_related("division")),
+        deliveries=list(
+            Delivery.objects.filter(case=case).prefetch_related("lines__line").order_by("seq")
+        ),
+        units=list(
+            U.objects.filter(case=case).select_related("item", "arrival", "line").order_by("seq")
+        ),
+        intake_id=intake.pk if intake else None,
+    )
+
+
+def _delivery_divisions(delivery):
+    return {coordination.division_of(dl.line) for dl in delivery.lines.all()}
+
+
+def _unit_division(st, unit):
+    return st.line_division.get(unit.line.line_no, st.owner) if unit.line_id else st.owner
+
+
+RULES = {
+    "start_triage": lambda st: st.member(st.owner),
+    "claim": lambda st: st.member(st.owner) and st.case.assignee_id != st.user.pk,
+    "assign": lambda st: st.member(st.owner, [Role.SUPERVISOR]),
+    "request_info": lambda st: st.member(st.owner),
+    "hold": lambda st: st.member(st.owner),
+    "info_received": lambda st: st.member(st.owner),
+    "resume": lambda st: st.member(st.owner),
+    "cancel": lambda st: (
+        st.member(st.owner)
+        and (
+            not any(line.approved_quantity is not None for line in st.lines)
+            or st.grant(A.WITHDRAWAL_APPROVAL)
+        )
+    ),
+    "decline": lambda st: st.member(st.owner),
+    "complete_triage": lambda st: st.member(st.owner) and st.handoff is None,
+    "request_handoff": lambda st: st.member(st.owner) and st.handoff is None and not st.review_open,
+    "accept_handoff": lambda st: st.handoff is not None and st.member(st.handoff.to_division_id),
+    "decline_handoff": lambda st: st.handoff is not None and st.member(st.handoff.to_division_id),
+    "request_routing_decision": lambda st: (
+        not st.review_open
+        and (
+            st.member(st.owner) or (st.handoff is not None and st.member(st.handoff.to_division_id))
+        )
+    ),
+    "decide_routing": lambda st: st.routes and (st.review_open or st.handoff is not None),
+    "set_priority": lambda st: st.member(st.owner),
+    "record_facts": lambda st: st.member(st.owner),
+    "approve": lambda st: (
+        st.case.kind == K.WITHDRAWAL
+        and st.case.submitted_by_id != st.user.pk
+        and st.grant(A.WITHDRAWAL_APPROVAL)
+        and any(line.approved_quantity is None for line in st.lines)
+    ),
+    "deny_approval": lambda st: RULES["approve"](st),
+    "allocate": lambda st: (
+        st.grant(A.ALLOCATION) and any(line.outstanding > 0 for line in st.lines)
+    ),
+    "issue": lambda st: any(
+        line.outstanding > 0 and st.member(st.line_division[line.line_no], [Role.ISSUER])
+        for line in st.lines
+    ),
+    "terminate_outstanding": lambda st: (
+        st.grant(A.WITHDRAWAL_APPROVAL) and any(line.outstanding > 0 for line in st.lines)
+    ),
+    "resolve_discrepancy": lambda st: any(
+        d.status == Delivery.Status.MISMATCH
+        and d.issued_by_id != st.user.pk
+        and all(st.member(div) for div in _delivery_divisions(d))
+        for d in st.deliveries
+    ),
+    "confirm": lambda st: (
+        st.intake_id is not None
+        and st.member(st.intake_id)
+        and (
+            st.case.kind == K.PROBLEM
+            or any(
+                d.status == Delivery.Status.AWAITING and d.issued_by_id != st.user.pk
+                for d in st.deliveries
+            )
+        )
+    ),
+    "dispute_resolution": lambda st: (
+        st.case.kind == K.PROBLEM and st.intake_id is not None and st.member(st.intake_id)
+    ),
+    "close": lambda st: st.case.kind in (K.WITHDRAWAL, K.PROBLEM) and st.member(st.owner),
+    "reopen": lambda st: (
+        st.case.kind == K.PROBLEM
+        and st.member(st.owner)
+        and st.case.ended_at is not None
+        and (st.now - st.case.ended_at).days < workflow.REOPEN_WINDOW_DAYS
+    ),
+    "return_instructions": lambda st: st.member(st.owner),
+    "receive": lambda st: any(
+        line.return_outstanding > 0 and st.member(st.line_division[line.line_no], [Role.RECEIVER])
+        for line in st.lines
+    ),
+    "inspect": lambda st: any(
+        u.status in (U.Status.AWAITING, U.Status.FINAL)
+        and u.line_id
+        and not u.open_discrepancy
+        and u.arrival.received_by_id != st.user.pk
+        and st.member(_unit_division(st, u), [Role.INSPECTOR])
+        for u in st.units
+    ),
+    "decide_inspection": lambda st: (
+        any(u.status == U.Status.CONFLICT for u in st.units) and st.grant(A.CONDITION_CERTIFICATION)
+    ),
+    "resolve_return_discrepancy": lambda st: any(
+        u.open_discrepancy
+        and u.arrival.received_by_id != st.user.pk
+        and st.member(_unit_division(st, u))
+        for u in st.units
+    ),
+    "terminate_return": lambda st: (
+        st.member(st.owner, [Role.SUPERVISOR])
+        and any(line.return_outstanding > 0 for line in st.lines)
+    ),
+    "resolve": lambda st: (
+        st.case.kind == K.PROBLEM
+        and st.member(st.owner, [Role.RESOLVER])
+        and not coordination.blocks_closing(st.case)
+    ),
+    "request_child_work": lambda st: st.member(st.owner),
+    "accept_child_work": lambda st: any(
+        c.status == ChildWork.Status.PENDING and st.member(c.division_id) for c in st.children
+    ),
+    "decline_child_work": lambda st: RULES["accept_child_work"](st),
+    "decide_child_work": lambda st: (
+        st.routes and any(c.status == ChildWork.Status.DISPUTED for c in st.children)
+    ),
+    "finish_child_work": lambda st: any(
+        c.status == ChildWork.Status.ACCEPTED
+        and st.member(c.division_id)
+        and not coordination.closes_itself(c)
+        for c in st.children
+    ),
+    "cancel_child_work": lambda st: (
+        st.member(st.owner) and any(c.status in ChildWork.OPEN for c in st.children)
+    ),
+    "pause_deadlines": lambda st: st.member(st.owner, [Role.SUPERVISOR]),
+}
+
+
+@dataclass
+class Offer:
+    name: str
+    label: str
+    primary: bool = False
+    irreversible: bool = False
+
+
+def available(user, case, st=None):
+    """Actions this viewer may start now, the primary one first (empty for read-only viewers)."""
+    st = st or situation(user, case)
+    names = []
+    for name, rule in RULES.items():
+        spec = workflow.ACTIONS.get(name)
+        if (
+            spec is None
+            or not spec.enabled_for(case.kind)
+            or not spec.targets(case.kind, case.status)
+        ):
+            continue
+        if rule(st):
+            names.append(name)
+    primary = _primary(case, names)
+    offers = [
+        Offer(
+            name,
+            BUTTON_LABELS.get(name, workflow.ACTIONS[name].label),
+            name == primary,
+            name in IRREVERSIBLE,
+        )
+        for name in names
+    ]
+    return sorted(offers, key=lambda o: (not o.primary, o.irreversible, names.index(o.name)))
+
+
+def _primary(case, names):
+    if "request_handoff" in names and "complete_triage" in names:
+        # A read: never policy.state_for, which locks the row for writers.
+        state = (
+            CaseTriage.objects.filter(case=case).select_related("current_recommendation").first()
+        )
+        recommendation = state.current_recommendation if state else None
+        elsewhere = recommendation and recommendation.proposed_owner_id != case.owner_division_id
+        names = [n for n in names if n != ("complete_triage" if elsewhere else "request_handoff")]
+    return next((name for name in PRIMARY_ORDER if name in names), None)
+
+
+# --- Forms ----------------------------------------------------------------------------------------
+
+
+@dataclass
+class Field:
+    name: str
+    label: str
+    kind: str = "text"  # text, textarea, select, radio, date, number, checks, lines, split, hidden
+    required: bool = False
+    choices: list = field(default_factory=list)
+    initial: object = ""
+    help: str = ""
+    rows: list = field(default_factory=list)  # for kind "lines"
+    columns: list = field(default_factory=list)
+    ui_only: bool = False  # helps the page, never part of the payload
+    value: object = None  # what the form shows: the posted value, else the initial one
+
+
+@dataclass
+class ActionForm:
+    action: str
+    label: str
+    fields: list
+    intro: str = ""
+    irreversible: bool = False
+    picker: list = field(default_factory=list)  # (value, label, url-query) to switch the subject
+
+
+def _reason(required=False, label="เหตุผล", help_text=""):
+    return Field("reason", label, "textarea", required, help=help_text)
+
+
+def _members(division_id):
+    grants = (
+        RoleGrant.objects.filter(
+            division_id=division_id, revoked_at__isnull=True, user__is_active=True
+        )
+        .select_related("user__staff_profile")
+        .order_by("user__username")
+    )
+    seen, choices = set(), []
+    for g in grants:
+        if g.user_id not in seen:
+            seen.add(g.user_id)
+            profile = getattr(g.user, "staff_profile", None)
+            choices.append((str(g.user_id), profile.display_name if profile else g.user.username))
+    return choices
+
+
+def _divisions(exclude=None):
+    return [
+        (d.code, f"{d.code} {d.name}")
+        for d in Division.objects.filter(is_active=True).exclude(pk=exclude).order_by("code")
+    ]
+
+
+def _number(value):
+    return f"{value.normalize():f}" if value is not None else ""
+
+
+def _line_label(line):
+    return f"#{line.line_no} {line.item.code} {line.item.name}"
+
+
+def _pick(items, wanted, key):
+    """The subject named in the query (?delivery= / ?unit= / ?child=), else the first one."""
+    for item in items:
+        if str(getattr(item, key)) == str(wanted):
+            return item
+    return items[0] if items else None
+
+
+def build_form(action, st, params, demo=False):
+    """The form of one action; `demo` (สาธิตการใช้งาน) lists every line whatever its state or
+    the viewer's duty, as an example that is never saved."""
+    case, label = st.case, BUTTON_LABELS.get(action, workflow.ACTIONS[action].label)
+    spec = workflow.ACTIONS[action]
+    form = ActionForm(action, label, [], irreversible=action in IRREVERSIBLE)
+    add = form.fields.append
+
+    if action == "assign":
+        add(Field("assignee_id", "ผู้รับผิดชอบ", "select", True, _members(case.owner_division_id)))
+        add(_reason())
+    elif action == "request_info":
+        add(_reason(True, "ขอข้อมูลอะไรจากเขต", "ข้อความนี้ส่งถึงผู้แจ้งทาง LINE"))
+    elif action in (
+        "hold",
+        "decline",
+        "deny_approval",
+        "decline_handoff",
+        "pause_deadlines",
+        "request_routing_decision",
+        "reopen",
+    ):
+        add(_reason(True))
+    elif action == "cancel":
+        if case.kind == K.WITHDRAWAL and st.deliveries:
+            add(
+                Field("resolution", "ของที่จ่ายไปแล้ว", "radio", True, list(CANCEL_RESOLUTIONS.items()))
+            )
+            add(
+                Field("reference", "เลขเอกสารการปรับในระบบทะเบียน", help="จำเป็นเมื่อปรับในระบบทะเบียนแล้ว")
+            )
+        add(_reason(True))
+    elif action == "request_handoff":
+        proposal = policy.card(case)
+        initial = proposal["proposed_owner"] if proposal else ""
+        reasons = (
+            policy.current_policy().doc.get("handoff_reasons", {})
+            if policy.current_policy()
+            else {}
+        )
+        add(
+            Field(
+                "to_division",
+                "ส่งให้กอง",
+                "select",
+                True,
+                _divisions(case.owner_division_id),
+                initial if initial != case.owner_division.code else "",
+            )
+        )
+        add(
+            Field(
+                "reason_category",
+                "เหตุผลที่เลือกต่างจากข้อเสนอ",
+                "select",
+                False,
+                [("", "— ตรงกับข้อเสนอ ไม่ต้องเลือก —"), *reasons.items()],
+            )
+        )
+        add(_reason(False, help_text="จำเป็นเมื่อเลือกกองต่างจากข้อเสนอ"))
+    elif action == "decide_routing":
+        add(Field("division", "กองที่รับเรื่อง", "select", True, _divisions()))
+        add(_reason(True))
+    elif action == "set_priority":
+        proposal = policy.card(case)
+        suggested = proposal["priority"]["suggested"] if proposal else ""
+        floor = proposal["priority"]["floor"] if proposal else ""
+        add(
+            Field(
+                "priority",
+                "ระดับความเร่งด่วน",
+                "select",
+                True,
+                [(p, label) for p, label in _levels()],
+                suggested,
+                help=f"ระบบเสนอ: {queues.level_name(suggested)}"
+                + (f" · ห้ามต่ำกว่า {queues.level_name(floor)}" if floor else ""),
+            )
+        )
+        add(_reason(help_text="จำเป็นเมื่อต่างจากที่ระบบเสนอ"))
+    elif action == "record_facts":
+        for name, title in FACT_FIELDS:
+            add(Field(f"fact-{name}", title, "select", False, FACT_CHOICES))
+        add(_reason(True, help_text="บอกว่ารู้ข้อเท็จจริงนี้จากไหน เช่น เขตแจ้งทางโทรศัพท์"))
+    elif action == "approve":
+        rows = [
+            {
+                "no": line.line_no,
+                "label": _line_label(line),
+                "hint": f"ขอ {_number(line.requested_quantity)} {line.item.unit}",
+                "values": {"quantity": _number(line.requested_quantity), "reason": ""},
+            }
+            for line in st.lines
+            if demo or line.approved_quantity is None
+        ]
+        add(
+            Field(
+                "lines",
+                "จำนวนที่อนุมัติ",
+                "lines",
+                rows=rows,
+                columns=[("quantity", "อนุมัติ", "number"), ("reason", "เหตุผล (ถ้าน้อยกว่าที่ขอ)", "text")],
+            )
+        )
+        add(_reason(label="หมายเหตุรวม"))
+    elif action == "allocate":
+        rows = [
+            {
+                "no": line.line_no,
+                "label": _line_label(line),
+                "hint": f"ค้างจ่าย {_number(line.outstanding)}",
+                "values": {"quantity": ""},
+            }
+            for line in st.lines
+            if demo or line.outstanding > 0
+        ]
+        add(
+            Field(
+                "lines",
+                "จำนวนที่จัดสรรให้เรื่องนี้",
+                "lines",
+                rows=rows,
+                columns=[("quantity", "จัดสรร", "number")],
+            )
+        )
+        add(_reason(True))
+    elif action == "issue":
+        rows = []
+        for line in st.lines:
+            if not demo and (
+                line.outstanding <= 0
+                or not st.member(st.line_division[line.line_no], [Role.ISSUER])
+            ):
+                continue
+            if line.approved_quantity is None:  # demo before approval
+                hint = f"ขอ {_number(line.requested_quantity)} {line.item.unit} (ยังไม่อนุมัติ)"
+            else:
+                hint = f"ค้างจ่าย {_number(line.outstanding)} {line.item.unit}"
+            if line.item.is_serialized and inventory.mode() == inventory.FAKE:
+                ready = inventory.available_serials(line.item)[:8]
+                if ready:
+                    hint += " · เลขพร้อมจ่าย: " + ", ".join(ready)
+            rows.append(
+                {
+                    "no": line.line_no,
+                    "label": _line_label(line),
+                    "hint": hint,
+                    "values": {
+                        "quantity": _number(line.outstanding or line.requested_quantity),
+                        "serials": "",
+                    },
+                }
+            )
+        add(Field("recipient_name", "ชื่อผู้รับของ ณ จุดส่งมอบ", required=True))
+        if inventory.mode() == inventory.MANUAL:
+            add(Field("document_number", "เลขเอกสารจ่ายจากระบบทะเบียน", required=True))
+        add(
+            Field(
+                "lines",
+                "ของที่จ่ายครั้งนี้",
+                "lines",
+                rows=rows,
+                columns=[
+                    ("quantity", "จำนวน", "number"),
+                    ("serials", "เลขเครื่อง (คั่นด้วยเว้นวรรค)", "text"),
+                ],
+                help="รายการที่ควบคุมรายชิ้นต้องระบุเลขเครื่องครบตามจำนวน",
+            )
+        )
+        add(_reason(label="หมายเหตุ"))
+    elif action == "terminate_outstanding":
+        add(
+            Field(
+                "lines",
+                "รายการที่ยุติส่วนค้างจ่าย",
+                "checks",
+                True,
+                [
+                    (str(line.line_no), f"{_line_label(line)} · ค้าง {_number(line.outstanding)}")
+                    for line in st.lines
+                    if demo or line.outstanding > 0
+                ],
+            )
+        )
+        add(_reason(True))
+    elif action == "resolve_discrepancy":
+        mismatched = [d for d in st.deliveries if d.status == Delivery.Status.MISMATCH]
+        delivery = _pick(mismatched, params.get("delivery"), "seq")
+        form.picker = [(d.seq, f"ส่งมอบครั้งที่ {d.seq}", f"delivery={d.seq}") for d in mismatched]
+        add(Field("delivery", "", "hidden", initial=delivery.seq if delivery else ""))
+        add(Field("resolution", "ผลการตรวจส่วนต่าง", "radio", True, Delivery.Resolution.choices))
+        add(Field("reference", "เลขเอกสารอ้างอิง", help="จำเป็นเมื่อของหายหรือใช้ระบบทะเบียนเดิม"))
+        if delivery:
+            rows = [
+                {
+                    "no": dl.line.line_no,
+                    "label": _line_label(dl.line),
+                    "hint": f"บันทึกจ่าย {_number(dl.quantity)}",
+                    "values": {
+                        "quantity": _number(dl.quantity),
+                        "serials": " ".join(dl.serials or []),
+                    },
+                }
+                for dl in delivery.lines.select_related("line__item")
+            ]
+            add(
+                Field(
+                    "lines",
+                    "จำนวนที่จ่ายจริง (เมื่อบันทึกจ่ายผิด)",
+                    "lines",
+                    rows=rows,
+                    columns=[("quantity", "จำนวน", "number"), ("serials", "เลขเครื่อง", "text")],
+                )
+            )
+        add(_reason(True))
+    elif action == "confirm":
+        if case.kind == K.WITHDRAWAL:
+            waiting = [d for d in st.deliveries if d.status == Delivery.Status.AWAITING]
+            delivery = _pick(waiting, params.get("delivery"), "seq")
+            form.picker = [(d.seq, f"ส่งมอบครั้งที่ {d.seq}", f"delivery={d.seq}") for d in waiting]
+            add(Field("delivery", "", "hidden", initial=delivery.seq if delivery else ""))
+            add(
+                Field(
+                    "result",
+                    "เขตได้รับของ",
+                    "radio",
+                    True,
+                    [("full", "ครบตามที่บันทึกจ่าย"), ("mismatch", "ไม่ตรง (กรอกจำนวนที่ได้จริง)")],
+                    "full",
+                )
+            )
+            if delivery:
+                rows = [
+                    {
+                        "no": dl.line.line_no,
+                        "label": _line_label(dl.line),
+                        "hint": f"บันทึกจ่าย {_number(dl.quantity)}",
+                        "values": {
+                            "quantity": _number(dl.quantity),
+                            "serials": " ".join(dl.serials or []),
+                        },
+                    }
+                    for dl in delivery.lines.select_related("line__item")
+                ]
+                add(
+                    Field(
+                        "lines",
+                        "ที่ได้รับจริง",
+                        "lines",
+                        rows=rows,
+                        columns=[("quantity", "จำนวน", "number"), ("serials", "เลขเครื่อง", "text")],
+                    )
+                )
+            form.intro = "บันทึกคำตอบที่เขตแจ้งทางช่องทางอื่น (ไม่ใช่ LINE)"
+        else:
+            form.intro = "เขตยอมรับผลการแก้ปัญหาแล้ว บันทึกแทนเขต"
+        add(Field("channel", "เขตแจ้งทาง", "select", True, STAFF_CHANNELS))
+        add(Field("intake_note", "บันทึกการรับแจ้ง", "textarea", True, help="เช่น ใครโทรมา เวลาไหน"))
+    elif action == "dispute_resolution":
+        form.intro = "เขตแจ้งว่ายังไม่เรียบร้อย เรื่องจะกลับไปที่กองเจ้าภาพ"
+        add(Field("channel", "เขตแจ้งทาง", "select", True, STAFF_CHANNELS))
+        add(Field("intake_note", "บันทึกการรับแจ้ง", "textarea", True))
+        add(_reason(True, "เขตแจ้งว่ายังไม่เรียบร้อยอย่างไร"))
+    elif action == "close":
+        if case.kind == K.WITHDRAWAL:
+            form.intro = f"ปิดได้เมื่อเขตไม่ยืนยันรับเกิน {settings.RECEIPT_NO_RESPONSE_DAYS} วัน"
+            add(Field("reference", "เลขเอกสารอ้างอิง", required=True))
+        else:
+            form.intro = f"ปิดได้เมื่อเขตไม่ตอบผลเกิน {settings.RECEIPT_NO_RESPONSE_DAYS} วัน"
+        add(_reason(True))
+    elif action == "return_instructions":
+        add(Field("place", "สถานที่ส่งคืน", required=True))
+        add(Field("from_date", "ตั้งแต่วันที่", "date"))
+        add(Field("to_date", "ถึงวันที่", "date"))
+        add(Field("note", "ข้อความเพิ่มเติมถึงเขต", "textarea"))
+    elif action == "receive":
+        rows = []
+        for line in st.lines:
+            if not demo and (
+                line.return_outstanding <= 0
+                or not st.member(st.line_division[line.line_no], [Role.RECEIVER])
+            ):
+                continue
+            hint = f"ค้างส่งคืน {_number(line.return_outstanding)}"
+            if line.serials:
+                hint += " · เลขที่ขอคืน: " + ", ".join(line.serials)
+            rows.append(
+                {
+                    "no": line.line_no,
+                    "label": _line_label(line),
+                    "hint": hint,
+                    "values": {"quantity": "", "serials": ""},
+                    "item": line.item.code,
+                }
+            )
+        add(
+            Field(
+                "lines",
+                "ของที่มาถึงจริง",
+                "lines",
+                rows=rows,
+                columns=[("quantity", "จำนวน", "number"), ("serials", "เลขเครื่องที่มาถึง", "text")],
+                help="เว้นว่างรายการที่ยังไม่มา ของนอกคำขอให้นับรวมในรายการที่ตรงรหัส",
+            )
+        )
+        add(Field("carrier_name", "ผู้นำของมาส่ง", required=True))
+        if inventory.mode() == inventory.MANUAL:
+            add(Field("document_number", "เลขเอกสารรับคืนจากระบบทะเบียน", required=True))
+        add(_reason(label="หมายเหตุ"))
+    elif action in ("inspect", "decide_inspection"):
+        if action == "inspect":
+            units = [
+                u
+                for u in st.units
+                if u.status in (U.Status.AWAITING, U.Status.FINAL)
+                and u.line_id
+                and not u.open_discrepancy
+                and u.arrival.received_by_id != st.user.pk
+            ]
+        else:
+            units = [u for u in st.units if u.status == U.Status.CONFLICT]
+        unit = _pick(units, params.get("unit"), "seq")
+        form.picker = [
+            (
+                u.seq,
+                f"หน่วย {u.seq} · {u.item.code} {u.serial or _number(u.quantity)}",
+                f"unit={u.seq}",
+            )
+            for u in units
+        ]
+        add(Field("unit", "", "hidden", initial=unit.seq if unit else ""))
+        if unit:
+            form.intro = (
+                f"หน่วย {unit.seq}: {unit.item.code} "
+                f"{unit.serial or ''} จำนวน {_number(unit.quantity)} · {unit.get_status_display()}"
+            )
+        add(
+            Field(
+                "split",
+                "ผลตรวจ (รวมต้องเท่ากับจำนวนของหน่วย)",
+                "split",
+                initial={"ready": "", "repair": "", "other": ""},
+                choices=list(returns.OUTCOMES.items()),
+            )
+        )
+        if action == "inspect":
+            add(Field("pending", "ยังตรวจไม่เสร็จ", "checks", False, [("1", "บันทึกว่ายังรอตรวจทั้งหน่วย")]))
+            add(
+                Field(
+                    "pending-quantity",
+                    "",
+                    "hidden",
+                    initial=_number(unit.quantity) if unit else "",
+                    ui_only=True,
+                )
+            )
+        if inventory.mode() == inventory.MANUAL:
+            add(Field("reference", "เลขเอกสารผลตรวจจากระบบทะเบียน", required=True))
+        add(_reason(action == "decide_inspection", help_text="จำเป็นเมื่อผลเป็น ดำเนินการอื่นตามระเบียบ"))
+    elif action == "resolve_return_discrepancy":
+        units = [
+            u for u in st.units if u.open_discrepancy and u.arrival.received_by_id != st.user.pk
+        ]
+        unit = _pick(units, params.get("unit"), "seq")
+        form.picker = [
+            (u.seq, f"หน่วย {u.seq} · {u.get_discrepancy_display()}", f"unit={u.seq}") for u in units
+        ]
+        add(Field("unit", "", "hidden", initial=unit.seq if unit else ""))
+        if unit:
+            what = unit.serial or _number(unit.quantity)
+            form.intro = (
+                f"หน่วย {unit.seq}: {unit.item.code} {what} · {unit.get_discrepancy_display()}"
+            )
+        add(Field("resolution", "ผล", "radio", True, U.Resolution.choices))
+        add(Field("reference", "เลขเอกสารอ้างอิง", help="จำเป็นเมื่อไม่รับหรือปรับในทะเบียน"))
+        add(Field("replaces", "แทนเลขเครื่อง (ถ้ามี)"))
+        add(_reason())
+    elif action == "terminate_return":
+        add(
+            Field(
+                "lines",
+                "รายการที่ยุติส่วนค้างส่งคืน",
+                "checks",
+                True,
+                [
+                    (
+                        str(line.line_no),
+                        f"{_line_label(line)} · ค้าง {_number(line.return_outstanding)}",
+                    )
+                    for line in st.lines
+                    if demo or line.return_outstanding > 0
+                ],
+            )
+        )
+        add(Field("category", "สาเหตุ", "radio", True, list(returns.STOP_CATEGORIES.items())))
+        add(Field("reference", "เลขเอกสารทะเบียน", help="จำเป็นเมื่อสูญหาย"))
+        add(_reason(True))
+    elif action == "resolve":
+        add(Field("category", "ผลที่ได้", "radio", True, ProblemResolution.Category.choices))
+        add(Field("message", "ข้อความถึงผู้แจ้ง", "textarea", True, help="ผู้แจ้งเห็นข้อความนี้ใน LINE"))
+        add(Field("internal_note", "บันทึกภายใน (ผู้แจ้งไม่เห็น)", "textarea"))
+        add(Field("files", "แนบไฟล์ (JPG, PNG, PDF)", "file", help="ไม่เกิน 5 ไฟล์ ไฟล์ละไม่เกิน 10 MB"))
+    elif action == "request_child_work":
+        add(Field("division", "กองที่ทำงานย่อย", "select", True, _divisions(case.owner_division_id)))
+        add(Field("task", "งานที่ขอ", "textarea", True))
+        add(Field("deliverable", "ผลที่ต้องส่งกลับ"))
+        add(
+            Field(
+                "rule",
+                "กติกา",
+                "select",
+                False,
+                [
+                    ("", "— ไม่ระบุ —"),
+                    ("R07", "R07 ตรวจทะเบียน"),
+                    ("R08", "R08 ของขาด/แย่งของ"),
+                    ("R09", "R09 หลายกองในเรื่องเดียว"),
+                ],
+            )
+        )
+        add(
+            Field(
+                "lines",
+                "รายการที่งานย่อยรับผิดชอบ (R09)",
+                "checks",
+                False,
+                [(str(line.line_no), _line_label(line)) for line in st.lines],
+            )
+        )
+        add(_reason())
+    elif action in (
+        "accept_child_work",
+        "decline_child_work",
+        "finish_child_work",
+        "cancel_child_work",
+        "decide_child_work",
+    ):
+        if action in ("accept_child_work", "decline_child_work"):
+            works = [
+                c
+                for c in st.children
+                if c.status == ChildWork.Status.PENDING and st.member(c.division_id)
+            ]
+        elif action == "finish_child_work":
+            works = [
+                c
+                for c in st.children
+                if c.status == ChildWork.Status.ACCEPTED
+                and st.member(c.division_id)
+                and not coordination.closes_itself(c)
+            ]
+        elif action == "decide_child_work":
+            works = [c for c in st.children if c.status == ChildWork.Status.DISPUTED]
+        else:
+            works = [c for c in st.children if c.status in ChildWork.OPEN]
+        work = _pick(works, params.get("child"), "seq")
+        form.picker = [
+            (c.seq, f"งานย่อย {c.seq} · {c.division.code}", f"child={c.seq}") for c in works
+        ]
+        add(Field("child", "", "hidden", initial=work.seq if work else ""))
+        if work:
+            form.intro = f"งานย่อย {work.seq} ({work.division.code}): {work.task}"
+        if action == "decide_child_work":
+            add(Field("division", "กองที่ทำงานย่อยนี้", "select", True, _divisions()))
+        if action == "finish_child_work":
+            add(
+                Field(
+                    "result",
+                    "ผล",
+                    "radio",
+                    True,
+                    [(ChildWork.Status.DONE, "ทำเสร็จ"), (ChildWork.Status.FAILED, "ทำไม่ได้")],
+                )
+            )
+            add(Field("summary", "สรุปผล", "textarea", True))
+        add(_reason(action in ("decline_child_work", "cancel_child_work", "decide_child_work")))
+    else:
+        add(_reason(spec.reason_required, "หมายเหตุ" if not spec.reason_required else "เหตุผล"))
+    if action in registry.EVIDENCE_ACTIONS and inventory.mode() == inventory.MANUAL:
+        # M11 Q3/Q13: the SAP document this fact cites, attached with it.
+        optional = action == "resolve_return_discrepancy"
+        add(
+            Field(
+                "evidence",
+                "หลักฐานเอกสารจากระบบทะเบียน (SAP)",
+                "file",
+                not optional,
+                help="สแกนหรือรูปเอกสาร SAP ที่ตรงกับเลขเอกสาร 1–5 ไฟล์ JPG, PNG หรือ PDF"
+                + (" (จำเป็นเมื่อใส่เลขเอกสาร)" if optional else ""),
+            )
+        )
+    if form.irreversible:
+        form.fields.append(
+            Field(
+                "confirm_irreversible", "ยืนยัน", "checks", True, [("1", "ตรวจแล้ว เข้าใจว่าย้อนกลับไม่ได้")]
+            )
+        )
+    return form
+
+
+def _levels():
+    from operations.queues import LEVEL_TITLES
+
+    return list(LEVEL_TITLES.items())
+
+
+FACT_FIELDS = [
+    ("hazard_reported", "แจ้งเหตุอันตราย"),
+    ("severe_impact", "ผลกระทบรุนแรง"),
+    ("registry_only", "ขอแก้ทะเบียนอย่างเดียว"),
+    ("serial_mismatch", "เลขเครื่องหรือจำนวนไม่ตรง"),
+    ("shortage", "ของไม่พอ"),
+]
+FACT_CHOICES = [("", "ไม่เปลี่ยน"), ("true", "ใช่"), ("false", "ไม่ใช่"), ("clear", "ล้างค่าที่ยืนยันไว้")]
+
+
+# --- Parsing the posted form ------------------------------------------------------------------
+
+
+SERIAL_SPLIT = re.compile(r"[\s,]+")
+
+
+def _serials(text):
+    return [s for s in SERIAL_SPLIT.split((text or "").strip()) if s]
+
+
+def _int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+class MissingConfirmation(Exception):
+    pass
+
+
+def payload_from(form, post):
+    """Contract-v1 payload from the posted form; empty optional fields are left out."""
+    payload = {}
+    action = form.action
+    for f in form.fields:
+        if f.kind == "lines":
+            rows = []
+            for row in f.rows:
+                values = {
+                    col: (post.get(f"line-{row['no']}-{col}") or "").strip()
+                    for col, _, _ in f.columns
+                }
+                if not any(values.values()):
+                    continue
+                entry = {"line_no": row["no"]}
+                for col, value in values.items():
+                    if col == "serials":
+                        entry["serials"] = _serials(value)
+                    elif value:
+                        entry[col] = value
+                if action == "receive":
+                    entry = {
+                        "item_code": row["item"],
+                        **{k: v for k, v in entry.items() if k != "line_no"},
+                    }
+                rows.append(entry)
+            payload["items" if action == "receive" else "lines"] = rows
+        elif f.kind == "checks" and f.name == "confirm_irreversible":
+            if post.get(f.name) != "1":
+                raise MissingConfirmation
+        elif f.kind == "checks" and f.name == "pending":
+            continue
+        elif f.kind == "checks":
+            values = [_int(v) for v in post.getlist(f.name) if v]
+            if values:
+                payload[f.name] = values
+        elif f.kind == "split":
+            if action == "inspect" and post.get("pending") == "1":
+                payload["split"] = {"pending": post.get("pending-quantity") or ""}
+                continue
+            split = {key: (post.get(f"split-{key}") or "").strip() for key, _ in f.choices}
+            payload["split"] = {k: v for k, v in split.items() if v}
+        elif f.kind == "file" or f.ui_only:
+            continue
+        elif f.name.startswith("fact-"):
+            value = post.get(f.name, "")
+            name = f.name[5:]
+            if value == "clear":
+                payload.setdefault("clear", []).append(name)
+            elif value in ("true", "false"):
+                payload.setdefault("facts", {})[name] = value == "true"
+        else:
+            value = (post.get(f.name) or "").strip()
+            if not value:
+                continue
+            payload[f.name] = (
+                _int(value) if f.name in ("delivery", "unit", "child", "assignee_id") else value
+            )
+    return payload
+
+
+def bind(form, data=None):
+    """Fill each field with the posted value (kept after an error or a conflict) or its initial."""
+    for f in form.fields:
+        if f.kind == "lines":
+            for row in f.rows:
+                row["current"] = {
+                    col: (
+                        data.get(f"line-{row['no']}-{col}", "")
+                        if data
+                        else row["values"].get(col, "")
+                    )
+                    for col, _, _ in f.columns
+                }
+        elif f.kind == "checks":
+            f.value = data.getlist(f.name) if data else []
+        elif f.kind == "split":
+            f.value = (
+                {key: data.get(f"split-{key}", "") for key, _ in f.choices}
+                if data
+                else dict(f.initial or {})
+            )
+        elif f.kind == "hidden" and f.initial not in ("", None):
+            f.value = f.initial  # the subject chosen when the form opened
+        else:
+            f.value = data.get(f.name, f.initial) if data else f.initial
+    return form

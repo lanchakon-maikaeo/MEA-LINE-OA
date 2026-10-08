@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from operations import internal_api, line, views
+from operations import internal_api, line, registry_web, views, web
 
 urlpatterns = [
     path("", views.index, name="index"),
@@ -30,8 +30,25 @@ urlpatterns = [
     path("internal/v1/ai/extract", internal_api.ai_extract),
     path("internal/v1/ai/triage", internal_api.ai_triage),
     path("attachments/<uuid:pk>/", views.attachment_download, name="attachment-download"),
-    path("console/", views.console, name="console"),
-    path("divisions/<str:code>/", views.division_detail, name="division-detail"),
+    path("start/", web.start, name="start"),
+    path("console/", web.home, name="console"),
+    path("divisions/<str:code>/", web.division_queue, name="division-detail"),
+    path("divisions/<str:code>/export.csv", web.division_export, name="division-export"),
+    path("queue/", web.all_queue, name="queue-all"),
+    path("queue/export.csv", web.all_export, name="queue-all-export"),
+    path("reports/", web.report, name="reports"),
+    path("cases/new/", web.case_new, name="case-new"),
+    path("cases/", web.case_search, name="case-search"),
+    path("cases/<str:number>/", web.case_detail, name="case-detail"),
+    path("cases/<str:number>/revision/", web.case_revision, name="case-revision"),
+    path("cases/<str:number>/act/<slug:action>/", web.case_action, name="case-action"),
+    path("cases/<str:number>/files/", web.case_upload, name="case-upload"),
+    path("account/", web.account, name="account"),
+    path("registry/", registry_web.home, name="registry"),
+    path("registry/export.csv", registry_web.export, name="registry-export"),
+    path("registry/settings/", registry_web.settings_page, name="registry-settings"),
+    path("registry/import/<slug:kind>/", registry_web.upload, name="registry-upload"),
+    path("registry/<int:pk>/", registry_web.discrepancy, name="registry-discrepancy"),
     path("console/admin/users/", views.admin_users, name="admin-users"),
     path("console/admin/users/new/", views.admin_user_new, name="admin-user-new"),
     path("console/admin/users/<int:pk>/", views.admin_user_detail, name="admin-user-detail"),
@@ -53,6 +70,12 @@ urlpatterns = [
         "console/admin/policy/<slug:action>/<int:pk>/",
         views.admin_policy_action,
         name="admin-policy-action",
+    ),
+    path("console/admin/inventory/", views.admin_inventory, name="admin-inventory"),
+    path(
+        "console/admin/inventory/<slug:action>/",
+        views.admin_inventory_action,
+        name="admin-inventory-action",
     ),
     path("console/admin/ai/", views.admin_ai, name="admin-ai"),
     path("console/admin/ai/<slug:action>/", views.admin_ai_action, name="admin-ai-action"),

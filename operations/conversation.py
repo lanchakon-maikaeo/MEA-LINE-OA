@@ -364,6 +364,14 @@ def _requester_turn(turn):
     command = " ".join(text.split()) if text is not None else None
     if command in MENU_WORDS:
         return _static_postback(turn, MENU_WORDS[command], draft)
+    if text is not None and turn.conversation.prompt == "receipt":
+        from operations import receipts  # local: receipts builds on this module (M07)
+
+        return receipts.on_text(turn, text)
+    if text is not None and turn.conversation.prompt in {"dispute", "reopen"}:
+        from operations import problem_chat  # local: problem_chat builds on services (M09)
+
+        return problem_chat.on_text(turn, text)
     if command and CASE_NUMBER.fullmatch(command.upper()) and not _expects_text(draft):
         return _case_detail(turn, command.upper())
     if text is not None and turn.conversation.prompt != "track":
@@ -452,6 +460,21 @@ def _when(moment):
     return f"{local.day:02d}/{local.month:02d}/{local.year + 543} {local:%H:%M} น."
 
 
+def _status_label(case):
+    label = case.get_status_display()
+    if case.kind == K.WITHDRAWAL:
+        from operations import fulfilment
+
+        if fulfilment.summary(case)["partially_issued"]:
+            label += " (จ่ายบางส่วน)"
+    elif case.kind == K.RETURN:
+        from operations import returns
+
+        if returns.summary(case)["partially_returned"]:
+            label += " (รับคืนบางส่วน)"
+    return label
+
+
 def _my_cases(turn):
     cases = list(
         services.visible_cases(_actor(turn))
@@ -459,7 +482,7 @@ def _my_cases(turn):
         .order_by("-submitted_at")[:5]
     )
     drafts = _open_drafts(turn).count()
-    lines = [f"{c.number} · {KIND_LABELS[c.kind]} · {c.get_status_display()}" for c in cases] or [
+    lines = [f"{c.number} · {KIND_LABELS[c.kind]} · {_status_label(c)}" for c in cases] or [
         "ยังไม่มีเรื่องที่เปิดอยู่"
     ]
     if drafts:
@@ -482,12 +505,31 @@ def _case_detail(turn, number):
         turn.say(f"ไม่พบเรื่อง {number} ในเรื่องของคุณ", MENU)
         return
     files = case.attachments.count()
-    turn.say(
+    text = (
         f"เรื่อง {case.number}\nประเภท: {KIND_LABELS[case.kind]}\n"
-        f"สถานะ: {case.get_status_display()}\nกองเจ้าภาพ: {case.owner_division.name}\n"
-        f"อัปเดตล่าสุด: {_when(case.updated_at)}" + (f"\nไฟล์แนบ: {files} ไฟล์" if files else ""),
-        MENU,
+        f"สถานะ: {_status_label(case)}\nกองเจ้าภาพ: {case.owner_division.name}\n"
+        f"อัปเดตล่าสุด: {_when(case.updated_at)}" + (f"\nไฟล์แนบ: {files} ไฟล์" if files else "")
     )
+    buttons = []
+    if case.kind == K.WITHDRAWAL:
+        from operations import receipts  # local: receipts builds on this module (M07)
+
+        detail = receipts.status_text(case)
+        if detail:
+            text += "\n" + detail
+        buttons = receipts.pending_buttons(turn, case)
+    elif case.kind == K.RETURN:
+        from operations import returns  # local: returns builds on services (M08)
+
+        text += "\n" + returns.status_text(case)
+    else:
+        from operations import problem_chat  # local: problem_chat builds on services (M09)
+
+        detail = problem_chat.status_text(case)
+        if detail:
+            text += "\n" + detail
+        buttons = problem_chat.buttons(turn, case)
+    turn.say(text, [*buttons, *MENU][:MAX_QUICK])
 
 
 # --- Drafts -------------------------------------------------------------------------------------
@@ -556,6 +598,14 @@ def _owned_draft(turn, draft_id):
 
 def _token_action(turn, token, draft):
     action = token.action
+    if action.startswith("receipt_"):
+        from operations import receipts  # local: receipts builds on this module (M07)
+
+        return receipts.on_token(turn, token)
+    if action.startswith("problem_"):
+        from operations import problem_chat  # local: problem_chat builds on services (M09)
+
+        return problem_chat.on_token(turn, token)
     if action in {"new_draft", "select_draft", "discard_and_new"}:
         if action == "new_draft":
             return _ask(turn, _new_draft(turn))
@@ -904,6 +954,11 @@ def _confirm(turn, draft):
     )
     if remaining:
         text += f"\nยังมีร่างที่ยังไม่ยื่น {remaining} ร่าง"
+    from operations import policy  # local: policy builds on workflow, not on this module
+
+    guidance = policy.hazard_guidance(case)  # M09 Q10: at once, never waiting for AI
+    if guidance:
+        text += f"\n\nคำแนะนำเร่งด่วน: {guidance}"
     _menu(turn, text)
 
 

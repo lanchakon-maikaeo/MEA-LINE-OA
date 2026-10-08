@@ -1,44 +1,108 @@
-<!doctype html>
+{% load static ui %}<!doctype html>
 <html lang="th">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"historyEnabled":false,"selfRequestsOnly":true}'>
   <title>{% block title %}ระบบรับเรื่อง ฝอจ.{% endblock %}</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 0; line-height: 1.5; color: #1a1a1a; background: #fff; }
-    header, main { max-width: 960px; margin: 0 auto; padding: 12px 16px; }
-    header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border-bottom: 1px solid #ddd; }
-    header nav { display: flex; flex-wrap: wrap; gap: 12px; flex: 1; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: top; }
-    .table-wrap { overflow-x: auto; }
-    .messages li.error { color: #a40000; }
-    .messages li.success { color: #1b5e20; }
-    form.inline { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    fieldset { margin: 12px 0; }
-    input, select, button { font: inherit; padding: 4px 8px; }
-    :focus-visible { outline: 3px solid #1565c0; outline-offset: 2px; }
-  </style>
+  <link rel="preload" href="{% static 'operations/fonts/ibm-plex-sans-thai-thai-400-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'operations/app.css' %}">
+  <script src="{% static 'operations/htmx.min.js' %}" defer></script>
+  <script src="{% static 'operations/app.js' %}" defer></script>
+  <script src="{% static 'operations/tour.js' %}" defer></script>
 </head>
-<body>
-  <header>
-    <strong>ระบบรับเรื่อง ฝอจ.</strong>
-    {% if user.is_authenticated %}
-      <nav aria-label="เมนูหลัก">
-        <a href="{% url 'console' %}">หน้าหลัก</a>
-        {% block admin_nav %}{% endblock %}
-        <a href="{% url 'password_change' %}">เปลี่ยนรหัสผ่าน</a>
-      </nav>
-      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">ออกจากระบบ</button></form>
-    {% endif %}
+<body data-page="{% block page_id %}{% endblock %}" data-kind="{% block page_kind %}{% endblock %}">
+  <a class="skip-link" href="#main">ข้ามไปเนื้อหา</a>
+  <header class="topbar">
+    <div class="topbar__inner">
+      {% if nav and nav.scope.has_any_access %}
+        <details class="drawer">
+          <summary class="icon-btn" aria-label="เมนู">{% icon "menu" %}</summary>
+          <nav class="drawer__panel" aria-label="เมนูหลัก (มือถือ)">
+            <a href="{% url 'console' %}"{% if nav.url_name == 'console' %} aria-current="page"{% endif %}>ภาพรวม</a>
+            {% if nav.divisions %}<p class="drawer__group">คิวงาน</p>{% endif %}
+            {% if nav.scope.is_admin %}<a href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
+            {% for d in nav.divisions %}<a href="{% url 'division-detail' d.code %}"{% if nav.url_name == 'division-detail' and nav.current == d.code %} aria-current="page"{% endif %}>{{ d.code }} {{ d.name }}</a>{% endfor %}
+            <p class="drawer__group">อื่น ๆ</p>
+            <a href="{% url 'reports' %}"{% if nav.section == 'reports' %} aria-current="page"{% endif %}>รายงาน</a>
+            {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน (SAP)</a>{% endif %}
+            {% if nav.is_intake %}<a href="{% url 'case-new' %}">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
+            {% if nav.scope.is_admin %}<a href="{% url 'admin-users' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>ตั้งค่าระบบ (แอดมิน)</a>{% endif %}
+            <p class="drawer__group">บัญชี</p>
+            <a href="{% url 'account' %}">บัญชีของฉัน</a>
+          </nav>
+        </details>
+      {% endif %}
+      <a class="brand" href="{% if user.is_authenticated %}{% url 'console' %}{% else %}{% url 'index' %}{% endif %}">
+        <span class="brand__mark" aria-hidden="true">ฝอจ.</span>
+        <span class="brand__name">ระบบรับเรื่อง ฝอจ.<small>เบิก · คืน · แจ้งปัญหาอุปกรณ์</small></span>
+      </a>
+      {% if nav and nav.scope.has_any_access %}
+        <nav class="mainnav" aria-label="เมนูหลัก" data-tour="nav">
+          <a href="{% url 'console' %}"{% if nav.url_name == 'console' %} aria-current="page"{% endif %}>ภาพรวม</a>
+          {% with first=nav.divisions.0 %}
+          <a href="{% if nav.current %}{% url 'division-detail' nav.current %}{% elif first %}{% url 'division-detail' first.code %}{% else %}{% url 'console' %}{% endif %}"{% if nav.section == 'queue' and nav.url_name != 'console' %} aria-current="page"{% endif %} data-tour-link="queue">คิวงาน</a>
+          {% endwith %}
+          <a href="{% url 'reports' %}"{% if nav.section == 'reports' %} aria-current="page"{% endif %}>รายงาน</a>
+          {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน</a>{% endif %}
+          {% if nav.scope.is_admin %}<a href="{% url 'admin-users' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>แอดมิน</a>{% endif %}
+        </nav>
+        <div class="topbar__tools">
+          <button class="chip tour-start js-only" type="button" data-tour-start data-tour="tour-start" aria-haspopup="dialog">{% icon "spark" "sm" %} <span class="tour-start__label">สาธิตการใช้งาน</span></button>
+          <form class="search" action="{% url 'case-search' %}" method="get" role="search" data-tour="search">
+            <label class="visually-hidden" for="q">ค้นหาเลขเรื่อง</label>
+            <input id="q" name="q" type="search" placeholder="ค้นหาเลขเรื่อง  /" autocomplete="off" value="{{ request.GET.q|default:'' }}">
+            {% icon "search" %}
+          </form>
+          {% if nav.divisions|length > 1 or nav.scope.is_admin %}
+            <details class="menu division-switch" data-tour="division-switch">
+              <summary class="chip" aria-label="เลือกกอง"><span class="chip__label">{{ nav.current|default:"เลือกกอง" }}</span> {% icon "grid" "sm" %}</summary>
+              <div class="menu__panel">
+                <p class="menu__label">คิวงานของกอง</p>
+                {% if nav.scope.is_admin %}<a class="menu__item" href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
+                {% for d in nav.divisions %}<a class="menu__item" href="{% url 'division-detail' d.code %}"{% if nav.current == d.code and nav.url_name == 'division-detail' %} aria-current="page"{% endif %}><strong>{{ d.code }}</strong> <span class="muted">{{ d.name }}</span></a>{% endfor %}
+              </div>
+            </details>
+          {% endif %}
+          <details class="menu">
+            <summary class="avatar" aria-label="บัญชีของ {{ nav.name }}">{{ nav.name|initial }}</summary>
+            <div class="menu__panel">
+              <div class="menu__who"><strong>{{ nav.name }}</strong><span class="muted">{{ user.username }}</span></div>
+              <div class="menu__sep"></div>
+              <a class="menu__item" href="{% url 'account' %}">{% icon "user" "sm" %} บัญชีของฉัน</a>
+              <a class="menu__item" href="{% url 'password_change' %}">{% icon "key" "sm" %} เปลี่ยนรหัสผ่าน</a>
+              <div class="menu__sep"></div>
+              <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="menu__item" type="submit">{% icon "logout" "sm" %} ออกจากระบบ</button></form>
+            </div>
+          </details>
+        </div>
+      {% elif user.is_authenticated %}
+        <div class="topbar__tools">
+          <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn--secondary btn--sm" type="submit">ออกจากระบบ</button></form>
+        </div>
+      {% endif %}
+    </div>
   </header>
-  <main>
+  {% block subnav %}{% endblock %}
+  {% block before_main %}{% endblock %}
+  <main id="main" class="page {% block page_class %}{% endblock %}" tabindex="-1">
     {% if messages %}
-      <ul class="messages" role="status">
-        {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
-      </ul>
+      <div class="messages" role="status">
+        {% for message in messages %}
+          <div class="notice{% if message.tags == 'error' %} notice--error{% elif message.tags == 'success' %} notice--success{% endif %}">
+            {% if message.tags == 'error' %}{% icon "alert" %}{% else %}{% icon "check" %}{% endif %}
+            <div class="notice__body">{{ message }}</div>
+          </div>
+        {% endfor %}
+      </div>
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="footer">
+    <div class="footer__inner">
+      <span>ระบบต้นแบบ ฝอจ. · ข้อมูลกอง กติกา และยอดคลังเป็นข้อมูลจำลอง ยังไม่ใช่ระเบียบหรือมาตรฐานบริการจริง</span>
+      <span>วันเวลาเป็นเวลาไทย ปี พ.ศ.</span>
+    </div>
+  </footer>
 </body>
 </html>

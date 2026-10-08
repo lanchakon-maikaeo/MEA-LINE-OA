@@ -1,0 +1,19 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}ค้นหา {{ query }} — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">ค้นหาเลขเรื่อง</span>
+    <h1>{% if query %}“{{ query }}”{% else %}ค้นหา{% endif %}</h1>
+    <p class="lede">ค้นได้เฉพาะเรื่องที่บัญชีนี้มีสิทธิ์เห็น</p>
+  </div>
+</div>
+{% if rows %}
+  <ol class="queue" aria-label="ผลการค้นหา">{% for row in rows %}{% include "operations/_queue_row.html" %}{% endfor %}</ol>
+{% elif query %}
+  <div class="empty"><strong>ไม่พบเรื่อง</strong>ตรวจเลขเรื่องอีกครั้ง เช่น W69-000001</div>
+{% else %}
+  <div class="empty"><strong>พิมพ์เลขเรื่องในช่องค้นหาด้านบน</strong>กด / เพื่อไปที่ช่องค้นหา</div>
+{% endif %}
+{% endblock %}

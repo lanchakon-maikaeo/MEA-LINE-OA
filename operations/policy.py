@@ -1,4 +1,5 @@
-"""M06 policy engine: routing (R01-R10), priority (P0-P3) and acknowledgement clocks.
+"""M06 policy engine: routing (R01-R10), priority (P0-P3) and acknowledgement clocks; M09 adds
+the service calendar and work deadlines (กรอบเวลา) with their pauses.
 
 Three parts stay apart (B.1, ADR 0002): facts (from the case, a hazard keyword flag, the AI
 triage task and staff), rules (an imported, versioned policy) and people's decisions
@@ -10,7 +11,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 from django.conf import settings
@@ -19,7 +20,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from operations import identity, orchestration, workflow
+from operations import identity, orchestration, servicetime, workflow
 from operations.models import (
     AckClock,
     AIConfigVersion,
@@ -28,6 +29,8 @@ from operations.models import (
     Case,
     CaseLine,
     CaseTriage,
+    ChildWork,
+    DeadlinePause,
     Decision,
     Division,
     EquipmentType,
@@ -40,7 +43,17 @@ from operations.models import (
 )
 
 PRIORITIES = tuple(Priority.values)  # most urgent first
-DEMO_POLICY = Path(settings.BASE_DIR) / "operations" / "fixtures" / "policy_demo_pe_2.json"
+DEMO_POLICY = Path(settings.BASE_DIR) / "operations" / "fixtures" / "policy_demo_pe_3.json"
+DEADLINE_KINDS = (
+    "ack",
+    "child_accept",
+    "first_response",
+    "resolve",
+    "child_result",
+    "approval",
+    "issue",
+    "inspection",
+)
 EVENT_TRIAGE_AI = orchestration.EVENT_TRIAGE_AI
 # A backlog this old means the system is not processing work: escalation waits (S12).
 STUCK_SECONDS = 600
@@ -127,6 +140,19 @@ def validate_document(document):
             raise ValidationError(f"{name} must be a positive whole number.")
     if priority["escalate_after"] <= priority["remind_after"]:
         raise ValidationError("Escalation must come after the reminder.")
+    if "calendar" in document:
+        problems = servicetime.validate(document["calendar"])
+        if problems:
+            raise ValidationError(f"calendar: {' '.join(problems)}")
+    for kind, table in (document.get("deadlines") or {}).items():
+        if kind not in DEADLINE_KINDS:
+            raise ValidationError(f"Unknown deadline {kind}.")
+        if set(table) != {*PRIORITIES, "none"} or any(
+            not isinstance(v, int) or v <= 0 for v in table.values()
+        ):
+            raise ValidationError(f"deadline {kind} needs positive minutes for P0-P3 and none.")
+    if not isinstance(document.get("emergency_guidance", ""), str):
+        raise ValidationError("emergency_guidance is text.")
     return document
 
 
@@ -253,7 +279,23 @@ class Policy:
         return (start is None or start <= now) and (end is None or now < end)
 
     def ack_minutes(self, priority):
-        return self.doc["priority"]["ack_minutes"][priority if priority in PRIORITIES else "none"]
+        table = (self.doc.get("deadlines") or {}).get("ack") or self.doc["priority"]["ack_minutes"]
+        return table[priority if priority in PRIORITIES else "none"]
+
+    def deadline_minutes(self, kind, priority):
+        """Minutes for a work deadline, or None when this policy defines none (M06 policies)."""
+        table = (self.doc.get("deadlines") or {}).get(kind)
+        if table is None:
+            return self.ack_minutes(priority) if kind == "child_accept" else None
+        return table[priority if priority in PRIORITIES else "none"]
+
+    @property
+    def calendar(self):
+        return servicetime.Calendar(self.doc.get("calendar"))
+
+    @property
+    def emergency_guidance(self):
+        return self.doc.get("emergency_guidance", "")
 
     def floor_for(self, facts):
         floors = self.doc["priority"].get("floors", {})
@@ -528,8 +570,10 @@ def build_facts(data, staff, ai_facts, policy, catalog):
         "registry_only": registry,
         "needed_by": data.get("needed_by"),
     }
+    # M07: withdrawals read ของไม่พอ from the inventory and a receipt mismatch from deliveries
+    # (case data); a person's confirmation still wins.
     for name in STAFF_ONLY_FACTS:
-        facts[name] = from_staff(name) or _fact(False, "case")
+        facts[name] = from_staff(name) or data.get(name) or _fact(False, "case")
     return facts
 
 
@@ -555,7 +599,7 @@ def case_data(case):
                 "item__code", "serials"
             )
         ]
-    return {
+    data = {
         "kind": case.kind,
         "lines": lines,
         "texts": case_text(case),
@@ -563,6 +607,15 @@ def case_data(case):
         "history": history,
         "related": related,
     }
+    if case.kind == K.WITHDRAWAL:
+        from operations import fulfilment  # local: fulfilment builds on this module
+
+        data.update(fulfilment.case_facts(case))
+    elif case.kind == K.RETURN:
+        from operations import returns  # local: returns builds on this module
+
+        data.update(returns.case_facts(case))
+    return data
 
 
 def input_digest(case):
@@ -854,34 +907,154 @@ def _clock_priority(state):
     return state.effective_priority or state.suggested_priority or ""
 
 
-def _times(policy, priority, started_at):
-    minutes = policy.ack_minutes(priority)
+ACK_KINDS = {AckClock.Kind.INTAKE, AckClock.Kind.HANDOFF}
+TABLE = {
+    AckClock.Kind.CHILD_ACCEPT: "child_accept",
+    AckClock.Kind.FIRST_RESPONSE: "first_response",
+    AckClock.Kind.RESOLVE: "resolve",
+    AckClock.Kind.APPROVAL: "approval",
+    AckClock.Kind.ISSUE: "issue",
+    AckClock.Kind.INSPECTION: "inspection",
+    AckClock.Kind.CHILD_RESULT: "child_result",
+}
+
+
+def _minutes(policy, kind, priority):
+    if kind in ACK_KINDS:
+        return policy.ack_minutes(priority)
+    return policy.deadline_minutes(TABLE[kind], priority)
+
+
+def _times(policy, priority, started_at, minutes=None, paused=0):
+    """Reminder at 1x and escalation at 2x of the minutes, on the service calendar (M09 Q7)."""
+    minutes = policy.ack_minutes(priority) if minutes is None else minutes
     rules = policy.doc["priority"]
+    calendar = policy.calendar
     return (
-        started_at + timedelta(minutes=minutes * rules["remind_after"]),
-        started_at + timedelta(minutes=minutes * rules["escalate_after"]),
+        calendar.add(started_at, minutes * rules["remind_after"] + paused, priority),
+        calendar.add(started_at, minutes * rules["escalate_after"] + paused, priority),
     )
+
+
+def _status_in(case, statuses):
+    """The case is in one of these statuses, or paused and returning to one of them."""
+    return case.status in statuses or (
+        case.status in workflow.PAUSED and case.resume_status in statuses
+    )
+
+
+def _entered(case, **filters):
+    decision = case.decisions.filter(**filters).order_by("-id").first()
+    return decision.created_at if decision else None
+
+
+def _wanted_work_clocks(case):
+    """{(kind, child_work_id): (division_id, started_at)} for FAOJ's steps running now (Q8).
+
+    Waits on the district (information, goods on the way, confirmation) have no deadline."""
+    from operations import coordination  # local: coordination builds on this module
+
+    K_ = AckClock.Kind
+    owner = case.owner_division_id
+    wanted = {}
+    if case.kind == K.PROBLEM:
+        if _status_in(case, {S.SUBMITTED, S.TRIAGE}):
+            wanted[(K_.FIRST_RESPONSE, None)] = (owner, case.submitted_at)
+        if _status_in(case, {S.IN_PROGRESS}):
+            start = _entered(case, action__in=["complete_triage", "dispute_resolution", "reopen"])
+            if start:
+                wanted[(K_.RESOLVE, None)] = (owner, start)
+    elif case.kind == K.WITHDRAWAL:
+        if _status_in(case, {S.AWAITING_APPROVAL}):
+            start = _entered(case, action="complete_triage")
+            if start:
+                wanted[(K_.APPROVAL, None)] = (owner, start)
+        if _status_in(case, {S.AWAITING_EXECUTION, S.IN_PROGRESS}):
+            start = _entered(case, from_status=S.AWAITING_APPROVAL, to_status=S.AWAITING_EXECUTION)
+            for line in case.lines.all():
+                if start and line.outstanding > 0:
+                    child = coordination.child_of(line)
+                    key = (K_.ISSUE, child.pk if child else None)
+                    wanted.setdefault(key, (child.division_id if child else owner, start))
+    elif case.kind == K.RETURN:
+        from operations.models import ReturnUnit
+
+        for unit in ReturnUnit.objects.filter(
+            case=case, status__in=[ReturnUnit.Status.AWAITING, ReturnUnit.Status.CONFLICT]
+        ).select_related("arrival", "line"):
+            child = coordination.child_of(unit.line) if unit.line_id else None
+            key = (K_.INSPECTION, child.pk if child else None)
+            division = child.division_id if child else owner
+            arrived = unit.arrival.received_at
+            if key not in wanted or arrived < wanted[key][1]:
+                wanted[key] = (division, arrived)
+    for child in case.child_works.all():
+        if child.status in (ChildWork.Status.PENDING, ChildWork.Status.DISPUTED):
+            wanted[(K_.CHILD_ACCEPT, child.pk)] = (child.division_id, child.requested_at)
+        elif child.status == ChildWork.Status.ACCEPTED and not coordination.closes_itself(child):
+            wanted[(K_.CHILD_RESULT, child.pk)] = (child.division_id, child.answered_at)
+    return wanted
+
+
+def _sync_pauses(case, now):
+    """Q12: the district's turn pauses work deadlines by itself; a supervisor's pause ends with
+    the hold. Returns the pauses of the case."""
+    current = DeadlinePause.objects.select_for_update().filter(case=case, ended_at__isnull=True)
+    for pause in current:
+        over = (
+            pause.kind == DeadlinePause.Kind.AWAITING_INFO and case.status != S.AWAITING_INFO
+        ) or (pause.kind == DeadlinePause.Kind.SUPERVISOR and case.status != S.ON_HOLD)
+        if over:
+            pause.ended_at = now
+            pause.save(update_fields=["ended_at"])
+    if (
+        case.status == S.AWAITING_INFO
+        and not DeadlinePause.objects.filter(case=case, ended_at__isnull=True).exists()
+    ):
+        DeadlinePause.objects.create(
+            case=case, kind=DeadlinePause.Kind.AWAITING_INFO, started_at=now
+        )
+    return list(DeadlinePause.objects.filter(case=case))
+
+
+def _paused(clock, pauses, calendar):
+    """Service minutes of ended pauses since the clock started, and the open pause's start."""
+    total, open_from = 0, None
+    for pause in pauses:
+        begin = max(pause.started_at, clock.started_at)
+        if pause.ended_at is None:
+            open_from = begin
+        elif pause.ended_at > begin:
+            total += calendar.minutes_between(begin, pause.ended_at, clock.priority)
+    return total, open_from
 
 
 def reconcile_clocks(case, state, policy, now):
     """Clocks follow the case: intake runs while nobody started triage, a handoff clock while a
-    handoff waits. Changing level re-times from the original start (no reset, B.4)."""
+    handoff waits, and (M09) a work deadline while FAOJ has a step to do. Changing level
+    re-times from the original start (no reset, B.4); pauses push the deadline out."""
     open_clocks = list(
         AckClock.objects.select_for_update().filter(case=case, stopped_at__isnull=True)
     )
     pending = Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).first()
+    wanted = {} if case.status in workflow.TERMINAL else _wanted_work_clocks(case)
     for clock in open_clocks:
-        finished = (
-            case.status in workflow.TERMINAL
-            or (clock.kind == AckClock.Kind.INTAKE and case.status != S.SUBMITTED)
-            or (
-                clock.kind == AckClock.Kind.HANDOFF
-                and (pending is None or clock.handoff_id != pending.pk)
+        if clock.kind in ACK_KINDS:
+            finished = (
+                case.status in workflow.TERMINAL
+                or (clock.kind == AckClock.Kind.INTAKE and case.status != S.SUBMITTED)
+                or (
+                    clock.kind == AckClock.Kind.HANDOFF
+                    and (pending is None or clock.handoff_id != pending.pk)
+                )
             )
-        )
+        else:
+            finished = (clock.kind, clock.child_work_id) not in wanted
+            wanted.pop((clock.kind, clock.child_work_id), None)
         if finished:
             clock.stopped_at = now
             clock.save(update_fields=["stopped_at"])
+    pauses = _sync_pauses(case, now)
     if policy is None or case.status in workflow.TERMINAL:
         return
     priority = _clock_priority(state)
@@ -912,11 +1085,41 @@ def reconcile_clocks(case, state, policy, now):
             due_at=due,
             escalate_at=escalate,
         )
+    for (kind, child_id), (division_id, started_at) in wanted.items():
+        minutes = _minutes(policy, kind, priority)
+        if minutes is None:
+            continue
+        due, escalate = _times(policy, priority, started_at, minutes)
+        AckClock.objects.create(
+            case=case,
+            kind=kind,
+            child_work_id=child_id,
+            division_id=division_id,
+            started_at=started_at,
+            priority=priority,
+            due_at=due,
+            escalate_at=escalate,
+        )
+    calendar = policy.calendar
     for clock in AckClock.objects.select_for_update().filter(case=case, stopped_at__isnull=True):
-        if clock.priority != priority:
-            clock.priority = priority
-            clock.due_at, clock.escalate_at = _times(policy, priority, clock.started_at)
-            clock.save(update_fields=["priority", "due_at", "escalate_at"])
+        minutes = _minutes(policy, clock.kind, priority)
+        if minutes is None:
+            continue
+        clock.priority = priority
+        paused, open_from = _paused(clock, pauses, calendar) if clock.work else (0, None)
+        due, escalate = _times(policy, priority, clock.started_at, minutes, paused)
+        changed = (clock.due_at, clock.escalate_at, clock.paused_minutes, clock.paused_at) != (
+            due,
+            escalate,
+            paused,
+            open_from,
+        )
+        if changed or clock.priority != priority:
+            clock.due_at, clock.escalate_at = due, escalate
+            clock.paused_minutes, clock.paused_at = paused, open_from
+            clock.save(
+                update_fields=["priority", "due_at", "escalate_at", "paused_minutes", "paused_at"]
+            )
 
 
 def _system_problem(now):
@@ -929,32 +1132,38 @@ def _system_problem(now):
 
 
 def sweep_clocks(now=None):
-    """Remind at 1x, escalate to the coordinator at 2x, after checking the system works (S12).
+    """Remind at 1x, escalate at 2x, after checking the system works (S12). Answers that nobody
+    gave (intake, handoff, child work) go to the coordinator; work deadlines go to the
+    supervisors of the division that has the step (M09 Q9). Paused clocks wait.
 
     A reminder or escalation is an audit record plus a flag that queues show; silence is never
     taken as acceptance.
     """
+    from operations import staff_email  # M10 (imported here: staff_email reads services)
+
     now = now or timezone.now()
     counts = {"reminded": 0, "escalated": 0, "held": 0}
     problem = None
     with transaction.atomic():
         due = (
             AckClock.objects.select_for_update(skip_locked=True)
-            .filter(stopped_at__isnull=True, due_at__lte=now)
+            .filter(stopped_at__isnull=True, due_at__lte=now, paused_at__isnull=True)
             .select_related("case", "division")
         )
         for clock in due:
+            work = clock.work
             if clock.reminded_at is None:
                 clock.reminded_at = now
                 identity.audit(
                     None,
-                    "case.ack_overdue",
+                    "case.deadline_overdue" if work else "case.ack_overdue",
                     clock.case,
                     actor_label="policy",
                     clock=clock.kind,
                     division=clock.division.code,
                     priority=clock.priority,
                 )
+                staff_email.plan_for_clock(clock, "overdue")
                 counts["reminded"] += 1
             if clock.escalate_at <= now and clock.escalated_at is None:
                 if problem is None:
@@ -974,14 +1183,20 @@ def sweep_clocks(now=None):
                 else:
                     policy = current_policy()
                     clock.escalated_at = now
+                    coordinator = policy.units["coordinator"] if policy else None
                     identity.audit(
                         None,
-                        "case.ack_escalated",
+                        "case.deadline_escalated" if work else "case.ack_escalated",
                         clock.case,
                         actor_label="policy",
                         clock=clock.kind,
                         division=clock.division.code,
-                        to=policy.units["coordinator"] if policy else None,
+                        to=f"supervisors:{clock.division.code}" if work else coordinator,
+                    )
+                    staff_email.plan_for_clock(
+                        clock,
+                        "escalated",
+                        f"supervisors:{clock.division.code}" if work else coordinator or "",
                     )
                     counts["escalated"] += 1
             clock.save()
@@ -1026,13 +1241,34 @@ def grant_authority(
     division=None,
     valid_from=None,
     valid_until=None,
+    category="",
+    item=None,
+    max_quantity=None,
 ):
-    """An admin records authority the organisation approved; never to themselves (Q16)."""
+    """An admin records authority the organisation approved; never to themselves (Q16).
+
+    M07 activities may narrow to a category or an item; a quantity cap needs an item (Q2)."""
     identity.require_admin(actor)
     if actor.pk == user.pk:
         raise ValidationError("ให้อำนาจแก่ตัวเองไม่ได้ (Q16)")
     if activity not in AuthorityGrant.Activity.values:
         raise ValidationError("Unknown activity.")
+    scoped = {
+        AuthorityGrant.Activity.WITHDRAWAL_APPROVAL,
+        AuthorityGrant.Activity.ALLOCATION,
+        AuthorityGrant.Activity.CONDITION_CERTIFICATION,
+    }
+    if (category or item or max_quantity) and activity not in scoped:
+        raise ValidationError("หมวด/รายการใช้กับอำนาจอนุมัติเบิก จัดสรร และรับรองสภาพเท่านั้น")
+    if category and category not in EquipmentType.Category.values:
+        raise ValidationError("Unknown category.")
+    if item is not None and category and item.category != category:
+        raise ValidationError("รายการของไม่อยู่ในหมวดที่เลือก")
+    if max_quantity is not None:
+        if activity != AuthorityGrant.Activity.WITHDRAWAL_APPROVAL or item is None:
+            raise ValidationError("จำนวนสูงสุดใช้กับอำนาจอนุมัติเบิกที่ระบุรายการของ (Q2)")
+        if max_quantity <= 0:
+            raise ValidationError("จำนวนสูงสุดต้องมากกว่า 0")
     if not user.is_active or not identity.staff_scope(user).has_any_access:
         raise ValidationError("Grant authority to active staff only.")
     reason = identity._require_reason(reason)
@@ -1044,6 +1280,9 @@ def grant_authority(
         user=user,
         activity=activity,
         division=division,
+        category=category or (item.category if item is not None else ""),
+        item=item,
+        max_quantity=max_quantity,
         valid_from=valid_from,
         valid_until=valid_until,
         reason=reason,
@@ -1058,6 +1297,9 @@ def grant_authority(
         user=user.pk,
         activity=activity,
         division=division.code if division else None,
+        category=grant.category,
+        item=item.code if item else None,
+        max_quantity=str(max_quantity) if max_quantity is not None else None,
         reference=approval_reference,
     )
     return grant
@@ -1127,6 +1369,9 @@ SOURCE_LABELS = {
     "keyword": "ธงจากคำในข้อความ (ยังไม่ยืนยัน)",
     "ai": "ข้อเสนอจาก AI (ยังไม่ยืนยัน)",
     "staff": "เจ้าหน้าที่ยืนยัน",
+    "stock": "ยอดคลัง",
+    "delivery": "การยืนยันรับของ",
+    "return": "การรับของคืน",
 }
 
 
@@ -1189,18 +1434,80 @@ def card(case):
         "clocks": [
             {
                 "kind": c.kind,
+                "label": c.get_kind_display(),
                 "division": c.division.code,
                 "due_at": c.due_at.isoformat(),
                 "overdue": c.reminded_at is not None,
                 "escalated": c.escalated_at is not None,
+                "paused": c.paused_at is not None,
             }
             for c in clocks
         ],
+        "hazard_alert": state.priority_floor == "P0",
+        "children": [
+            {
+                "child": w.seq,
+                "division": w.division.code,
+                "rule": w.rule,
+                "task": w.task,
+                "status": w.status,
+                "status_label": w.get_status_display(),
+                "lines": sorted(line.line_no for line in w.lines.all()),
+                "result": w.result_summary,
+            }
+            for w in case.child_works.select_related("division").prefetch_related("lines")
+        ],
+        "related": case.related_case.number if case.related_case_id else None,
+        "linked": list(
+            Case.objects.filter(related_case=case)
+            .order_by("number")
+            .values_list("number", flat=True)
+        ),
+        "problem": _problem(case),
         "decision_made": Decision.objects.filter(
             case=case,
             action__in=["set_priority", "accept_handoff", "decide_routing", "complete_triage"],
         ).exists(),
+        "fulfilment": _fulfilment(case),
     }
+
+
+def _problem(case):
+    if case.kind != K.PROBLEM:
+        return None
+    from operations import problems
+
+    return problems.summary(case)
+
+
+def hazard_guidance(case):
+    """M09 Q10: the emergency guidance of the active policy when a hazard was reported (floor
+    P0), shown at once without waiting for AI."""
+    state = CaseTriage.objects.filter(case=case).first()
+    current = current_policy()
+    if state is None or state.priority_floor != "P0" or current is None:
+        return ""
+    return current.emergency_guidance
+
+
+def update_due(case):
+    """กำหนดอัปเดต (M09 Q14): the open resolve deadline of a problem, shown to the requester."""
+    clock = AckClock.objects.filter(
+        case=case, kind=AckClock.Kind.RESOLVE, stopped_at__isnull=True
+    ).first()
+    return clock.due_at if clock else None
+
+
+def _fulfilment(case):
+    if case.kind == K.WITHDRAWAL:
+        from operations import fulfilment
+
+        return fulfilment.summary(case)
+    if case.kind == K.RETURN:
+        from operations import returns
+
+        return returns.summary(case)
+    return None
 
 
 def queue_key(case_triage, case):

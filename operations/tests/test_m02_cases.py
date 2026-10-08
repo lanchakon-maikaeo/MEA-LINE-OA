@@ -266,7 +266,9 @@ class TransitionMatrixTests(CaseTestCase):
     def test_actions_of_later_modules_are_refused_not_faked(self):
         case = self.make_case(K.WITHDRAWAL, S.AWAITING_APPROVAL)
         for name, spec in workflow.ACTIONS.items():
-            if spec.enabled:
+            # Shared lifecycle actions arrive per kind (withdrawal with M07, Q16 excludes
+            # reopen for withdrawals: that is an invalid transition, tested in M07).
+            if spec.enabled_for(K.WITHDRAWAL):
                 continue
             with self.subTest(action=name):
                 error = self.assertFails(
@@ -294,7 +296,19 @@ class TransitionMatrixTests(CaseTestCase):
                     self.assertIn(source, allowed - {workflow.RESUME}, (spec.name, kind))
                     self.assertTrue(targets <= allowed, (spec.name, kind, source))
                     if source in workflow.TERMINAL:
-                        self.assertEqual((spec.name, source), ("reopen", S.CLOSED))
+                        # Only reopen leaves a terminal status; deliveries made before a
+                        # withdrawal was cancelled can still be confirmed or settled (M07 Q7)
+                        # without leaving it.
+                        receipt_after_cancel = (
+                            kind == K.WITHDRAWAL
+                            and source == S.CANCELLED
+                            and spec.name in {"confirm", "resolve_discrepancy"}
+                            and targets == {S.CANCELLED}
+                        )
+                        self.assertTrue(
+                            receipt_after_cancel or (spec.name, source) == ("reopen", S.CLOSED),
+                            (spec.name, kind, source),
+                        )
 
     def test_every_lifecycle_status_is_reachable_and_can_reach_closed(self):
         for kind in K:

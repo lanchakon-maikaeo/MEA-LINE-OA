@@ -1,8 +1,13 @@
 {% extends "operations/admin_base.html" %}
 {% block content %}
-<h1>เพิ่มบัญชีรายบุคคล</h1>
-<p>บัญชีใหม่ยังไม่มีกองหรือบทบาท และต้องเปลี่ยนรหัสผ่านชั่วคราวเมื่อเข้าสู่ระบบครั้งแรก</p>
-<form method="post">
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>เพิ่มบัญชีรายบุคคล</h1>
+    <p class="lede">บัญชีใหม่ยังไม่มีกองหรือบทบาท และต้องเปลี่ยนรหัสผ่านชั่วคราวเมื่อเข้าสู่ระบบครั้งแรก</p>
+  </div>
+</div>
+<form method="post" class="page--narrow">
   {% csrf_token %}
   {{ form.as_p }}
   <button type="submit">สร้างบัญชี</button>

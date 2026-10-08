@@ -13,6 +13,12 @@ RUN pip install --no-cache-dir uv==0.10.11 \
 COPY config ./config
 COPY operations ./operations
 COPY manage.py synthetic-data.json priority-engine-demo.json ./
+# Hashed static files for WhiteNoise (M10); throwaway settings, nothing connects to a database.
+RUN BUILD_KEY="$(/app/.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(64))')" \
+    && APP_ENV=production ALLOWED_HOSTS=build CSRF_TRUSTED_ORIGINS=https://build \
+    DATABASE_URL="postgresql://collectstatic:${BUILD_KEY}@build/build?sslmode=verify-full" \
+    DJANGO_SECRET_KEY="${BUILD_KEY}" \
+    /app/.venv/bin/python manage.py collectstatic --noinput
 USER 10001:10001
 EXPOSE 8000
 # Send an allowed Host: staging/production ALLOWED_HOSTS do not list 127.0.0.1 (Django returns 400).

@@ -9,6 +9,11 @@ MODULE_TESTS = {
     "M04": "operations.tests.test_m04_orchestration",
     "M05": ["operations.tests.test_m05_ai", "operations.tests.test_m05_security"],
     "M06": "operations.tests.test_m06_policy",
+    "M07": "operations.tests.test_m07_fulfilment",
+    "M08": "operations.tests.test_m08_returns",
+    "M09": "operations.tests.test_m09_problems",
+    "M10": "operations.tests.test_m10_web",
+    "M11": "operations.tests.test_m11_registry",
 }
 
 

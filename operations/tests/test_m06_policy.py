@@ -65,6 +65,9 @@ S = Case.Status
 K = Case.Kind
 A = AuthorityGrant.Activity
 DEMO = json.loads((settings.BASE_DIR / "priority-engine-demo.json").read_text())
+# M06 behaviour is tested on DEMO-PE-2 (continuous clocks); DEMO-PE-3's service calendar and work
+# deadlines are tested in test_m09_problems.
+PE2 = str(settings.BASE_DIR / "operations" / "fixtures" / "policy_demo_pe_2.json")
 EXPECTED = {s["id"]: s["expected"] for s in DEMO["scenarios"]}
 CATEGORY = {
     "MTR_SYN_A": "meter",
@@ -138,7 +141,7 @@ class PolicyTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
         setup_world(cls)
-        call_command("seed_demo_policy", stdout=StringIO())
+        call_command("seed_demo_policy", source=PE2, stdout=StringIO())
         cls.eqp_staff = make_staff("eqp", (Role.STAFF, "SIM-EQP"))
         cls.reg_staff = make_staff("reg", (Role.STAFF, "SIM-REG"))
         cls.coordinator = make_staff("coord", (Role.SUPERVISOR, "SIM-SUPERVISOR"))
@@ -710,11 +713,24 @@ class PriorityAndCompletionTests(PolicyTestCase):
         )
         self.act(self.intake, case, "start_triage")
         self.act(self.intake, case, "set_priority", {"priority": "P3"})
+        # M09 Q18: every line needs child work before an R09 case leaves triage.
+        error = self.assertFails(
+            ErrorCode.VALIDATION_ERROR, self.act, self.intake, case, "complete_triage"
+        )
+        self.assertIn("R09", error.message)
+        for division, line in (("SIM-MTR", 1), ("SIM-TRF", 2)):
+            self.act(
+                self.intake,
+                case,
+                "request_child_work",
+                {"division": division, "task": "จ่ายรายการของกอง", "rule": "R09", "lines": [line]},
+            )
         self.assertEqual(self.act(self.intake, case, "complete_triage").status, S.AWAITING_APPROVAL)
 
     def test_s11_an_invalid_issue_is_not_executed(self):
+        # Issuing exists since M07, but never for a return case or before approval.
         case = self.at_owner(return_payload(), "SIM-MTR", self.meter)
-        self.assertFails(ErrorCode.ACTION_NOT_ENABLED, self.act, self.meter, case, "issue")
+        self.assertFails(ErrorCode.INVALID_TRANSITION, self.act, self.meter, case, "issue")
         self.assertEqual(Case.objects.get(pk=case.pk).status, S.TRIAGE)
 
     def test_m06_actions_follow_the_matrix(self):
@@ -741,8 +757,13 @@ class PriorityAndCompletionTests(PolicyTestCase):
                 K.PROBLEM: {S.TRIAGE: {S.IN_PROGRESS}},
             },
         )
-        for name in ("approve", "issue", "receive", "resolve", "close"):
-            self.assertFalse(workflow.ACTIONS[name].enabled, name)
+        self.assertEqual(workflow.ACTIONS["resolve"].enabled_kinds, [K.PROBLEM])  # M09
+        for name in ("receive", "inspect"):
+            self.assertEqual(workflow.ACTIONS[name].enabled_kinds, [K.RETURN], name)  # M08
+        for name in ("approve", "issue", "confirm", "close"):
+            self.assertTrue(workflow.ACTIONS[name].enabled_for(K.WITHDRAWAL), name)  # M07
+        self.assertTrue(workflow.ACTIONS["close"].enabled_for(K.PROBLEM))  # M09
+        self.assertTrue(workflow.ACTIONS["confirm"].enabled_for(K.PROBLEM))  # M09
 
     def test_requester_sees_only_status_changes_as_new_updates(self):
         case = self.submit(withdrawal())
@@ -842,19 +863,19 @@ class PolicyVersionTests(PolicyTestCase):
             version.save()
         with self.assertRaises(ValueError):
             PolicyVersion.objects.get(pk=version.pk).delete()
-        document = policy.load_document()
+        document = policy.load_document(PE2)
         self.assertEqual(policy.import_policy(document).pk, version.pk)  # same content: same row
         document["priority"]["ack_minutes"]["P3"] = 60
         with self.assertRaises(ValidationError):
             policy.import_policy(document)
-        broken = {**policy.load_document(), "code": "BROKEN", "units": {"intake": "NOPE"}}
+        broken = {**policy.load_document(PE2), "code": "BROKEN", "units": {"intake": "NOPE"}}
         with self.assertRaises(ValidationError):
             policy.import_policy(broken)
 
     def test_activation_needs_admin_approver_and_reference_and_reevaluates_open_cases(self):
         case = self.at_owner(withdrawal(), "SIM-MTR", self.meter)
         self.act(self.meter, case, "set_priority", {"priority": "P3"})
-        document = policy.load_document()
+        document = policy.load_document(PE2)
         document["code"] = "DEMO-PE-3"
         for entry in document["responsibility"]:
             if entry["rule"] == "R01":
@@ -918,7 +939,7 @@ class PolicyVersionTests(PolicyTestCase):
         with self.assertRaises(CommandError):
             call_command("import_policy", "--username", "meter", stdout=StringIO())
         out = StringIO()
-        call_command("import_policy", "--username", "admin", stdout=out)
+        call_command("import_policy", "--username", "admin", "--source", PE2, stdout=out)
         self.assertIn("DEMO-PE-2", out.getvalue())
 
 

@@ -1,0 +1,10 @@
+{% extends "operations/base.html" %}
+{% block title %}{{ form.label }} · {{ case.number }} — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_class %}page--reading{% endblock %}
+{% block content %}
+<ol class="crumbs">
+  <li><a href="{% url 'case-detail' case.number %}">{{ case.number }}</a></li>
+  <li aria-current="page">{{ form.label }}</li>
+</ol>
+<div id="action-slot">{% include "operations/_action_form.html" %}</div>
+{% endblock %}

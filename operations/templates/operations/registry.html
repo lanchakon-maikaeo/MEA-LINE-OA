@@ -1,0 +1,140 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}กระทบยอดทะเบียน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">ทะเบียน (SAP)</span>
+    <h1>กระทบยอดทะเบียน</h1>
+    <p class="lede">เทียบรายการจ่าย รับคืน และผลตรวจที่บันทึกในระบบนี้ กับเอกสารที่ส่งออกจาก SAP รายการที่ไม่ตรงเป็นส่วนต่างทะเบียนให้คนตัดสิน ระบบไม่แก้ตัวเลขให้ตรงเอง</p>
+  </div>
+  <div class="page-head__actions">
+    {% if full %}<a class="btn btn--secondary btn--sm" href="{% url 'registry-export' %}">ดาวน์โหลด CSV</a>{% endif %}
+    {% if is_admin %}<a class="btn btn--secondary btn--sm" href="{% url 'registry-settings' %}">ตั้งค่าการอ่านไฟล์ SAP</a>{% endif %}
+  </div>
+</div>
+
+{% if full and not configured %}
+  <div class="notice notice--warning mb-24" role="status"><div class="notice__body"><strong>ยังไม่ได้ตั้งประเภทการเคลื่อนไหวของ SAP</strong>ต้องตั้งก่อนว่ารหัสใดคือจ่าย รับคืน หรือเปลี่ยนสถานะของ จึงจะนำเข้ารายการเอกสารได้{% if is_admin %} · <a href="{% url 'registry-settings' %}">ไปตั้งค่า</a>{% endif %}</div></div>
+{% endif %}
+
+{% if report %}
+<div class="stats">
+  <div class="stat stat--dark"><span class="stat__label">ส่วนต่างที่ยังไม่ปิด</span><span class="stat__value">{{ report.open }}</span></div>
+  <div class="stat{% if report.older_7 %} stat--alert{% endif %}"><span class="stat__label">ค้างเกิน 7 วัน</span><span class="stat__value">{{ report.older_7 }}</span></div>
+  <div class="stat"><span class="stat__label">รอทะเบียนแก้</span><span class="stat__value">{{ report.waiting_registry }}</span></div>
+  <div class="stat{% if report.unreconciled %} stat--alert{% endif %}"><span class="stat__label">ยังไม่ได้กระทบยอด (เกิน 7 วัน)</span><span class="stat__value">{{ report.unreconciled }}</span></div>
+</div>
+<p class="muted mb-24">{% if report.last_export %}ไฟล์รายการเอกสารล่าสุดส่งออกจาก SAP {{ report.last_export|thai_datetime }} · ครอบคลุมถึง {{ report.covered_until|thai_date }}{% else %}ยังไม่เคยนำเข้ารายการเอกสารจาก SAP{% endif %} · บันทึกที่อ้างเอกสาร SAP ทั้งหมด {{ report.records }} รายการ</p>
+{% endif %}
+
+{% if can_import %}
+<details class="disclosure mb-24"{% if not report.last_export %} open{% endif %}>
+  <summary>นำเข้าไฟล์จาก SAP</summary>
+  <div class="disclosure__body form-grid">
+    <form class="card stack-sm" method="post" action="{% url 'registry-upload' 'documents' %}" enctype="multipart/form-data">
+      {% csrf_token %}
+      <h2 class="strong">รายการเอกสาร</h2>
+      <p class="helptext">CSV หรือ Excel ที่ส่งออกจาก SAP (เช่น MB51) ต้องมีเลขเอกสาร ประเภทการเคลื่อนไหว รหัสพัสดุ และจำนวน รายการที่อยู่ในวันทำการสุดท้ายของช่วงจะรอเทียบกับไฟล์รอบหน้า</p>
+      <div class="field"><label for="d-file">ไฟล์ <span class="req">*</span></label><input id="d-file" name="file" type="file" accept=".csv,.xlsx,.txt" required></div>
+      <div class="field"><label for="d-from">ครอบคลุมตั้งแต่วันที่ <span class="req">*</span></label><input id="d-from" name="period_from" type="date" required></div>
+      <div class="field"><label for="d-to">ถึงวันที่ <span class="req">*</span></label><input id="d-to" name="period_to" type="date" value="{{ today|date:'Y-m-d' }}" required></div>
+      <div class="field"><label for="d-at">เวลาที่ส่งออกจาก SAP <span class="req">*</span></label><input id="d-at" name="exported_at" type="datetime-local" required></div>
+      <button class="btn btn--sm" type="submit">นำเข้าและเทียบ</button>
+    </form>
+    <form class="card stack-sm" method="post" action="{% url 'registry-upload' 'serials' %}" enctype="multipart/form-data">
+      {% csrf_token %}
+      <h2 class="strong">เลขเครื่องของเอกสาร</h2>
+      <p class="helptext">ใช้เมื่อรายการเอกสารไม่มีเลขเครื่อง ต้องมีเลขเอกสาร รหัสพัสดุ และเลขเครื่อง ไม่มีไฟล์นี้ ระบบจะเทียบแค่จำนวน</p>
+      <div class="field"><label for="s-file">ไฟล์ <span class="req">*</span></label><input id="s-file" name="file" type="file" accept=".csv,.xlsx,.txt" required></div>
+      <div class="field"><label for="s-at">เวลาที่ส่งออกจาก SAP <span class="req">*</span></label><input id="s-at" name="exported_at" type="datetime-local" required></div>
+      <button class="btn btn--sm" type="submit">นำเข้าเลขเครื่อง</button>
+    </form>
+    <form class="card stack-sm" method="post" action="{% url 'registry-upload' 'balances' %}" enctype="multipart/form-data">
+      {% csrf_token %}
+      <h2 class="strong">ยอดคงเหลือ</h2>
+      <p class="helptext">เช่น MB52: Unrestricted → พร้อมจ่าย, Quality inspection → รอตรวจ, Blocked → รอซ่อม เฉพาะที่เก็บของ ฝอจ. ที่ตั้งไว้ ยอดเป็นข้อมูลประกอบ ไม่บล็อกการบันทึกจ่าย</p>
+      <div class="field"><label for="b-file">ไฟล์ <span class="req">*</span></label><input id="b-file" name="file" type="file" accept=".csv,.xlsx,.txt" required></div>
+      <div class="field"><label for="b-at">เวลาที่ส่งออกจาก SAP <span class="req">*</span></label><input id="b-at" name="exported_at" type="datetime-local" required></div>
+      <button class="btn btn--sm" type="submit">นำเข้ายอด</button>
+    </form>
+  </div>
+</details>
+{% endif %}
+
+<nav class="chips" aria-label="สถานะส่วนต่างทะเบียน">
+  {% for key, label, count in tabs %}
+    <a class="chip" href="?tab={{ key }}{% if kind %}&amp;kind={{ kind }}{% endif %}"{% if key == tab %} aria-current="page"{% endif %}>{{ label }}{% if count is not None %} <span class="chip__count{% if key == 'open' and count %} chip__count--alert{% endif %}">{{ count }}</span>{% endif %}</a>
+  {% endfor %}
+</nav>
+
+{% if tab != "unreconciled" %}
+<form class="cluster mt-18 mb-24" method="get" data-autosubmit>
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <label class="visually-hidden" for="r-kind">ชนิด</label>
+  <select id="r-kind" name="kind" class="pill-select{% if kind %} is-set{% endif %}">
+    <option value="">ทุกชนิด</option>
+    {% for value, label in kinds %}<option value="{{ value }}"{% if value == kind %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <button class="btn btn--sm filters__apply" type="submit">กรอง</button>
+  <span class="muted">{{ rows|length }} รายการ</span>
+</form>
+{% if rows %}
+  <ol class="queue" aria-label="ส่วนต่างทะเบียน">
+    {% for d in rows %}
+      <li class="qrow qrow--registry">
+        <div class="qrow__main">
+          <div class="qrow__title">
+            <a class="qrow__link" href="{% url 'registry-discrepancy' d.pk %}">เอกสาร {{ d.document_number|default:"-" }}</a>
+            <span class="tag tag--outline">{{ d.get_kind_display }}</span>
+            <span class="qrow__sub">{% if d.case %}เรื่อง {{ d.case.number }}{% else %}ไม่ผูกเรื่อง{% endif %}{% if d.record %} · {{ d.record.get_kind_display }} · บันทึกโดย {{ d.record.division.code }}{% endif %}</span>
+          </div>
+          <p class="qrow__summary">{{ d.detail }}</p>
+          {% if d.division_answer %}<p class="qrow__note">กอง {{ d.division.code }} ตอบ: {{ d.get_division_answer_display }} — {{ d.division_answer_note }}</p>{% endif %}
+        </div>
+        <div class="qrow__meta">
+          <span class="tag tag--muted">{{ d.get_status_display }}</span>
+          <span class="muted">เปิด {{ d.opened_at|thai_short }}{% if d.status != "resolved" %} · ค้าง {{ d.opened_at|days_since }}{% endif %}</span>
+          {% if d.resolution %}<span class="muted">{{ d.get_resolution_display }}</span>{% endif %}
+          {% if d.status == "with_division" %}<span class="muted">รอ {{ d.division.code }}</span>{% endif %}
+        </div>
+      </li>
+    {% endfor %}
+  </ol>
+{% else %}
+  <div class="empty"><strong>ไม่มีส่วนต่างในแท็บนี้</strong>{% if tab == "open" %}เมื่อนำเข้าไฟล์ SAP แล้วพบรายการที่ไม่ตรง จะขึ้นที่นี่{% endif %}</div>
+{% endif %}
+{% else %}
+  <p class="muted mt-18 mb-24">บันทึกที่อ้างเอกสาร SAP เกิน 7 วัน แต่ยังไม่มีไฟล์รายการเอกสารใดครอบคลุมวันที่นั้น (ยังไม่นับเป็นส่วนต่าง)</p>
+  {% if unreconciled %}
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">เรื่อง</th><th scope="col">ชนิด</th><th scope="col">เลขเอกสาร</th><th scope="col">กอง</th><th scope="col">บันทึกเมื่อ</th></tr></thead>
+    <tbody>
+      {% for r in unreconciled %}<tr><td><a href="{% url 'case-detail' r.case.number %}">{{ r.case.number }}</a></td><td>{{ r.get_kind_display }}</td><td>{{ r.document_number }}</td><td>{{ r.division.code }}</td><td>{{ r.recorded_at|thai_short }}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<div class="empty"><strong>ทุกบันทึกเทียบกับไฟล์แล้ว</strong></div>{% endif %}
+{% endif %}
+
+{% if imports %}
+<section class="section mt-24" aria-labelledby="r-imports">
+  <div class="section-head"><h2 id="r-imports">ไฟล์ที่นำเข้าล่าสุด</h2><span class="muted">เก็บไฟล์ต้นฉบับไว้ ลบไม่ได้</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">ชนิด</th><th scope="col">ไฟล์</th><th scope="col">ช่วงวันที่</th><th scope="col">ส่งออกจาก SAP</th><th scope="col" class="num">แถว</th><th scope="col">ผล</th><th scope="col">ผู้นำเข้า</th></tr></thead>
+    <tbody>
+      {% for i in imports %}
+        <tr>
+          <td>{{ i.get_kind_display }}</td>
+          <td>{{ i.original_name }}</td>
+          <td>{% if i.period_from %}{{ i.period_from|thai_date }} – {{ i.period_to|thai_date }}{% else %}-{% endif %}</td>
+          <td>{{ i.exported_at|thai_short }}</td>
+          <td class="num">{{ i.rows }}</td>
+          <td class="muted">{% if i.kind == "balances" %}{{ i.summary.items }} รายการ{% else %}ส่วนต่างใหม่ {{ i.summary.new_total|default:0 }} · ปิดเอง {{ i.summary.resolved|default:0 }}{% endif %}</td>
+          <td>{{ i.uploaded_by.staff_profile.display_name|default:i.uploaded_by.username }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endif %}
+{% endblock %}

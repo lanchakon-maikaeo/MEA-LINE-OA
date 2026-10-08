@@ -1,3 +1,10 @@
-<!doctype html>
-<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ไม่พบหน้า</title></head>
-<body><main><h1>ไม่พบหน้าที่ต้องการ</h1><p><a href="/console/">กลับหน้าหลัก</a></p></main></body></html>
+{% extends "operations/base.html" %}
+{% block title %}ไม่พบหน้า — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="auth">
+  <span class="eyebrow">404</span>
+  <h1>ไม่พบหน้านี้</h1>
+  <p class="lede">ไม่มีหน้านี้ หรือบัญชีนี้ไม่มีสิทธิ์เห็นเรื่องนี้</p>
+  <p class="mt-24"><a class="btn" href="{% if user.is_authenticated %}{% url 'console' %}{% else %}{% url 'index' %}{% endif %}">กลับหน้าแรก</a></p>
+</div>
+{% endblock %}
