@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -10,6 +11,16 @@ from urllib.request import urlopen
 from playwright.sync_api import expect, sync_playwright
 
 RUN = secrets.token_hex(3).upper()
+# K14: the real ฝอจ. structure (ADR 0008), one synthetic account per division. seed_org_demo
+# switches the database (it refuses anything but a demo database) and keeps its own accounts'
+# passwords, so these e2e accounts are added next to them.
+REAL_ACCOUNTS = {"e2e-kcw": "กคว.", "e2e-kae": "กองอุปกรณ์ฯ", "e2e-ktf": "กตฟ."}
+REAL_SETUP = (
+    "import os\n"
+    "from operations.management.commands.seed_org_demo import _account\n"
+    f"for name, code in {REAL_ACCOUNTS!r}.items():\n"
+    "    _account(name, code, os.environ['E2E_PASSWORD'])\n"
+)
 
 
 def sign_in(browser, base_url, username, password, phone=False):
@@ -58,7 +69,11 @@ def file_case(page, base_url, kind, rows, **fields):
     page.locator(f"input[name=kind][value={kind}]").check()
     page.locator("#nc-note").fill(f"e2e {RUN}: เขตโทรแจ้ง")
     for name, value in fields.items():
-        page.locator(f"[name={name}]").fill(value)
+        field = page.locator(f"[name={name}]")
+        if field.evaluate("e => e.tagName") == "SELECT":
+            field.select_option(value)
+        else:
+            field.fill(value)
     for i, (item, quantity, serials) in enumerate(rows):
         page.locator(f"[name=row-{i}-item]").select_option(item)
         page.locator(f"[name=row-{i}-quantity]").fill(quantity)
@@ -195,6 +210,103 @@ def journeys(browser, base_url, password):
     intake.context.close()
 
 
+def finish_triage(page, section=None):
+    """Owner division without an intake desk: start, optionally name the แผนก, confirm P3."""
+    act(page, "เริ่มคัดกรอง")
+    if section:
+        act(page, "ระบุแผนก", [lambda f: f.locator("[name=section]").select_option(label=section)])
+        expect(page.locator("dl.facts dd").first).to_contain_text(section)
+    act(
+        page,
+        "คัดกรองเสร็จ ส่งดำเนินการ",
+        [
+            lambda f: f.locator("[name=priority]").select_option("P3"),
+            lambda f: f.locator("[name=reason]").fill(f"e2e {RUN}: ระดับที่ตกลงในการทดสอบ"),
+        ],
+    )
+
+
+def answer_for_district(page):
+    """The district answered by phone (its requester has no LINE): the case closes."""
+    act(
+        page,
+        "บันทึกคำตอบแทนเขต",
+        [
+            lambda f: f.locator("[name=channel]").select_option("phone"),
+            lambda f: f.locator("[name=intake_note]").fill(f"e2e {RUN}: เขตโทรแจ้ง"),
+        ],
+    )
+    expect(page.locator(".case-head__title")).to_contain_text("ปิดเรื่อง")
+
+
+def real_structure(browser, base_url, password):
+    """K14: the real ฝอจ. structure (ADR 0008). No intake desk, so a case goes straight to the
+    division the rules name; one account per division does every step (separation off)."""
+    # 4. A meter and fuses in one request: one case per division, each sees only its own.
+    kcw = sign_in(browser, base_url, "e2e-kcw", password)
+    meter = file_case(
+        kcw,
+        base_url,
+        "withdrawal",
+        [("MTR_SYN_A", "1", ""), ("FUSE_SYN_A", "6", "")],
+        purpose="เปลี่ยนมิเตอร์และฟิวส์ตู้ย่อย",
+    )
+    notice = kcw.locator(".notice--success")
+    expect(notice).to_contain_text("แยกเป็น 2 เรื่องตามกอง")
+    fuses = next(n for n in re.findall(r"W\d{2}-\d{6}", notice.inner_text()) if n != meter)
+    expect(kcw.locator("dl.facts dd").first).to_contain_text("กคว. กองเครื่องวัดหน่วยไฟฟ้า")
+    finish_triage(kcw)
+    act(kcw, "อนุมัติ", [lambda f: f.locator("[name=line-1-quantity]").fill("1")])
+    assert kcw.goto(f"{base_url}/cases/{fuses}/").status == 404
+    kcw.context.close()
+    kae = sign_in(browser, base_url, "e2e-kae", password)
+    expect(kae.get_by_role("link", name=fuses)).to_be_visible()
+    open_case(kae, base_url, fuses)
+    finish_triage(kae, section="แผนกซ่อมสร้างอุปกรณ์ไฟฟ้า")
+    act(kae, "อนุมัติ", [lambda f: f.locator("[name=line-1-quantity]").fill("6")])
+    act(
+        kae,
+        "บันทึกการจ่ายของ",
+        [
+            lambda f: f.locator("[name=recipient_name]").fill("ผู้รับทดสอบ"),
+            lambda f: f.locator("[name=line-1-quantity]").fill("6"),
+        ],
+    )
+    expect(kae.locator("[data-tour=deliveries]")).to_contain_text("รอยืนยันรับ")
+    kae.screenshot(path="reports/e2e-real-withdrawal.png", full_page=True)
+    answer_for_district(kae)
+    kae.context.close()
+
+    # 5. Electricity use (การใช้ไฟฟ้า): straight to กตฟ., a แผนก, resolved; other queues closed.
+    ktf = sign_in(browser, base_url, "e2e-ktf", password, phone=True)
+    number = file_case(
+        ktf,
+        base_url,
+        "problem",
+        [],
+        topic="usage",
+        description="สงสัยลักใช้ไฟ ต่อสายตรงไม่ผ่านมิเตอร์ (ข้อมูลจำลอง)",
+    )
+    expect(ktf.locator("dl.facts dd").first).to_contain_text("กตฟ. กองตรวจสอบการใช้ไฟฟ้า")
+    expect(ktf.locator("dl.facts")).to_contain_text("การใช้ไฟฟ้า (ไม่ส่งให้ AI)")
+    finish_triage(ktf, section="แผนกตรวจสอบการใช้ไฟฟ้า 1")
+    act(
+        ktf,
+        "บันทึกผลการแก้ปัญหา",
+        [
+            lambda f: f.locator("[name=category]").first.check(),
+            lambda f: f.locator("[name=message]").fill("ตรวจแล้ว แก้การต่อสายเรียบร้อย (ข้อมูลจำลอง)"),
+        ],
+    )
+    ktf.screenshot(path="reports/e2e-real-usage-phone.png", full_page=True)
+    answer_for_district(ktf)
+    assert ktf.goto(base_url + "/divisions/กคว./").status == 404
+    ktf.goto(base_url + "/reports/")
+    expect(ktf.get_by_text("แผนกตรวจสอบการใช้ไฟฟ้า 1").first).to_be_visible()
+    ktf.context.close()
+    return meter, fuses, number
+
+
 with socket.socket() as sock:
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -259,6 +371,16 @@ with Path("reports/e2e-server.log").open("w") as log:
                 base_url + "/accounts/login/"
             )
             journeys(browser, base_url, env["E2E_PASSWORD"])
+            # The SIM-* journeys are done; switch the same database to the real structure.
+            demo = {k: v for k, v in env.items() if k != "DEMO_STAFF_PASSWORD"}
+            for command in (["seed_org_demo"], ["shell", "-c", REAL_SETUP]):
+                subprocess.run(
+                    [sys.executable, "manage.py", *command],
+                    env=demo,
+                    check=True,
+                    capture_output=True,
+                )
+            real_structure(browser, base_url, env["E2E_PASSWORD"])
             browser.close()
         print("PASS Chromium: Thai landing, keyboard link, database readiness")
         print("PASS Chromium: keyboard login, own-division scope, admin denied, logout")
@@ -267,6 +389,8 @@ with Path("reports/e2e-server.log").open("w") as log:
         print(
             "PASS Chromium: M10 hazard problem, route chosen against the proposal (phone, keyboard)"
         )
+        print("PASS Chromium: real structure, one request split per division, issued in its แผนก")
+        print("PASS Chromium: real structure, electricity use to กตฟ., resolved (phone), scope")
     finally:
         process.terminate()
         try:
