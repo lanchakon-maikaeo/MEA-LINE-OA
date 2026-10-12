@@ -27,7 +27,7 @@
         "test_m07_fulfilment.NotificationTests.test_a_delivery_asks_for_receipt_with_bound_buttons"
       ],
       "evidence": ["live-line", "simulate-line", "ci"],
-      "external": "ทำซ้ำบน faoj-staging กับ OA ทดสอบเมื่อมี OCI (G06)"
+      "external": "ทำซ้ำบน faoj-staging กับ @894attlg ก่อน go-live เมื่อมี OCI (G06)"
     },
     {
       "id": "A02",
@@ -243,7 +243,7 @@
       "title": "Integration",
       "signer": "เจ้าของระบบเชื่อมต่อ",
       "rows": [
-        {"need": "LINE จริง + n8n container + AI API จริง", "evidence": ["live-line"], "external": "ทำซ้ำบน faoj-staging กับ OA ทดสอบ"},
+        {"need": "LINE จริง + n8n container + AI API จริง", "evidence": ["live-line"], "external": "ทำซ้ำบน faoj-staging กับ @894attlg ก่อน go-live (OA เดียว ตาม C.2.3)"},
         {"need": "timeout/reconciliation และสัญญากับระบบทะเบียน", "tests": ["test_m11_registry.ExternalOperationTests.test_a_timeout_after_the_registry_applied_it_is_settled_by_asking"], "external": "เจ้าของระบบทะเบียนยืนยันเอกสารหรือ API"}
       ]
     },

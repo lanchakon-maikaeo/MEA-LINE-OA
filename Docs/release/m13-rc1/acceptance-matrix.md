@@ -22,7 +22,7 @@
 | G03 ธุรกรรมและ routing | รอหลักฐานภายนอก | QA + เจ้าของกระบวนการ | QA และเจ้าของกระบวนการ |
 | G04 Security | รอหลักฐานภายนอก | ผู้รับผิดชอบ security | ผู้รับผิดชอบ security |
 | G05 AI | รอหลักฐานภายนอก | ผู้รับผิดชอบ AI + ฝอจ. | endpoint/key/โควตาจริง ประเมินซ้ำ และ ฝอจ. ทบทวนผล; ไม่อยู่ใน candidate นี้ ผู้ใช้ตัดสินภายหลัง ต้องประเมินใหม่ |
-| G06 Integration | รอหลักฐานภายนอก | เจ้าของระบบเชื่อมต่อ | ทำซ้ำบน faoj-staging กับ OA ทดสอบ; เจ้าของระบบทะเบียนยืนยันเอกสารหรือ API |
+| G06 Integration | รอหลักฐานภายนอก | เจ้าของระบบเชื่อมต่อ | ทำซ้ำบน faoj-staging กับ @894attlg ก่อน go-live (OA เดียว ตาม C.2.3); เจ้าของระบบทะเบียนยืนยันเอกสารหรือ API |
 | G07 CI/CD | รอหลักฐานภายนอก | ผู้ดูแล release | รันจริงบน GitHub และ OCI |
 | G08 Operations | รอหลักฐานภายนอก | ผู้ดูแลระบบ/DB | วัดบน faoj-prod และกู้ลง faoj-staging; OCI Monitoring/Notifications และรายชื่อเวร |
 | G09 UAT | รอหลักฐานภายนอก | ตัวแทนผู้ใช้ | ตัวแทนผู้ใช้ทำตาม Docs/release/uat-script.md |
@@ -32,7 +32,7 @@
 
 | ข้อ | สิ่งที่ต้องมี | สถานะ | หลักฐาน |
 | --- | --- | --- | --- |
-| A01 | LINE OA ส่วนตัวจริง → n8n container → ThaiLLM API จริง → เว็บเฉพาะกอง/แอดมิน → ผล LINE ถึงเจ้าของเรื่อง ครบสามงาน | รอหลักฐานภายนอก: ทำซ้ำบน faoj-staging กับ OA ทดสอบเมื่อมี OCI (G06) | live-line, simulate-line, ci, เทสต์ 4 รายการ |
+| A01 | LINE OA ส่วนตัวจริง → n8n container → ThaiLLM API จริง → เว็บเฉพาะกอง/แอดมิน → ผล LINE ถึงเจ้าของเรื่อง ครบสามงาน | รอหลักฐานภายนอก: ทำซ้ำบน faoj-staging กับ @894attlg ก่อน go-live เมื่อมี OCI (G06) | live-line, simulate-line, ci, เทสต์ 4 รายการ |
 | A02 | P0: แจ้งอันตรายได้ P0 และคำแนะนำทันที แม้ AI ล่ม | ผ่าน | simulate-line, เทสต์ 4 รายการ |
 | A03 | unknown: ไม่รู้ของ ไม่รู้ยอด หรือระบบภายนอกไม่ตอบ ไม่เดาและไม่ทำซ้ำ | ผ่าน | เทสต์ 3 รายการ |
 | A04 | partial: อนุมัติ จ่าย และคืนบางส่วน แล้วยุติส่วนที่เหลือ | ผ่าน | เทสต์ 4 รายการ |
@@ -54,8 +54,8 @@
 
 | หลักฐาน | ผล | ไฟล์ (sha256) |
 | --- | --- | --- |
-| ci | ผ่าน | ci.json `05ed2257b132`<br>migrate.log `14b0c6097093`<br>check.log `46732ec0eb1e`<br>test.log `10cfb35f7e90`<br>test-e2e.log `a74d4eebc4e9`<br>security.log `baf6b1aecd39` |
-| tests | ผ่าน | test.log `10cfb35f7e90` |
+| ci | ผ่าน | ci.json `05ed2257b132`<br>migrate.log `14b0c6097093`<br>check.log `79c9f6a51576`<br>test.log `c9fc42c56ca7`<br>test-e2e.log `4beedab7fa07`<br>security.log `baf6b1aecd39` |
+| tests | ผ่าน | test.log `c9fc42c56ca7` |
 | acceptance-tests | ผ่าน | acceptance-tests.log `a8fbf04ff2e2` |
 | simulate-line | ผ่าน | sim-seed1.json `e29f0faa70de`<br>sim-seed7.json `6a6199343540` |
 | ai-extract | ผ่าน | ai-extract.json `a8f0a7a0f4bf` |
