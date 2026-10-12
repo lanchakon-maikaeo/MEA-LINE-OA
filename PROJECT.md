@@ -2,7 +2,7 @@
 
 เอกสารหลัก: ขอบเขตโครงการ · Priority Engine · Production-ready · แผนพัฒนาตามโมดูล · Technology Stack · CI/CD · โมดูลสำหรับ AI implement · คำศัพท์กลาง
 
-ปรับปรุง: 8 ตุลาคม 2569 | สถานะ: M00–M11 เสร็จในเครื่อง (done local); M12 implementation done (ซ้อมครบบนเครื่อง รอ OCI tenancy เพื่อทดสอบ runtime); M13 planned; ยังไม่ deploy staging/production บน OCI
+ปรับปรุง: 12 ตุลาคม 2569 | สถานะ: M00–M11 เสร็จในเครื่อง (done local); M12 implementation done (ซ้อมครบบนเครื่อง รอ OCI tenancy เพื่อทดสอบ runtime); M13 done (local): release candidate `m13-rc1` (commit `9c0a4c3`) มีหลักฐานบนเครื่องครบและทดสอบกับ LINE จริงแล้ว G01–G10 ยังไม่ผ่านเพราะรอหลักฐานภายนอกและผู้รับรอง; ยังไม่ deploy staging/production บน OCI
 
 ขอบเขตงานรอบนี้: ปรับแผนในเอกสารเท่านั้น ยกเลิกกรอบเวลาเดิม และกำหนดเป้าหมาย production-ready ตามโมดูล ยังไม่เริ่ม implementation เพิ่ม คำสั่งและลำดับพัฒนาด้านล่างเป็นแผนสำหรับเมื่อผู้ใช้สั่งเริ่มพัฒนา
 
@@ -1704,7 +1704,7 @@ Rollback ปกติคือกลับ image digest ก่อนหน้า
 | `make check`, `make test` | lint/check/migration drift และ tests; ไม่มี test ที่เลือกให้ fail ไม่ใช่สำเร็จเงียบ |
 | `make test-module MODULE=Mxx` | map module ID ไป test suite ที่มีจริง; ID ไม่รู้จักหรือ suite ว่างต้อง exit non-zero |
 | `make test-e2e`, `make security` | browser journeys และ secret/dependency/image scans พร้อม reports |
-| `make eval-ai`, `make load-test` | ใช้ staging endpoint/ชุดประเมินที่ระบุ เก็บ model/config/latency/results ไม่เรียก AI จริงในทุก PR |
+| `make eval-ai`, `make load-test` | ใช้ staging endpoint/ชุดประเมินที่ระบุ เก็บ model/config/latency/results ไม่เรียก AI จริงในทุก PR; `make load-test` (M13) = `faoj load-test smoke\|design` ผ่าน Caddy ด้วยข้อมูลจำลอง ปฏิเสธใน production |
 | `make build`, `make smoke` | build image และ smoke environment ที่ explicit |
 | `make deploy ENV=staging RELEASE=<digest>` | ตรวจ digest/config แล้ว deploy ผ่าน script เดียวกับ production |
 | `make rollback ENV=staging RELEASE=<previous-digest>` | ตรวจ compatibility/authorization แล้ว revert image; ไม่ restore DB อัตโนมัติ |
@@ -1740,7 +1740,7 @@ Backup baseline self-hosted: pgBackRest full weekly + differential daily + conti
 Runbooks (เขียนครบใน M12, 8 ตุลาคม 2569; คำสั่งรันบนเครื่องผ่าน OCI Bastion ด้วย `sudo faoj …` ทุกขั้นที่เปลี่ยนระบบให้บันทึกเวลาและเหตุผลในบันทึกเหตุการณ์):
 
 - **RB01 DB/app outage** (alert host-down, unhealthy, outbox/inbox age): `faoj status` ดูว่า container ไหนล้ม → ถ้าคาดว่าเกิน 5 นาที `faoj maintenance on` (เว็บและ LINE webhook ตอบ 503 พร้อมเบอร์โทรและลิงก์แบบฟอร์มสำรอง; LINE ส่ง webhook ซ้ำเมื่อเปิด Webhook redelivery) → แจ้งกองรับเรื่องกลางให้รับเรื่องทางช่องทางรับเรื่องสำรอง → `docker compose -p faoj restart <service>` หรือ reboot เครื่อง → `faoj smoke` → `faoj maintenance off` → ดู `inbox_pending_oldest_seconds` และ `outbox_oldest_pending_seconds` กลับเป็น 0 → กองรับเรื่องกลางบันทึกเรื่องจากช่องทางสำรองแทนผู้แจ้ง (ช่องทาง "แบบฟอร์มสำรอง"/"โทรศัพท์" พร้อม**เวลาแจ้งจริง**) ถ้าเครื่องเสียถาวรใช้ RB05 กู้ลง `faoj-staging`
-- **RB02 AI unavailable**: ปิด AI ที่หน้าแอดมิน AI (หรือ `AI_ENABLED=false` ใน `django.env` แล้ว `faoj deploy` digest เดิม) บทสนทนากลับเป็นคำถามทีละช่องเอง → ตรวจ profile/endpoint/key/quota ที่หน้าแอดมิน AI และ `make eval-ai` บน staging → เปิดกลับ เรื่องที่รอ AI คัดกรองยังอยู่ในคิวให้คนทำ
+- **RB02 AI unavailable**: หน้าแอดมิน AI → "หยุดใช้ AI ของงาน" เลือกงานที่มีปัญหาแล้วใส่เหตุผล (หรือ `manage.py stop_ai --task extract|answer|triage --username <แอดมินผู้พัฒนา> --reason ...`; ปิดทุกงานพร้อมกันด้วย `AI_ENABLED=false` ใน `django.env` แล้ว `faoj deploy` digest เดิม) บทสนทนากลับเป็นคำถามทีละช่อง ตอบจากคำสำคัญ และกติกายังเสนอกองและระดับ งานคัดกรองที่รอ AI ปิดเป็นไม่ใช้ AI ให้คนคัดกรอง → ตรวจ profile/endpoint/key/quota ที่หน้าแอดมิน AI และ `make eval-ai` บน staging → เปิดกลับด้วยเมนูเปลี่ยนรุ่น (รุ่นต้องมีผลประเมินของโค้ดที่ใช้อยู่)
 - **RB03 LINE failure/quota** (alert line-quota, dead-letter): หน้า `/console/admin/line/` ดูผล 429/monthly limit/unknown → อย่ากดส่งซ้ำรายการ unknown จนตรวจกับ LINE แล้ว → ถ้างบเดือนหมด ข้อความ critical เท่านั้นที่ส่งได้ (tier 2) แจ้งกองรับเรื่องกลางโทรหาผู้แจ้งที่รอข้อมูล → ส่ง dead-letter กลับเข้าคิวพร้อมเหตุผลเมื่อสาเหตุหายแล้ว
 - **RB04 External unknown** (alert external-unknown): ห้ามส่งซ้ำ → ถามระบบทะเบียนด้วย operation ID (`registry_ops.reconcile_external`) → คนตรวจเอกสาร SAP → ยืนยันหรือ fail พร้อมหลักฐาน ปัจจุบันไม่มี adapter จริง (ADR 0005) จึงไม่ควรเกิดใน production
 - **RB05 Restore/data corruption** (alert backup-age, wal-archive): หยุดการเขียน `faoj maintenance on` และ `docker compose -p faoj stop worker n8n` → เก็บหลักฐาน (`faoj releases`, log) → บน `faoj-staging`: `faoj restore-drill --keep` (หยุด stack ของ staging ให้เอง กู้ฐานข้อมูลถึง WAL สุดท้ายและไฟล์ล่าสุด ตรวจไฟล์กับ checksum รายงาน RPO/RTO) → ตรวจข้อความ LINE และรายการ SAP ที่เกิดหลังจุดกู้ ก่อนเปิดส่งข้อความออก → ผู้รับผิดชอบอนุมัติเปิดใช้ (ชี้ LINE webhook ไปที่ staging หรือสร้าง prod ใหม่แล้ว restore กลับ) ห้าม replay การแจ้งเตือนจาก n8n execution history
@@ -1754,16 +1754,18 @@ Runbooks (เขียนครบใน M12, 8 ตุลาคม 2569; คำ�
 
 | Gate | หลักฐานที่ต้องมีเพื่อผ่าน | ผู้รับรองตามบทบาท | สถานะปัจจุบัน |
 | --- | --- | --- | --- |
-| G01 ขอบเขตและระดับบริการ | ขอบเขตสาม workflow, load/SLO/RPO/RTO ที่รับรอง, pilot districts และคนดูแล | เจ้าของกระบวนการ + ผู้ดูแลระบบ | ยังไม่ตรวจรับ |
-| G02 ตัวตน/ข้อมูล/อำนาจ | 18 เขตแมป official codes, กอง/AuthorityGrant/ServicePolicy จริง, บัญชีรายบุคคล/การรับรอง LINE/กอง/บทบาท/แอดมินผู้พัฒนา, retention และช่องทางฉุกเฉิน | ฝอจ. + เจ้าของตัวตน/ข้อมูล | ยังไม่ตรวจรับ |
-| G03 ธุรกรรมและ routing | S01–S16 + R02 โดยตรง + transition/partial/concurrency/idempotency; ไม่เหลือ defect ที่ทำสิทธิ์/ยอดผิด | QA + เจ้าของกระบวนการ | ยังไม่ตรวจรับ |
-| G04 Security | threat cases E.7, dependency/image/secret reports, same-district other-user/cross-district/cross-division download/export, no-role/revoked-session, AI config authorization และ signed LINE actions ผ่าน | ผู้รับผิดชอบ security | ยังไม่ตรวจรับ |
-| G05 AI | held-out evaluation จาก API จริง, model ID/profile version/prompt, provider revision เมื่อมี, model/key switch ผ่านเว็บและ configuration, evidence validation/fallback และเจ้าหน้าที่ทบทวนผล | ผู้รับผิดชอบ AI + ฝอจ. | ยังไม่ตรวจรับ |
-| G06 Integration | LINE จริงบน OA ทดสอบ, n8n container/workflows และ ThaiLLM API ที่บัญชีใช้ได้จริง, manual-reference หรือ API contract ของสต็อก, timeout/reconciliation ผ่าน | เจ้าของระบบเชื่อมต่อ | ยังไม่ตรวจรับ |
-| G07 CI/CD | PR checks fail ได้จริง, immutable app/n8n images และ workflow revision, staging promotion, secret isolation, migration/rollback rehearsal | ผู้ดูแล release | ยังไม่ตรวจรับ |
-| G08 Operations | load report, alerts มีผู้รับ, restore drill app DB+n8n metadata/volume+files+secret recovery ผ่าน RPO/RTO, runbooks และรายชื่อเวร | ผู้ดูแลระบบ/DB | ยังไม่ตรวจรับ |
-| G09 UAT | ตัวแทนเขต/ฝอจ. ทำสามเส้นทางและกรณีเห็นต่าง/ข้อมูลขาดสำเร็จ; training/คู่มือพร้อม | ตัวแทนผู้ใช้ | ยังไม่ตรวจรับ |
-| G10 Release | release manifest, open risks ที่มีเจ้าของ/กำหนดแก้, pilot go/no-go, rollback owner และหลักฐาน G01–G09 | เจ้าของโครงการ + release owner | ยังไม่ตรวจรับ |
+| G01 ขอบเขตและระดับบริการ | ขอบเขตสาม workflow, load/SLO/RPO/RTO ที่รับรอง, pilot districts และคนดูแล | เจ้าของกระบวนการ + ผู้ดูแลระบบ | ยังไม่ตรวจรับ · บนเครื่อง: สามงานผ่าน CI บทสนทนาจำลอง และ LINE จริง, load และ restore ซ้อมบน Mac (m13-rc1) · รอ: วัดบน faoj-prod เขต pilot และผู้รับรอง |
+| G02 ตัวตน/ข้อมูล/อำนาจ | 18 เขตแมป official codes, กอง/AuthorityGrant/ServicePolicy จริง, บัญชีรายบุคคล/การรับรอง LINE/กอง/บทบาท/แอดมินผู้พัฒนา, retention และช่องทางฉุกเฉิน | ฝอจ. + เจ้าของตัวตน/ข้อมูล | ยังไม่ตรวจรับ · บนเครื่อง: เทสต์สิทธิ์ผ่าน · รอ: ข้อมูลจริงของ ฝอจ. retention และผู้รับรอง |
+| G03 ธุรกรรมและ routing | S01–S16 + R02 โดยตรง + transition/partial/concurrency/idempotency; ไม่เหลือ defect ที่ทำสิทธิ์/ยอดผิด | QA + เจ้าของกระบวนการ | ยังไม่ตรวจรับ · บนเครื่อง: S01–S16 และเทสต์ทำพร้อมกันผ่าน · รอ: QA และเจ้าของกระบวนการรับรอง |
+| G04 Security | threat cases E.7, dependency/image/secret reports, same-district other-user/cross-district/cross-division download/export, no-role/revoked-session, AI config authorization และ signed LINE actions ผ่าน | ผู้รับผิดชอบ security | ยังไม่ตรวจรับ · บนเครื่อง: secret/dependency/image scan สะอาด เทสต์ภัยคุกคามผ่าน · รอ: ผู้รับผิดชอบ security |
+| G05 AI | held-out evaluation จาก API จริง, model ID/profile version/prompt, provider revision เมื่อมี, model/key switch ผ่านเว็บและ configuration, evidence validation/fallback และเจ้าหน้าที่ทบทวนผล | ผู้รับผิดชอบ AI + ฝอจ. | ยังไม่ตรวจรับ · บนเครื่อง: สกัดร่าง v11 และตอบแชต v14 ผ่าน gate บน source ของ candidate (OpenTyphoon ข้อมูลจำลอง) คัดกรองไม่อยู่ในรุ่นนี้ · รอ: ThaiLLM ขององค์กร คลังคำตอบจริง ผู้รับรอง |
+| G06 Integration | LINE จริงบน OA ทดสอบ, n8n container/workflows และ ThaiLLM API ที่บัญชีใช้ได้จริง, manual-reference หรือ API contract ของสต็อก, timeout/reconciliation ผ่าน | เจ้าของระบบเชื่อมต่อ | ยังไม่ตรวจรับ · บนเครื่อง: LINE @894attlg จริงผ่าน tunnel + n8n + AI ครบสามงาน · รอ: staging กับ OA ทดสอบ และระบบทะเบียนจริง |
+| G07 CI/CD | PR checks fail ได้จริง, immutable app/n8n images และ workflow revision, staging promotion, secret isolation, migration/rollback rehearsal | ผู้ดูแล release | ยังไม่ตรวจรับ · บนเครื่อง: image เดียว deploy และ rollback ซ้อม · รอ: GitHub OCIR และ staging promotion |
+| G08 Operations | load report, alerts มีผู้รับ, restore drill app DB+n8n metadata/volume+files+secret recovery ผ่าน RPO/RTO, runbooks และรายชื่อเวร | ผู้ดูแลระบบ/DB | ยังไม่ตรวจรับ · บนเครื่อง: restore drill และ load design บน Mac · รอ: faoj-prod alert ถึงผู้รับจริง ผู้ดูแลคนที่ 2 |
+| G09 UAT | ตัวแทนเขต/ฝอจ. ทำสามเส้นทางและกรณีเห็นต่าง/ข้อมูลขาดสำเร็จ; training/คู่มือพร้อม | ตัวแทนผู้ใช้ | ยังไม่ตรวจรับ · มีสคริปต์ UAT ผู้ใช้ทำ U01–U03 บนเครื่องแล้ว · รอ: ตัวแทนเขตและ ฝอจ. บน staging |
+| G10 Release | release manifest, open risks ที่มีเจ้าของ/กำหนดแก้, pilot go/no-go, rollback owner และหลักฐาน G01–G09 | เจ้าของโครงการ + release owner | ยังไม่ตรวจรับ · มี release manifest acceptance matrix ความเสี่ยงที่มีเจ้าของ และแบบ go/no-go · รอ: ลงนาม |
+
+ตารางหลักฐานต่อแถวของทุก gate อยู่ใน [Docs/release/m13-rc1/acceptance-matrix.md](Docs/release/m13-rc1/acceptance-matrix.md) (สร้างจาก `deploy/acceptance.json` ด้วย `make release-candidate`)
 
 AI acceptance ตั้งเป้าเริ่มต้นสำหรับ review: intent macro-F1 ≥ 0.90, exact match ของ item/quantity/unit ในข้อมูลที่ระบุชัด ≥ 0.95, valid JSON หลัง bounded retry ≥ 0.99 บนชุด held-out อย่างน้อย 150 ข้อความ ครบ 3 intents และกรณี unknown/mixed; รายงานจำนวนตัวอย่าง ความผิดพลาดแยกกลุ่มและ latency ไม่เลือกเฉพาะตัวอย่างสำเร็จ ตัวเลขนี้เป็นเกณฑ์เสนอที่ต้องรับรอง ไม่ใช่ผลที่วัดแล้ว ถ้าไม่ผ่านให้ G05 ยังไม่ผ่านและแก้/ประเมินซ้ำก่อนเปิดรุ่นที่มี AI ตามขอบเขตนี้ ส่วน manual flow เป็น fallback เมื่อเกิดขัดข้อง ไม่ใช้แทนหลักฐานว่า AI ผ่านเกณฑ์
 
@@ -1859,7 +1861,7 @@ n8n เป็นองค์ประกอบที่เลือกสำห�
 | M10 | เว็บเฉพาะกอง/แอดมิน/รายงาน | M03, M05, M07, M08, M09 | division/admin UI, scoped export, account/profile screens | done (local); 46 tests + Playwright 3 เส้นทาง + `make ci` 5 ขั้นผ่าน; เห็นเฉพาะเรื่องของกอง แอดมินอ่านอย่างเดียว; สาธิตการใช้งานพร้อมฟอร์มตัวอย่าง; อีเมลเจ้าหน้าที่ปิดไว้จนมี SMTP องค์กร — ดู [M10](#module-m10) |
 | M11 | เชื่อมระบบทะเบียน/กระทบยอด | M07, M08, M09 | ExternalOperation, inventory adapter | done (local); 44 tests + `make ci` 5 ขั้นผ่าน; โหมดอ้างเลขเอกสารบังคับหลักฐาน, กระทบยอดด้วยไฟล์ SAP, ส่วนต่างทะเบียนให้กองทะเบียนตัดสิน (ADR 0005); `api_confirmed` มีแค่สัญญาและระบบจำลอง รอ G06 — ดู [M11](#module-m11) |
 | M12 | Production infra + CD/operations | M04, M10, M11 | app/n8n digests, workflow release, recovery/alerts | implementation done (ซ้อมบนเครื่อง); 22 tests + mutation 10/10 + `make ci` ผ่าน; deploy/rollback/backup/restore drill ซ้อมครบ; OCI runtime รอ tenancy — ดู [M12](#module-m12) |
-| M13 | E2E/UAT/release evidence | M12 | G01–G10, acceptance report, release manifest | in progress: โครงสร้างจริง ฝอจ. (ADR 0008), ตัวเลือกระบบ (ADR 0009), ยืนยันตัวตนและเจ้าหน้าที่ใน LINE (ADR 0010), บทสนทนาจำลองกับบอทจริง (ADR 0011, `make simulate-line`), บอทตอบคำถามในแชต (ADR 0012); UAT/release evidence ยังไม่เริ่ม — ดู [M13](#module-m13) |
+| M13 | E2E/UAT/release evidence | M12 | G01–G10, acceptance report, release manifest | done (local): release candidate `m13-rc1` = `9c0a4c3`; LINE จริง→n8n→AI→เว็บ→LINE ครบสามงาน, AI v11/v14 ผ่าน gate บน source ของ candidate, make ci, acceptance tests 66 รายการ, deploy/rollback/restore/load ซ้อมบนเครื่อง, manifest + acceptance matrix + UAT + go/no-go + ความเสี่ยงที่มีเจ้าของ; G01–G10 รอหลักฐานภายนอกและผู้รับรอง — ดู [M13](#module-m13) |
 
 ลำดับแนะนำ: M00 → M01 → M02 → M03/M04/M06 → M05/M07/M08/M09 → M10 → M11 → M12 → M13 งานที่ dependency ครบสามารถแบ่งผู้พัฒนาทำได้ แต่ `models.py`, `services.py`, schema และ migrations ต้องมีผู้รวมการเปลี่ยนแปลงคนเดียวต่อรอบ ไม่ให้ AI หลายงานเปลี่ยน contract แยกกันโดยไม่ตรวจ caller
 
@@ -2750,6 +2752,90 @@ Implement M12: ทำ OCI infrastructure ตาม E.2.1 ไม่เกิน�
     - เลือกคำตอบถูก 100%, คำตอบที่เขียนผ่านกฎ 100%, red-team ฝ่าได้ 0
     - คำถามต่อผ่านกฎ 100% (เดิม 90%)
     - p95 ประมาณ 2 วินาที, security suites 226 tests
+
+#### รอบ release candidate m13-rc1 (12 ต.ค. 2569, ผู้ใช้สั่ง "ทำ M13 ให้เสร็จ")
+
+ผู้ใช้ตอบ 4 ข้อ เลือกตามที่แนะนำทุกข้อ:
+
+| ข้อ | การตัดสิน |
+| --- | --- |
+| commit | commit งานทั้งหมดเป็น release candidate บน branch นี้ ไม่ push ไม่เปิด PR: โค้ดอยู่ใน `9c0a4c3` แล้ว commit เอกสารหลักฐานแยกอีกชุด |
+| AI คัดกรอง | ไม่อยู่ใน candidate นี้ หยุดใช้ v13 แล้ว งานค้าง 55 เรื่องปิดเป็นไม่ใช้ AI เปิดภายหลังต้องประเมินใหม่และผู้ใช้ตัดสิน |
+| ประเมิน AI ใหม่ | อนุมัติหนึ่งครั้งตอนหยุดแก้โค้ด |
+| LINE จริง | ทำตอนท้าย: เปิด tunnel ชั่วคราว ผู้ใช้ตั้ง webhook เองและคุยจากมือถือ บอทตอบเฉพาะ LINE ใน allowlist |
+
+สิ่งที่เพิ่ม:
+- **หยุดใช้ AI ของงาน:** หน้า AI มีฟอร์ม "หยุดใช้ AI ของงาน" (แอดมินผู้พัฒนา ต้องมีเหตุผล บันทึก audit `ai.task_stopped`) และ `manage.py stop_ai` รุ่นที่หยุดเป็น "เลิกใช้" งานใหม่ทำต่อโดยไม่ใช้ AI งานคัดกรองที่ยังไม่ถึงคิวปิดเป็น "หยุดใช้ AI คัดกรองก่อนถึงคิว" (migration 0027) เปิดกลับใช้เมนูเปลี่ยนรุ่น ซึ่งต้องมีผลประเมินของโค้ดที่ใช้อยู่ เดิม RB02 ให้ปิด AI ที่หน้าแอดมิน แต่หน้าเว็บยังทำไม่ได้
+- **รายงาน push ต่อเรื่อง:** `manage.py line_usage_report` (บน host: `faoj line-usage`) นับ push ที่ LINE คิดโควตา แยกผู้แจ้ง เจ้าหน้าที่ และชนิดข้อความ หาร push ต่อเรื่อง คาดการณ์เดือนนี้และเมื่อเปิดครบ 18 เขต แล้วเสนอแพ็กเกจตามเกณฑ์ C.2.3 ไม่มีชื่อ LINE ID หรือข้อความ
+- **load test:** `make load-test` = `faoj load-test smoke|design` รัน k6 v2.3.0 (pin digest) ผ่าน Caddy แบบเดียวกับที่ LINE และเจ้าหน้าที่เข้ามา ส่ง webhook ที่ลงลายเซ็นด้วย channel secret ของเครื่องนั้น และเปิดหน้าคิวกับหน้าเรื่องด้วยบัญชีเจ้าหน้าที่จำลอง (`prepare_load_test` สร้างผู้แจ้ง LINE จำลอง 50 คน ปฏิเสธใน production) เกณฑ์ผ่านตาม E.9 แล้ว `load_report` บอกเวลาจากรับ event ถึงจบตาของบอท
+- **ตาราง acceptance และ release record:** `deploy/acceptance.json` ระบุข้อ A01–A17 ของ M13 และ G01–G10 พร้อมเทสต์ 66 รายการและหลักฐานที่ต้องมี `make acceptance-tests` รันเทสต์เหล่านั้นแบบระบุชื่อ `make release-candidate` เขียน `release-manifest.json` กับ `acceptance-matrix.md` และตรวจว่าไม่มีค่าลับหรือ LINE ID ก่อนเขียน แถวที่ต้องใช้หลักฐานภายนอกไม่ผ่านจากหลักฐานบนเครื่อง และ gate ผ่านได้เมื่อผู้รับรองลงนามเท่านั้น (เทสต์ `CandidateTests`)
+- `scripts/live_line_trace.py` สรุปรอบ LINE จริงโดยไม่มี LINE ID ชื่อ หรือข้อความ
+- เอกสาร: [สคริปต์อบรมและ UAT](Docs/release/uat-script.md) (U01–U16) และ [บันทึก go/no-go](Docs/release/go-no-go.md) ผลรวมของรุ่นอยู่ใน [Docs/release/m13-rc1](Docs/release/m13-rc1/acceptance-matrix.md)
+- แก้ระหว่างซ้อม: `deploy/rehearsal.sh` สร้าง registry และ S3 จำลองใหม่เมื่อ container เก่าหยุดอยู่ (เดิมข้ามไปเพราะชื่อซ้ำ แล้ว push image ไม่ได้) และ k6 เก็บ cookie ข้ามรอบ (เดิม session ของเจ้าหน้าที่จำลองหายทุกรอบ ทำให้หน้าเว็บดูเร็วเกินจริงเพราะได้หน้า login)
+
+หลักฐานของ candidate `9c0a4c3` (image ที่ซ้อม `localhost:5001/faoj/app@sha256:8dc6a2f0…`, source digest `0b3b49fb8aff`):
+
+| หลักฐาน | ผล |
+| --- | --- |
+| LINE จริง (A01) | ผู้ใช้คุยกับ @894attlg จากมือถือผ่าน tunnel: webhook 25 event บอทตอบครบ 25, AI สกัดร่าง 3 ครั้งผ่าน n8n (`typhoon-v2.5-30b-a3b-instruct`), เจ้าหน้าที่ทำผ่านเว็บ, push ถึง LINE 4 ข้อความ (นับโควตา 3), ผู้แจ้งกดยืนยันรับของและยืนยันผลใน LINE: W69-000032 เบิก (กคว.), R69-000011 คืน (กคว.), P69-000016 แจ้งปัญหา (กองอุปกรณ์ฯ) ปิดครบทั้งสามเรื่อง |
+| AI สกัดร่าง v11 | ผ่านบน source นี้: heldout-v4 intent 0.975 items 0.972 p95 1.9 วิ, redteam-v1 ทุกค่า 1.0, redteam-v2 items 0.80 ร่างไม่ปนเปื้อน 0.85 p95 5.5 วิ, security 227 tests |
+| AI ตอบแชต v14 | ผ่านทั้งสองรอบ: เลือกคำตอบถูก 0.975 และ 1.0, เลือกผิด 0, คำตอบที่เขียนผ่านกฎ 0.971 และ 1.0, คำถามต่อผ่านกฎ 1.0, red-team ฝ่าได้ 0, p95 1.6–1.9 วิ |
+| make ci | ผ่านครบ 5 ขั้นบนฐานข้อมูลเปล่าแบบ GitHub CI (postgres 17 ชื่อ `mea_ci`): migrate, check, เทสต์ 676 รายการ, e2e Chromium 5 เส้นทาง, secret และ dependency scan สะอาด; รอบแรกบนฐานสาธิตในเครื่อง e2e ไม่ผ่านเพราะกองจำลอง SIM-* ถูกปิดตั้งแต่ใช้โครงสร้างจริง และสคริปต์ e2e ยังรอข้อความเดิม "ต่างจากข้อเสนอ" ที่หน้าเว็บเปลี่ยนเป็น "ต่างจากที่ระบบเสนอ" ตั้งแต่ 10 ต.ค. (แก้ที่ `scripts/e2e.py` ไม่แตะโค้ดแอป) |
+| acceptance tests | เทสต์ 66 รายการที่ตาราง acceptance อ้างถึง ผ่านทั้งหมด (`make acceptance-tests`, แสดงผลรายเทสต์) |
+| บทสนทนาจำลอง | 200 บทผ่านทั้งหมดทั้ง seed 1 และ 7 ครอบคลุมทาง 100% และ 98%, ทางแยก 100% |
+| image scan | Trivy: app และ db ไม่มีช่องโหว่ HIGH/CRITICAL ที่แก้ได้ และไม่มีค่าลับใน image |
+| deploy และ rollback (ซ้อมบนเครื่อง) | deploy ผ่าน smoke ทั้งในเครื่องและผ่าน Caddy, rollback ไปรุ่นก่อน 28 วิ แล้ว deploy กลับ 37 วิ (รวมช่วงปิดปรับปรุง) |
+| restore drill | RTO 24 วิ, ไฟล์หาย 0 เพี้ยน 0, migration ครบ (RPO 338 วิเป็นค่าบน เพราะระบบว่างหลังรายการสุดท้าย) |
+| load (design บนเครื่อง) | ผ่านเกณฑ์ E.9 บน rehearsal (Mac, Docker Desktop, gunicorn 2 workers) 35 นาที: webhook 2 event/วิ 30 นาที p95 88 ms p99 857 ms ช้าสุด 10.9 วิ, burst 10 event/วิ 5 นาที p95 79 ms p99 128 ms, เจ้าหน้าที่ 100 session หน้าคิว p95 129 ms หน้าเรื่อง p95 137 ms, 47,988 request ไม่ล้ม, ข้อความ 6,596 ข้อความจบครบ บอทจบตา p95 0.98 วิ ไม่มีงานค้างหรือ dead-letter; รอบแรกไม่นับเพราะผู้ใช้ปิดฝาเครื่องขณะใช้แบตเตอรี่ (sleep 15:27–15:39) ผลเก็บแยกไว้ ตัวเลขนี้ยังไม่ใช่ A1 1 OCPU |
+| รายงาน LINE | ข้อมูลในเครื่อง: เสนอแพ็กเกจฟรี รอบ LINE จริงใช้ push 1 ข้อความต่อเรื่อง ต่ำกว่าเป้า 2 ต่อเรื่องใน C.2.3 ตัวเลขที่ใช้ตัดสินต้องมาจาก pilot |
+
+**คู่มือการใช้งาน**
+
+ใช้ปกติ:
+- ผู้แจ้ง: เพิ่มเพื่อน LINE OA → พิมพ์ชื่อและนามสกุลแล้วเลือกเขต → รออนุมัติ → พิมพ์เรื่องหรือกด "ส่งเรื่องใหม่" → ตอบคำถาม → ตรวจหน้าสรุปแล้วกดยืนยัน → ได้เลขเรื่อง ดูสถานะที่ "เรื่องของฉัน" เมื่อบอทขอให้ยืนยันรับของหรือยืนยันผล ให้กดในข้อความนั้น
+- เจ้าหน้าที่กอง: เปิดคิวของกอง → เริ่มคัดกรอง → ดูข้อเสนอเรื่องกองและระดับ → คัดกรองเสร็จ → ทำขั้นของงาน (อนุมัติและบันทึกการจ่าย / แจ้งวิธีส่งคืน รับของ ตรวจสภาพ / บันทึกผลการแก้ปัญหา) ระบบแจ้งผู้แจ้งเอง
+- แอดมิน: อนุมัติการลงทะเบียน จัดการบัญชีและบทบาท ตัวเลือกระบบ คลังคำตอบ และดูหน้า LINE
+
+ข้อมูลผิด:
+- ก่อนยืนยัน ผู้แจ้งแก้จากหน้าสรุปหรือเริ่มใหม่ หลังส่งแล้วเจ้าหน้าที่กด "ขอข้อมูลเพิ่มจากเขต" หรือ "แก้ข้อเท็จจริง" พร้อมเหตุผล ผู้แจ้งยกเลิกเองได้ก่อนเริ่มงาน
+- ส่งผิดกอง: "ส่งต่อให้กองอื่น" พร้อมเหตุผล หรือ "ขอให้ผู้ประสานตัดสิน"
+- บันทึกจ่ายหรือรับคืนผิด: บันทึกรายการแก้ต่อท้าย ไม่ลบประวัติ จำนวนไม่ตรงไฟล์ SAP เป็นส่วนต่างทะเบียนให้กองตัดสิน (ADR 0005)
+- ลงทะเบียนผิดคนหรือผิดเขต: แอดมินถอนการรับรองแล้วให้ลงทะเบียนใหม่
+- เรื่องปัญหาที่ระบบยังไม่เสนอระดับ (AI คัดกรองปิดอยู่และกติกาไม่มีข้อเท็จจริงพอ เช่น P69-000016) เจ้าหน้าที่เลือกระดับพร้อมเหตุผล หรือ "แก้ข้อเท็จจริง" ให้กติกาคำนวณ
+
+AI ใช้ไม่ได้ (RB02):
+- อาการ: บอทถามทีละช่องเอง หรือหน้า AI มีการเรียกที่ล้มหรือช้า
+- แอดมินผู้พัฒนากด "หยุดใช้ AI ของงาน" ที่งานนั้นพร้อมเหตุผล แชตยังรับเรื่องได้ ตอบจากคำสำคัญ คำอันตรายยังได้คำแนะนำทันที และกติกายังเสนอกอง
+- ตรวจ key โควตา และผู้ให้บริการ ทดสอบการเชื่อมต่อ แล้วเปิดกลับด้วยเมนูเปลี่ยนรุ่น
+
+ส่งไม่สำเร็จ (RB03):
+- reply ล้มหรือเลยเวลา: บอทไม่ส่ง push แทน ผู้แจ้งเห็น "มีอัปเดตใหม่" เมื่อทักครั้งถัดไป
+- push ล้ม: หน้า LINE ของแอดมินแสดงรายการล้ม เลื่อน และไม่ทราบผล ส่งซ้ำรายการล้มพร้อมเหตุผล รายการไม่ทราบผลห้ามกดซ้ำจนตรวจกับ LINE รายการที่เลื่อนเพราะงบให้โทรหาผู้แจ้งที่รอข้อมูล
+- โควตาใกล้หมด: แจ้งเตือนที่ 50/80/95% ตั้งแต่ 80% ส่งเฉพาะข้อความสำคัญ ดู `faoj line-usage` แล้วเสนอเจ้าของงบ
+- ระบบหยุดทั้งระบบ: `faoj maintenance on` แล้วใช้ช่องทางสำรอง กองบันทึกแทนพร้อมเวลาแจ้งจริงเมื่อระบบกลับมา (RB01)
+
+**ความเสี่ยงที่ยังเปิดอยู่**
+
+| # | ความเสี่ยง | ผลถ้าเกิด | เจ้าของ | ทางลดหรือสิ่งที่ต้องทำ |
+| --- | --- | --- | --- | --- |
+| K01 | ยังไม่มี OCI tenancy | ไม่มีหลักฐาน runtime ของ G06–G08 | ผู้ใช้ (เจ้าของบัญชี OCI) | สมัครและตั้งตามขั้น 1–7 ใน M12 แล้ว deploy staging |
+| K02 | ข้อมูลจริงของ ฝอจ. ยังไม่ครบ (อักษรย่อ แผนก เบอร์ รายการของ ทะเบียนพนักงาน บัญชีเจ้าหน้าที่ เลขอนุมัติกติกา) | เปิดใช้จริงไม่ได้ | ฝอจ. | ส่งข้อมูลแล้วนำเข้าด้วยคำสั่งที่มีอยู่ ก่อน G02 |
+| K03 | AI ใช้ OpenTyphoon กับข้อมูลจำลอง ยังไม่ใช่ ThaiLLM ของบัญชีองค์กร | ผลประเมินอาจไม่ตรงกับโมเดลที่ใช้จริง | ผู้รับผิดชอบ AI | ได้ key และโควตาจริงแล้วประเมินซ้ำบนคลังคำตอบจริง (G05) |
+| K04 | คลังคำตอบเป็นร่าง 14 ข้อ | บอทตอบด้วยข้อมูลที่ยังไม่รับรอง | ฝอจ. | แก้และรับรองในหน้า "คลังคำตอบ" แล้วประเมิน AI ตอบแชตใหม่ |
+| K05 | AI คัดกรองปิดใน candidate นี้ | เรื่องปัญหาบางเรื่องไม่มีระดับที่เสนอ เจ้าหน้าที่ต้องเลือกเอง | ผู้ใช้ | อบรมตาม U03 ตัดสิน AI คัดกรองหลัง pilot ด้วยการประเมินใหม่ |
+| K06 | OA เดียวใช้ทั้งทดสอบและ production | ทดสอบไปรบกวนผู้ใช้จริงหรือโควตา | เจ้าของ OA | สร้าง OA ทดสอบของ staging และย้าย webhook ตาม checklist ใน C.2.3 |
+| K07 | ยังไม่รู้จำนวน push จริงต่อเดือน | โควตาฟรี 300 หมดกลางเดือน | เจ้าของงบ | `faoj line-usage` ทุกเดือนช่วง pilot ตัดสินแพ็กเกจตามเกณฑ์ C.2.3 |
+| K08 | load test มีแค่บน Mac | A1 1 OCPU อาจรับโหลดออกแบบไม่ได้ | ผู้ดูแลระบบ | `faoj load-test design` บน `faoj-prod` ก่อนเปิดใช้ ถ้าไม่ผ่านใช้เงื่อนไขย้ายใน E.2.1 |
+| K09 | redteam-v2 ยังมีร่าง 3 จาก 20 ที่มีข้อความแทรกหลุดเข้าร่าง | ร่างมีข้อความแปลก | ผู้รับผิดชอบ AI | ผู้แจ้งตรวจและยืนยันร่างทุกครั้ง เฝ้าดูในหน้า AI ช่วง pilot |
+| K10 | ชื่อเว็บใช้ sslip.io ที่ไม่มี SLA | เข้าเว็บหรือ webhook ไม่ได้ถ้าบริการ DNS ล่ม | ผู้ดูแลระบบ | ขอ subdomain ขององค์กรก่อน production |
+| K11 | ยังไม่มีผู้ดูแล OCI คนที่สองและรายชื่อเวร | ระบบล่มนอกเวลาแล้วไม่มีคนรับ | ผู้ใช้ | หาผู้ดูแลคนที่สองพร้อม MFA ก่อน G08 |
+| K12 | ประกาศความเป็นส่วนตัวและระยะเก็บข้อมูลยังไม่รับรอง | เก็บตำแหน่งและข้อมูลผู้แจ้งโดยไม่มีฐาน | data owner | รับรองก่อน G02 |
+| K13 | rollback ซ้อมกับรุ่นที่ schema เดียวกันเท่านั้น | rollback ข้าม migration ใหญ่ยังไม่มีหลักฐาน | release owner | ซ้อมบน staging กับรุ่นจริงก่อนหน้าเมื่อมี release แรกบน OCI |
+| K14 | เทสต์ browser (`make test-e2e`) เดินสามเส้นทางบนกองจำลอง SIM-* ส่วนโครงสร้างจริงทดสอบด้วยเทสต์ระดับ service และรอบ LINE จริง | หน้าเว็บของโครงสร้างจริงอาจมีจุดที่เทสต์ browser ไม่เห็น | ผู้ช่วยพัฒนา | เพิ่มเส้นทาง browser บนโครงสร้างจริงในรอบถัดไป ระหว่างนี้ทำ UAT ตาม uat-script |
+
+**สรุปความพร้อม:** ยังไม่พร้อม production G01–G10 ยังไม่ผ่านทุกข้อเพราะรอหลักฐานภายนอกหรือผู้รับรอง (ดู [acceptance-matrix.md](Docs/release/m13-rc1/acceptance-matrix.md)) หลักฐานบนเครื่องครบตามตาราง รุ่นนี้พร้อมขึ้น `faoj-staging` เพื่อทำ UAT ทันทีที่มี OCI tenancy และการตัดสิน go/no-go เป็นของเจ้าของโครงการกับ release owner ตาม [go-no-go.md](Docs/release/go-no-go.md)
+
+**ทำซ้ำ:** `make ci` → `make acceptance-tests RC=m13-rc1` → `make eval-ai VERSION=11` และ `manage.py answer_ai --username <แอดมินผู้พัฒนา> --profile 6 --evaluate --reason ...` → `make simulate-line COUNT=200 SEED=1` (และ 7) → บน rehearsal: `make rehearsal-up`, `make rehearsal-release`, `faoj deploy`, `faoj backup stanza|full|files`, `faoj restore-drill`, `faoj rollback`, `make load-test PROFILE=design` → `manage.py line_usage_report --out …` → `scripts/live_line_trace.py` หลังรอบ LINE จริง → `make release-candidate RC=m13-rc1 APP_IMAGE=<digest>` หลักฐานทั้งหมดอยู่ใน `reports/release/m13-rc1/evidence` (ไม่อยู่ใน git) และ manifest บันทึก sha256 ของทุกไฟล์
 
 **ยังเปิดอยู่:** อักษรย่อสองกอง (Q7), ตารางแผนก (Q12), เบอร์โทรตามหัวข้อ, รายการของจริง (ยังเป็นของจำลอง), ค่าจริงของปฏิทิน กรอบเวลา และข้อความฉุกเฉินใน FAJO-1 (ยังคัดจาก DEMO-PE-3)
 

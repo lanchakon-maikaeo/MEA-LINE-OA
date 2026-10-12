@@ -169,7 +169,7 @@ def journeys(browser, base_url, password):
     form.locator("[name=to_division]").select_option("SIM-MTR")
     form.locator("[name=reason]").fill("ช่างกองมิเตอร์อยู่หน้างาน")
     form.get_by_role("button", name="บันทึก: ส่งต่อให้กองอื่น").click()
-    expect(intake.locator("#action-slot .notice--error")).to_contain_text("ต่างจากข้อเสนอ")
+    expect(intake.locator("#action-slot .notice--error")).to_contain_text("ต่างจากที่ระบบเสนอ")
     expect(form.locator("[name=reason]")).to_have_value("ช่างกองมิเตอร์อยู่หน้างาน")
     form = intake.locator("#action-slot form")
     form.locator("[name=to_division]").select_option("SIM-MTR")

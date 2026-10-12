@@ -31,6 +31,13 @@ THAI = {
     "signoff": "รอผู้รับรองลงนาม",
 }
 LINE_ID = re.compile(r"\bU[0-9a-f]{32}\b")
+# What the image is built from (Dockerfile and its COPY sources): a change here is a new
+# release. Documents, the matrix and test tooling may change after the candidate commit.
+RELEASED = re.compile(
+    r"^(Dockerfile|pyproject\.toml|uv\.lock|manage\.py|synthetic-data\.json|"
+    r"priority-engine-demo\.json|config/|operations/|workflows/n8n/|deploy/server/|"
+    r"deploy/n8n/import\.sh|deploy/release_manifest\.py)"
+)
 SECRET_ENV = re.compile(r"SECRET|TOKEN|PASSWORD|_KEY$|DATABASE_URL")
 
 # --- Rules (pure; tested in operations/tests/test_m13_release.py) -----------------------------
@@ -204,6 +211,12 @@ def git(*args):
     return subprocess.check_output(["git", "-C", str(ROOT), *args], text=True).strip()
 
 
+def release_changes(commit):
+    """Files the image is built from that differ from the commit, committed or not."""
+    names = git("diff", "--name-only", commit).splitlines()
+    return sorted(name for name in names if RELEASED.search(name))
+
+
 def image_release(image):
     out = subprocess.check_output(
         ["docker", "run", "--rm", "--entrypoint", "cat", image, "/app/release.json"], text=True
@@ -348,7 +361,8 @@ def markdown(data, result):
         "| --- | --- | --- | --- |",
     ]
     for row in result["m13"]:
-        proof = [*row.get("evidence", []), *(f"{len(row.get('tests', []))} tests",)]
+        count = len(row.get("tests", []))
+        proof = [*row.get("evidence", []), *([f"เทสต์ {count} รายการ"] if count else [])]
         note = f": {row['external']}" if row["status"] == "external" else ""
         lines.append(
             f"| {row['id']} | {row['need']} | {THAI[row['status']]}{note} | {', '.join(proof)} |"
@@ -377,17 +391,15 @@ def main(argv=None):
     if not re.search(r"@sha256:[0-9a-f]{64}$", args.app_image):
         sys.exit("--app-image must be pinned by digest")
     folder = Path(args.evidence or ROOT / "reports/release" / args.name / "evidence")
-    commit, dirty = (
-        git("rev-parse", "HEAD"),
-        bool(git("status", "--porcelain", "--untracked-files=no")),
-    )
-    if dirty and not args.allow_dirty:
-        sys.exit(
-            "tracked files differ from the commit; commit first (or --allow-dirty for a draft)"
-        )
     release = image_release(args.app_image)
-    if not commit.startswith(release.get("commit", "").removesuffix("-dirty") or "-"):
-        sys.exit(f"the image was built from {release.get('commit')}, not {commit[:12]}")
+    built = release.get("commit", "")
+    if not built or built.endswith("-dirty"):
+        sys.exit(f"the image was built from uncommitted files ({built or 'no commit'})")
+    commit = git("rev-parse", f"{built}^{{commit}}")
+    changed = release_changes(commit)
+    if changed and not args.allow_dirty:
+        sys.exit("files in the image differ from its commit: " + ", ".join(changed[:10]))
+    dirty = bool(changed)
     log = folder / "acceptance-tests.log"
     tests = test_results(log.read_text(encoding="utf-8", errors="replace")) if log.exists() else {}
     info = runtime()
@@ -396,6 +408,8 @@ def main(argv=None):
     signoff = _read(signoff_path) if signoff_path.exists() else {}
     result = evaluate(matrix, tests, evidence, signoff)
     data = manifest(args.name, args.app_image, release, info, evidence, result, commit, dirty)
+    data["documents_at"] = git("rev-parse", "HEAD")
+    data["matrix_sha256"] = _sha(MATRIX)
     text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     page = markdown(data, result)
     secrets = {k: v for k, v in os.environ.items() if SECRET_ENV.search(k)}
