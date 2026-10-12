@@ -2,7 +2,7 @@
 
 เอกสารหลัก: ขอบเขตโครงการ · Priority Engine · Production-ready · แผนพัฒนาตามโมดูล · Technology Stack · CI/CD · โมดูลสำหรับ AI implement · คำศัพท์กลาง
 
-ปรับปรุง: 8 ตุลาคม 2569 | สถานะ: M00–M11 เสร็จในเครื่อง (done local); M12–M13 ยัง planned; ยังไม่ deploy staging/production บน OCI
+ปรับปรุง: 8 ตุลาคม 2569 | สถานะ: M00–M11 เสร็จในเครื่อง (done local); M12 implementation done (ซ้อมครบบนเครื่อง รอ OCI tenancy เพื่อทดสอบ runtime); M13 planned; ยังไม่ deploy staging/production บน OCI
 
 ขอบเขตงานรอบนี้: ปรับแผนในเอกสารเท่านั้น ยกเลิกกรอบเวลาเดิม และกำหนดเป้าหมาย production-ready ตามโมดูล ยังไม่เริ่ม implementation เพิ่ม คำสั่งและลำดับพัฒนาด้านล่างเป็นแผนสำหรับเมื่อผู้ใช้สั่งเริ่มพัฒนา
 
@@ -344,6 +344,22 @@ flowchart TB
 | SIM-TRIAGE | จุดรับเรื่องกลาง ฝอจ. (บทบาทจำลอง) | เป็นเจ้าของคิวแรก ตรวจเรื่องกำกวม ดูแลการส่งต่อ และประสานเรื่องหลายกอง | เป็นบทบาทรับเรื่อง ไม่ใช่กองที่ห้า |
 
 บทบาทคนที่แยกจากชื่อกอง: ผู้รับผิดชอบเรื่อง, ผู้รับรองด้านเทคนิค, ผู้อนุมัติตามวงเงิน/จำนวน/ประเภทงาน, ผู้ประสานระดับฝ่าย และเจ้าของกติกา คนเดียวอาจได้รับหลายบทบาทตามอำนาจจริง แต่สิทธิ์ต้องกำหนดชัด ไม่อนุมานจากชื่อกองหรือชื่อตำแหน่ง
+
+#### B.2.1 โครงสร้างจริงของ ฝอจ. (9 ต.ค. 2569, [ADR 0008](Docs/adr/0008-real-structure-routes-straight-to-each-division.md))
+
+ผู้ใช้ส่งโครงสร้างจริง (ไฟล์ `operations/fixtures/org_fajo_v1.json` โหลดด้วย `manage.py load_org`) และกติกาจริงรุ่นแรก `operations/fixtures/policy_fajo_v1.json` (FAJO-1) แทนกองจำลองใน staging/production และเว็บบนเครื่อง เทสต์เดิมยังใช้ SIM-*
+
+| รหัสในระบบ | หน่วย | หน้าที่ในระบบ | แผนก/งาน |
+| --- | --- | --- | --- |
+| กองเครื่องมือฯ (ชั่วคราว) | กองเครื่องมือเครื่องใช้และอุปกรณ์ | ยังไม่มีหัวข้อที่ส่งเข้าโดยตรง กำหนดรายการของภายหลังได้ | ผลิตอุปกรณ์, เครื่องมือเครื่องใช้, จัดหาว่าจ้าง |
+| กองอุปกรณ์ฯ (ชั่วคราว) | กองอุปกรณ์การจำหน่าย | หม้อแปลงและอุปกรณ์อื่น (เบิก คืน แจ้งปัญหา) | ซ่อมบำรุงสวิตช์ตัดตอนระบบจำหน่าย, ซ่อมสร้างอุปกรณ์ไฟฟ้า, หม้อแปลงและคาปาซิเตอร์, ซ่อมบำรุงหม้อแปลง |
+| กคว. | กองเครื่องวัดหน่วยไฟฟ้า | มิเตอร์ (เบิก คืน แจ้งปัญหา) | ซ่อมเครื่องวัด, คลังเครื่องวัด, ทดสอบเครื่องวัด |
+| กตฟ. | กองตรวจสอบการใช้ไฟฟ้า | เรื่องการใช้ไฟฟ้า: ลักใช้ไฟ ไฟแพง ร้องเรียน (ไม่ส่งให้ AI) | ตรวจสอบการใช้ไฟฟ้า 1–3, ตรวจสอบเครื่องวัดอัตโนมัติผิดปกติ |
+| ศอค. | ศูนย์ปฏิบัติการระบบอ่านเครื่องวัดอัตโนมัติ | ยังไม่มีหัวข้อที่ส่งเข้าโดยตรง | งานควบคุมและดูแลระบบอ่านเครื่องวัดฯ, วค., บษ. |
+| บท. | แผนกบริหารทั่วไป | หน่วยระดับกองขึ้นตรงกับฝ่าย ไม่มีแผนกย่อย | — |
+| ฝอจ. | ผู้บริหาร ฝอจ. (ผู้ประสานระดับฝ่าย) | ตัดสินข้อพิพาทเส้นทาง และรับเรื่องที่กติกาบอกไม่ได้ (R10) | — |
+
+ไม่มีจุดรับเรื่องกลางและหน่วยทะเบียนกลาง ([ADR 0008](Docs/adr/0008-real-structure-routes-straight-to-each-division.md)): เรื่องใหม่เข้าคิวกองตามกติกาทันที คำขอที่มีของหลายกองแยกเป็นเรื่องละกองตั้งแต่ยื่น แต่ละกองบันทึกและกระทบยอด SAP ของตัวเอง อักษรย่อของสองกองแรกยังไม่ทราบ ใช้รหัสชั่วคราวและเปลี่ยนได้ด้วย `manage.py rename_division_code` ซึ่งติดตั้งกติการุ่นใหม่ที่ใช้รหัสใหม่ในธุรกรรมเดียวกัน
 
 #### ทะเบียนหน้าที่ที่ Agent ต้องอ่าน
 
@@ -1427,7 +1443,7 @@ flowchart LR
 
 - ใช้ tenancy แยกเฉพาะโครงการนี้ เพราะโควตา Always Free นับรวมทั้ง tenancy ระบุเจ้าของบัญชี วิธีชำระเงินที่องค์กรรับรอง และผู้ดูแลอย่างน้อย 2 คนที่เปิด MFA
 - Home region เลือกตอนสมัครและเปลี่ยนไม่ได้ ส่วน Always Free compute สร้างได้เฉพาะ home region เสนอ **Singapore (ap-singapore-1)** เพราะใกล้ที่สุดและ OCI ยังไม่มี region ในไทย ข้อมูลจึงอยู่นอกประเทศ เจ้าของข้อมูลต้องรับรองตาม PDPA ก่อนเก็บข้อมูลผู้ใช้จริง (เงื่อนไข G02)
-- อัปเกรดเป็น **Pay As You Go** หลังสมัคร เพื่อไม่ให้ทรัพยากรถูกปิดเมื่อ trial หมด และเพื่อเลี่ยงการเรียกคืน instance ที่ Oracle ถือว่า idle (7 วันที่ CPU, network และ memory p95 ต่ำกว่า 20%) PAYG ไม่คิดเงินเมื่ออยู่ในโควตา แต่คิดทันทีเมื่อเกิน จึงต้องมีตัวกันด้านล่าง การยกเว้น idle reclaim ของ PAYG อ้างจาก FAQ/รายงานผู้ใช้ ให้ตรวจในบัญชีจริง
+- **ไม่อัปเกรดเป็น Pay As You Go** (เปลี่ยนจากแผนเดิม, M12 Q14, [ADR 0006](Docs/adr/0006-oci-always-free-singapore-without-payg.md)): บัตรใช้ยืนยันตัวตนตอนสมัครเท่านั้น บัญชี Always Free ไม่ถูกเก็บเงิน ของที่เกินโควตาถูกปฏิเสธแทน เหตุผลเดิมเรื่อง idle reclaim ใช้ไม่ได้ เพราะ Oracle นับเครื่อง A1 ว่าว่างเมื่อ CPU, network **และ memory** ต่ำกว่า 20% ตลอด 7 วัน ส่วน stack นี้ใช้ memory ราว 70–80% ตลอด ถ้า A1 เต็มจนสร้างเครื่องไม่ได้ให้ลองใหม่หรือทบทวนการอัปเกรดกับผู้ใช้ (ตรวจกับเอกสาร Oracle 8 ตุลาคม 2569)
 
 **งบทรัพยากร** — ห้ามสร้างทรัพยากร OCI นอกตารางนี้ การเพิ่มต้องแก้ตารางและผ่าน review ก่อน
 
@@ -1436,7 +1452,7 @@ flowchart LR
 | Ampere A1 Flex | 2 OCPU + 12 GB รวมทั้ง tenancy (1,500 OCPU-ชม. และ 9,000 GB-ชม./เดือน) | `faoj-prod` 1 OCPU/8 GB + `faoj-staging` 1 OCPU/4 GB รันทั้งเดือน = 1,488 OCPU-ชม. และ 8,928 GB-ชม. (เดือน 31 วัน) | 0 — ห้ามสร้างเครื่องที่สามหรือ deploy แบบ blue/green สองเครื่อง |
 | AMD Micro | 2 เครื่อง 1/8 OCPU/1 GB | ไม่ใช้ เพราะ boot volume ขั้นต่ำ 47 GB จะกินโควตา block storage | — |
 | Block Volume | 200 GB รวม boot; volume backup 5 ชุด | boot 50 + 50 GB, data prod 70 GB, data staging 30 GB = 200 GB; backup: data prod ก่อน release ≤ 3 ชุด + boot prod 1 ชุด | 0 GB / backup 1 ชุด |
-| Object Storage | 20 GB (บัญชีจ่ายเงิน: Standard 10 + Infrequent 10 + Archive 10 GB), 50,000 requests/เดือน | pgBackRest ของ prod ≤ 8 GB (Standard), สำรองไฟล์แนบ ≤ 5 GB (Infrequent), image ใน OCIR ≤ 2 GB (เก็บ 5 รุ่นล่าสุด) รวม ≤ 15 GB | alert ที่ 16 GB และ 40,000 requests |
+| Object Storage | 20 GB รวมทุก tier สำหรับบัญชี Always Free อย่างเดียว (บัญชีจ่ายเงินได้ 10 GB ต่อ tier), 50,000 requests/เดือน | ทุกอย่างอยู่ Standard (Infrequent Access มีค่าดึงข้อมูล): pgBackRest ของ prod ≤ 8 GB, restic ไฟล์แนบ+n8n ≤ 5 GB, image ใน OCIR ≤ 2 GB (เก็บ 5 รุ่นล่าสุด) รวม ≤ 15 GB; WAL ทุก 5 นาทีราว 9–17k requests/เดือน | alert ที่ 16 GB และ 40,000 requests |
 | Outbound transfer | 10 TB/เดือน | webhook/ข้อความ/ไฟล์และสำเนา backup นอก OCI รวมไม่ถึง 100 GB | มาก |
 | Load Balancer | Flexible 1 ตัว 10 Mbps | ไม่ใช้ — Caddy บน VM รับ TLS เอง | — |
 | Vault | software keys ไม่จำกัด, secrets 150 รายการ | ประมาณ 20 secrets ต่อ environment | มาก |
@@ -1481,7 +1497,7 @@ flowchart LR
 
 **Backup และการกู้คืนภายในโควตา**
 
-- `faoj-prod`: pgBackRest (encrypted repo) → OCI Object Storage ผ่าน S3-compatible API ด้วย Customer Secret Key: full รายสัปดาห์, differential รายวัน และ WAL archive โดย `archive_timeout=900` ให้ RPO ≤ 15 นาทีตาม E.9 ครอบคลุมทั้ง app DB และ n8n DB เพราะอยู่ cluster เดียวกัน ไฟล์แนบสำรองแบบเข้ารหัสรายวันไป Infrequent Access สร้าง volume backup ก่อน release
+- `faoj-prod`: pgBackRest (encrypted repo) → OCI Object Storage ผ่าน S3-compatible API ด้วย Customer Secret Key: full รายสัปดาห์, differential รายวัน และ WAL archive โดย `archive_timeout=300` (เดิม 900; ซ้อมแล้วพบว่า 900 ทำให้ RPO ชิดขอบ 15 นาทีและ alert WAL lag 10 นาทีดังทุกช่วงว่าง) ครอบคลุมทั้ง app DB และ n8n DB เพราะอยู่ cluster เดียวกัน ไฟล์แนบและ n8n volume สำรองแบบเข้ารหัสด้วย restic รายวัน ก่อน deploy ทุกครั้งทำ pgBackRest incremental เป็นจุดกู้คืน (volume backup ทำด้วยมือก่อน release ใหญ่)
 - `faoj-staging`: ใช้ `pg_dump` รายวันบน data volume ของตนเอง ไม่ archive WAL ขึ้น Object Storage เพื่อประหยัด requests
 - **สำเนานอก OCI** รายสัปดาห์ (full backup + ไฟล์แนบ แบบเข้ารหัส) ไปที่เก็บขององค์กร เพื่อรับมือบัญชีถูกระงับหรือ Oracle เปลี่ยนเงื่อนไข เก็บ encryption key ใน OCI Vault และสำเนา offline ที่แยกสิทธิ์
 - **กู้เมื่อ `faoj-prod` เสีย:** หยุด stack ของ staging แล้ว restore production ลง `faoj-staging` แบบลดขนาด (1 OCPU/4 GB, ClamAV ปิด และ quarantine ไฟล์ใหม่ทั้งหมด) ระหว่างสร้าง prod ใหม่ เป้า RTO ≤ 4 ชั่วโมงต้องพิสูจน์ใน restore drill ถ้าทั้งบัญชีหรือ region ใช้ไม่ได้ ให้ restore จากสำเนานอก OCI ลง VM องค์กร
@@ -1511,6 +1527,8 @@ Config ที่ต้องเพิ่มเมื่อ implement: APP_ENV, P
 **ขอบเขตการดูข้อมูล:** ผู้แจ้ง = requester identity ตรงกัน; เจ้าหน้าที่ = กองที่ตนมี membership และงานที่ส่งให้กองนั้นตาม A.3; แอดมิน = global scope ตรวจซ้ำกับไฟล์ URL/API/postback/export/สถิติ และผลตอบจาก idempotency cache ให้ deny โดย default การทราบ UUID หรือ LINE user ID ของผู้อื่นไม่ให้สิทธิ์ใด ๆ
 
 **สิทธิ์ทางเทคนิค:** การเป็นแอดมินระบบไม่เปิดหน้า AI configuration อัตโนมัติ ต้องมีสิทธิ์แอดมินผู้พัฒนาตาม C.5 ด้วย; การให้หรือถอนสิทธิ์ผู้พัฒนาทำได้เฉพาะแอดมินผู้พัฒนาที่มีอยู่หรือกระบวนการ bootstrap/recovery ที่รับรอง แอดมินทั่วไปมอบสิทธิ์นี้ให้ตนเองหรือผู้อื่นไม่ได้ ทั้งเว็บและ config-import ใช้ validation/test/activate/audit เดียวกัน n8n service principal มีสิทธิ์เฉพาะ claim งานและ action ของ lease ปัจจุบัน ไม่สามารถจัดการ user/role/AI profile ได้
+
+**ผู้ช่วยเหลือระบบ** ([ADR 0007](Docs/adr/0007-system-support-account-acts-for-every-division.md), ยืนยัน 9 ตุลาคม 2569): บุคคลเดียวคือผู้ออกแบบระบบ ทำได้ทุกขั้นของทุกกองในทุก environment รวมขั้นที่ใช้อำนาจ (ได้ AuthorityGrant ทุกประเภทแบบไม่จำกัดพร้อมบทบาท) และไม่ผูกกับการแยกหน้าที่ในเรื่องเดียวกัน; ให้ได้ด้วย `manage.py system_support --grant <user> --reason …` บนเครื่องเท่านั้น ฐานข้อมูลบังคับผู้ถือไม่เกิน 1 คน หน้าเว็บให้ไม่ได้แต่แอดมินถอนได้ (อำนาจถอนตาม); ทุก**การทำแทนกอง**ต้องมีเหตุผล มีป้ายในไทม์ไลน์ อยู่ในตารางหน้ารายงาน 90 วัน และวางแผนอีเมลถึงผู้กำกับงานของกอง ข้อนี้ยกเว้นข้อตกลง M10 รอบ 2 Q3 (แอดมินอ่านอย่างเดียว) และการแยกหน้าที่ของ M07/M08 เฉพาะบุคคลนี้; ผู้ตรวจสอบภายในควรรับรองก่อนใช้ใน production
 
 SSO/OIDC เป็นงานต่อยอดเมื่อองค์กรกำหนด โดยแมปบัญชีรายบุคคลกับกอง/บทบาทเดิมและทดสอบถอนสิทธิ์ ไม่ใช้ SSO เป็นเงื่อนไขบังคับของ M01/G02/G06 ใน baseline นี้ ชื่อจริง 18 เขตคงเดิม รหัส D01–D18/SIM-* เป็น fixture; official_code/กอง/อำนาจ/ผู้รับรองจริงต้องยืนยันก่อน production
 
@@ -1719,15 +1737,16 @@ Backup baseline self-hosted: pgBackRest full weekly + differential daily + conti
 
 ขนาด repository, retention และจำนวน requests ต้องอยู่ในงบ Object Storage ของ E.2.1 วัดจริงบน staging ก่อนเปิดใช้; ถ้าข้อมูลโตจนจะเกินงบให้ทบทวน retention/การบีบอัดไฟล์แนบกับเจ้าของข้อมูลหรือใช้เงื่อนไขย้าย ไม่ลดรอบ backup เงียบ ๆ
 
-Runbooks ที่ต้องเขียนในเอกสารนี้เมื่อ implement:
+Runbooks (เขียนครบใน M12, 8 ตุลาคม 2569; คำสั่งรันบนเครื่องผ่าน OCI Bastion ด้วย `sudo faoj …` ทุกขั้นที่เปลี่ยนระบบให้บันทึกเวลาและเหตุผลในบันทึกเหตุการณ์):
 
-- **RB01 DB/app outage**: ประเมินขอบเขต → เปิด maintenance/ช่องทางสำรอง → restart/failover ตามสิทธิ์ → ตรวจ durable inbox → reconcile สิ่งที่รับระหว่าง outage → เปิดบริการ
-- **RB02 AI unavailable**: ปิด AI flag → ใช้ structured questions/manual queue → ตรวจ active profile/endpoint/authentication/quota ของผู้ให้บริการ → รันทดสอบ → เปิดแบบจำกัดก่อน ไม่ทิ้งเรื่องที่รออยู่
-- **RB03 LINE failure/quota**: ดู provider result/quota → หยุด retry ที่ไม่มีทางสำเร็จ → แสดง failed/unknown แก่ ฝอจ. → ใช้ช่องทางที่รับรอง → ตรวจซ้ำก่อน resend
-- **RB04 External unknown**: freeze operation ID → query ระบบเดิมด้วย correlation/reference → คนตรวจเอกสาร → confirm/fail พร้อมหลักฐาน → จึงอนุญาต retry
-- **RB05 Restore/data corruption**: หยุด writes/outbound → เก็บหลักฐาน → restore DB+files ในที่แยก → วัด loss/window → reconcile external actions → reauthorize reopen
-- **RB06 Credential/security incident**: revoke/rotate → ปิด session/สิทธิ์ที่เกี่ยวข้อง → ตรวจ audit/export → แก้สาเหตุ → ตรวจสิทธิ์ก่อนคืนบริการ
-- **RB07 Release rollback**: หยุด deploy ถัดไป → ตรวจ migration compatibility → กลับ digest/forward fix → smoke → เฝ้าดู metrics → บันทึกเหตุ
+- **RB01 DB/app outage** (alert host-down, unhealthy, outbox/inbox age): `faoj status` ดูว่า container ไหนล้ม → ถ้าคาดว่าเกิน 5 นาที `faoj maintenance on` (เว็บและ LINE webhook ตอบ 503 พร้อมเบอร์โทรและลิงก์แบบฟอร์มสำรอง; LINE ส่ง webhook ซ้ำเมื่อเปิด Webhook redelivery) → แจ้งกองรับเรื่องกลางให้รับเรื่องทางช่องทางรับเรื่องสำรอง → `docker compose -p faoj restart <service>` หรือ reboot เครื่อง → `faoj smoke` → `faoj maintenance off` → ดู `inbox_pending_oldest_seconds` และ `outbox_oldest_pending_seconds` กลับเป็น 0 → กองรับเรื่องกลางบันทึกเรื่องจากช่องทางสำรองแทนผู้แจ้ง (ช่องทาง "แบบฟอร์มสำรอง"/"โทรศัพท์" พร้อม**เวลาแจ้งจริง**) ถ้าเครื่องเสียถาวรใช้ RB05 กู้ลง `faoj-staging`
+- **RB02 AI unavailable**: ปิด AI ที่หน้าแอดมิน AI (หรือ `AI_ENABLED=false` ใน `django.env` แล้ว `faoj deploy` digest เดิม) บทสนทนากลับเป็นคำถามทีละช่องเอง → ตรวจ profile/endpoint/key/quota ที่หน้าแอดมิน AI และ `make eval-ai` บน staging → เปิดกลับ เรื่องที่รอ AI คัดกรองยังอยู่ในคิวให้คนทำ
+- **RB03 LINE failure/quota** (alert line-quota, dead-letter): หน้า `/console/admin/line/` ดูผล 429/monthly limit/unknown → อย่ากดส่งซ้ำรายการ unknown จนตรวจกับ LINE แล้ว → ถ้างบเดือนหมด ข้อความ critical เท่านั้นที่ส่งได้ (tier 2) แจ้งกองรับเรื่องกลางโทรหาผู้แจ้งที่รอข้อมูล → ส่ง dead-letter กลับเข้าคิวพร้อมเหตุผลเมื่อสาเหตุหายแล้ว
+- **RB04 External unknown** (alert external-unknown): ห้ามส่งซ้ำ → ถามระบบทะเบียนด้วย operation ID (`registry_ops.reconcile_external`) → คนตรวจเอกสาร SAP → ยืนยันหรือ fail พร้อมหลักฐาน ปัจจุบันไม่มี adapter จริง (ADR 0005) จึงไม่ควรเกิดใน production
+- **RB05 Restore/data corruption** (alert backup-age, wal-archive): หยุดการเขียน `faoj maintenance on` และ `docker compose -p faoj stop worker n8n` → เก็บหลักฐาน (`faoj releases`, log) → บน `faoj-staging`: `faoj restore-drill --keep` (หยุด stack ของ staging ให้เอง กู้ฐานข้อมูลถึง WAL สุดท้ายและไฟล์ล่าสุด ตรวจไฟล์กับ checksum รายงาน RPO/RTO) → ตรวจข้อความ LINE และรายการ SAP ที่เกิดหลังจุดกู้ ก่อนเปิดส่งข้อความออก → ผู้รับผิดชอบอนุมัติเปิดใช้ (ชี้ LINE webhook ไปที่ staging หรือสร้าง prod ใหม่แล้ว restore กลับ) ห้าม replay การแจ้งเตือนจาก n8n execution history
+- **RB06 Credential/security incident**: ถ้าบัญชีผู้ช่วยเหลือระบบรั่ว แอดมินถอนบทบาทในหน้าแอดมินได้ทันที (อำนาจทั้งหมดของบทบาทถอนตาม) แล้วตรวจตารางการทำแทนกองในหน้ารายงาน; เพิกถอน key ที่รั่วในหน้า OCI (auth token/Customer Secret Key/API key ของผู้ใช้ service) และ LINE channel → สร้างค่าใหม่ใส่ `*.secret.env` → `faoj deploy` digest เดิม → ปิด session/บทบาทที่เกี่ยวข้องในหน้าแอดมิน → ตรวจ audit/export → ค่าลับของฐานข้อมูลเปลี่ยนด้วย `ALTER ROLE` ผ่าน `docker compose -p faoj exec -u postgres db psql` แล้วแก้ไฟล์ env ให้ตรง
+- **RB07 Release rollback**: deploy ที่ smoke ไม่ผ่านจะกลับรุ่นก่อนเอง (เฉพาะ image; schema คงไว้ตามกติกา expand → contract) ถ้าพบปัญหาหลังจากนั้น `faoj rollback` (รุ่นก่อนที่สำเร็จ) หรือ `faoj rollback <digest>` → `faoj smoke` → ถ้า migration ทำข้อมูลเสียใช้ RB05 แทน ห้าม reverse migration ที่ทำข้อมูลหาย
+- **RB08 ย้ายไปเครื่องอื่น** (เช่น VM องค์กร, เงื่อนไขใน E.2.1): เตรียมเครื่อง Linux + Docker + Compose (x86 ใช้ image เดียวกัน) และให้ IT เปิด 443 จากอินเทอร์เน็ตผ่าน DMZ/reverse proxy → `bootstrap-host.sh` → คัดลอก `*.secret.env` และ `tls/db` จากเครื่องเดิม → `faoj maintenance on` ที่เครื่องเดิม → `faoj backup incr` และ `faoj backup files` → บนเครื่องใหม่ restore ด้วยขั้นตอนเดียวกับ `faoj restore-drill --keep` แล้ว `faoj deploy <digest เดิม>` → เปลี่ยน Webhook URL ของ LINE → `faoj smoke` → ตรวจ inbox/outbox แล้วปิดเครื่องเดิม ซ้อมก่อนย้ายจริงเสมอ (ช่วงหยุดคาดว่า 1–2 ชั่วโมง ขึ้นกับขนาดข้อมูล)
 
 สำรอง n8n metadata DB/volume, workflow JSON และ encryption key ที่จำเป็นต้องกู้ credentials; สำรอง AI profile metadata กับ secret/encryption material แยกสิทธิ์ ทดสอบ restore โดย n8n schedules/outbound ปิดจนตรวจ lease/delivery และ reconciliation แล้ว ไม่ replay notifications จาก execution history แบบเหมารวม
 
@@ -1800,6 +1819,8 @@ n8n เป็นองค์ประกอบที่เลือกสำห�
 
 ### F.1 วิธีใช้งานและข้อตกลงร่วม
 
+**หลักออกแบบ (ผู้ใช้ 10 ต.ค. 2569):** flow และกฎเกณฑ์จะเปลี่ยนภายหลัง จึงออกแบบให้ยืดหยุ่นเสมอ: สิ่งที่องค์กรอาจเลือกต่างกัน (เช่น ใครอนุมัติการลงทะเบียน การแยกหน้าที่ เส้นทางส่งเข้ากอง แผนก กรอบเวลา) ต้องเป็นตัวเลือกหรือข้อมูลที่เปลี่ยนได้โดยไม่แก้โปรแกรม (ตัวเลือกระบบ, กติกาที่มีรุ่น, ข้อมูลโครงสร้าง) ไม่ฝังค่าเดียวในโค้ด แต่ละตัวเลือกต้องสะดวกและปลอดภัย: ค่าเริ่มต้นคือค่าที่ปลอดภัยที่สุด ค่าที่เลือกได้จำกัดและตรวจในโค้ด ผู้เปลี่ยนต้องมีสิทธิ์และให้เหตุผล และทุกการเปลี่ยนมีประวัติ ([ADR 0009](Docs/adr/0009-system-options-instead-of-fixed-rules.md))
+
 โมดูลด้านล่างเป็นชิ้นงานใน monolith เดียว ให้สั่งทีละโมดูลตาม dependency ไม่ได้สั่งให้สร้าง agent หรือ microservice เพิ่ม M00 เปลี่ยนเป็น **done (local)** ตามหลักฐานด้านล่าง ส่วน M01–M13 ยัง **planned**; เปลี่ยนเป็น done เมื่อมี code/tests/หลักฐานตามเกณฑ์เท่านั้น C.3 เป็นโครงระบบ ส่วน F กำหนดไฟล์และเกณฑ์ของแต่ละโมดูลเพื่อ production-ready โดยคงชื่อ app `operations`
 
 ใช้ shared instruction ต่อไปนี้ร่วมกับ prompt ของโมดูลที่เลือก:
@@ -1837,8 +1858,8 @@ n8n เป็นองค์ประกอบที่เลือกสำห�
 | M09 | ปัญหา/ส่งต่อ/ยกระดับ | M04, M06 | handoff/accept/resolve/reopen, deadline sweep | done (local); 28 tests (รวม race 3) + `make ci` 5 ขั้นผ่าน; งานย่อย/ปฏิทินบริการ/กรอบเวลา (DEMO-PE-3, ADR 0004); หน้าทำงานเจ้าหน้าที่และอีเมลอยู่ M10 — ดู [M09](#module-m09) |
 | M10 | เว็บเฉพาะกอง/แอดมิน/รายงาน | M03, M05, M07, M08, M09 | division/admin UI, scoped export, account/profile screens | done (local); 46 tests + Playwright 3 เส้นทาง + `make ci` 5 ขั้นผ่าน; เห็นเฉพาะเรื่องของกอง แอดมินอ่านอย่างเดียว; สาธิตการใช้งานพร้อมฟอร์มตัวอย่าง; อีเมลเจ้าหน้าที่ปิดไว้จนมี SMTP องค์กร — ดู [M10](#module-m10) |
 | M11 | เชื่อมระบบทะเบียน/กระทบยอด | M07, M08, M09 | ExternalOperation, inventory adapter | done (local); 44 tests + `make ci` 5 ขั้นผ่าน; โหมดอ้างเลขเอกสารบังคับหลักฐาน, กระทบยอดด้วยไฟล์ SAP, ส่วนต่างทะเบียนให้กองทะเบียนตัดสิน (ADR 0005); `api_confirmed` มีแค่สัญญาและระบบจำลอง รอ G06 — ดู [M11](#module-m11) |
-| M12 | Production infra + CD/operations | M04, M10, M11 | app/n8n digests, workflow release, recovery/alerts | planned |
-| M13 | E2E/UAT/release evidence | M12 | G01–G10, acceptance report, release manifest | planned |
+| M12 | Production infra + CD/operations | M04, M10, M11 | app/n8n digests, workflow release, recovery/alerts | implementation done (ซ้อมบนเครื่อง); 22 tests + mutation 10/10 + `make ci` ผ่าน; deploy/rollback/backup/restore drill ซ้อมครบ; OCI runtime รอ tenancy — ดู [M12](#module-m12) |
+| M13 | E2E/UAT/release evidence | M12 | G01–G10, acceptance report, release manifest | in progress: โครงสร้างจริง ฝอจ. (ADR 0008), ตัวเลือกระบบ (ADR 0009), ยืนยันตัวตนและเจ้าหน้าที่ใน LINE (ADR 0010), บทสนทนาจำลองกับบอทจริง (ADR 0011, `make simulate-line`), บอทตอบคำถามในแชต (ADR 0012); UAT/release evidence ยังไม่เริ่ม — ดู [M13](#module-m13) |
 
 ลำดับแนะนำ: M00 → M01 → M02 → M03/M04/M06 → M05/M07/M08/M09 → M10 → M11 → M12 → M13 งานที่ dependency ครบสามารถแบ่งผู้พัฒนาทำได้ แต่ `models.py`, `services.py`, schema และ migrations ต้องมีผู้รวมการเปลี่ยนแปลงคนเดียวต่อรอบ ไม่ให้ AI หลายงานเปลี่ยน contract แยกกันโดยไม่ตรวจ caller
 
@@ -2428,6 +2449,12 @@ Implement M10: ทำหน้า queue/detail/actions/report เฉพาะก
 
 **แก้หลังผู้ใช้ตรวจคิว (8 ตุลาคม 2569):** การส่งต่อที่รอตอบรับแสดงในคิวและหน้าเรื่องว่า "ส่งต่างจากที่ระบบเสนอ (ระบบเสนอ X)" พร้อมประเภทเหตุผลและเหตุผลที่พิมพ์ (`queues.handoff_info`); เรื่องที่จบ (ยกเลิก ไม่รับ ปิด) ก่อนตอบรับ ปิดการส่งต่อตาม (`Handoff.Status.ENDED`, migration 0014) จึงไม่ค้างในแท็บ "รอรับงาน" ของกองปลายทาง; `prepare_e2e_user` ยกเลิกเรื่องแจ้งปัญหา e2e รอบก่อนที่ยังเปิด และเส้นทาง Playwright ที่ 3 ตรวจเหตุผลบนหน้าเรื่องแล้วยกเลิกเรื่องเองตอนจบ (เดิมเรื่องหม้อแปลงทดสอบค้าง "รอ SIM-MTR ตอบรับ" สะสมทุกรอบ CI ทำให้ดูเหมือนส่งผิดกอง)
 
+**แก้หลังจำลองการใช้งาน LINE (8 ตุลาคม 2569):** mockup ที่บันทึกจากโค้ดแชตจริง (`build_line_mockup`, `reports/line-mockup.html`) พบว่าเมื่อเจ้าหน้าที่ขอข้อมูลเพิ่ม ("ตอบกลับในแชตนี้ได้เลย") คำตอบของผู้แจ้งถูกส่งให้ AI เหมือนคำขอใหม่ ตอบว่า "ยังไม่เข้าใจข้อความ" และเจ้าหน้าที่ไม่เห็น; แก้แล้ว: ข้อความหรือไฟล์ที่ผู้แจ้งส่งหลังคำขอข้อมูลผูกกับเรื่องที่รอข้อมูล (`ConversationMessage.case`, migration 0016) ไม่ผ่าน AI ไม่เปิดร่างใหม่ (ยกเว้นผู้แจ้งเริ่มทำร่างหลังคำขอ) มีหลายเรื่องรอข้อมูลให้ผู้แจ้งเลือกเรื่อง ไฟล์แนบกับเรื่องที่ขอล่าสุด; หน้าเรื่องมีส่วน "ข้อมูลเพิ่มจากผู้แจ้ง (LINE)" และไทม์ไลน์ คิวขึ้นป้าย "ผู้แจ้งตอบข้อมูลแล้ว"; เจ้าหน้าที่ยังเป็นคนกด "ได้ข้อมูลครบแล้ว" เอง; tests 5 ข้อใน `test_m03_line.InfoReplyTests`, `make test` 498 tests ผ่าน. ข้อสังเกตอื่นจาก mockup ที่ยังไม่แก้: วันที่ในสรุปเรื่องและข้อความนัดส่งคืนเป็น ค.ศ., "มีอัปเดตใหม่" ซ้ำกับข้อความที่ส่งไปแล้ว, บรรทัดผลรับคืนแสดงตัวเลข 0 ทุกช่อง
+
+**หน้ารายงานกดลิงก์ได้และมี dashboard (9 ตุลาคม 2569):** ทุกตัวเลขในหน้ารายงาน (การ์ดตัวเลข แถบระดับ อายุเรื่อง ชนิด สถานะ รายการของ จำนวนที่ใช้คิดเวลาเฉลี่ย ตารางเทียบทุกกอง และวันในกราฟ) ลิงก์ไป `/reports/cases/` ซึ่งแสดงเรื่องชุดเดียวกับที่นับ (ใช้ชุด query เดียวกับรายงานใน `reports._Sets` จึงตัวเลขตรงกันเสมอ ขอบเขตการเห็นเรื่องเหมือนเดิม) พร้อมปุ่มเปิดในคิวงานเมื่อมีแท็บที่ตรงกัน; เพิ่มตัวเลือกช่วงเวลา 7/30/90 วัน, กราฟเส้นเรื่องเข้า/เรื่องจบรายวัน (SVG ที่สร้างฝั่ง server ตาม CSP, tooltip + เส้นนำสายตาด้วย app.js, มีตารางให้ดูแทน), แถบอายุเรื่องที่เปิดอยู่และรายการของที่มากที่สุด; สีผ่านตัวตรวจ palette (น้ำเงิน/ส้มสำหรับ 2 ชุดข้อมูล, ไล่น้ำเงิน 5 ขั้นสำหรับลำดับ) บนพื้นขาว; บนมือถือกราฟเลื่อนในกรอบของตัวเอง และแก้แถบบนที่ล้นจอ 17px ที่ 390px; tests 3 ข้อใน `test_m10_web.ReportDrillDownTests` (กดทุกลิงก์แล้วจำนวนเรื่องตรงกับตัวเลข), `make test` 533 tests ผ่าน
+
+**แก้สาธิตการใช้งาน (8 ตุลาคม 2569):** บัญชีแอดมินกด "สาธิตการใช้งาน" แล้วหน้าเว็บไม่เปลี่ยนตามขั้น เพราะทัวร์หาเรื่องตัวอย่างจากคิวของกองที่เปิดอยู่เท่านั้น (SIM-TRF ไม่มีเรื่องเบิก/คืนที่ยังเปิด) จึงค้างที่คิวและขึ้นแต่คำอธิบาย; แก้แล้ว: เมื่อคิวที่เปิดอยู่ไม่มีเรื่องชนิดนั้น ทัวร์ถาม `/tour/where/?kind=` ซึ่งหาคิวและเรื่องชนิดนั้นที่บัญชีนี้เปิดได้ (กองที่เปิดอยู่ก่อน แท็บงานของกองก่อน ไม่มีในคิวใดก็ใช้เรื่องล่าสุดที่เห็นได้) แล้วพาไปที่นั่น; ขอบเขตการเห็นเรื่องเหมือนเดิม (เช่น กองมิเตอร์ไม่เห็นเรื่องแจ้งปัญหาของกองอื่น ทัวร์แจ้งปัญหาจึงอธิบายในที่); tests 2 ข้อใน `test_m10_web`, `make test` 501 tests ผ่าน
+
 **วิธีตรวจด้วยคน:** `make dev` แล้วเข้าสู่ระบบด้วยบัญชีเจ้าหน้าที่จำลอง (หรือรัน `E2E_PASSWORD=... uv run python manage.py prepare_e2e_user` เพื่อตั้งบัญชี e2e-intake, e2e-meter, e2e-eqp, e2e-approver, e2e-issuer, e2e-receiver, e2e-trf ด้วยรหัสผ่านที่กำหนดเอง) จากนั้น: ภาพรวม → คิวงาน (ลองแท็บ ตัวกรอง ค้นหา `/`) → เปิดเรื่อง → กดปุ่มสีดำทำขั้นต่อไป; ลอง "บันทึกเรื่องแทนผู้แจ้ง" ด้วยบัญชีกองรับเรื่องกลาง; เปิด "รายงาน" และ "ดาวน์โหลด CSV"; กด "สาธิตการใช้งาน" แล้วเลือกเรื่องเบิก/คืน/แจ้งปัญหา; ตั้ง `STAFF_EMAIL_ENABLED=true` เพื่อดูอีเมลที่ระบบเขียนลง `reports/emails/` (ไม่ส่งจริงในเครื่อง); `make test-e2e` บันทึกภาพ `reports/e2e-m10-withdrawal.png`, `reports/e2e-m10-return.png`, `reports/e2e-m10-problem-phone.png`
 
 **ข้อจำกัดที่ยังเหลือ:** ยังไม่ได้ทดสอบกับผู้ใช้จริงหรือ screen reader (ตรวจด้วย Playwright, คีย์บอร์ด และจอ 390px เท่านั้น); อีเมลยังไม่ส่งจริงจนมีที่อยู่ SMTP องค์กรและอีเมลเจ้าหน้าที่ (เปิดด้วย `STAFF_EMAIL_ENABLED` และตั้ง `EMAIL_*`), ยังไม่มีสรุปรวมรายวัน; ไฟล์ที่เจ้าหน้าที่แนบรอ ClamAV ใน worker (ถ้าสแกนเนอร์ไม่พร้อม ไฟล์รอสแกนต่อและเปิดไม่ได้); ฟอร์มยืนยันข้อเท็จจริงยังแก้ "อุปกรณ์" ไม่ได้ (แก้ได้เฉพาะข้อเท็จจริงแบบใช่/ไม่ใช่); ปุ่มที่แสดงอาจไม่ตรงกับ handler ในกรณีขอบ (เช่น ผู้จัดสรรที่จ่ายของจากการจัดสรรของตนเอง) แต่ service ปฏิเสธพร้อมข้อความ; การสาธิตอธิบายตามข้อมูลในคิวของผู้ใช้ ถ้าคิวไม่มีเรื่องชนิดนั้นจะอธิบายโดยไม่มีตัวอย่าง; รายงานและ CSV คำนวณตอนเปิดหน้า (ยังไม่ได้ทดสอบกับข้อมูลจำนวนมาก); ข้อความหน้าจอ ชื่อระดับ และขั้นตอนสาธิตควรให้เจ้าหน้าที่ ฝอจ. ตรวจภาษาใน UAT; หน้าเว็บผู้แจ้งยังไม่มี (ผู้แจ้งใช้ LINE ตามขอบเขต)
@@ -2490,6 +2517,59 @@ Implement M12: ทำ OCI infrastructure ตาม E.2.1 ไม่เกิน�
 ไม่ deploy production ในโมดูลนี้; ส่ง release candidate และหลักฐานที่ยังขาดอย่างชัดเจน
 ```
 
+**การตัดสินใจออกแบบ M12 (ยืนยันกับผู้ใช้ 8 ตุลาคม 2569, Q1–Q15)**
+
+| เรื่อง | ข้อตกลง |
+| --- | --- |
+| ที่รัน (Q1, Q14, Q15) | OCI tenancy แยกของโครงการ home region Singapore, Always Free อย่างเดียว ไม่อัปเกรด PAYG ([ADR 0006](Docs/adr/0006-oci-always-free-singapore-without-payg.md)); ระหว่างรอบัญชี ทำและซ้อมทุกอย่างบน Mac (arm64 เหมือน A1) |
+| ใครสั่งอะไร (Q2) | ผู้ช่วยพัฒนาเขียน Terraform/script และมี key อ่านอย่างเดียว (กลุ่ม `faoj-readers`: ไม่อ่าน object/secret); การสร้าง แก้ และ deploy เจ้าของบัญชีเป็นคนรัน |
+| การปล่อยรุ่น (Q3) | GitHub แผนฟรีบังคับ reviewer/environment ไม่ได้ → CI build ครั้งเดียว สแกน SBOM ส่ง OCIR; คนบนเครื่องสั่ง `faoj deploy <digest>` หลังบันทึกการอนุมัติ (`--approval` บังคับใน production); CI ไม่ถือสิทธิ์เครื่อง/ฐานข้อมูล |
+| คนรับผิดชอบ (Q4) | ผู้ใช้เป็นผู้ดูแล OCI, ผู้รับ alert และผู้อนุมัติ release; ผู้ดูแลคนที่ 2 (MFA) ยังขาด — เงื่อนไขก่อน G08 |
+| ระบบหยุด (Q5–Q8) | เปิด LINE Webhook redelivery; หน้าปิดปรับปรุงบอกเบอร์โทรและลิงก์**แบบฟอร์มสำรอง** (Microsoft Forms ขององค์กร ตอบได้เฉพาะบัญชีองค์กร); กองรับเรื่องกลางบันทึกแทนผู้แจ้งด้วยช่องทาง "แบบฟอร์มสำรอง" พร้อม**เวลาแจ้งจริง** (บังคับสำหรับช่องทางนี้ ย้อนได้ไม่เกิน 30 วัน); กรอบเวลานับจากเวลาบันทึก เวลาแจ้งจริงแสดงในหน้าเรื่องและ CSV |
+| ชื่อเว็บ (Q9) | `<ip>.sslip.io` ทั้ง staging และ production จนได้ subdomain ขององค์กร (Caddy ขอใบรับรอง Let's Encrypt เอง) |
+| เครื่อง (Q10) | `faoj-prod` 1 OCPU/8 GB ติดตั้งครบแต่ปิดส่งออก ใช้ซ้อม backup/restore/rollback; `faoj-staging` 1 OCPU/4 GB รับ LINE @894attlg ด้วย URL ถาวร; เปิดใช้จริงใน M13 |
+| Terraform (Q11) | OCI Resource Manager (อัปโหลด zip จาก `make oci-stack`, Plan, Apply); state อยู่ใน OCI |
+| แจ้งเตือน (Q12) | OCI Monitoring + Notifications → อีเมลเจ้าของและอีเมลของช่อง Teams; heartbeat หาย = เครื่องดับ |
+| สำเนานอก OCI (Q13) | `make backup-pull` บน Mac ดึงไฟล์ที่เข้ารหัสแล้วลง OneDrive ขององค์กรทุกวันจันทร์ (launchd) |
+| ค่าทางเทคนิค | Ubuntu 24.04 ARM, ค่าลับสร้างบนเครื่องเอง (0600 root) แยกไฟล์ต่อ service, ClamAV เปิดบน staging, build arm64 บน runner ARM ของ GitHub (ใช้นาทีฟรีของแผน) |
+
+**ผล implement / หลักฐาน 8 ตุลาคม 2569:** implementation done และซ้อมครบบนเครื่อง; runtime บน OCI ยังรอ tenancy (ไม่นับเป็นผ่าน)
+
+**เพิ่ม 9 ตุลาคม 2569 — ผู้ช่วยเหลือระบบ (ADR 0007):** บทบาท `system_support` (migration `0018_system_support`, constraint ผู้ถือเดียว), `operations/support.py` (ให้/ถอน/ป้าย/รายการ), คำสั่ง `system_support`, การตรวจสมาชิกรวมเป็น `identity.holds` และการแยกหน้าที่เป็น `identity.separated` ทั้งฝั่ง service และหน้าจอ, เหตุผลบังคับในทุก action ของบทบาทนี้, ป้ายในไทม์ไลน์ + ตารางในหน้ารายงาน + อีเมล `staff_support` ถึงผู้กำกับงาน; `test_m12_support` 7 tests (ผู้ช่วยเหลือระบบคนเดียวเดินเรื่องเบิกตั้งแต่รับเรื่องถึงเขตยืนยันรับข้ามกองได้ ทุกขั้นมีเหตุผลและป้าย, คนอื่นยังถูกแยกหน้าที่), `make test` 530 tests ผ่าน; บนเครื่องพัฒนาให้บทบาทนี้กับบัญชี `admin` แล้ว
+
+- **แอป:** migration `0017_fallback_intake` (ช่องทาง `fallback_form`, `Case.reported_at` + constraint ห้ามมีในเรื่อง LINE), ฟอร์มบันทึกแทนมีช่องเวลาแจ้งจริง, คำสั่ง `apply_db_grants` (role runtime อ่าน/เขียนได้ แต่ตาราง append-only 10 ตารางและ `django_migrations` แก้/ลบไม่ได้), `ops_metrics` (อายุ/จำนวนเท่านั้น ไม่มีชื่อหรือ LINE user ID), `verify_restore` (migration ครบ, ไฟล์ที่ DB อ้างมีครบและ checksum ตรง, RPO), `seed_staging` (ข้อมูลจำลองบน staging, ปฏิเสธใน production), `BEHIND_TLS_PROXY`
+- **image = release:** `Dockerfile` สองขั้น (uv/pip ไม่อยู่ใน image จริง, อัปเดตความปลอดภัย OS ตอน build) และใส่ `deploy/server/`, workflows n8n และ `release.json` (digest ของ db/n8n/ClamAV/Caddy/restic, hash ของ workflows, รายชื่อ migration); `deploy/server/db/` = PostgreSQL 17 + pgBackRest, TLS, roles `faoj_owner`/`faoj_app`/`n8n`, `gosu` เปลี่ยนเป็น `setpriv` และ flatten image (gosu เดิมมี Go runtime ที่มี CVE 22 รายการ)
+- **บนเครื่อง:** `deploy/server/compose.yaml` (Caddy เปิด 80/443 อย่างเดียว, n8n editor `127.0.0.1`, DB ไม่เปิด port, `mem_limit` ทุกตัว, ค่าลับแยกไฟล์ต่อ service), `caddy/Caddyfile` (ปิด `/internal/*`, ธงปิดปรับปรุง → 503 ทุก method), `bootstrap-host.sh`, `bin/faoj` (deploy/rollback/maintenance/backup/restore-drill/metrics/quota-check/smoke/status/releases), systemd timers (metrics ทุกนาที, pgBackRest full อาทิตย์/diff ทุกวัน, restic ทุกวัน, dump บน staging, quota-check รายชั่วโมง, restore drill รายเดือนบน staging), `oci/quota_check.py` + `oci/budget.json`
+- **OCI:** `deploy/oci/` Terraform (compartment, quota policy, budget ถ้าต้องการ, IAM groups + policy, VCN/NSG/Bastion, 2 เครื่อง + data volume + cloud-init, 2 buckets, OCIR 2 repos, Vault + key, topic + 20 alarms); `terraform validate` ผ่านทั้ง 1.5.7 (รุ่นที่ Resource Manager ใช้) และ 1.13; lock file มี checksum ของ linux_amd64/arm64/darwin_arm64
+- **CI/CD:** `.github/workflows/release.yml` (gate รอ CI ผ่าน, build arm64/amd64 บน runner จริง, push by digest, index, Trivy บล็อกเฉพาะ image ของเรา, image third-party รายงานอย่างเดียว, SBOM SPDX, release.json + คำสั่ง deploy ใน summary), `scheduled.yml` (สแกนซ้ำรายสัปดาห์), `dependabot.yml`; actionlint ผ่าน, action ทุกตัว pin SHA, `permissions: contents: read`
+- **ซ้อมบนเครื่อง** (`deploy/rehearsal.sh`: registry ในเครื่องแทน OCIR, S3 gateway แทน Object Storage, ข้อมูลจำลองทั้งหมด):
+  - deploy ครั้งแรกด้วย role owner + grants, n8n ต่อ DB ผ่าน TLS; deploy รุ่นถัดไปช่วงปิดปรับปรุง 28 วินาที (เป้า ≤ 1 นาที), rollback 27 วินาที, history บันทึกทุกครั้งรวมที่ล้มเหลว
+  - smoke ที่ edge จับ bug จริง: `/internal/` ผ่าน Caddy ไปถึง Django (401) เพราะ `handle` มาก่อน `respond` → deploy กลับรุ่นก่อนเองแล้วแก้เป็น `handle @internal`
+  - M10 browser journeys 3 เส้นทางผ่าน Caddy (HTTPS) ด้วย role `faoj_app` ผ่าน; role นี้ `UPDATE operations_auditevent`, `DELETE operations_decision`, `DELETE django_migrations`, `CREATE TABLE` ถูกปฏิเสธทั้งหมด
+  - ปิดปรับปรุง: หน้า 503 + `Retry-After` แสดงเบอร์และลิงก์แบบฟอร์ม, POST `/webhooks/line` ได้ 503
+  - backup: pgBackRest full 53 MB (60 วินาทีกับ S3 จำลอง), restic ไป S3 แล้วกู้กลับไฟล์ตรง checksum, ใน bucket ไม่มีข้อความ plaintext; `backup-pull` ดึงทั้งสอง repository ออกมาเป็นไฟล์เข้ารหัส
+  - restore drill (archive_timeout 900): RTO 21 วินาที (ข้อมูลจำลองเล็ก), RPO 871 วินาที → เปลี่ยนเป็น 300 วินาที; ซ้อมซ้ำ (archive_timeout 300): ทำรายการแล้วรอ 5 นาทีครึ่ง กู้กลับมาครบถึงรายการล่าสุด (RPO วัดได้ 329 วินาทีซึ่งเป็นค่าบนเพราะระบบว่างหลังจากนั้น, WAL lag ขณะซ้อม 47 วินาที), RTO 23 วินาที, ไฟล์ไม่หายไม่เพี้ยน
+  - Trivy: app และ db 0 รายการ HIGH/CRITICAL ที่แก้ได้ (ก่อนแก้ app มี 8 ใน OS + pip/uv, db มี OS + gosu 22 + private key snakeoil)
+- `make test-module MODULE=M12` ผ่าน **22 tests**; mutation 10/10 (เปิด /internal, เปิด port DB, ตาราง history เขียนได้, เกินงบ A1, RPO 15 นาที, action ไม่ pin, SSH จากทุกที่, DB ไม่บังคับ TLS, แบบฟอร์มไม่มีเวลาแจ้ง, ค่าลับ DB ถึง web); `make ci` 5 ขั้นผ่าน (523 tests)
+
+**ข้อค้นพบระหว่างซ้อมที่แก้แล้ว:** postmaster เป็น PID 1 แล้ว worker async ของ pgBackRest ออกทำให้ DB restart (ใส่ `init: true`); healthcheck รันเป็น root ทำให้ log peer auth ล้มทุก 5 วินาที (ใช้ `gosu postgres`); ต้องสร้าง stanza ก่อน migrate; ฐานข้อมูลที่กู้ต้องมีค่าของ repository ตอน recovery; Caddy อีเมล ACME ว่างทำให้ config ล้ม (ตัดออก ใช้ alert วันหมดอายุแทน); `archive_timeout=900` ขัดกับ alert 10 นาที
+
+**วิธีตั้ง OCI หลังสมัครบัญชีแล้ว (เจ้าของบัญชีทำ):**
+
+1. `make oci-stack` → OCI Console → Developer Services → Resource Manager → Stacks → Create stack → .zip → ใส่ `ssh_public_key`, `admin_cidrs` (IP บ้าน/ที่ทำงาน /32), `alert_emails` (อีเมลตัวเอง + อีเมลของช่อง Teams) → Plan → อ่าน → Apply; กดยืนยันอีเมล subscription ที่ได้รับ
+2. Identity → Users: สร้างผู้ใช้ service 5 คนตามกลุ่ม (`faoj-readers` สำหรับผู้ช่วยพัฒนา + API key, `faoj-ci` + auth token, `faoj-deployers` + auth token, `faoj-backup-writers` + Customer Secret Key, `faoj-backup-readers` + Customer Secret Key) ค่าลับไม่ส่งในแชต
+3. GitHub → Settings → Secrets and variables → Actions: variables `OCIR_REGISTRY` (`ap-singapore-1.ocir.io`), `OCIR_NAMESPACE` (จาก output); secrets `OCIR_USERNAME` (`<namespace>/<user>`), `OCIR_TOKEN` → push main แล้ว Release workflow พิมพ์ digest
+4. เข้าเครื่องผ่าน Bastion (managed SSH session) → `sudo docker login ap-singapore-1.ocir.io` (ผู้ใช้ deployer) → `sudo faoj-install <app@sha256:…>` → ใส่ LINE credentials ใน `app.secret.env`, S3 key ใน `db.secret.env`/`backup.secret.env`, `BACKUP_S3_ENDPOINT`/`OCI_COMPARTMENT_OCID` ใน `compose.env` → `sudo faoj deploy <digest>` (production ใส่ `--approval`) → `sudo faoj backup stanza` และ `faoj backup full` บน prod
+5. staging: `seed_staging` แล้วตั้ง Webhook URL ของ @894attlg เป็น output `webhook_url` ของ staging, เปิด Use webhook และ Webhook redelivery
+6. เก็บ `PGBACKREST_REPO1_CIPHER_PASS`, `RESTIC_PASSWORD`, `N8N_ENCRYPTION_KEY` ใน Vault (`faoj-vault`) และในที่เก็บรหัสผ่านของเจ้าของ; ใส่สำเนาใน `drill.secret.env` บน staging เพื่อซ้อมกู้รายเดือน
+7. Mac: `~/.config/faoj/backup-pull.env` (key ของ backup-readers, ปลายทาง OneDrive) → `make backup-pull` ครั้งแรก → `make backup-pull-schedule`
+
+**แบบฟอร์มสำรอง (Microsoft Forms ขององค์กร):** ตั้ง "เฉพาะคนในองค์กร" และ "บันทึกชื่อ" แล้วใส่ลิงก์ใน `FALLBACK_FORM_URL`; เบอร์โทรของแต่ละหัวข้อใส่ใน `FALLBACK_PHONE_METER` (กคว.), `FALLBACK_PHONE_EQUIPMENT` (กองอุปกรณ์การจำหน่าย), `FALLBACK_PHONE_USAGE` (กตฟ.) และ `FALLBACK_PHONE` สำหรับเรื่องอื่น (ADR 0008); ช่อง: เขต (18 เขต), เบอร์ติดต่อกลับ, หัวข้อ (มิเตอร์/หม้อแปลง/อุปกรณ์อื่น/การใช้ไฟฟ้า) ให้กองนั้นบันทึกแทน, ประเภท (เบิก/ส่งคืน/แจ้งปัญหา/ข้อเสนอแนะ), รายการของและจำนวน, รายละเอียด/จุดประสงค์/เหตุผล, ต้องการภายใน (ไม่บังคับ), มีอันตรายหรือไม่ (ถ้ามีให้โทรทันทีด้วย); เวลาส่งแบบฟอร์มคือเวลาแจ้งจริง ผู้ส่งที่ยังไม่ได้ลงทะเบียน แอดมินสร้างผู้แจ้งก่อนบันทึกแทน
+
+**วิธีตรวจด้วยคน:** `FAOJ_ROOT=<โฟลเดอร์ชั่วคราว> make rehearsal-up` → `make rehearsal-release` → `FAOJ_ROOT=… deploy/server/bin/faoj deploy <digest>` → เปิด https://localhost:8443 (ใบรับรองของ Caddy เอง) → `faoj maintenance on` แล้วเปิดหน้าเดิม → `faoj backup full`, `faoj backup files`, `faoj restore-drill` → `make rehearsal-down`
+
+**ข้อจำกัดที่ยังเหลือ:** ทุกอย่างที่ต้องใช้ OCI ยังไม่ได้ทดสอบจริง (quota policy/budget ปฏิเสธหรือเตือนได้จริง, instance principal, OCIR, Let's Encrypt กับ sslip.io, Bastion, alarms และอีเมลถึง Teams, Release workflow กับ OCIR) จึงยังไม่ผ่าน acceptance ข้อ runtime; load test (k6) รอ `faoj-prod`; production ที่ใช้ sslip.io พึ่งบริการ DNS ภายนอกที่ไม่มี SLA (ควรย้ายไปชื่อขององค์กรก่อนเปิดใช้จริง); restic อ่านไฟล์จาก bind mount ของ Docker Desktop บน macOS ไม่ได้ (Linux ไม่มีปัญหานี้ ทดสอบด้วย volume แทน); การลบ image เก่าใน OCIR ทำมือ (quota-check เตือนเมื่อเกิน 5 รุ่น); image third-party (n8n, ClamAV, Caddy, restic) สแกนแบบรายงาน ไม่บล็อก; ผู้ดูแล OCI คนที่ 2 ยังไม่มี; AI คัดกรอง v13 ใน DB ในเครื่องมีสถานะ active แต่ workflow ไม่ได้ publish จึงมี event ค้าง (รอผู้ใช้ตัดสินตาม M06)
+
 <a id="module-m13"></a>
 
 ### M13 — Integration, UAT และหลักฐาน release
@@ -2499,6 +2579,179 @@ Implement M12: ทำ OCI infrastructure ตาม E.2.1 ไม่เกิน�
 **ขอบเขตไฟล์/ผลส่งมอบ:** end-to-end/load/eval reports, `release-manifest.json` ที่ไม่มี secret, acceptance matrix, training/demo script, open-risk register และสถานะ gates ใน PROJECT.md
 
 **Acceptance:** LINE OA ส่วนตัวจริง→n8n container→ThaiLLM API จริง→เว็บเฉพาะกอง/แอดมิน→ผล LINE ถึงเจ้าของเรื่อง ครบสามงาน; ทดสอบ P0/unknown/partial/override/own-requester/division/admin scope, LINE pending→approved, role changes และ model/key changes ทั้งสองช่องทาง; load+restore+rollback มีหลักฐาน; มีรายงาน push ต่อเรื่องและ forecast โควตา LINE จาก pilot พร้อมข้อเสนอแพ็กเกจ; unresolved external gate ไม่ถูกเปลี่ยนเป็น pass ด้วย fixture และมี pilot rollout/go-no-go ที่ผู้รับผิดชอบรับรอง
+
+#### รอบโครงสร้างจริง (9–10 ต.ค. 2569)
+
+ผู้ใช้ส่ง `Docs/โครงสร้าง ฝอจ.txt` พร้อมหมายเหตุ (กคว. ดูมิเตอร์, กองอุปกรณ์การจำหน่ายดูหม้อแปลง, กตฟ. ดูลักใช้ไฟ ไฟแพง ร้องเรียน) และตอบคำถามสองรอบ:
+
+| ข้อ | การตัดสิน |
+| --- | --- |
+| Q1 | กองเป็นเจ้าภาพ แผนกเป็นกลุ่มย่อยสำหรับคิวและรายงาน บท. เป็นหน่วยระดับกองขึ้นตรงกับฝ่าย |
+| Q2 | อุปกรณ์อื่นไปกองอุปกรณ์การจำหน่าย กำหนดรายรายการภายหลังได้ในกติกา |
+| Q3 | งาน กตฟ. เป็นเรื่องแจ้งปัญหาหัวข้อ "การใช้ไฟฟ้า" ไฟแพงที่สงสัยมิเตอร์ให้ กคว. ทดสอบเป็นงานย่อย |
+| Q4 | ไม่มีจุดรับเรื่องกลาง ส่งตรงถึงกองตามกติกา ไม่ชัดไปผู้ประสานระดับฝ่าย |
+| Q5 | ผู้ประสานระดับฝ่ายคือผู้บริหาร ฝอจ. |
+| Q6, Q15 | ไม่มีหน่วยทะเบียนกลาง แต่ละกองอัปโหลดไฟล์ SAP ของตัวเองและตัดสินส่วนต่างของตัวเอง |
+| Q7 | อักษรย่อของกองเครื่องมือเครื่องใช้และอุปกรณ์กับกองอุปกรณ์การจำหน่ายบอกภายหลัง (ใช้รหัสชั่วคราว) |
+| Q8 | เทสต์ใช้ SIM-* ต่อ เว็บบนเครื่อง staging และ production ใช้โครงสร้างจริง |
+| Q9 | กองเจ้าภาพบันทึกแทนผู้แจ้งและแทนเขต คนที่บันทึกผลแก้/จ่ายของบันทึกคำตอบแทนเขตของเรื่องเดียวกันไม่ได้ |
+| Q10 | ช่องทางสำรองมีเบอร์ของแต่ละกองตามหัวข้อ แบบฟอร์มสำรองมีช่องหัวข้อ |
+| Q11 | คำขอหลายกองแยกเป็นเรื่องละกองตั้งแต่ยื่น ถ้าคัดกรองผิดให้มอบงานย่อย |
+| Q12 | ระบบเสนอแผนกจากตาราง `sections` ในกติกา (เริ่มว่าง) กองเปลี่ยนได้ด้วย "ระบุแผนก" |
+| Q13 | เจ้าหน้าที่สังกัดได้ 1 แผนก (แอดมินตั้งในหน้าบัญชี) สิทธิ์ยังเป็นระดับกอง |
+| Q14 | เรื่องการใช้ไฟฟ้าไม่ส่งให้ AI ทั้งตอนร่างใน LINE และตอนคัดกรอง (ทั้งหัวข้อและคำในข้อความ) |
+
+**ทำแล้ว:** migration 0019 (`Section`, `StaffProfile.section`, `Case.section`, `Case.topic`); การกระทำ `set_section`; โหมดไม่มีจุดกลาง/หน่วยทะเบียนใน `policy.evaluate`, `services.submit_case` (แยกเรื่อง, `CommandResult.split`), การบันทึกแทนเขต, อีเมลเหตุอันตราย, หน้า SAP; LINE มีตัวเลือก "4. การใช้ไฟฟ้า" และตอบเลขทุกเรื่องเมื่อแยก; ตัวกรองแผนกในคิว, ตารางตามแผนกในรายงาน, ป้ายแผนกในหน้าเรื่อง; คำสั่ง `load_org`, `rename_division_code`, `seed_org_demo` (เว็บบนเครื่อง), `seed_staging` ใช้โครงสร้างจริง; หน้าปิดปรับปรุงมีเบอร์ตามหัวข้อ หลักฐาน: `make test-module MODULE=M13` 18 tests และชุดเต็ม 559 tests ผ่าน, `make check` ผ่าน
+
+**ติดตั้งใน production:** `manage.py load_org` → `manage.py import_policy --username <admin> --source operations/fixtures/policy_fajo_v1.json --activate --approved-by <เจ้าของกติกา> --reference <เลขอนุมัติ> --reason ...` → สร้างบัญชีเจ้าหน้าที่จริงและตั้งแผนกในหน้าแอดมิน → ใส่เบอร์ตามหัวข้อใน `compose.env` เมื่อได้อักษรย่อ: `manage.py rename_division_code --from กองอุปกรณ์ฯ --to <อักษรย่อ> --username <admin> --approved-by ... --reference ... --reason ...`
+
+**รอบต่อมา (10 ต.ค. 2569, [ADR 0009](Docs/adr/0009-system-options-instead-of-fixed-rules.md)):** ผู้ใช้ให้แต่ละกองมีผู้ใช้คนเดียวที่ทำได้ทุกงานของกอง และกำหนดหลักออกแบบว่า flow และกฎเกณฑ์ต้องเปลี่ยนได้สะดวก งานอย่างการลงทะเบียนต้องมีตัวเลือก ไม่ fix แต่ปลอดภัย จึงมีหน้า "ตัวเลือกระบบ" (การแยกหน้าที่: เปิด/ปิด; ผู้อนุมัติการลงทะเบียน: แอดมิน/ผู้กำกับงาน/เจ้าหน้าที่กอง) และปุ่ม "ทำได้ทุกงานในกอง" ในหน้าบัญชี เว็บบนเครื่องใช้บัญชี `kcw`, `kae`, `ktf`, `kkm`, `sok`, `bt`, `faoj` (กองละหนึ่ง) และปิดการแยกหน้าที่ บัญชีรายบทบาทชุดก่อนถูกระงับ ใน production ให้แอดมินสร้างบัญชีกองละหนึ่ง กด "ทำได้ทุกงานในกอง" แล้วเลือกการแยกหน้าที่ในตัวเลือกระบบ (ควรให้ผู้ตรวจสอบภายในรับรองก่อนปิด)
+
+**เปลี่ยนชื่อ (10 ต.ค. 2569):** ผู้ใช้ให้เรียกเรื่องชนิด problem ว่า "แจ้งปัญหา/ข้อเสนอแนะ" ทั้งใน LINE เว็บ และสาธิต (migration 0021 เปลี่ยนแค่ป้ายชื่อ รหัส `problem` เดิม)
+
+**รอบแจ้งปัญหา/ข้อเสนอแนะและ LINE (10 ต.ค. 2569, [ADR 0010](Docs/adr/0010-identity-checks-anonymous-reports-and-staff-on-line.md)):**
+- ข้อเสนอแนะเป็นหัวข้อของเรื่องแจ้งปัญหา/ข้อเสนอแนะ ส่งถึง ฝอจ. (กติกา FAJO-2) และมีหมวดผลของตัวเอง
+- LINE ถาม "เรื่องนี้เกี่ยวกับอะไร" โดยหัวข้อมาจากกติกา และมีปุ่ม "ไม่แน่ใจ"
+- ยืนยันตัวตนด้วยทะเบียนพนักงาน (นำเข้า CSV เก็บค่ายืนยันเป็น hash) ระบบอนุมัติเองเมื่อตรงและตัวเลือกระบบอนุญาต และมีทางอื่นให้คนอนุมัติเสมอ
+- ตำแหน่งผู้ลงทะเบียนเก็บตามตัวเลือก แจ้งแบบไม่ระบุตัวตนได้เฉพาะปัญหา/ข้อเสนอแนะและต้องมีตำแหน่ง
+- เจ้าหน้าที่เชื่อม LINE ด้วยรหัสจากเว็บหรือรหัสพนักงาน ได้เมนู "งานของกอง" ทำบางขั้นได้ และได้เด้งเตือนเฉพาะเรื่องสำคัญถึงผู้รับผิดชอบหรือ ผอ. ภายในงบที่ปรับได้ (ค่าเริ่ม 220)
+- LINE เดียวเป็นทั้งผู้แจ้งและเจ้าหน้าที่ได้ ผอ.แจ้งในนามกองได้
+- ข้อความบอทเขียนตามแนว /humanizer
+- หลักฐาน: `test_m13_line_people` 13 tests และชุดเต็ม 578 tests ผ่าน
+- ก่อน production ต้องมี: ทะเบียนพนักงานจริง, ประกาศความเป็นส่วนตัวเรื่องตำแหน่งและการแจ้งไม่ระบุตัวตน, ตัดสินแบ่งโควตา LINE ระหว่างเจ้าหน้าที่กับเขต
+
+**บทสนทนาจำลอง (10 ต.ค. 2569, [ADR 0011](Docs/adr/0011-simulated-requesters-talk-to-the-real-bot.md)):** ทำตามข้อเสนอจากงานวิจัยแนว intent graph + dual agent + validation/retry ของ [ASCRIBE/S-ICOPD](https://arxiv.org/pdf/2610.01234) และ [GraphTOD](https://arxiv.org/abs/2501.11977) โดยจำลองเฉพาะฝั่งผู้แจ้ง อีกฝั่งคือบอทจริงที่รับ event ผ่าน `line.store_events` และ `conversation.handle_inbox` เหมือน LINE
+- กราฟขั้นสนทนาอยู่ใน `operations/fixtures/dialogue_graph_v1.json`: ขั้นของบอทกับสิ่งที่ผู้แจ้งทำต่อได้พร้อมน้ำหนัก ทางแยก (พิมพ์นอกเรื่อง กดปุ่มเก่า ส่งรูป ดูเรื่องของฉัน พิมพ์เลขเรื่องของคนอื่น กดยืนยันซ้ำ) ผู้แจ้งจำลอง 4 แบบ สถานการณ์ 12 แบบ (เบิก คืน ปัญหาอุปกรณ์ กดไม่แน่ใจ การใช้ไฟฟ้า ข้อเสนอแนะ ไม่ระบุตัวตน ลงทะเบียนด้วยรหัสพนักงาน ลงทะเบียนให้คนตรวจ ยกเลิกร่างเบิก ยกเลิกร่างแจ้งปัญหา เจ้าหน้าที่ใน LINE) และคลังข้อความภาษาไทยจำลอง บอทเพิ่มขั้นเมื่อไรแก้ไฟล์นี้ ไม่ต้องแก้โค้ด
+- ข้อความสร้างจากแม่แบบด้วยกฎ ไม่เรียกโมเดล ก่อนส่งตรวจว่าข้อความตรงกับป้ายของบทสนทนาตามกติกาที่ใช้งาน (ไม่มีคำของอุปกรณ์หมวดอื่น ไม่มีคำอันตรายหรือคำของเรื่องการใช้ไฟฟ้าที่ไม่ได้ตั้งใจ) ไม่ตรงก็สุ่มใหม่โดยตัดแม่แบบนั้นออก หลังส่ง ถ้าบอทไม่ไปต่อ ผู้แจ้งจำลองซ่อมแบบคน (กดปุ่มแทนพิมพ์ ใช้ตัวเลข ค้นหาให้เจาะจงขึ้น) และนับเป็นจุดติดขัด ความผิดของบอทเป็นข้อค้นพบ ไม่ลองซ้ำจนผ่าน
+- กฎที่ตรวจ: ทุกข้อความได้คำตอบในขอบเขตของ LINE, ขั้นที่ให้เลือกมีปุ่ม, ไม่มีขีดยาว/คำต้องห้ามตามแนว humanizer, หน้าสรุปแสดงทุกคำตอบตามลำดับที่ถาม, ข้อมูลในเรื่องตรงกับที่ตอบ, กองเจ้าภาพตรงตารางความรับผิดชอบในกติกา (อ่านจากเอกสารกติกาโดยตรง), แยกเรื่องตามกองครบ, แจ้งอันตรายได้ P0 และคำแนะนำทันที, ข้อความเรื่องการใช้ไฟฟ้าไม่ถึง AI, ข้อความเด้งถึงเจ้าหน้าที่ไม่มีข้อความของผู้แจ้ง, ผู้แจ้งไม่ระบุตัวตนไม่มีชื่อและตำแหน่งตรง, ปุ่มเก่าใช้ไม่ได้, ไม่เห็นเรื่องของคนอื่น, ยืนยันซ้ำได้เรื่องเดียว, ลงทะเบียนได้ผลตามวิธี, เจ้าหน้าที่เชื่อม LINE ดูงานและทำขั้นที่อนุญาตได้
+- ทั้งรอบอยู่ในธุรกรรมที่ย้อนกลับ แต่ละบทใน savepoint ของตัวเอง ปิด AI ปิดการส่งออก และใช้ได้เฉพาะ local, ci, staging
+- ข้อค้นพบที่แก้แล้ว: (1) หน้าสรุปเรียงคำตอบตามลำดับคีย์ของ jsonb ไม่ใช่ลำดับที่ถาม และข้อเสนอแนะ/การใช้ไฟฟ้าใช้ป้าย "ผลกระทบ" ผิดความหมาย (2) เมื่อหมวดมีของเกิน 11 รายการ บอทเปลี่ยนเป็นโหมดค้นหาและปุ่ม "ไม่ระบุรุ่น" หายไป แจ้งปัญหาโดยไม่ระบุรุ่นไม่ได้ (จะเกิดกับรายการของจริง) (3) ผลค้นหาเกิน 10 รายการถูกตัดเงียบ ตอนนี้บอกให้พิมพ์ให้เจาะจงขึ้น
+- ใช้: `make simulate-line COUNT=200 SEED=7` หรือ `manage.py simulate_line_dialogues --count 200 --seed 7 --out reports/sim.jsonl --report reports/sim.json --ai-eval-out reports/triage-sim.json` (`--dialogue N` เล่นบทเดียวซ้ำ, `--scenario` เลือกสถานการณ์, `--fail-on-findings` สำหรับ CI) ผลที่ได้ใน local: 200 บท ผ่านทั้งหมด ครอบคลุมทางในกราฟ 100% ทางแยก 100% ใช้เวลาราว 46 วินาที
+- หมวดที่มีของน้อยกว่าค่า `catalogue.at_least` ในกราฟ (ตอนนี้มิเตอร์ 14 รายการ) ตัวจำลองเพิ่มของจำลองชั่วคราวให้ครบระหว่างรัน แล้วย้อนกลับพร้อมทุกอย่าง เพื่อให้ได้เดินขั้นค้นหาของแบบเมื่อมีรายการของจริง ของเหล่านี้ไม่ถูกส่งออกเป็นชุดประเมิน AI
+- `--ai-eval-out` ส่งออกเรื่องแจ้งปัญหาอุปกรณ์ที่ผ่านเป็นแถวรูปแบบชุดประเมิน triage (ไม่รวมการใช้ไฟฟ้าและข้อเสนอแนะ) เป็นชุดร่างให้เจ้าหน้าที่ตรวจ ไม่ใช่ชุดที่ล็อกและไม่ใช้ตัดสินเปิด AI
+- หลักฐาน: `test_m13_dialogue_sim` (กราฟ, รันทุกสถานการณ์โดยไม่เก็บและไม่ส่งอะไร, เล่นซ้ำได้ผลเดิม, mutation test ที่ทำให้บอทผิดโดยตั้งใจแล้วกฎที่เกี่ยวข้องต้องจับได้, การสุ่มใหม่และการซ่อม, การส่งออก, คำสั่ง, ข้อค้นพบที่แก้แล้ว)
+- ให้โมเดลเขียนข้อความของผู้แจ้ง (ผู้ใช้อนุมัติ 10 ต.ค. 2569): `manage.py simulate_line_dialogues --writer model --profile 6 --max-model-calls 200` โมเดลเขียนใหม่จากแม่แบบที่ผ่านการตรวจแล้วเท่านั้น และข้อความที่ได้ต้องผ่านกฎ:
+  - ไม่มีคำสั่งปน อักษรภาษาอื่น หรือการเขียนในบทเจ้าหน้าที่
+  - เนื้อความคงเดิม ความยาวไม่เกินกำหนด และความต้องการกับความไม่แน่ใจยังอยู่
+  - ตัวเลข ชื่ออุปกรณ์ คำอันตราย และคำของเรื่องการใช้ไฟฟ้าไม่หายหรือเพิ่ม
+
+  ไม่ผ่านก็ส่งเหตุผลกลับให้เขียนใหม่ ครบจำนวนครั้งแล้วใช้แม่แบบ โค้ดอยู่ใน `operations/dialogue_writer.py`
+  - รอบจริงกับ OpenTyphoon `typhoon-v2.5-30b-a3b-instruct` ต้องปรับกฎตามที่เจอ 3 รอบ: โมเดลเคยเอาคำสั่งเรื่องวิธีพิมพ์ใส่ในข้อความ แต่งตัวเลขเอง ตอบแทนเจ้าหน้าที่ ปนอักษรจีน และกลับความหมายข้อเสนอแนะ ("อยากให้มีคู่มือ" เป็น "มีคู่มือให้แล้ว")
+  - รอบสุดท้าย 40 บทผ่านทั้งหมด ข้อความจากโมเดล 35/41 (เรียก 72 ครั้ง ใช้แม่แบบแทน 6)
+  - ข้อจำกัด: ข้อความที่ผ่านกฎแต่เปลี่ยนความหมายเล็กน้อยยังมีได้ ชุดประเมิน AI ที่ส่งออกจึงต้องให้คนตรวจ และรอบที่ใช้โมเดลเล่นซ้ำได้ไม่ตรงคำเดิม
+
+**บอทตอบคำถามในแชต (10 ต.ค. 2569, [ADR 0012](Docs/adr/0012-chat-answers-from-an-approved-bank.md)):** ผู้ใช้เลือก ก+ข+ค และอนุมัติให้ใช้ AI
+- คลังคำตอบในหน้าแอดมิน "คลังคำตอบ": แก้ รับรอง เลิกใช้ ต้องมีเหตุผลและบันทึก audit ร่างชุดแรก 14 ข้อ (`operations/fixtures/chat_answers_v1.json`, `manage.py load_answers`)
+- ตัวเลือกระบบ `chat_answers`: ปิด (ค่าเริ่มต้น) / คำสำคัญ / AI เลือก / AI เขียน บนเครื่องตั้งเป็น "AI เขียน" ตามที่ผู้ใช้เลือก
+- ลำดับ: คำอันตรายได้คำแนะนำเร่งด่วนทันที → คำสำคัญ → AI สกัดร่าง → ถ้าไม่ใช่คำขอ AI ตอบ หลังตอบบอทถามคำถามเดิมต่อ
+- AI งาน "ตอบแชต" (`operations/ai_answer.py`) มีรุ่นและเกณฑ์ของตัวเอง เลือกได้เฉพาะคำตอบที่รับรองแล้ว คำตอบที่เขียนต้องผ่านกฎ (ไม่รับปาก ไม่มีตัวเลขหรือเลขเรื่องที่ไม่มีในข้อมูล ภาษาไทย ตรงแนว humanizer) ไม่ผ่านใช้ข้อความที่รับรอง
+- คำสั่ง: `manage.py answer_ai --username <developer-admin> --profile <id> --reason "..." --test --evaluate --activate`
+- ตัวจำลองบทสนทนาถามคำถามระหว่างทางและตรวจว่าได้คำตอบจากคลังแล้วบอทถามคำถามเดิมต่อ
+- แก้บั๊กที่เจอระหว่างทำ: ผู้แจ้งไม่ระบุตัวตนพิมพ์ข้อความอิสระตอนเปิด AI แล้วได้ "บัญชีผู้แจ้งของคุณใช้งานไม่ได้" ตอนนี้ได้คำตอบจากคำสำคัญเท่านั้น
+- หลักฐาน: `test_m13_chat_answers` 23 tests, ตัวจำลองบทสนทนาถามคำถามระหว่างทาง 20 ครั้งใน 200 บทผ่านทั้งหมด
+- ประเมินจริงบนเครื่อง (OpenTyphoon `typhoon-v2.5-30b-a3b-instruct`, รุ่น v14, prompt answer-v2): ผ่านเกณฑ์และเปิดใช้แล้ว
+  - รอบ 1: เลือกคำตอบถูก 95%, เลือกผิด 1.8% (1 จาก 56), JSON ถูก 98.2%
+  - รอบ 2: ทุกค่า 100%
+  - ทั้งสองรอบ: คำตอบที่เขียนผ่านกฎ 100%, red-team ฝ่าได้ 0, p95 ประมาณ 1.7 วินาที
+- รอบแรก (answer-v1) เจอว่าโมเดลเดาเวลาทำการเอง เพราะไม่ได้เห็นเวลาจากกติกา กฎจับได้และส่งข้อความที่รับรองแทน แก้โดยส่งข้อความเต็มให้โมเดลเห็น และตัดคำลงท้าย
+- ก่อน production: ฝอจ. แก้และรับรองคำตอบจริง (โดยเฉพาะเบอร์ติดต่อ Q10) และเปิดรุ่น AI ที่ประเมินบนคลังคำตอบจริง
+
+**หน้าเว็บ (10 ต.ค. 2569 ตามที่ผู้ใช้ขอ):**
+- ตัวอักษรเมนูหลักใหญ่ขึ้น (18px) และเมนูแอดมิน (17px)
+- รวม "ภาพรวม" กับ "รายงาน" เป็นหน้าเดียว "ภาพรวมและรายงาน" ลำดับเนื้อหา:
+  1. งานที่รอแต่ละกอง
+  2. ตัวเลขสำคัญพร้อมตัวกรองช่วงเวลาและกอง
+  3. กราฟเรื่องเข้าและเรื่องจบ
+  4. การ์ดแยกตามระดับ อายุ ชนิด สถานะ และของ
+  5. การ์ดเทียบทุกกอง กดแล้วเข้ารายงานของกองนั้น
+- ที่อยู่เดิม `/reports/` ยังเปิดได้และแสดงหน้าเดียวกัน
+- หน้าที่มีรายการยาวมีช่องค้นหา ตัวกรองแบบ dropdown ตัวนับ และพับ/ขยายรายการ (`_list_tools.html` + app.js) ไม่มี JavaScript ก็ยังเห็นทุกรายการ
+  - คลังคำตอบ: กรองตามสถานะและสิ่งที่ต่อท้าย
+  - ตัวเลือกระบบ: กรองว่าเปลี่ยนจากค่าเริ่มต้นหรือไม่
+  - ผู้ใช้: เพิ่มคอลัมน์กองและบทบาท กรองตามกองและสถานะ
+  - กอง: กรองตามสถานะและประเภท
+  - ผู้แจ้งที่รับรองแล้ว: กรองตามเขตและสถานะ
+
+**AI ถามต่อเอง (10 ต.ค. 2569, ADR 0012):** หลัง AI เติมร่างจากข้อความ AI เรียบเรียงคำถามของขั้นถัดไปโดยอ้างถึงสิ่งที่ผู้แจ้งพิมพ์มา ขั้นและปุ่มยังเป็นของระบบ คำถามต้องผ่านกฎก่อนส่ง (เป็นคำถาม ถามตรงขั้น ไม่มีตัวเลขใหม่ ไม่รับปาก ภาษาไทย) ตัวเลือกระบบ `chat_followup` บนเครื่องตั้งเป็น "AI ถามต่อ"
+- ประเมินจริง (v14, OpenTyphoon) ผ่านเกณฑ์ ผลรวมกับชุดตอบแชต:
+  - เลือกคำตอบถูก 100%, คำตอบที่เขียนผ่านกฎ 97%, red-team ฝ่าได้ 0
+  - คำถามต่อผ่านกฎ 90% ทั้งสองรอบ ฝ่ากฎได้ 0 ส่วนที่เหลือใช้คำถามมาตรฐาน
+- รอบแรก (followup-v1) ผ่านแค่ 70-75% ด้วยสองสาเหตุ:
+  - โมเดลลอกคำถามมาตรฐานและพูดแทนผู้แจ้ง ("ขอเบิก...")
+  - ตัวตรวจนับ "ขอ" เป็นคำถามทั้งที่ "ขอ" อยู่ใน "ของ"
+
+  แก้ทั้ง prompt (v2 มีตัวอย่าง) และตัวตรวจ
+- ลองจริงทั้งเส้นทาง: "ขอเบิกฟิวส์ 5 ชิ้นครับ" บอทถามว่า "ฟิวส์รุ่นจำลอง A 5 ชิ้นที่ขอเบิกเอาไปใช้ทำอะไร"
+- จุดที่เหลือจากรอบนี้แก้แล้วในหัวข้อถัดไป
+
+**ข้อความที่ไม่ใช่คำตอบของขั้น (11 ต.ค. 2569 "ปรับที่ยังปรับต่อได้", ADR 0010 และ 0012):**
+- ตัวเลือกระบบใหม่ 3 ข้อ (ค่าเริ่มต้นอยู่หน้า):
+  - `chat_typed_steps` รับเป็นคำตอบของขั้นเสมอ / ตรวจก่อน บนเครื่องตั้งเป็น "ตรวจก่อน"
+  - `info_reply` ดูก่อน / ถามยืนยันทุกข้อความ
+  - `registration_name` ต้องมีทั้งชื่อและนามสกุล / รับตามที่พิมพ์
+- ขั้นที่ให้พิมพ์ (ตรวจก่อน):
+  - คำถามไปที่คลังคำตอบ แล้วไปที่ AI ตอบแชตเท่านั้น
+  - คำขอใหม่ไปที่ AI สกัดร่าง
+  - ไม่พบอะไร หรือ AI ตอบไม่ทัน ขั้นนั้นรับข้อความตามเดิม
+  - คำขอใหม่ที่เพิ่มของไม่เติมช่องของขั้นที่ถามอยู่ บอทถามช่องนั้นอีกครั้ง
+- ระหว่างเจ้าหน้าที่รอข้อมูลเพิ่ม:
+  - คำทักทายไม่ถูกส่งถึงเจ้าหน้าที่ บอทบอกว่าเจ้าหน้าที่รออะไร
+  - คำถาม คำขอใหม่ และข้อความสั้นมาก บอทถามก่อน
+  - กด "ไม่ใช่ข้อมูลเพิ่ม" ข้อความนั้นทำงานเหมือนข้อความทั่วไป รวมถึงให้ AI อ่าน
+- ลงทะเบียน:
+  - คำทักทาย คำถาม คำขอ ตัวเลข และคำเดียว ไม่ถูกรับเป็นชื่อ
+  - "ผมชื่อ..." ตัดคำนำออก
+  - ตอนเลือกเขตมีปุ่ม "แก้ชื่อ" และพิมพ์แทนการเลือกได้รายการเขตอีกครั้ง
+- ขั้นที่ให้เลือก: พิมพ์ข้อความที่ใช้ไม่ได้ บอทบอกวิธีตอบก่อนถามซ้ำ
+- AI ถามต่อ:
+  - คำกำกับขั้นผลกระทบรับ "ส่งผล" ด้วย
+  - ตัวตรวจรับ "เหตุใด/ทำไม" เป็นคำถาม
+  - คำถามที่ถูกตีกลับเก็บถ้อยคำไว้ดูย้อนหลัง
+  - AIRun มีสถานะใหม่ "ขั้นที่ให้พิมพ์รับข้อความไว้" (migration 0026)
+- ลองกับโมเดลจริงแบบย้อนกลับเจอ 2 จุดที่เทสต์จำลองไม่เจอ แก้แล้ว:
+  - คำถามที่มีคำถามกลางประโยค ("ต้องรอนานแค่ไหนกว่าจะได้ของ") หลุดไปเป็นวัตถุประสงค์
+  - AI สกัดร่างอ่านคำถามเป็นการแจ้งปัญหาแล้วเปิดร่างใหม่ จึงให้คำถามไปที่ AI ตอบแชตอย่างเดียว
+
+  หลังแก้ บทสนทนาเดียวกันได้ร่างเดียวที่มีของครบ 2 รายการและวัตถุประสงค์ที่ผู้แจ้งพิมพ์
+- AI สกัดร่าง: ช่องสั้น (วัตถุประสงค์ เหตุผล สภาพ) ที่มีแค่คำขอ คำว่าเพิ่ม/อีก จำนวน หน่วย และชื่อของ ไม่ถูกเติม (`ai_grounding.says_nothing`)
+  - โมเดลจริงเคยเติม "เพิ่มอีก" เป็นวัตถุประสงค์จาก "ขอเบิกมิเตอร์เพิ่มอีก 2 เครื่อง"
+  - ระบบตัดค่าแบบนี้ทิ้งเงียบ ๆ ไม่ปฏิเสธ คำตอบที่บันทึกไว้แล้วจึงไม่หาย
+  - ตรวจกับค่าที่ชุดประเมินสกัดร่างคาดหวัง 106 ค่า ไม่มีค่าไหนถูกตัด
+  - ลองกับโมเดลจริง: ข้อความเพิ่มของไม่ได้วัตถุประสงค์ ส่วน "ใช้ติดตั้งบ้านใหม่ในซอย 5" และ "เหลือจากงาน" ยังได้ครบ
+  - ประเมิน v11 ชุดเต็มใหม่บน source นี้ (11 ต.ค. 2569, ผู้ใช้สั่ง "ทำเลย") ผ่าน security tests 227 รายการ:
+
+    | ชุด | intent | items | ร่างไม่ปนเปื้อน | p95 | เทียบ 7 ต.ค. |
+    | --- | --- | --- | --- | --- | --- |
+    | heldout-v4 (40) | 1.000 | 1.000 | - | 2.1 วิ | ดีขึ้น (0.975 / 0.972) |
+    | redteam-v1 (20) | 1.000 | 1.000 | 1.00 | 1.6 วิ | เท่าเดิม |
+    | redteam-v2 (20) | 1.000 | 0.80 | 0.85 | 8.1 วิ | ดีขึ้น (0.75 / 0.80) |
+
+    - redteam-v2 ยังมีร่าง 3 จาก 20 ที่มีข้อความแทรกจากผู้โจมตีหลุดเข้ามา (เดิม 4) ผ่านเกณฑ์ เพราะผู้แจ้งเป็นคนตรวจและยืนยันร่างเองทุกครั้ง
+    - รอบแรกไม่นับ: ผมแก้ worker ระหว่างที่ระบบเรียกโมเดล เกณฑ์จึงตีตกตามที่ออกแบบไว้ (source ต้องไม่เปลี่ยนระหว่างประเมิน) รอบที่สองไม่แตะโค้ดเลย
+    - ผลเดิมสำรองไว้ที่ `reports/ai-eval-v11-before-2569-10-11.json`
+    - ประเมิน AI ตอบแชต v14 ซ้ำบน source เดียวกัน ผ่านทั้งสองรอบ: เลือกคำตอบถูก 100%, คำตอบที่เขียนและคำถามต่อผ่านกฎ 100%, red-team ฝ่าได้ 0, p95 ประมาณ 1.7 วินาที
+    - ผลของทั้งสองงานผูกกับ source digest เดียวกัน (`825cea8a10d3…`) ซึ่งตรงกับโค้ดปัจจุบัน ถ้า commit โค้ดนี้โดยไม่แก้ไฟล์ใน digest หลักฐานยังใช้กับ commit นั้นได้ แก้ไฟล์ใดก็ต้องประเมินใหม่
+- ตัวจำลองมีสถานการณ์ใหม่ "เจ้าหน้าที่ขอข้อมูลเพิ่มแล้วผู้แจ้งตอบในแชต" (ADR 0011) และตัวตรวจ `info`
+  - ผู้แจ้งจำลองทักทาย ถามคำถาม กด "ไม่ใช่ข้อมูลเพิ่ม" หรือตอบข้อมูล ข้อความต้องถึงเรื่องเฉพาะเมื่อเป็นข้อมูล
+  - เจอระหว่างทำ: คำทักทายได้ทั้ง "มีอัปเดตใหม่" และข้อความเตือนที่บอกเหตุผลของเจ้าหน้าที่ซ้ำกัน ตอนนี้บอกครั้งเดียว
+  - เทสต์แบบทำให้บอทพังโดยตั้งใจ: บอทที่ส่งคำทักทายถึงเจ้าหน้าที่ถูกตัวจำลองจับได้
+  - 200 บทผ่านทั้งหมดใน seed 1, 3, 7, 11 ครอบคลุมทาง 98-100% ตามการสุ่ม ทางแยก 100%
+- หน้า AI (ผู้พัฒนา) มีคอลัมน์ "AI ทำอะไร" ของ 50 ข้อความล่าสุด: ขั้นที่พิมพ์มา จำนวนเรื่องที่เติมร่าง คำตอบที่เลือก ข้อความที่ส่ง คำถามต่อ และเหตุผลที่ถ้อยคำของ AI ถูกตีกลับ กรองตามผลและ "มีที่ถูกตีกลับ" ได้ ADR 0012 เขียนไว้ว่าให้ ฝอจ. ดูย้อนหลัง แต่ก่อนหน้านี้ยังไม่มีหน้าจอให้ดู
+- เทสต์ที่ล้มครั้งเดียว ("Lease is not valid"):
+  - สาเหตุ: log ของ macOS บอกว่าเครื่อง sleep เวลา 08:44–08:52 ระหว่างเทสต์รอบนั้น นาฬิกาจริงเดินเกินเวลาจองงาน 120 วินาทีของ worker
+  - จุดที่ต้องแก้: worker หยุดทั้ง loop เมื่อจองงานหมดเวลาระหว่างทำ เครื่องจริงที่ VM ค้างนาน ๆ ก็เกิดแบบเดียวกันได้
+  - แก้แล้ว: worker บันทึกเตือนแล้วทำงานต่อ งานนั้นถูกหยิบมาทำใหม่ภายหลัง ซึ่งไม่ซ้ำ เพราะข้อความที่ตอบแล้วถูกข้าม และการแจ้งเตือนวางแผนครั้งเดียวต่อ event
+  - error บอกด้วยว่าตรวจข้อไหนไม่ผ่าน API ยังตอบ `LEASE_INVALID` เหมือนเดิม
+  - มีเทสต์จำลองเครื่องค้างกลางงาน
+- หลักฐาน:
+  - `test_m13_chat_turns` 20 tests และชุดเต็ม 663 tests ผ่าน (รวมเทสต์ช่องสั้นของ AI สกัดร่างและตัวจำลองขอข้อมูลเพิ่ม), `make check` ผ่าน
+  - ตัวจำลอง 200 บทผ่านทั้งหมด ครอบคลุมทางและทางแยก 100% มีทางแยกใหม่ "ถามคำถามในขั้นที่ให้พิมพ์" และ "พิมพ์สิ่งที่ไม่ใช่ชื่อ"
+  - ประเมินจริง v14 บน source นี้ ผ่านทั้งสองรอบ:
+    - เลือกคำตอบถูก 100%, คำตอบที่เขียนผ่านกฎ 100%, red-team ฝ่าได้ 0
+    - คำถามต่อผ่านกฎ 100% (เดิม 90%)
+    - p95 ประมาณ 2 วินาที, security suites 226 tests
+
+**ยังเปิดอยู่:** อักษรย่อสองกอง (Q7), ตารางแผนก (Q12), เบอร์โทรตามหัวข้อ, รายการของจริง (ยังเป็นของจำลอง), ค่าจริงของปฏิทิน กรอบเวลา และข้อความฉุกเฉินใน FAJO-1 (ยังคัดจาก DEMO-PE-3)
 
 ```text
 Implement M13: รวมระบบและตรวจ acceptance G01–G10 โดยอ้าง commit/image/model/policy เดียวกับ candidate release

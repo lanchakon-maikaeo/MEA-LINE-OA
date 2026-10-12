@@ -1,0 +1,255 @@
+# Staging/production stack on one host (M12, E.2.1). It ships inside the application image, so a
+# release digest fixes the app, database image, n8n/ClamAV/Caddy digests and n8n workflows.
+# Run only through `faoj` (deploy/server/bin/faoj), which passes:
+#   --env-file $FAOJ_ROOT/env/compose.env   host settings (non-secret)
+#   --env-file <release>/release.env        APP_IMAGE, DB_IMAGE, RELEASE_ID
+# Secrets live in $FAOJ_ROOT/env/*.secret.env (0600, root) and reach only the services below.
+name: faoj
+x-app: &app
+  image: ${APP_IMAGE:?release.env}
+  env_file:
+    - ${FAOJ_ROOT:?}/env/django.env
+    - ${FAOJ_ROOT}/env/app.secret.env
+  environment:
+    CLAMAV_HOST: clamav
+    CLAMAV_PORT: "3310"
+    PRIVATE_MEDIA_ROOT: /data/private-media
+    BEHIND_TLS_PROXY: "true"
+    RELEASE_ID: ${RELEASE_ID:?release.env}
+  volumes:
+    - ${FAOJ_ROOT}/data/media:/data/private-media
+    - ${FAOJ_ROOT}/tls/db/ca.crt:/run/faoj-tls/ca.crt:ro
+  init: true
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options: {max-size: "20m", max-file: "5"}
+
+services:
+  caddy:
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?compose.env}
+      CADDY_LOCAL_CERTS: ${CADDY_LOCAL_CERTS:-}
+      FALLBACK_PHONE: ${FALLBACK_PHONE:-}
+      FALLBACK_PHONE_METER: ${FALLBACK_PHONE_METER:-}
+      FALLBACK_PHONE_EQUIPMENT: ${FALLBACK_PHONE_EQUIPMENT:-}
+      FALLBACK_PHONE_USAGE: ${FALLBACK_PHONE_USAGE:-}
+      FALLBACK_FORM_URL: ${FALLBACK_FORM_URL:-}
+    volumes:
+      - ${RELEASE_DIR:?release.env}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${RELEASE_DIR}/caddy/maintenance:/srv/maintenance:ro
+      - ${FAOJ_ROOT}/run:/srv/run:ro
+      - ${FAOJ_ROOT}/data/caddy:/data
+    mem_limit: ${CADDY_MEM:-128m}
+    restart: unless-stopped
+    logging: *logging
+
+  db:
+    image: ${DB_IMAGE:?release.env}
+    env_file:
+      - ${FAOJ_ROOT}/env/db.secret.env
+    environment:
+      POSTGRES_USER: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+      PGBACKREST_STANZA: faoj
+      PGBACKREST_PG1_PATH: /var/lib/postgresql/data/pgdata
+      PGBACKREST_REPO1_TYPE: ${BACKUP_REPO_TYPE:-s3}
+      PGBACKREST_REPO1_PATH: /pgbackrest/${FAOJ_ENV:?compose.env}
+      PGBACKREST_REPO1_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-none}
+      PGBACKREST_REPO1_S3_BUCKET: ${BACKUP_DB_BUCKET:-none}
+      PGBACKREST_REPO1_S3_REGION: ${BACKUP_S3_REGION:-none}
+      PGBACKREST_REPO1_S3_URI_STYLE: path
+      PGBACKREST_REPO1_STORAGE_VERIFY_TLS: ${BACKUP_S3_VERIFY_TLS:-y}
+      PGBACKREST_REPO1_CIPHER_TYPE: aes-256-cbc
+      PGBACKREST_REPO1_RETENTION_FULL: "2"
+      PGBACKREST_REPO1_BUNDLE: "y"
+      PGBACKREST_REPO1_BLOCK: "y"
+      PGBACKREST_COMPRESS_TYPE: zst
+      PGBACKREST_ARCHIVE_ASYNC: "y"
+      PGBACKREST_SPOOL_PATH: /var/spool/pgbackrest
+      PGBACKREST_LOG_LEVEL_CONSOLE: info
+      PGBACKREST_LOG_LEVEL_FILE: "off"
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/var/lib/postgresql/tls/server.crt
+      - -c
+      - ssl_key_file=/var/lib/postgresql/tls/server.key
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-256MB}
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-60}
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=${PG_ARCHIVE_MODE:-off}
+      - -c
+      - archive_command=pgbackrest archive-push %p
+      - -c
+      # RPO ≈ 5 min when idle, so the 10-minute WAL-lag alert means something (E.9); about
+      # 9–17k Object Storage requests a month within the 50k Always Free allowance.
+      - archive_timeout=300
+    volumes:
+      - ${FAOJ_ROOT}/data/postgres:/var/lib/postgresql/data
+      - ${FAOJ_ROOT}/tls/db:/run/faoj-tls:ro
+      - ${FAOJ_ROOT}/data/pgbackrest-spool:/var/spool/pgbackrest
+    shm_size: 256m
+    # An init reaps pgBackRest's async archive workers; as PID 1 the postmaster would take
+    # their exit for a crashed backend and restart the cluster.
+    init: true
+    healthcheck:
+      test: ["CMD", "gosu", "postgres", "pg_isready", "-q", "-h", "/var/run/postgresql", "-d", "faoj"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: ${DB_MEM:-2g}
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    <<: *app
+    env_file:
+      - ${FAOJ_ROOT}/env/django.env
+      - ${FAOJ_ROOT}/env/app.secret.env
+      - ${FAOJ_ROOT}/env/migrate.secret.env
+    command:
+      - sh
+      - -c
+      - /app/.venv/bin/python manage.py migrate --noinput && /app/.venv/bin/python manage.py apply_db_grants --role faoj_app
+    depends_on:
+      db: {condition: service_healthy}
+    restart: "no"
+    profiles: ["tools"]
+    healthcheck: {disable: true}
+
+  web:
+    <<: *app
+    command:
+      - /app/.venv/bin/gunicorn
+      - config.wsgi:application
+      - --bind=0.0.0.0:8000
+      - --workers=${WEB_WORKERS:-2}
+      - --access-logfile=-
+      - --error-logfile=-
+      - --forwarded-allow-ips=*
+    depends_on:
+      db: {condition: service_healthy}
+    mem_limit: ${WEB_MEM:-600m}
+
+  worker:
+    <<: *app
+    # Exactly one replica: it keeps each requester's chat turns in order (M04).
+    command: ["/app/.venv/bin/python", "manage.py", "run_worker"]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/worker-heartbeat') > 60)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    mem_limit: ${WORKER_MEM:-300m}
+
+  n8n:
+    image: n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b
+    env_file:
+      - ${FAOJ_ROOT}/env/n8n.secret.env
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: db
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_SSL_ENABLED: "true"
+      DB_POSTGRESDB_SSL_CA_FILE: /run/faoj-tls/ca.crt
+      DB_POSTGRESDB_SSL_REJECT_UNAUTHORIZED: "true"
+      GENERIC_TIMEZONE: Asia/Bangkok
+      TZ: Asia/Bangkok
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_SECURE_COOKIE: "false"  # editor only on 127.0.0.1, reached through an SSH tunnel
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "168"
+    ports:
+      - "127.0.0.1:${N8N_EDITOR_PORT:-5678}:5678"
+    volumes:
+      - ${FAOJ_ROOT}/data/n8n:/home/node/.n8n
+      - ${FAOJ_ROOT}/tls/db/ca.crt:/run/faoj-tls/ca.crt:ro
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 5
+    mem_limit: ${N8N_MEM:-1g}
+    restart: unless-stopped
+    logging: *logging
+
+  n8n-import:
+    # One-off per release: the Django credential and this release's workflows (no duplicates).
+    image: n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b
+    env_file:
+      - ${FAOJ_ROOT}/env/n8n.secret.env
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: db
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_SSL_ENABLED: "true"
+      DB_POSTGRESDB_SSL_CA_FILE: /run/faoj-tls/ca.crt
+      DB_POSTGRESDB_SSL_REJECT_UNAUTHORIZED: "true"
+      N8N_PUBLISH_IDS: ${N8N_PUBLISH_IDS:-faojCaseNotify01 faojRecovery0001 faojConvAi000001}
+    volumes:
+      - ${RELEASE_DIR}/workflows:/workflows:ro
+      - ${RELEASE_DIR}/n8n/import.sh:/import.sh:ro
+      - ${FAOJ_ROOT}/tls/db/ca.crt:/run/faoj-tls/ca.crt:ro
+    entrypoint: ["sh", "/import.sh"]
+    depends_on:
+      db: {condition: service_healthy}
+    profiles: ["tools"]
+
+  clamav:
+    image: clamav/clamav-debian:1.4@sha256:6d0680780fd29855cb7018f68272cb520821f614259e2066f8ec669069ac91b3
+    volumes:
+      - ${FAOJ_ROOT}/data/clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 300s
+      retries: 3
+    mem_limit: ${CLAMAV_MEM:-1536m}
+    restart: unless-stopped
+    logging: *logging
+    profiles: ["clamav"]
+
+  files-backup:
+    # Encrypted copy of private files and the n8n volume (restic → Object Storage, E.2.1).
+    image: restic/restic:0.18.1@sha256:39d9072fb5651c80d75c7a811612eb60b4c06b32ffe87c2e9f3c7222e1797e76
+    env_file:
+      - ${FAOJ_ROOT}/env/backup.secret.env
+    environment:
+      RESTIC_CACHE_DIR: /cache
+      AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-none}
+    volumes:
+      - ${FAOJ_ROOT}/data/media:/backup/media:ro
+      - ${FAOJ_ROOT}/data/n8n:/backup/n8n:ro
+      - ${FAOJ_ROOT}/data/restic-cache:/cache
+      - ${FAOJ_ROOT}/restore:/restore
+      - ${FAOJ_ROOT}/tls/backup:/run/faoj-backup-tls:ro
+    profiles: ["tools"]

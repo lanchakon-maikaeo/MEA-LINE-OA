@@ -14,6 +14,15 @@ MODULE_TESTS = {
     "M09": "operations.tests.test_m09_problems",
     "M10": "operations.tests.test_m10_web",
     "M11": "operations.tests.test_m11_registry",
+    "M12": ["operations.tests.test_m12_operations", "operations.tests.test_m12_support"],
+    "M13": [
+        "operations.tests.test_m13_org",
+        "operations.tests.test_m13_line_people",
+        "operations.tests.test_m13_dialogue_sim",
+        "operations.tests.test_m13_chat_answers",
+        "operations.tests.test_m13_chat_turns",
+        "operations.tests.test_m13_release",
+    ],
 }
 
 

@@ -1,0 +1,17 @@
+# Dependency update PRs (M12, E.8): they pass CI, Release and staging like any change; nothing
+# upgrades production on its own.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker
+    directories: ["/", "/deploy/server/db"]
+    schedule: {interval: weekly}
+  - package-ecosystem: docker-compose
+    directories: ["/", "/deploy/server"]
+    schedule: {interval: weekly}
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}

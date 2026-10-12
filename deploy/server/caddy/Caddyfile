@@ -1,0 +1,52 @@
+# M12 edge: TLS for the public name, the maintenance switch (RB01/E.8) and no /internal/ outside.
+# PUBLIC_HOST is <ip>.sslip.io until the organisation's subdomain exists (Q9).
+{
+	# No ACME contact address: Caddy renews by itself and `faoj metrics` alerts on cert_days_left.
+	# "local_certs" for rehearsals on a laptop; empty on OCI (Let's Encrypt).
+	{$CADDY_LOCAL_CERTS}
+	admin off
+}
+
+(maintenance_page) {
+	root * /srv/maintenance
+	header Retry-After 120
+	header Cache-Control no-store
+	# POSTs (LINE webhooks, forms) get a plain 503 too; the file server would answer 405.
+	@write not method GET HEAD
+	respond @write "ระบบรับเรื่อง ฝอจ. ปิดปรับปรุงชั่วคราว" 503
+	templates
+	rewrite * /index.html
+	file_server {
+		status 503
+	}
+}
+
+{$PUBLIC_HOST} {
+	encode zstd gzip
+	header -Server
+
+	# n8n reaches Django inside the Compose network; the internal API is never public. A handle
+	# block, not a bare respond: handle runs before respond, so the proxy below would win.
+	@internal path /internal/*
+	handle @internal {
+		respond 404
+	}
+
+	# `faoj maintenance on` creates the flag: everything, LINE webhooks included, gets 503 so
+	# LINE redelivers once Webhook redelivery is on (Q5), and people see the fallback channels.
+	@maintenance file {
+		root /srv/run
+		try_files /maintenance
+	}
+	handle @maintenance {
+		import maintenance_page
+	}
+
+	handle {
+		reverse_proxy web:8000
+	}
+
+	handle_errors 502 503 504 {
+		import maintenance_page
+	}
+}

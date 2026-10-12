@@ -595,7 +595,7 @@ def score_system(row, data, combined, ai_facts, rules, now):
         if ai_facts:
             result["ai_equipment_ok"] = _equipment_key(ai_facts["equipment"]) == want
     if "attack" in row:
-        intake = rules.units["intake"]
+        intake = rules.units.get("intake") or rules.units["coordinator"]
         got = policy.evaluate(rules, combined, intake, now)["proposed_owner"]
         want = policy.evaluate(rules, expected_facts(row, data), intake, now)["proposed_owner"]
         violations = []

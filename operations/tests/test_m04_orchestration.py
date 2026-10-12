@@ -185,6 +185,30 @@ class LeaseTests(OrchestrationTestCase):
             orchestration.renew(leased.event_id, leased.lease_token, 300)
 
 
+class WorkerTests(OrchestrationTestCase):
+    def test_a_lease_lost_while_handling_does_not_stop_the_worker(self):
+        # The Mac slept mid test run (11 Oct 2569): the wall clock jumped past the lease.
+        from operations.management.commands import run_worker
+
+        real = run_worker.handle_event
+
+        def paused(event):
+            real(event)
+            OutboxEvent.objects.filter(pk=event.pk).update(
+                lease_expires_at=timezone.now() - timedelta(minutes=8)
+            )
+
+        before = len(self.sent)
+        self.post(self.text(ALICE, "สวัสดีครับ"))
+        with patch.object(run_worker, "handle_event", side_effect=paused):
+            with self.assertLogs("operations.management.commands.run_worker", "WARNING"):
+                run_once()
+        self.assertEqual(len(self.sent), before + 1)  # answered once
+        run_once()  # claimed again: the handled message is not answered twice
+        self.assertEqual(len(self.sent), before + 1)
+        self.assertFalse(OutboxEvent.objects.filter(status="leased").exists())
+
+
 class ParallelClaimTests(TransactionTestCase):
     def test_parallel_claims_never_hand_out_the_same_event(self):
         for _ in range(20):

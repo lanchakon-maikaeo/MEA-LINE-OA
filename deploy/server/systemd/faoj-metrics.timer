@@ -1,0 +1,11 @@
+[Unit]
+Description=Send faoj metrics to OCI Monitoring (timer)
+
+[Timer]
+# UTC on the host; 20:00 UTC is 03:00 in Bangkok, outside service hours.
+OnCalendar=*:*:00
+Persistent=true
+RandomizedDelaySec=5
+
+[Install]
+WantedBy=timers.target

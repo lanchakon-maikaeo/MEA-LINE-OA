@@ -1,0 +1,402 @@
+{
+  "code": "LINE-DIALOGUE-1",
+  "is_synthetic": true,
+  "title": "กราฟขั้นสนทนาของบอท LINE รุ่น 1 (บทสนทนาจำลอง)",
+  "note": "ขั้นของบอทกับสิ่งที่ผู้แจ้งจำลองทำต่อได้ พร้อมน้ำหนักการสุ่ม ตามแนว intent graph ของ ASCRIBE/S-ICOPD และ GraphTOD ข้อความทั้งหมดเป็นข้อมูลจำลอง ไม่มีชื่อหรือเลขของคนจริง แก้กราฟนี้เมื่อบอทเพิ่มหรือเปลี่ยนขั้น โดยไม่ต้องแก้โค้ดตัวจำลอง",
+  "limits": {
+    "max_turns": 40,
+    "max_repairs": 2,
+    "max_redraws": 6,
+    "detour_rate": 0.3,
+    "rewrite_overlap": 0.5,
+    "rewrite_length": 2.0
+  },
+  "steps": {
+    "start": [["follow", 1]],
+    "reg_name": [["type_name", 1], ["press_anonymous", 1]],
+    "reg_district": [["press_district", 1]],
+    "reg_employee": [["type_employee_id", 4], ["press_other_way", 1]],
+    "reg_check": [["type_proof", 1]],
+    "reg_location": [["send_location", 3], ["skip_location", 1]],
+    "idle": [["press_new", 3], ["type_new", 1]],
+    "kind": [["press_kind", 4], ["type_kind_number", 1], ["press_discard", 1]],
+    "topic": [
+      ["press_topic", 4],
+      ["type_topic_number", 1],
+      ["press_unsure", 1],
+      ["press_discard", 1]
+    ],
+    "category": [["press_category", 4], ["type_category_number", 1], ["press_lines_done", 1]],
+    "item": [["press_item", 3], ["press_no_model", 1], ["press_back", 1]],
+    "item_search": [["search_item", 1], ["press_item", 1], ["press_no_model", 1]],
+    "quantity": [["type_quantity", 1]],
+    "serials": [["type_serials", 1], ["press_skip_serials", 1]],
+    "more": [["press_add_line", 1], ["press_continue", 1], ["change_mind_add", 0.3]],
+    "field": [["type_field", 3], ["press_skip_field", 1]],
+    "location": [["send_location", 1]],
+    "summary": [["press_confirm", 6], ["press_restart", 1], ["press_discard", 1]],
+    "staff_start": [["follow", 1]],
+    "staff_unlinked": [["type_link_code", 3], ["ask_employee_link", 1]],
+    "staff_emp": [["type_employee_id", 1]],
+    "staff_check": [["type_proof", 1]],
+    "staff_ready": [["type_staff_menu", 1]],
+    "staff_menu": [["press_staff_case", 1]],
+    "staff_detail": [["press_push", 1]],
+    "staff_alerted": [["press_staff_action", 2], ["type_my_cases", 1], ["finish_staff", 1]],
+    "awaiting_info": [
+      ["greet_waiting", 1],
+      ["ask_waiting", 1],
+      ["press_not_info", 2],
+      ["type_info", 2]
+    ]
+  },
+  "catalogue": {
+    "note": "ถ้าหมวดใดมีของน้อยกว่าจำนวนนี้ ตัวจำลองเพิ่มของจำลองชั่วคราวจนครบ (ย้อนกลับพร้อมทุกอย่าง) เพื่อให้ได้เดินขั้นค้นหาของแบบรายการของจริง",
+    "at_least": {"meter": 14}
+  },
+  "detours": {
+    "type_offtopic": {
+      "weight": 3,
+      "steps": ["kind", "topic", "category", "item", "more", "summary"]
+    },
+    "press_stale": {"weight": 2, "steps": ["category", "item", "more", "field", "summary"]},
+    "send_photo": {"weight": 1, "steps": ["field", "summary"]},
+    "check_mine": {"weight": 1, "steps": ["idle"]},
+    "peek_case": {"weight": 1, "steps": ["idle"]},
+    "double_confirm": {"weight": 2, "steps": ["submitted"]},
+    "ask_question": {
+      "weight": 2,
+      "steps": ["idle", "kind", "category", "more", "field", "summary"]
+    },
+    "not_a_name": {"weight": 2, "steps": ["reg_name"]}
+  },
+  "personas": [
+    {
+      "id": "presser",
+      "label": "กดปุ่มตามที่บอทเสนอ",
+      "writing": "พิมพ์สั้น ตรงประเด็น ไม่ทักทาย",
+      "weight": 4,
+      "type_choice": 0.05,
+      "polite": 0.2,
+      "thai_digits": 0.0,
+      "detours": 0,
+      "quantity": {"digits": 1}
+    },
+    {
+      "id": "typist",
+      "label": "ชอบพิมพ์ตัวเลขแทนกดปุ่ม",
+      "writing": "พิมพ์เร็ว ใช้ภาษาพูดหรือคำย่อที่คนทั่วไปใช้ เว้นวรรคน้อย",
+      "weight": 2,
+      "type_choice": 0.7,
+      "polite": 0.4,
+      "thai_digits": 0.4,
+      "detours": 1,
+      "quantity": {"digits": 2, "thai": 2, "unit": 1}
+    },
+    {
+      "id": "chatty",
+      "label": "ทักทายหรือพิมพ์นอกเรื่องระหว่างทาง",
+      "writing": "สุภาพ อาจทักทายหรือขอบคุณสั้นๆ ก่อนหรือหลังเนื้อหา",
+      "weight": 2,
+      "type_choice": 0.3,
+      "polite": 0.9,
+      "thai_digits": 0.1,
+      "detours": 3,
+      "quantity": {"digits": 2, "unit": 2, "words": 1}
+    },
+    {
+      "id": "hurried",
+      "label": "รีบ กดปุ่มเก่าหรือส่งรูปกลางทาง",
+      "writing": "รีบ พิมพ์ห้วน ตัดคำฟุ่มเฟือย แต่ไม่ตัดตัวเลขหรือชื่ออุปกรณ์",
+      "weight": 1,
+      "type_choice": 0.2,
+      "polite": 0.0,
+      "thai_digits": 0.0,
+      "detours": 2,
+      "quantity": {"digits": 3, "words": 1}
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "withdraw",
+      "label": "เบิกของ",
+      "weight": 3,
+      "actor": "registered",
+      "kind": "withdrawal",
+      "categories": ["meter", "transformer", "other"],
+      "lines": [1, 2],
+      "options": {"chat_typed_steps": "check"}
+    },
+    {
+      "id": "return",
+      "label": "ส่งคืนของ",
+      "weight": 2,
+      "actor": "registered",
+      "kind": "return",
+      "categories": ["meter", "transformer", "other"],
+      "lines": [1, 1],
+      "options": {"chat_typed_steps": "check"}
+    },
+    {
+      "id": "problem_equipment",
+      "label": "แจ้งปัญหาอุปกรณ์",
+      "weight": 3,
+      "actor": "registered",
+      "kind": "problem",
+      "topics": ["meter", "transformer", "other"],
+      "choose": "topic",
+      "item": 0.5,
+      "hazard": 0.3,
+      "negated_hazard": 0.15,
+      "options": {"chat_typed_steps": "check"}
+    },
+    {
+      "id": "problem_unsure",
+      "label": "แจ้งปัญหาโดยกดไม่แน่ใจ",
+      "weight": 2,
+      "actor": "registered",
+      "kind": "problem",
+      "topics": ["meter", "transformer", "other", "none"],
+      "choose": "unsure",
+      "hazard": 0.2
+    },
+    {
+      "id": "usage",
+      "label": "เรื่องการใช้ไฟฟ้า",
+      "weight": 2,
+      "actor": "registered",
+      "kind": "problem",
+      "topics": ["usage"],
+      "choose": "topic"
+    },
+    {
+      "id": "suggestion",
+      "label": "ข้อเสนอแนะ",
+      "weight": 2,
+      "actor": "registered",
+      "kind": "problem",
+      "topics": ["suggestion"],
+      "choose": "topic",
+      "options": {"chat_typed_steps": "check"}
+    },
+    {
+      "id": "anonymous",
+      "label": "แจ้งแบบไม่ระบุตัวตน",
+      "weight": 2,
+      "actor": "anonymous",
+      "kind": "problem",
+      "topics": ["usage", "suggestion", "meter", "transformer"],
+      "choose": "topic",
+      "hazard": 0.2,
+      "options": {"anonymous_reports": "on"}
+    },
+    {
+      "id": "newcomer",
+      "label": "ลงทะเบียนด้วยรหัสพนักงานแล้วแจ้งเรื่อง",
+      "weight": 1,
+      "actor": "newcomer",
+      "registration": "employee",
+      "kind": "problem",
+      "topics": ["meter", "transformer", "suggestion"],
+      "choose": "topic",
+      "options": {"registration_check": "employee_auto", "registration_location": "optional"}
+    },
+    {
+      "id": "newcomer_other_way",
+      "label": "ลงทะเบียนโดยให้เจ้าหน้าที่ตรวจ",
+      "weight": 1,
+      "actor": "newcomer",
+      "registration": "other_way",
+      "options": {"registration_check": "employee_auto", "registration_location": "optional"}
+    },
+    {
+      "id": "info_reply",
+      "label": "เจ้าหน้าที่ขอข้อมูลเพิ่มแล้วผู้แจ้งตอบในแชต",
+      "weight": 2,
+      "actor": "registered",
+      "kind": "withdrawal",
+      "categories": ["meter", "transformer", "other"],
+      "lines": [1, 1],
+      "info": true
+    },
+    {
+      "id": "abandon",
+      "label": "เริ่มแล้วยกเลิกร่าง",
+      "weight": 1,
+      "actor": "registered",
+      "kind": "withdrawal",
+      "categories": ["meter", "other"],
+      "lines": [1, 1],
+      "finish": "discard"
+    },
+    {
+      "id": "abandon_problem",
+      "label": "เริ่มแจ้งปัญหาแล้วยกเลิกร่าง",
+      "weight": 1,
+      "actor": "registered",
+      "kind": "problem",
+      "topics": ["meter", "transformer", "usage", "suggestion"],
+      "choose": "topic",
+      "finish": "discard"
+    },
+    {
+      "id": "staff",
+      "label": "เจ้าหน้าที่เชื่อม LINE แล้วดูงานของกอง",
+      "weight": 1,
+      "actor": "staff",
+      "topics": ["meter", "transformer", "usage", "suggestion"],
+      "dual": 0.5,
+      "options": {"staff_line_actions": "act", "staff_line_link": "code_or_employee"}
+    }
+  ],
+  "texts": {
+    "name": {
+      "first": ["สมใจ", "วันดี", "ประเสริฐ", "มาลี", "สุรชัย", "อรทัย", "ธนพล", "กมลวรรณ"],
+      "last": ["ทดสอบดี", "จำลองสุข", "ตัวอย่างงาม", "สมมติชัย"]
+    },
+    "places": [
+      "ตลาดเช้า",
+      "ปากซอย",
+      "หน้าวัด",
+      "ข้างโรงเรียน",
+      "หน้าร้านสะดวกซื้อ",
+      "หมู่บ้านร่มเย็น"
+    ],
+    "polite": [" ครับ", " ค่ะ", " นะครับ", " นะคะ"],
+    "offtopic": ["สวัสดีครับ", "รอสักครู่นะคะ", "ขอถามหน่อยครับ", "โอเค", "เดี๋ยวนะครับ"],
+    "description": {
+      "meter": [
+        "มิเตอร์บ้านเลขที่ {house} หน้าจอดับ อ่านหน่วยไม่ได้",
+        "มิเตอร์ที่ซอย {soi} ตัวเลขค้าง ไม่เดินมาสองวัน",
+        "ฝาครอบมิเตอร์{place}แตก น้ำฝนเข้าได้",
+        "มาตรวัดไฟของร้านค้า{place} ไฟสถานะกะพริบตลอด",
+        "มิเตอร์ล็อตที่เบิกไปเมื่อสัปดาห์ก่อน มี {n} เครื่องเปิดไม่ติด"
+      ],
+      "transformer": [
+        "หม้อแปลง{place} มีเสียงดังหึ่งตลอดคืน",
+        "หม้อแปลงที่ซอย {soi} ไฟตกช่วงหัวค่ำทุกวัน",
+        "ทรานส์ฟอร์มเมอร์{place} ตัวถังมีสนิมมาก",
+        "หม้อแปลงลูกที่รับไปติดตั้ง ป้ายรุ่นไม่ตรงกับใบส่งของ"
+      ],
+      "other": [
+        "ฟิวส์ล็อตที่เบิกไปขาดง่ายกว่าปกติ",
+        "เบรกเกอร์ในตู้ควบคุม{place} ตัดบ่อยวันละหลายครั้ง",
+        "สายเคเบิลที่ได้รับมาฉนวนแตกหลายจุด",
+        "ฟิวส์ที่ได้มา {n} ชิ้น ขนาดไม่ตรงกับที่ขอ"
+      ],
+      "none": [
+        "ไฟดับเป็นช่วงๆ ที่ซอย {soi} ไม่แน่ใจว่าเกิดจากอะไร",
+        "แรงดันไฟไม่นิ่ง หลอดไฟกะพริบทั้งซอย {soi}",
+        "ของที่ได้รับรอบนี้ใช้งานไม่ได้ ยังไม่รู้สาเหตุ"
+      ],
+      "usage": [
+        "สงสัยบ้านเลขที่ {house} ลักใช้ไฟ ต่อสายอ้อมไม่ผ่านมิเตอร์",
+        "ผู้ใช้ไฟร้องเรียนว่าค่าไฟแพงขึ้นเกือบสองเท่า ทั้งที่ใช้เท่าเดิม",
+        "พบการต่อไฟตรงจากเสาเข้าร้าน{place}",
+        "ค่าไฟสูงผิดปกติสามเดือนติดกัน ขอให้ตรวจสอบ"
+      ],
+      "suggestion": [
+        "อยากให้มีแบบฟอร์มเบิกของที่กรอกครั้งเดียวใช้ได้ทั้งเดือน",
+        "ควรแจ้งในไลน์เมื่อของพร้อมให้มารับ",
+        "เสนอให้เพิ่มรอบรับของช่วงบ่าย",
+        "อยากให้มีคู่มือการติดตั้งรุ่นใหม่เป็นภาษาไทย"
+      ]
+    },
+    "hazard": {
+      "meter": ["ตอนนี้มีควันออกจากกล่อง", "ได้กลิ่นไหม้แรงมาก"],
+      "transformer": ["มีน้ำมันรั่วลงพื้น", "ตัวถังร้อนจัดจนเข้าใกล้ไม่ได้"],
+      "other": ["มีประกายไฟตอนฝนตก", "สายขาดห้อยลงมาเกือบถึงพื้น"],
+      "none": ["มีประกายไฟที่เสาหน้าบ้าน"]
+    },
+    "negated_hazard": ["ดูแล้วไม่มีควัน", "ตรวจแล้วไม่พบประกายไฟ"],
+    "impact": {
+      "severe": ["ผู้ใช้ไฟประมาณ {n}0 หลังได้รับผลกระทบ", "งานติดตั้งหยุดทั้งทีม"],
+      "minor": ["กระทบเล็กน้อย ยังใช้งานได้", "มีผู้ใช้ไฟร้องเรียน 1 ราย"]
+    },
+    "usage_impact": ["เลขผู้ใช้ไฟ (CA) {ca}", "ผู้ร้องขอให้ติดต่อกลับทางโทรศัพท์ {phone}"],
+    "suggestion_impact": ["ใช้กับงานรับของที่คลังเขต", "เกี่ยวกับงานติดตั้งรายใหม่"],
+    "purpose": [
+      "ใช้เปลี่ยนของชำรุดในพื้นที่เขต",
+      "สำรองไว้สำหรับงานขยายเขตเดือนหน้า",
+      "งานติดตั้งผู้ใช้ไฟรายใหม่ {n} ราย",
+      "ทดแทนของที่ส่งซ่อม"
+    ],
+    "condition": ["ชำรุด ใช้งานไม่ได้", "ยังใช้งานได้ เหลือจากงาน", "ไม่ครบชุด ขาดฝาครอบ"],
+    "reason": ["เหลือจากงานติดตั้ง", "ของชำรุดจากหน้างาน", "เบิกเกินจำนวนที่ใช้จริง"],
+    "source_reference": ["เอกสารเบิก SIM-{doc}", "SIM-{doc}"],
+    "field_generic": ["ข้อมูลเพิ่มเติมสำหรับทดสอบ"],
+    "questions": {
+      "greeting": ["สวัสดีครับ", "หวัดดีค่ะ"],
+      "thanks": ["ขอบคุณครับ", "ขอบคุณค่ะ"],
+      "how_withdraw": ["เบิกยังไงครับ", "วิธีเบิกต้องทำไง"],
+      "how_return": ["คืนยังไงคะ", "วิธีส่งคืนของ"],
+      "contact": ["ขอเบอร์ติดต่อหน่อย", "ติดต่อใครได้บ้าง"],
+      "my_status": ["เรื่องของผมถึงไหนแล้ว", "ขอดูความคืบหน้าหน่อย"],
+      "hours": ["เวลาทำการกี่โมง", "วันหยุดทำงานไหม"],
+      "register": ["ลงทะเบียนให้เพื่อนยังไง"],
+      "change_case": ["ยื่นผิด แก้ได้ไหม"]
+    },
+    "number_words": {"1": "หนึ่ง", "2": "สอง", "3": "สาม", "4": "สี่", "5": "ห้า"},
+    "not_requester": [
+      "ขอบคุณที่แจ้ง",
+      "ขอขอบคุณ",
+      "ได้รับทราบ",
+      "รับทราบแล้ว",
+      "จะดำเนินการ",
+      "แจ้งผลกลับ",
+      "ทางเราจะ",
+      "เจ้าหน้าที่จะ",
+      "ขออภัย",
+      "ให้บริการ"
+    ],
+    "keep_meaning": [
+      {
+        "when": ["อยากให้", "ควร", "เสนอ"],
+        "need": [
+          "อยาก",
+          "ควร",
+          "เสนอ",
+          "ขอให้",
+          "ขอเพิ่ม",
+          "ขอมี",
+          "ช่วย",
+          "น่าจะ",
+          "ได้ไหม",
+          "ดีไหม"
+        ],
+        "why": "ความต้องการของผู้แจ้งหายไป"
+      },
+      {
+        "when": ["สงสัย", "ไม่แน่ใจ", "ยังไม่รู้"],
+        "need": ["สงสัย", "ไม่แน่ใจ", "น่าจะ", "อาจ", "คิดว่า", "ไม่รู้", "ไม่ทราบ"],
+        "why": "ความไม่แน่ใจของผู้แจ้งหายไป ข้อความเดิมยังไม่ยืนยัน"
+      }
+    ],
+    "not_name": [
+      "สวัสดีครับ",
+      "หวัดดีค่ะ",
+      "ลงทะเบียนยังไงครับ",
+      "ขอเบิกมิเตอร์ 2 ตัว",
+      "สมใจ",
+      "สมใจ 1234"
+    ],
+    "info_request": ["ขอรูปของที่จะเบิก (จำลอง)", "ขอตำแหน่งที่จะใช้ของ (จำลอง)"],
+    "info": [
+      "ใช้ที่ตู้ปากซอย {soi} ฝั่งตรงข้ามร้านค้า",
+      "ส่งรูปให้ทางอีเมลของกองแล้ว",
+      "ติดตั้งหน้าบ้านเลขที่ {house} ติดรั้ว"
+    ],
+    "greeting": ["สวัสดีครับ", "สวัสดีค่ะ", "ขอบคุณครับ"]
+  },
+  "style": {
+    "banned": ["—", "–", " -- ", "!"],
+    "banned_phrases": [
+      "ยินดีให้บริการ",
+      "ขอบคุณที่ใช้บริการ",
+      "หวังว่าข้อมูลนี้",
+      "อย่างแน่นอน",
+      "ไม่ต้องกังวล",
+      "มีอะไรให้ช่วยอีกไหม"
+    ]
+  }
+}

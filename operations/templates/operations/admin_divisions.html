@@ -6,11 +6,12 @@
     <h1>กองและบทบาทประสานงาน</h1>
   </div>
 </div>
+{% include "operations/_list_tools.html" with list="divisions" placeholder="ค้นหารหัสหรือชื่อกอง" filters=division_filters %}
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ประเภท</th><th scope="col">สถานะ</th><th scope="col">จัดการ</th></tr></thead>
-  <tbody>
+  <tbody data-list-items="divisions">
   {% for division in divisions %}
-    <tr>
+    <tr data-item data-status="{{ division.is_active|yesno:'active,closed' }}" data-kind="{{ division.kind }}" data-search="{{ division.code|lower }} {{ division.name|lower }}">
       <td><a href="{% url 'division-detail' division.code %}">{{ division.code }}</a></td>
       <td>{{ division.name }}{% if division.is_synthetic %} (จำลอง){% endif %}</td>
       <td>{{ division.get_kind_display }}{% if division.is_intake %} · <strong>กองรับเรื่องกลาง</strong>{% endif %}</td>
@@ -18,6 +19,9 @@
       <td><form class="inline" method="post" action="{% url 'admin-division-action' division.pk division.is_active|yesno:'deactivate,activate' %}">
         {% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">{{ division.is_active|yesno:"ปิด,เปิด" }}</button>
       </form>
+      {% if division.is_intake %}<form class="inline" method="post" action="{% url 'admin-division-action' division.pk 'clear-intake' %}">
+        {% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ยกเลิกกองรับเรื่องกลาง (ส่งตรงถึงกอง)</button>
+      </form>{% endif %}
       {% if division.is_active and not division.is_intake %}<form class="inline" method="post" action="{% url 'admin-division-action' division.pk 'set-intake' %}">
         {% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ตั้งเป็นกองรับเรื่องกลาง</button>
       </form>{% endif %}</td>
@@ -25,6 +29,7 @@
   {% endfor %}
   </tbody>
 </table></div>
+<p class="list-empty" data-list-empty="divisions" hidden>ไม่พบกองที่ตรงกับการค้นหา</p>
 <form method="post">
   <fieldset><legend>เพิ่มกอง</legend>{% csrf_token %}{{ form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
 </form>

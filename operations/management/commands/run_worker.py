@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 from pathlib import Path
@@ -18,6 +19,7 @@ from operations import (
 from operations.models import OutboxEvent, PostbackToken, WebhookInbox
 
 HEARTBEAT = Path("/tmp/worker-heartbeat")  # noqa: S108 - container-local liveness marker
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -56,6 +58,14 @@ def handle_event(event):
         staff_email.plan_for_event(event)  # M10: การแจ้งเตือนเจ้าหน้าที่
 
 
+def _lease_lost(event, error):
+    """The lease ran out while the event was handled: the machine paused (a laptop slept mid
+    test run on 11 Oct 2569; a VM can pause too). The worker goes on, and the event is claimed
+    again later; its handlers are idempotent (a handled inbox is skipped, a planned notification
+    is not planned twice)."""
+    logger.warning("Outbox event %s: %s Claimed again later.", event.event_id, error)
+
+
 def run_once(limit=20):
     """Claim due Django-owned events in event-time order; failures retry, then dead-letter."""
     events = orchestration.claim(orchestration.DJANGO_TYPES, limit, lease_seconds=120)
@@ -63,7 +73,11 @@ def run_once(limit=20):
         try:
             handle_event(event)
         except Exception as exc:  # noqa: BLE001 - one bad event must not stop the queue
-            settled = orchestration.fail(event.event_id, event.lease_token, type(exc).__name__)
+            try:
+                settled = orchestration.fail(event.event_id, event.lease_token, type(exc).__name__)
+            except orchestration.LeaseError as lost:
+                _lease_lost(event, lost)
+                continue
             if (
                 settled.status == OutboxEvent.Status.FAILED
                 and event.event_type == orchestration.EVENT_CONVERSATION
@@ -72,7 +86,10 @@ def run_once(limit=20):
                     status=WebhookInbox.Status.FAILED, error=type(exc).__name__[:200]
                 )
             continue
-        orchestration.complete(event.event_id, event.lease_token)
+        try:
+            orchestration.complete(event.event_id, event.lease_token)
+        except orchestration.LeaseError as lost:
+            _lease_lost(event, lost)
     ai_chat.expire_waiting()
     conversation.expire_drafts()
     policy.sweep_clocks()  # M06: acknowledgement reminders and escalation

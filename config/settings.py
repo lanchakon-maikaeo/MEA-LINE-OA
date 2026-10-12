@@ -95,6 +95,10 @@ SECURE_REDIRECT_EXEMPT = [
     # n8n calls Django over the internal Compose network; the proxy must not expose /internal/.
     r"^internal/v1/",
 ]
+# M12: Caddy terminates TLS on the host and is the only way in, so its X-Forwarded-Proto is
+# trusted there; never set this where clients can reach Gunicorn directly.
+if os.environ.get("BEHIND_TLS_PROXY", "").lower() == "true":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_HSTS_SECONDS = 31536000 if SECURE_ENVIRONMENT else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_ENVIRONMENT
 SECURE_HSTS_PRELOAD = SECURE_ENVIRONMENT

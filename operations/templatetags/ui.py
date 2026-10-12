@@ -157,3 +157,11 @@ def lookup(mapping, key):
         return mapping.get(key, "")
     except AttributeError:
         return ""
+
+
+@register.filter
+def action_label(action):
+    """Thai name of a case action (the report of การทำแทนกอง)."""
+    from operations.casepage import action_label as label
+
+    return label(action)

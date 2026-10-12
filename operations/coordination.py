@@ -10,6 +10,7 @@ are done; other child works are finished by the child division with a result.
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
+from operations import identity
 from operations.contracts import ErrorCode, clean_text, fail
 from operations.models import (
     AuthorityGrant,
@@ -95,10 +96,7 @@ def after_action(case, actor=None):
 
 
 def _member(ctx, division_id, roles=None):
-    if ctx.scope is None:
-        return False
-    held = ctx.scope.division_roles.get(division_id, frozenset())
-    return bool(held if roles is None else held & set(roles))
+    return identity.holds(ctx.scope, division_id, roles)
 
 
 def _child(case, payload):

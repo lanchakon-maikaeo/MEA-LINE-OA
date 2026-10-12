@@ -53,10 +53,34 @@ class Division(models.Model):
         return f"{self.code} {self.name}"
 
 
+class Section(models.Model):
+    """แผนก (งาน in ศอค.): a group inside a division for queues and reports. The division stays
+    the owner of the work and of every right (real structure, 9 Oct 2569 Q1, Q13)."""
+
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="sections")
+    name = models.CharField(max_length=200)
+    code = models.CharField(max_length=32, blank=True)  # an official abbreviation, when one exists
+    order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    is_synthetic = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["division__code", "order", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["division", "name"], name="section_unique_name")
+        ]
+
+    def __str__(self):
+        return self.code or self.name
+
+
 class Role(models.TextChoices):
     # Global roles (division must be empty).
     ADMIN = "admin", "แอดมินระบบ"
     DEVELOPER_ADMIN = "developer_admin", "แอดมินผู้พัฒนา"
+    # ADR 0007: one person (the system's designer) acts for every division, unbound by the
+    # separation of duties; granted only on the host (manage.py system_support).
+    SYSTEM_SUPPORT = "system_support", "ผู้ช่วยเหลือระบบ"
     # Division roles. A role is a duty, not approval authority (AuthorityGrant is M06).
     STAFF = "staff", "เจ้าหน้าที่กอง"
     APPROVER = "approver", "ผู้อนุมัติ"
@@ -67,7 +91,7 @@ class Role(models.TextChoices):
     SUPERVISOR = "supervisor", "ผู้กำกับงานในกอง"
 
 
-GLOBAL_ROLES = frozenset({Role.ADMIN, Role.DEVELOPER_ADMIN})
+GLOBAL_ROLES = frozenset({Role.ADMIN, Role.DEVELOPER_ADMIN, Role.SYSTEM_SUPPORT})
 DIVISION_ROLES = frozenset(set(Role) - GLOBAL_ROLES)
 
 
@@ -76,6 +100,12 @@ class StaffProfile(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="staff_profile"
     )
     display_name = models.CharField(max_length=200)
+    # รหัสพนักงาน (10 Oct 2569 Q3): links LINE to this account after an employee check.
+    employee_id = models.CharField(max_length=32, blank=True)
+    # แผนก (Q13): at most one; empty for heads of division and staff outside any section.
+    section = models.ForeignKey(
+        Section, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     must_change_password = models.BooleanField(default=False)
     # Sessions authenticated before this instant are rejected (forced logout).
     sessions_valid_after = models.DateTimeField(null=True, blank=True)
@@ -121,6 +151,12 @@ class RoleGrant(models.Model):
                 condition=Q(revoked_at__isnull=True, division__isnull=False),
                 name="rolegrant_one_active_division_role",
             ),
+            # ADR 0007: at most one active ผู้ช่วยเหลือระบบ in the whole system.
+            models.UniqueConstraint(
+                fields=["role"],
+                condition=Q(role="system_support", revoked_at__isnull=True),
+                name="rolegrant_single_system_support",
+            ),
         ]
 
 
@@ -138,9 +174,26 @@ class Requester(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
     )
     approved_at = models.DateTimeField(auto_now_add=True)
+    # ไม่ระบุตัวตน (10 Oct 2569 Q1): a LINE user who reports a problem or suggestion without
+    # registering; only problem/suggestion cases, always with a location. Staff never see who.
+    is_anonymous = models.BooleanField(default=False)
+    anonymous_identity = models.OneToOneField(
+        "ChannelIdentity",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="anonymous_requester",
+    )
+
+    # ผู้แจ้งภายใน (10 Oct 2569 Q8): a staff member reporting a problem or suggestion in LINE in the
+    # name of their own division; problems and suggestions only.
+    is_internal = models.BooleanField(default=False)
+    division = models.ForeignKey(
+        "Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
 
     def __str__(self):
-        return self.display_name
+        return "ไม่ระบุตัวตน" if self.is_anonymous else self.display_name
 
 
 class ChannelIdentity(models.Model):
@@ -158,6 +211,16 @@ class ChannelIdentity(models.Model):
     external_id = models.CharField(max_length=128)
     requester = models.ForeignKey(Requester, null=True, blank=True, on_delete=models.PROTECT)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    # เจ้าหน้าที่ที่เชื่อม LINE (10 Oct 2569 Q3, Q7): the staff account this LINE acts for. One LINE
+    # may be a requester and staff at once (ผอ.ฝอจ.); each side keeps its own rights.
+    staff_user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="line_identity",
+    )
+    staff_linked_at = models.DateTimeField(null=True, blank=True)
     # Unfollow/block is recorded for delivery decisions (M04); it never changes permissions.
     is_following = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -191,6 +254,12 @@ class RegistrationRequest(models.Model):
     )
     decided_at = models.DateTimeField(null=True, blank=True)
     decision_reason = models.TextField(blank=True)
+    # การยืนยันตัวตน (10 Oct 2569 Q1, Q3): the employee the person proved to be, if any.
+    employee = models.ForeignKey(
+        "Employee", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 
     class Meta:
         ordering = ["created_at"]
@@ -282,7 +351,7 @@ class Case(models.Model):
     class Kind(models.TextChoices):
         WITHDRAWAL = "withdrawal", "คำขอเบิก"
         RETURN = "return", "คำขอคืน"
-        PROBLEM = "problem", "เรื่องแจ้งปัญหา"
+        PROBLEM = "problem", "เรื่องแจ้งปัญหา/ข้อเสนอแนะ"
 
     class Status(models.TextChoices):
         SUBMITTED = "submitted", "รอคัดกรอง"
@@ -297,11 +366,20 @@ class Case(models.Model):
         REJECTED = "rejected", "ไม่รับเรื่อง/ไม่อนุมัติ"
         CANCELLED = "cancelled", "ยกเลิก"
 
+    class Topic(models.TextChoices):
+        METER = "meter", "มิเตอร์"
+        TRANSFORMER = "transformer", "หม้อแปลง"
+        OTHER = "other", "อุปกรณ์อื่น"
+        USAGE = "usage", "การใช้ไฟฟ้า"
+        SUGGESTION = "suggestion", "ข้อเสนอแนะ"
+
     class Channel(models.TextChoices):
         LINE = "line", "LINE"
         PHONE = "phone", "โทรศัพท์"
         LETTER = "letter", "หนังสือ"
         COUNTER = "counter", "หน้าเคาน์เตอร์"
+        # M12 Q6: ช่องทางรับเรื่องสำรอง while the intake system is down (the organisation's form).
+        FALLBACK_FORM = "fallback_form", "แบบฟอร์มสำรอง"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     number = models.CharField(max_length=16, unique=True)
@@ -314,6 +392,10 @@ class Case(models.Model):
     requester = models.ForeignKey(Requester, on_delete=models.PROTECT, related_name="cases")
     district = models.ForeignKey(District, on_delete=models.PROTECT, related_name="+")
     owner_division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    # แผนกที่ดูแล (Q12): proposed by the policy, changed by the owner division; never an owner.
+    section = models.ForeignKey(
+        Section, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     assignee = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -322,7 +404,15 @@ class Case(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     channel = models.CharField(max_length=16, choices=Channel.choices)
+    # หมวดเรื่อง the requester chose for a problem (Q3): equipment, or การใช้ไฟฟ้า for กตฟ.
+    topic = models.CharField(max_length=16, choices=Topic.choices, blank=True)
     intake_note = models.TextField(blank=True)
+    # ตำแหน่งที่แจ้ง (10 Oct 2569 Q1): required from an anonymous reporter, optional otherwise.
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    # เวลาแจ้งจริง (M12 Q8): when the requester reported on a staff channel, before it was recorded
+    # here. Shown only; clocks start at submitted_at.
+    reported_at = models.DateTimeField(null=True, blank=True)
 
     purpose = models.TextField(blank=True)
     needed_by = models.DateField(null=True, blank=True)
@@ -349,6 +439,10 @@ class Case(models.Model):
                     Q(status__in=["awaiting_info", "on_hold"]) & ~Q(resume_status="")
                     | ~Q(status__in=["awaiting_info", "on_hold"]) & Q(resume_status="")
                 ),
+            ),
+            models.CheckConstraint(
+                name="case_reported_at_only_on_behalf",
+                condition=Q(reported_at__isnull=True) | ~Q(channel="line"),
             ),
             models.CheckConstraint(
                 name="case_submitter_matches_channel",
@@ -651,12 +745,16 @@ class Conversation(models.Model):
 
 
 class ConversationMessage(models.Model):
-    """Text the user typed, kept verbatim as source material (AI extraction arrives in M05)."""
+    """Text the user typed, kept verbatim as source material (AI extraction arrives in M05).
+    `case`: the requester's answer to staff who asked for more information on that case."""
 
     identity = models.ForeignKey(ChannelIdentity, on_delete=models.PROTECT, related_name="+")
     inbox = models.OneToOneField(WebhookInbox, on_delete=models.PROTECT, related_name="+")
     draft = models.ForeignKey(
         ConversationDraft, null=True, blank=True, on_delete=models.PROTECT, related_name="messages"
+    )
+    case = models.ForeignKey(
+        "Case", null=True, blank=True, on_delete=models.PROTECT, related_name="info_replies"
     )
     text = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -891,6 +989,7 @@ class AIConfigVersion(models.Model):
     class Task(models.TextChoices):
         EXTRACT = "extract", "สกัดร่างจากแชต (M05)"
         TRIAGE = "triage", "เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06)"
+        ANSWER = "answer", "ตอบแชตผู้แจ้งจากคลังคำตอบ (ADR 0012)"
 
     class Status(models.TextChoices):
         CANDIDATE = "candidate", "รอทดสอบ/ประเมิน"
@@ -969,6 +1068,8 @@ class AIRun(models.Model):
         FALLBACK = "fallback", "ถามทีละช่องแทน (เวลาไม่พอ)"
         FAILED = "failed", "AI ใช้ไม่ได้ ถามทีละช่องแทน"
         STALE = "stale", "ร่างเปลี่ยนระหว่างรอ"
+        ANSWERED = "answered", "ตอบคำถามจากคลังคำตอบ (ADR 0012)"
+        TAKEN = "taken", "ขั้นที่ให้พิมพ์รับข้อความไว้ (ADR 0012)"
 
     identity = models.ForeignKey(ChannelIdentity, on_delete=models.PROTECT, related_name="+")
     inbox = models.OneToOneField(WebhookInbox, on_delete=models.PROTECT, related_name="ai_run")
@@ -1131,7 +1232,8 @@ class AuthorityGrant(models.Model):
     # The approver or document behind the grant (G02 replaces synthetic grants).
     approval_reference = models.CharField(max_length=200)
     is_synthetic = models.BooleanField(default=False)
-    # Empty only for synthetic demo seeds; an admin never grants authority to themselves.
+    # Empty for synthetic demo seeds and ผู้ช่วยเหลือระบบ's own grants (made on the host, ADR 0007);
+    # an admin never grants authority to themselves.
     granted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -1173,6 +1275,7 @@ class AITriageRun(models.Model):
         DONE = "done", "ได้ข้อเท็จจริงแล้ว"
         FAILED = "failed", "AI ไม่ตอบ"
         STALE = "stale", "ข้อความในเรื่องเปลี่ยนระหว่างรอ"
+        CANCELLED = "cancelled", "หยุดใช้ AI คัดกรองก่อนถึงคิว"
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="ai_triage_runs")
     case_revision = models.PositiveIntegerField()
@@ -1932,6 +2035,10 @@ class ProblemResolution(AppendOnlyModel):
         NO_FAULT = "no_fault", "ตรวจแล้วไม่พบปัญหา"
         EXTERNAL = "external", "ส่งหน่วยงานนอก ฝอจ. ตามแผนที่รับรอง"
         NEEDS_CASE = "needs_case", "ต้องมีเรื่องเบิกหรือคืนแยก"
+        # ข้อเสนอแนะ (10 Oct 2569 Q1): the answer to a suggestion, not a repair.
+        CONSIDERED = "considered", "รับไว้พิจารณา"
+        ADOPTED = "adopted", "นำไปปรับปรุงแล้ว"
+        NOT_FEASIBLE = "not_feasible", "ยังทำไม่ได้"
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="resolutions")
     category = models.CharField(max_length=16, choices=Category.choices)
@@ -1948,6 +2055,58 @@ class ProblemResolution(AppendOnlyModel):
 
 
 # --- M11: registry (SAP) reconciliation and external operations --------------------------------
+
+
+class StaffLinkCode(models.Model):
+    """A one-time code from บัญชีของฉัน that links a LINE account to this staff account (ADR
+    0010). Six digits, ten minutes, used once; only its hash is stored."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="line_link_codes"
+    )
+    code_hash = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class Employee(models.Model):
+    """ทะเบียนพนักงาน for identity checks (10 Oct 2569 Q1, Q3), imported by an admin. The
+    proof value (e.g. a birth date) is kept only as a keyed hash, never in plain text."""
+
+    employee_id = models.CharField(max_length=32, unique=True)
+    name = models.CharField(max_length=200)
+    district = models.ForeignKey(District, null=True, blank=True, on_delete=models.PROTECT)
+    division = models.ForeignKey(Division, null=True, blank=True, on_delete=models.PROTECT)
+    position = models.CharField(max_length=200, blank=True)
+    check_label = models.CharField(max_length=100, blank=True)
+    check_hash = models.CharField(max_length=128, blank=True)
+    is_active = models.BooleanField(default=True)
+    is_synthetic = models.BooleanField(default=False)
+    imported_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["employee_id"]
+
+    def __str__(self):
+        return f"{self.employee_id} {self.name}"
+
+
+class SystemOption(models.Model):
+    """ตัวเลือกระบบ: a choice the organisation can change without code (user, 10 Oct 2569:
+    rules and flows change later; give options, keep them convenient and safe). The choices
+    and their safe defaults live in operations/options.py; every change is audited."""
+
+    key = models.CharField(max_length=64, unique=True)
+    value = models.CharField(max_length=64)
+    reason = models.TextField(blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.key}={self.value}"
 
 
 class RegistryConfig(models.Model):
@@ -2170,3 +2329,46 @@ class ExternalOperation(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+
+
+class ChatAnswer(models.Model):
+    """คลังคำตอบ (ADR 0012): what the bot may say to a question in LINE. Only approved answers
+    are used, by keyword (ก), chosen by the AI (ข) or as the ground the AI writes from (ค). An
+    action adds what only the system knows (the requester's own cases, the policy's emergency
+    guidance or service hours); the text itself is written and approved by people."""
+
+    class Action(models.TextChoices):
+        TEXT = "text", "ข้อความอย่างเดียว"
+        MY_CASES = "my_cases", "ต่อด้วยเรื่องที่เปิดอยู่ของผู้แจ้ง"
+        EMERGENCY = "emergency", "ต่อด้วยคำแนะนำเร่งด่วนจากกติกา (คำอันตรายในกติกาเป็นคำสำคัญด้วย)"
+        HOURS = "hours", "ต่อด้วยเวลาทำการจากปฏิทินในกติกา"
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "ร่าง"
+        APPROVED = "approved", "รับรองแล้ว ใช้ตอบได้"
+        RETIRED = "retired", "เลิกใช้"
+
+    key = models.SlugField(max_length=40, unique=True)
+    title = models.CharField(max_length=100)
+    keywords = models.JSONField(default=list, blank=True)
+    # Greetings and thanks: answered only when the message is little more than the keyword, so
+    # "สวัสดีครับ ขอแจ้งไฟดับ" is handled as a report, not a greeting.
+    short_only = models.BooleanField(default=False)
+    text = models.TextField(max_length=1000)
+    action = models.CharField(max_length=16, choices=Action.choices, default=Action.TEXT)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    is_synthetic = models.BooleanField(default=False)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["key"]
+
+    def __str__(self):
+        return self.title

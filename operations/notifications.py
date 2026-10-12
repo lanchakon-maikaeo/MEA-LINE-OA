@@ -318,6 +318,10 @@ def _recipient_problem(delivery):
         return "not in allowlist"
     if not identity.is_following:
         return "unfollowed or blocked"
+    from operations import staff_line  # local: staff_line plans through this module
+
+    if staff_line.is_staff_delivery(delivery):
+        return staff_line.recipient_problem(delivery)
     if delivery.case_id is not None:
         requester = delivery.case.requester
         if (
@@ -359,7 +363,12 @@ def send(delivery_id, now=None):
                 delivery.save(update_fields=["status", "detail"])
                 return SendResult("skipped")
             state = budget_state(now)
-            if not allows(delivery.level, state):
+            from operations import staff_line
+
+            over_staff = staff_line.is_staff_delivery(delivery) and not staff_line.budget_allows(
+                delivery.level, now
+            )
+            if over_staff or not allows(delivery.level, state):
                 delivery.status, delivery.tier = N.Status.DEFERRED, state.tier
                 delivery.detail = f"budget tier {state.tier}"
                 delivery.save(update_fields=["status", "tier", "detail"])

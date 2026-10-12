@@ -19,14 +19,14 @@
         <details class="drawer">
           <summary class="icon-btn" aria-label="เมนู">{% icon "menu" %}</summary>
           <nav class="drawer__panel" aria-label="เมนูหลัก (มือถือ)">
-            <a href="{% url 'console' %}"{% if nav.url_name == 'console' %} aria-current="page"{% endif %}>ภาพรวม</a>
+            <a href="{% url 'console' %}"{% if nav.url_name == 'console' or nav.section == 'reports' %} aria-current="page"{% endif %}>ภาพรวมและรายงาน</a>
             {% if nav.divisions %}<p class="drawer__group">คิวงาน</p>{% endif %}
             {% if nav.scope.is_admin %}<a href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
             {% for d in nav.divisions %}<a href="{% url 'division-detail' d.code %}"{% if nav.url_name == 'division-detail' and nav.current == d.code %} aria-current="page"{% endif %}>{{ d.code }} {{ d.name }}</a>{% endfor %}
             <p class="drawer__group">อื่น ๆ</p>
-            <a href="{% url 'reports' %}"{% if nav.section == 'reports' %} aria-current="page"{% endif %}>รายงาน</a>
             {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน (SAP)</a>{% endif %}
             {% if nav.is_intake %}<a href="{% url 'case-new' %}">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
+            {% if nav.registrations %}<a href="{% url 'admin-registrations' %}">รับรองผู้แจ้ง</a>{% endif %}
             {% if nav.scope.is_admin %}<a href="{% url 'admin-users' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>ตั้งค่าระบบ (แอดมิน)</a>{% endif %}
             <p class="drawer__group">บัญชี</p>
             <a href="{% url 'account' %}">บัญชีของฉัน</a>
@@ -39,13 +39,12 @@
       </a>
       {% if nav and nav.scope.has_any_access %}
         <nav class="mainnav" aria-label="เมนูหลัก" data-tour="nav">
-          <a href="{% url 'console' %}"{% if nav.url_name == 'console' %} aria-current="page"{% endif %}>ภาพรวม</a>
+          <a href="{% url 'console' %}"{% if nav.url_name == 'console' or nav.section == 'reports' %} aria-current="page"{% endif %}>ภาพรวมและรายงาน</a>
           {% with first=nav.divisions.0 %}
           <a href="{% if nav.current %}{% url 'division-detail' nav.current %}{% elif first %}{% url 'division-detail' first.code %}{% else %}{% url 'console' %}{% endif %}"{% if nav.section == 'queue' and nav.url_name != 'console' %} aria-current="page"{% endif %} data-tour-link="queue">คิวงาน</a>
           {% endwith %}
-          <a href="{% url 'reports' %}"{% if nav.section == 'reports' %} aria-current="page"{% endif %}>รายงาน</a>
           {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน</a>{% endif %}
-          {% if nav.scope.is_admin %}<a href="{% url 'admin-users' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>แอดมิน</a>{% endif %}
+          {% if nav.scope.is_admin %}<a href="{% url 'admin-users' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>แอดมิน</a>{% elif nav.registrations %}<a href="{% url 'admin-registrations' %}"{% if nav.url_name == 'admin-registrations' %} aria-current="page"{% endif %}>รับรองผู้แจ้ง</a>{% endif %}
         </nav>
         <div class="topbar__tools">
           <button class="chip tour-start js-only" type="button" data-tour-start data-tour="tour-start" aria-haspopup="dialog">{% icon "spark" "sm" %} <span class="tour-start__label">สาธิตการใช้งาน</span></button>

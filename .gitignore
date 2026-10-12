@@ -21,6 +21,13 @@ Docs/adr/*
 !Docs/adr/0003-no-local-stock-allocate-only-on-contention.md
 !Docs/adr/0004-multi-division-case-stays-one-case.md
 !Docs/adr/0005-reconcile-with-sap-by-export-files.md
+!Docs/adr/0006-oci-always-free-singapore-without-payg.md
+!Docs/adr/0007-system-support-account-acts-for-every-division.md
+!Docs/adr/0008-real-structure-routes-straight-to-each-division.md
+!Docs/adr/0009-system-options-instead-of-fixed-rules.md
+!Docs/adr/0010-identity-checks-anonymous-reports-and-staff-on-line.md
+!Docs/adr/0011-simulated-requesters-talk-to-the-real-bot.md
+!Docs/adr/0012-chat-answers-from-an-approved-bank.md
 archive/
 *.jpg
 *.jpeg

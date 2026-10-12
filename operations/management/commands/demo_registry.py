@@ -7,7 +7,9 @@ result. Synthetic staff, codes and documents only; nothing reaches a real regist
 """
 
 import csv
+import hashlib
 import io
+import secrets
 import uuid
 from datetime import timedelta
 from io import StringIO
@@ -16,7 +18,7 @@ from django.core.management import call_command
 from django.test.utils import override_settings
 from django.utils import timezone
 
-from operations import registry, services
+from operations import attachments, registry, services
 from operations.contracts import Actor, CommandFailed
 from operations.management.commands.demo_withdrawal import STAFF, _grant, _user
 from operations.management.demo import DemoCommand
@@ -139,14 +141,20 @@ class Command(DemoCommand):
         self.act(u["sim-eqp"], case, "complete_triage")
         lines = [{"line_no": 1, "quantity": str(quantity)}]
         self.act(u["sim-approver"], case, "approve", {"lines": lines})
+        data = f"%PDF-1.4\n% synthetic SAP document {document} (demo_registry)\n%%EOF\n".encode()
+        name = secrets.token_hex(16)
+        path = attachments.storage_dir() / name
+        path.write_bytes(data)
+        path.chmod(0o600)
         evidence = Attachment.objects.create(
             uploaded_by=u["sim-eqp-issuer"],
             case=case,
             declared_name=f"{document}.pdf",
             content_type="application/pdf",
-            size=0,
-            sha256="0" * 64,
-            note="หลักฐานจำลอง (ไม่มีไฟล์จริง)",
+            size=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+            storage_name=name,
+            note="หลักฐานจำลอง (demo_registry)",
             scan_status=Attachment.ScanStatus.PENDING_SCAN,
         )
         payload = {

@@ -14,7 +14,7 @@ from decimal import Decimal
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
-from operations import coordination, fulfilment, inventory, registry
+from operations import coordination, fulfilment, identity, inventory, registry
 from operations.contracts import (
     MAX_LINES,
     ErrorCode,
@@ -419,7 +419,7 @@ def _check_inspectable(ctx, unit):
         fail(ErrorCode.VALIDATION_ERROR, "หน่วยนี้ส่งกลับเขตแล้ว")
     if unit.open_discrepancy:
         fail(ErrorCode.VALIDATION_ERROR, "บันทึกผลส่วนต่างการรับคืนก่อนตรวจสภาพ (Q3)")
-    if unit.arrival.received_by_id == ctx.user.pk:
+    if identity.separated(ctx) and unit.arrival.received_by_id == ctx.user.pk:
         fail(ErrorCode.FORBIDDEN, "ผู้รับของไม่ตรวจสภาพของชิ้นที่ตนรับ (Q5)")
 
 
@@ -527,7 +527,9 @@ def decide_inspection(ctx, case, payload, reason, target):
     inspectors = set(
         unit.inspections.exclude(split__has_key=PENDING).values_list("inspector_id", flat=True)
     )
-    if ctx.user.pk in inspectors or unit.arrival.received_by_id == ctx.user.pk:
+    if identity.separated(ctx) and (
+        ctx.user.pk in inspectors or unit.arrival.received_by_id == ctx.user.pk
+    ):
         fail(ErrorCode.FORBIDDEN, "ผู้ตัดสินต้องไม่ใช่ผู้ตรวจหรือผู้รับของหน่วยนี้ (Q9)")
     split = _split(payload, unit, allow_pending=False)
     reference = clean_text(payload, "reference", False, 100)
@@ -584,7 +586,7 @@ def resolve_return_discrepancy(ctx, case, payload, reason, target):
         fail(ErrorCode.FORBIDDEN, "สมาชิกกองที่รับผิดชอบรายการเท่านั้น")
     if not unit.open_discrepancy:
         fail(ErrorCode.VALIDATION_ERROR, "หน่วยนี้ไม่มีส่วนต่างที่รอผล")
-    if unit.arrival.received_by_id == ctx.user.pk:
+    if identity.separated(ctx) and unit.arrival.received_by_id == ctx.user.pk:
         fail(ErrorCode.FORBIDDEN, "ผู้รับครั้งนั้นไม่ปิดส่วนต่างของตนเอง (Q10)")
     kind = payload.get("resolution")
     if kind not in U.Resolution.values:

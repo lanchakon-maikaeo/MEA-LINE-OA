@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily encrypted files and n8n volume backup (restic)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=FAOJ_ROOT=@FAOJ_ROOT@
+ExecStart=/usr/local/sbin/faoj backup files
+Nice=10

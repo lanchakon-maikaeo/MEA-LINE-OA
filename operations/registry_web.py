@@ -71,7 +71,14 @@ def home(request):
         tab = keys[0]
     kind = request.GET.get("kind", "")
     counts = registry.counts(user)
-    unreconciled = registry.unreconciled(now) if full else []
+    own = registry.own_divisions(user)  # ADR 0008: per division, only the user's own
+    unreconciled = registry.unreconciled(now, own) if full else []
+    imports = RegistryImport.objects.select_related("uploaded_by__staff_profile")
+    if own is not None:
+        imports = imports.filter(
+            uploaded_by__role_grants__division_id__in=own,
+            uploaded_by__role_grants__revoked_at__isnull=True,
+        ).distinct()
     context = {
         "tabs": [
             (key, label, len(unreconciled) if key == "unreconciled" else counts.get(key))
@@ -86,10 +93,9 @@ def home(request):
         "decides": registry.is_registry_staff(user),
         "can_import": registry.may_import(user),
         "is_admin": identity.staff_scope(user).is_admin,
-        "report": registry.report(now) if full else None,
-        "imports": RegistryImport.objects.select_related("uploaded_by__staff_profile")[:8]
-        if full
-        else [],
+        "report": registry.report(now, user) if full else None,
+        "imports": imports[:8] if full else [],
+        "per_division": registry.per_division(),
         "configured": any((registry.config().movement_types or {}).values()),
         "now": now,
         "today": timezone.localdate(),

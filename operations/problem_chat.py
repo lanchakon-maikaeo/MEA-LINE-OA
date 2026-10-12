@@ -43,9 +43,14 @@ def resolution_card(case, identity, now=None):
     now = now or timezone.now()
     accept = _token(identity, "problem_accept", case, now)
     dispute = _token(identity, "problem_dispute", case, now)
-    title = f"ผลการแก้ปัญหา เรื่อง {case.number}"
+    accept_label, dispute_label = labels(case)
+    if case.topic == Case.Topic.SUGGESTION:
+        title = f"ผลการพิจารณาข้อเสนอแนะ เรื่อง {case.number}"
+        hint = f"กด '{accept_label}' ถ้าไม่มีอะไรเพิ่ม หรือ '{dispute_label}' แล้วพิมพ์ต่อได้"
+    else:
+        title = f"ผลการแก้ปัญหา เรื่อง {case.number}"
+        hint = f"กด '{accept_label}' ถ้าเรียบร้อย หรือ '{dispute_label}' แล้วพิมพ์เหตุผล"
     category = resolution.get_category_display()
-    hint = "กด 'ยอมรับผล' ถ้าเรียบร้อย หรือ 'ยังไม่เรียบร้อย' แล้วพิมพ์เหตุผล"
     text = "\n".join([title, category, resolution.message, hint])
 
     def button(label, data, style):
@@ -77,13 +82,20 @@ def resolution_card(case, identity, now=None):
                 "layout": "horizontal",
                 "spacing": "sm",
                 "contents": [
-                    button("ยอมรับผล", accept, "primary"),
-                    button("ยังไม่เรียบร้อย", dispute, "secondary"),
+                    button(accept_label, accept, "primary"),
+                    button(dispute_label, dispute, "secondary"),
                 ],
             },
         },
     }
     return text, message
+
+
+def labels(case):
+    """(accept, dispute) button labels: a suggestion is acknowledged, a problem accepted."""
+    if case.topic == Case.Topic.SUGGESTION:
+        return "รับทราบ", "มีข้อมูลเพิ่ม"
+    return "ยอมรับผล", "ยังไม่เรียบร้อย"
 
 
 def _case(turn, case_id):
@@ -117,14 +129,17 @@ def on_token(turn, token):
             return
         if _act(turn, case, "confirm") is not None:
             turn.set_prompt()
-            turn.say(f"บันทึกแล้ว: ยอมรับผล เรื่อง {case.number} ปิดแล้ว")
+            turn.say(f"บันทึกแล้ว เรื่อง {case.number} ปิดแล้ว")
         return
     if token.action == "problem_dispute":
         if case.status != Case.Status.AWAITING_CONFIRMATION:
             turn.say("เรื่องนี้ไม่ได้รอการยืนยันผลแล้ว")
             return
         turn.set_prompt("dispute", case=str(case.pk))
-        turn.say(f"เรื่อง {case.number}: พิมพ์ว่ายังไม่เรียบร้อยอย่างไร")
+        if case.topic == Case.Topic.SUGGESTION:
+            turn.say(f"เรื่อง {case.number}: พิมพ์ข้อมูลที่อยากเพิ่มได้เลย")
+        else:
+            turn.say(f"เรื่อง {case.number}: พิมพ์ว่ายังไม่เรียบร้อยอย่างไร")
         return
     if token.action == "problem_reopen":
         turn.set_prompt("reopen", case=str(case.pk))
@@ -164,15 +179,17 @@ def status_text(case):
         Case.Status.AWAITING_CONFIRMATION,
         Case.Status.CLOSED,
     ):
-        rows.append(f"ผลการแก้ปัญหา: {resolution.get_category_display()}\n{resolution.message}")
+        heading = "ผลการพิจารณา" if case.topic == Case.Topic.SUGGESTION else "ผลการแก้ปัญหา"
+        rows.append(f"{heading}: {resolution.get_category_display()}\n{resolution.message}")
     return "\n".join(rows)
 
 
 def buttons(turn, case):
     if case.status == Case.Status.AWAITING_CONFIRMATION:
+        accept_label, dispute_label = labels(case)
         return [
-            turn.button("ยอมรับผล", "problem_accept", {"case": str(case.pk)}),
-            turn.button("ยังไม่เรียบร้อย", "problem_dispute", {"case": str(case.pk)}),
+            turn.button(accept_label, "problem_accept", {"case": str(case.pk)}),
+            turn.button(dispute_label, "problem_dispute", {"case": str(case.pk)}),
         ]
     window = timedelta(days=workflow.REOPEN_WINDOW_DAYS)
     if (

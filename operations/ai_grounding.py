@@ -170,6 +170,24 @@ OTHER_INFO = re.compile(
     re.I,
 )
 LEADING_CLAUSE = re.compile(r"\s*(?:(?:ใช้เพื่อ|เพื่อ|สำหรับ|ใช้)\s+)?\S+")
+# A short field must say something beyond the request itself: the live model once returned
+# "เพิ่มอีก" from "ขอเบิกมิเตอร์เพิ่มอีก 2 เครื่อง" as the purpose (11 Oct 2569). Request verbs,
+# change words, quantities, units, item names and polite endings carry no purpose.
+FILLER = re.compile(
+    r"\d+(?:[.,]\d+)?|ขอ|เบิก|ส่งคืน|คืน|แจ้ง|เพิ่ม|ลด|อีก|ด้วย|ทั้งหมด|หน่อย|ครับ|ค่ะ|คะ|นะ|จ้ะ|จ้า|ฮะ"
+    r"|แล้ว|และ|กับ|ก็|ตัว|ชิ้น|เครื่อง|อัน|ชุด|ม้วน|เมตร|ลูก|ตู้|หน่วย"
+)
+
+
+def says_nothing(value, catalog):
+    """True when a short field holds only request words, quantities and item names."""
+    rest = normalise(value)
+    for item in catalog:
+        for name in (item.name, item.code):
+            if name:
+                rest = rest.replace(normalise(name), " ")
+    rest = FILLER.sub(" ", rest)
+    return len(re.findall(r"[\u0e01-\u0e4ea-z]", rest)) < 3
 
 
 def without_other_info(value):
@@ -448,6 +466,13 @@ def ground(extraction, text, catalog, draft=None, source_context=None):
         _apply_labels(proposal, labeled, original_text)
         _apply_corrections(proposal, corrections, kept, original_text)
         _fill_stated(proposal, dates, deadlines, purposes, original_text)
+        for name in SHORT_FIELDS:
+            source = proposal.field_sources.get(name, {}).get("source")
+            if name in proposal.fields and source == "message":
+                if says_nothing(proposal.fields[name], catalog):
+                    # No value stated: dropped, not rejected, so a saved answer stays.
+                    del proposal.fields[name]
+                    del proposal.field_sources[name]
     filled = [p for p in extraction.requests if p.items or p.fields]
     if filled and len(filled) < len(extraction.requests):
         extraction.requests = filled  # an extra intent with nothing in it is not a request

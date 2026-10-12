@@ -1,0 +1,16 @@
+{
+  "_comment": "OCI Always Free budget of E.2.1 (checked 8 Oct 2026). Changing it needs a review; Terraform defaults in deploy/oci must match (test_m12).",
+  "allowed_shapes": ["VM.Standard.A1.Flex"],
+  "a1_ocpus": 2,
+  "a1_memory_gb": 12,
+  "block_storage_gb": 200,
+  "volume_backups": 5,
+  "object_storage_gb": 20,
+  "object_storage_gb_alert": 16,
+  "ocir_images_per_repo": 5,
+  "load_balancers": 0,
+  "instances": {
+    "faoj-prod": {"ocpus": 1, "memory_gb": 8, "boot_gb": 50, "data_gb": 70},
+    "faoj-staging": {"ocpus": 1, "memory_gb": 4, "boot_gb": 50, "data_gb": 30}
+  }
+}

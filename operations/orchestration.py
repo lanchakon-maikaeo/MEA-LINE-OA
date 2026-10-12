@@ -93,14 +93,17 @@ def claim(event_types, limit=1, lease_seconds=30, now=None):
 
 def _leased(event_id, lease_token, now):
     event = OutboxEvent.objects.select_for_update().filter(event_id=event_id).first()
-    if (
-        event is None
-        or event.status != S.LEASED
-        or not lease_token
-        or not secrets.compare_digest(event.lease_token, str(lease_token))
-        or event.lease_expires_at < now
-    ):
-        raise LeaseError("Lease is not valid.")
+    # Which check failed goes into the traceback only (the API answers LEASE_INVALID), so a
+    # rare failure can be explained (a full test run once failed here and never again).
+    if event is None:
+        raise LeaseError("Lease is not valid (no such event).")
+    if event.status != S.LEASED:
+        raise LeaseError(f"Lease is not valid (status {event.status}).")
+    if not lease_token or not secrets.compare_digest(event.lease_token, str(lease_token)):
+        raise LeaseError("Lease is not valid (token).")
+    if event.lease_expires_at < now:
+        expired = event.lease_expires_at.isoformat()
+        raise LeaseError(f"Lease is not valid (expired {expired} < {now.isoformat()}).")
     return event
 
 

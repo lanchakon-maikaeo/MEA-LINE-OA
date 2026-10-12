@@ -214,13 +214,13 @@ a:hover { color: var(--charcoal); }
   background: var(--ink); color: var(--on-primary);
   font-size: 13px; font-weight: 700; letter-spacing: 0;
 }
-.brand__name { font-weight: 600; font-size: 16px; line-height: 1.2; }
+.brand__name { font-weight: 600; font-size: 17px; line-height: 1.2; }
 .brand__name small { display: block; font-size: 12px; color: var(--mute); font-weight: 500; }
 
-.mainnav { display: flex; align-items: stretch; gap: var(--s-24); height: 100%; flex: 1; justify-content: center; }
+.mainnav { display: flex; align-items: stretch; gap: var(--s-30); height: 100%; flex: 1; justify-content: center; }
 .mainnav a {
   display: inline-flex; align-items: center; height: 100%;
-  font-weight: 500; text-decoration: none; color: var(--ink);
+  font-size: 18px; font-weight: 600; text-decoration: none; color: var(--ink); white-space: nowrap;
   box-shadow: inset 0 -2px 0 transparent;
 }
 .mainnav a[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--ink); }
@@ -312,6 +312,11 @@ a:hover { color: var(--charcoal); }
   .brand__name { display: none; }
   .division-switch .chip__label { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
 }
+@media (max-width: 420px) {
+  /* The division switch keeps its name in aria-label; the icon alone fits a 390px phone. */
+  .division-switch .chip__label { display: none; }
+  .topbar__tools { gap: var(--s-8); }
+}
 
 /* Sub-navigation strip (admin) */
 .subnav { background: var(--canvas); box-shadow: inset 0 -1px 0 var(--hairline-soft); }
@@ -320,8 +325,8 @@ a:hover { color: var(--charcoal); }
   display: flex; gap: var(--s-24); overflow-x: auto; scrollbar-width: none;
 }
 .subnav a {
-  display: inline-flex; align-items: center; min-height: 48px; white-space: nowrap;
-  font-size: 15px; font-weight: 500; text-decoration: none; color: var(--mute);
+  display: inline-flex; align-items: center; min-height: 52px; white-space: nowrap;
+  font-size: 17px; font-weight: 500; text-decoration: none; color: var(--mute);
   box-shadow: inset 0 -2px 0 transparent;
 }
 .subnav a:hover { color: var(--ink); }
@@ -585,6 +590,18 @@ a.stat--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 }
 .facts dt { font-size: 13px; color: var(--mute); }
 .facts dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+
+/* Step tracker: where the case is on its main path, and what comes next. */
+.journey { display: flex; gap: var(--s-4); list-style: none; margin: var(--s-24) 0 0; padding: 0; counter-reset: step; }
+.journey__step { flex: 1 1 0; min-width: 0; padding-top: var(--s-8); border-top: 4px solid var(--hairline-soft); font-size: 13px; color: var(--mute); overflow-wrap: anywhere; }
+.journey__step::before { counter-increment: step; content: counter(step) ". "; }
+.journey__step.is-done { border-top-color: var(--ink); color: var(--charcoal); }
+.journey__step.is-done::before { content: "✓ "; }
+.journey__step.is-current { border-top-color: var(--info); color: var(--ink); font-weight: 700; }
+.journey__step.is-stopped { border-top-color: var(--danger); color: var(--danger); font-weight: 700; }
+.journey__note { display: block; font-weight: 500; color: var(--info-deep); }
+.is-stopped .journey__note { color: var(--danger); }
+.hint { margin: 0 0 var(--s-8); padding: var(--s-12); border-radius: var(--r-field); background: var(--info-tint); color: var(--info-deep); font-size: 14px; }
 
 .detail { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: var(--s-48); align-items: start; }
 .detail__aside { position: sticky; top: calc(var(--nav-h) + var(--s-18)); display: grid; gap: var(--s-12); }
@@ -863,6 +880,71 @@ meter::-moz-meter-bar { background: var(--ink); border-radius: var(--r-full); }
 /* --- Reports and the file-on-behalf form ------------------------------------------------------- */
 
 .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 0 var(--s-48); }
+
+/* --- Report dashboard (dataviz: palette validated against the white surface, 9 Oct 2026) ---
+   Two series: blue / orange. Ordinal ramp (older or more urgent = darker): one blue hue, 5 steps.
+   Values sit at the bar tip; every chart also has a table view. No inline styles (CSP). */
+.viz {
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-o1: #86b6ef;
+  --viz-o2: #5598e7;
+  --viz-o3: #256abf;
+  --viz-o4: #184f95;
+  --viz-o5: #0d366b;
+  --viz-muted: var(--stone);
+  --viz-grid: var(--hairline-soft);
+  --viz-axis: var(--hairline);
+}
+.report-filters { display: flex; flex-wrap: wrap; gap: var(--s-12); align-items: center; margin: 0 0 var(--s-24); }
+.viz-bars { display: grid; gap: var(--s-2); }
+.viz-bar { display: grid; grid-template-columns: minmax(96px, 200px) minmax(0, 1fr) 48px; gap: var(--s-12); align-items: center; padding: 6px var(--s-8); margin: 0 calc(-1 * var(--s-8)); border-radius: 10px; font-size: 14px; color: var(--ink); text-decoration: none; }
+a.viz-bar:hover, a.viz-bar:focus-visible { background: var(--cloud); color: var(--ink); }
+.viz-bar > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viz-bar .num { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.viz-bar progress { height: 12px; border-radius: 0; background: transparent; border-left: 1px solid var(--viz-axis); }
+.viz-bar progress::-webkit-progress-bar { background: transparent; }
+.viz-bar progress::-webkit-progress-value { background: var(--viz-1); border-radius: 0 4px 4px 0; }
+.viz-bar progress::-moz-progress-bar { background: var(--viz-1); border-radius: 0 4px 4px 0; }
+.viz-bar--o1 progress::-webkit-progress-value { background: var(--viz-o1); }
+.viz-bar--o1 progress::-moz-progress-bar { background: var(--viz-o1); }
+.viz-bar--o2 progress::-webkit-progress-value { background: var(--viz-o2); }
+.viz-bar--o2 progress::-moz-progress-bar { background: var(--viz-o2); }
+.viz-bar--o3 progress::-webkit-progress-value { background: var(--viz-o3); }
+.viz-bar--o3 progress::-moz-progress-bar { background: var(--viz-o3); }
+.viz-bar--o4 progress::-webkit-progress-value { background: var(--viz-o4); }
+.viz-bar--o4 progress::-moz-progress-bar { background: var(--viz-o4); }
+.viz-bar--o5 progress::-webkit-progress-value { background: var(--viz-o5); }
+.viz-bar--o5 progress::-moz-progress-bar { background: var(--viz-o5); }
+.viz-bar--muted progress::-webkit-progress-value { background: var(--viz-muted); }
+.viz-bar--muted progress::-moz-progress-bar { background: var(--viz-muted); }
+
+.legend { display: flex; flex-wrap: wrap; gap: var(--s-8) var(--s-24); list-style: none; margin: 0 0 var(--s-12); padding: 0; font-size: 13px; color: var(--ash); }
+.legend__key { display: inline-block; width: 16px; height: 2px; border-radius: 1px; vertical-align: middle; margin-right: var(--s-8); background: var(--viz-1); }
+.legend__key--ended { background: var(--viz-2); }
+.chart { position: relative; margin-bottom: var(--s-12); }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart__grid { stroke: var(--viz-grid); stroke-width: 1; }
+.chart__base, .chart__cross { stroke: var(--viz-axis); stroke-width: 1; }
+.chart__tick { fill: var(--mute); font-size: 13px; font-family: var(--font); font-variant-numeric: tabular-nums; }
+.chart__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart__line--new { stroke: var(--viz-1); }
+.chart__line--ended { stroke: var(--viz-2); }
+.chart__dot { stroke: var(--canvas); stroke-width: 2; }
+.chart__dot--new { fill: var(--viz-1); }
+.chart__dot--ended { fill: var(--viz-2); }
+.chart__hit rect { fill: transparent; }
+.chart__hit:hover rect, .chart__hit:focus rect { fill: rgba(17, 17, 17, 0.04); }
+.chart__hit:focus { outline: none; }
+.chart-tip { position: absolute; top: 0; left: 0; z-index: 5; pointer-events: none; background: var(--canvas); border: 1px solid var(--hairline-soft); border-radius: 10px; padding: var(--s-8) var(--s-12); font-size: 13px; line-height: 1.5; white-space: nowrap; box-shadow: 0 6px 18px rgba(17, 17, 17, 0.08); }
+.chart-tip[hidden] { display: none; }
+@media (max-width: 720px) {
+  /* Phones scroll the chart inside its own box so axis text stays readable (no page scroll). */
+  .chart { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .chart svg { min-width: 760px; }
+}
+.chart-tip__day { color: var(--mute); }
+.chart-tip__row strong { font-weight: 600; margin-right: 4px; font-variant-numeric: tabular-nums; }
 .report-grid .section { margin-top: var(--section); }
 .kind-group { display: none; border-top: 1px solid var(--hairline); padding-top: var(--s-18); margin: var(--s-24) 0; }
 .kind-title { font-size: 18px; margin-bottom: var(--s-12); }
@@ -887,3 +969,76 @@ meter::-moz-meter-bar { background: var(--ink); border-radius: var(--r-full); }
   .topbar, .subnav, .footer, .detail__aside, .mobile-actions, .toolbar { display: none !important; }
   .detail { grid-template-columns: 1fr; }
 }
+
+/* --- Overview and report on one page (10 Oct 2569) ---------------------------------------------- */
+
+[hidden] { display: none !important; }
+.section-head--tools { flex-wrap: wrap; align-items: center; }
+.section-head--tools .report-filters { margin: 0; }
+.section-note { margin: 0 0 var(--s-18); font-size: 14px; }
+.division-card {
+  border: 1px solid var(--hairline-soft); border-top: 2px solid var(--ink); border-radius: 0 0 18px 18px;
+  padding: var(--s-18) var(--s-18) var(--s-24);
+}
+.division-card .division-card__head { flex-direction: column; align-items: flex-start; gap: 2px; }
+.division-card__head h3 { font-size: 22px; }
+.division-card .stat__label { white-space: nowrap; }
+.division-card__head a { text-decoration: none; }
+.division-card__head a:hover { text-decoration: underline; }
+.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--s-24); }
+.panel { border: 1px solid var(--hairline-soft); border-radius: 18px; padding: var(--s-18) var(--s-24) var(--s-24); }
+.panel__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s-8); margin-bottom: var(--s-12); }
+.panel__head h3 { font-size: 18px; }
+.panel__head .muted { font-size: 14px; }
+.link-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s-12); margin-bottom: var(--s-18); }
+.link-card {
+  display: grid; gap: var(--s-12); padding: var(--s-18) var(--s-24);
+  border: 1px solid var(--hairline-soft); border-radius: 18px; text-decoration: none; color: var(--ink);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.link-card:hover, .link-card:focus-visible { border-color: var(--ink); box-shadow: 0 8px 24px rgb(17 17 17 / 0.08); color: var(--ink); }
+.link-card__head { display: grid; gap: 2px; }
+.link-card__head strong { font-size: 20px; }
+.link-card__head .muted { font-size: 14px; }
+.link-card__figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-8); font-size: 13px; color: var(--charcoal); }
+.link-card__value { display: block; font-size: 28px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--ink); }
+.link-card .t-alert .link-card__value { color: var(--danger); }
+.link-card__more { font-size: 14px; font-weight: 600; }
+.disclosure > summary .muted { font-weight: 400; font-size: 14px; margin-left: auto; margin-right: var(--s-12); }
+@media (max-width: 599px) { .panel-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* --- Long lists: search, filters and folding items ------------------------------------------- */
+
+.list-tools {
+  display: none; flex-wrap: wrap; gap: var(--s-8); align-items: center;
+  margin: 0 0 var(--s-18); padding: var(--s-12); border-radius: 18px; background: var(--cloud);
+}
+.js .list-tools { display: flex; }
+.list-tools__search {
+  flex: 1 1 240px; min-height: 40px; padding: 0 var(--s-18);
+  border: 1px solid var(--hairline); border-radius: var(--r-pill); background: var(--canvas);
+  font: inherit; font-size: 15px; color: var(--ink);
+}
+.list-tools__search:focus { border-color: var(--ink); outline: none; }
+.list-tools__count { font-size: 14px; color: var(--mute); margin-left: auto; }
+.list-tools .chip { background: var(--canvas); }
+.fold { border: 1px solid var(--hairline-soft); border-radius: 18px; margin-bottom: var(--s-8); background: var(--canvas); }
+.fold > summary {
+  list-style: none; cursor: pointer; position: relative;
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-12);
+  padding: var(--s-18) var(--s-48) var(--s-18) var(--s-24);
+}
+.fold > summary:hover .fold__title { text-decoration: underline; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after {
+  content: ""; position: absolute; right: var(--s-24); top: 26px; width: 10px; height: 10px;
+  border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink);
+  transform: rotate(45deg); transition: transform 150ms ease;
+}
+.fold[open] > summary::after { transform: rotate(-135deg); top: 30px; }
+.fold[open] > summary { border-bottom: 1px solid var(--hairline-soft); }
+.fold__title { font-size: 17px; font-weight: 600; }
+.fold__sub { width: 100%; font-size: 14px; color: var(--mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold__body { padding: var(--s-18) var(--s-24) var(--s-24); }
+.list-empty { padding: var(--s-24); text-align: center; color: var(--mute); }
+

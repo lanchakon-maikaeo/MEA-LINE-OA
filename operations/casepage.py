@@ -29,6 +29,36 @@ from operations.models import (
 )
 
 K = Case.Kind
+S = Case.Status
+
+# The main path of each kind, for the step tracker at the top of the case page.
+JOURNEY = {
+    K.PROBLEM: [
+        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
+        ("แก้ปัญหา", {S.IN_PROGRESS}),
+        ("รอเขตยืนยันผล", {S.AWAITING_CONFIRMATION}),
+        ("ปิดเรื่อง", {S.CLOSED}),
+    ],
+    K.WITHDRAWAL: [
+        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
+        ("อนุมัติ", {S.AWAITING_APPROVAL}),
+        ("จ่ายของ", {S.AWAITING_EXECUTION, S.IN_PROGRESS}),
+        ("รอเขตยืนยันรับ", {S.AWAITING_CONFIRMATION}),
+        ("ปิดเรื่อง", {S.CLOSED}),
+    ],
+    K.RETURN: [
+        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
+        ("รอของคืน", {S.AWAITING_EXECUTION}),
+        ("รับคืนและตรวจสภาพ", {S.IN_PROGRESS}),
+        ("ปิดเรื่อง", {S.CLOSED}),
+    ],
+}
+ASIDE = {
+    S.AWAITING_INFO: "รอข้อมูลเพิ่มจากเขต",
+    S.ON_HOLD: "พักเรื่องไว้",
+    S.REJECTED: "ไม่รับเรื่อง/ไม่อนุมัติ",
+    S.CANCELLED: "ยกเลิก",
+}
 
 FACT_LABELS = {
     "kind": "ชนิดเรื่อง",
@@ -154,6 +184,10 @@ def timeline(case):
                 "what": label,
                 "who": _who(decision.actor, decision.actor_label, case),
                 "why": decision.reason,
+                # ADR 0007: การทำแทนกอง is shown where the division reads its case.
+                "support": (decision.data or {}).get("support", {}).get("division", "")
+                if isinstance(decision.data, dict)
+                else "",
                 "status": (
                     f"{status_labels.get(decision.from_status, '')} → "
                     f"{status_labels.get(decision.to_status, '')}"
@@ -183,6 +217,17 @@ def timeline(case):
                 "why": event.reason,
                 "status": " · ".join(parts),
                 "system": True,
+            }
+        )
+    for reply in case.info_replies.order_by("created_at"):
+        entries.append(
+            {
+                "at": reply.created_at,
+                "what": "ผู้แจ้งตอบข้อมูลเพิ่มทาง LINE",
+                "who": f"ผู้แจ้ง ({case.requester.display_name})",
+                "why": reply.text[:300],
+                "status": "",
+                "system": False,
             }
         )
     return sorted(entries, key=lambda e: e["at"])
@@ -340,6 +385,33 @@ def _handoff(case):
     return info
 
 
+def journey(case):
+    """Steps done, the current one and those to come. A paused case, or one that ended early,
+    stays at the step it left, with the reason beside it."""
+    steps = JOURNEY.get(case.kind, [])
+    status = case.status
+    if status in ASIDE:
+        left = case.decisions.filter(to_status=status).order_by("-id").first()
+        status = left.from_status if left else S.TRIAGE
+    at = next((i for i, (_, statuses) in enumerate(steps) if status in statuses), 0)
+    stopped = case.status in (S.REJECTED, S.CANCELLED)
+    closed = case.status == S.CLOSED
+    return [
+        {
+            "label": label,
+            "state": (
+                "done"
+                if closed or i < at
+                else ("stopped" if stopped else "current")
+                if i == at
+                else "todo"
+            ),
+            "note": ASIDE.get(case.status, "") if i == at else "",
+        }
+        for i, (label, _) in enumerate(steps)
+    ]
+
+
 def build(case, now=None):
     now = now or timezone.now()
     triage = CaseTriage.objects.filter(case=case).select_related("confirmed_division").first()
@@ -373,7 +445,9 @@ def build(case, now=None):
         "review": RoutingReview.objects.filter(case=case, status=RoutingReview.Status.OPEN).first(),
         "attachments": list(case.attachments.order_by("created_at")),
         "registry": registry_facts(case),
+        "info_replies": list(case.info_replies.order_by("created_at")),
         "timeline": timeline(case),
         "related": related,
         "update_due": policy.update_due(case),
+        "journey": journey(case),
     }

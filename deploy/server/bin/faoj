@@ -1,0 +1,522 @@
+#!/usr/bin/env bash
+# faoj — operator commands for one staging/production host (M12, E.8/E.9, RB01–RB08).
+#
+# Every release is one application image digest. The image carries this script, the Compose
+# stack, Caddy config, n8n workflows and release.json (database/n8n/ClamAV/Caddy digests), so a
+# deploy never builds or edits files on the host. CI holds no host or database credentials; an
+# operator runs these commands on the host (over OCI Bastion) after recording the approval.
+#
+#   faoj deploy <image@sha256:…> [--approval "who/when/where approved"]
+#   faoj rollback [<image@sha256:…>]           previous release when omitted; no DB restore
+#   faoj maintenance on|off|status
+#   faoj backup stanza|full|diff|incr|files|dump|status
+#   faoj restore-drill [--keep]                  restore production backups in a side stack
+#   faoj metrics [--sink stdout|oci]
+#   faoj quota-check                             OCI Always Free budget (E.2.1), read-only
+#   faoj line-usage [--months N]                 LINE pushes per case and package forecast (C.2.3)
+#   faoj load-test smoke|design                  k6 through the edge, synthetic subjects (E.9)
+#   faoj smoke | status | releases
+#
+# Works with bash 3.2 (macOS rehearsals) and bash 5 (Ubuntu hosts).
+set -euo pipefail
+umask 077
+
+FAOJ_ROOT=${FAOJ_ROOT:-/srv/faoj}
+ENV_DIR="$FAOJ_ROOT/env"
+RELEASES="$FAOJ_ROOT/releases"
+HISTORY="$RELEASES/history.jsonl"
+FLAG="$FAOJ_ROOT/run/maintenance"
+LOCK="$FAOJ_ROOT/run/deploy.lock"
+
+die() { echo "faoj: $*" >&2; exit 1; }
+say() { echo "[$(date -u +%H:%M:%S)] $*" >&2; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
+
+load_env() {
+  [ -r "$ENV_DIR/compose.env" ] || die "$ENV_DIR/compose.env missing (run bootstrap-host.sh)"
+  # shellcheck disable=SC1091
+  set -a; . "$ENV_DIR/compose.env"; set +a
+  case "${FAOJ_ENV:-}" in staging|production|rehearsal) ;; *) die "FAOJ_ENV must be staging, production or rehearsal";; esac
+}
+
+json_get() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get(sys.argv[2], ""))' "$1" "$2"; }
+now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+release_id() {
+  case "$1" in
+    *@sha256:*) local d=${1##*@sha256:}; [ ${#d} -eq 64 ] || die "bad digest: $1"; echo "${d:0:12}";;
+    *) die "a release is an image digest (…@sha256:<64 hex>), not a tag: $1";;
+  esac
+}
+
+current_dir() { [ -L "$RELEASES/current" ] && (cd "$RELEASES/current" && pwd -P) || echo ""; }
+previous_image() {
+  [ -s "$HISTORY" ] || return 0
+  python3 - "$HISTORY" <<'PY'
+import json, sys
+done = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+ok = [r for r in done if r.get("result") == "ok"]
+print(ok[-2]["app_image"] if len(ok) >= 2 else "")
+PY
+}
+
+# Compose for one release directory.
+dc_in() {
+  local rel=$1; shift
+  local profiles=()
+  [ "${CLAMAV_ENABLED:-true}" = "true" ] && profiles+=(--profile clamav)
+  docker compose -p faoj -f "$rel/compose.yaml" \
+    --env-file "$ENV_DIR/compose.env" --env-file "$rel/release.env" "${profiles[@]+"${profiles[@]}"}" "$@"
+}
+dc() { local rel; rel=$(current_dir); [ -n "$rel" ] || die "no current release"; dc_in "$rel" "$@"; }
+
+install_bundle() {
+  local image=$1 id dir cid
+  id=$(release_id "$image"); dir="$RELEASES/$id"
+  if [ ! -f "$dir/release.env" ]; then
+    say "pull $image"
+    docker pull -q "$image" >/dev/null
+    rm -rf "$dir.tmp"; mkdir -p "$dir.tmp/n8n" "$dir.tmp/workflows"
+    cid=$(docker create "$image")
+    docker cp "$cid:/app/deploy/server/." "$dir.tmp/" >/dev/null 2>&1
+    docker cp "$cid:/app/deploy/n8n/import.sh" "$dir.tmp/n8n/import.sh" >/dev/null 2>&1
+    docker cp "$cid:/app/workflows/n8n/." "$dir.tmp/workflows/" >/dev/null 2>&1
+    docker cp "$cid:/app/release.json" "$dir.tmp/release.json" >/dev/null 2>&1
+    docker rm "$cid" >/dev/null
+    local db_image; db_image=$(json_get "$dir.tmp/release.json" db_image)
+    [ -n "$db_image" ] || die "release.json has no db_image"
+    release_id "$db_image" >/dev/null
+    {
+      echo "APP_IMAGE=$image"
+      echo "DB_IMAGE=$db_image"
+      echo "RELEASE_ID=$id"
+      echo "RELEASE_DIR=$dir"
+    } > "$dir.tmp/release.env"
+    chmod -R go-w "$dir.tmp"; chmod 755 "$dir.tmp/bin/faoj"
+    mv "$dir.tmp" "$dir"
+  fi
+  echo "$dir"
+}
+
+record() {  # result, image, approval, note
+  local rel; rel=$(current_dir)
+  python3 - "$HISTORY" "$@" "$FAOJ_ENV" "${SUDO_USER:-${USER:-?}}" "$(now_iso)" "$rel" <<'PY'
+import json, os, sys
+path, result, image, approval, note, env, who, at, rel = sys.argv[1:10]
+release = {}
+if rel and os.path.exists(os.path.join(rel, "release.json")):
+    release = json.load(open(os.path.join(rel, "release.json")))
+row = {"at": at, "env": env, "operator": who, "result": result, "app_image": image,
+       "approval": approval, "note": note, "commit": release.get("commit", ""),
+       "db_image": release.get("db_image", ""), "n8n_image": release.get("n8n_image", ""),
+       "workflows_sha256": release.get("workflows_sha256", ""),
+       "migrations": release.get("migrations", [])[-3:]}
+with open(path, "a") as out:
+    out.write(json.dumps(row, ensure_ascii=False) + "\n")
+PY
+}
+
+lock() {
+  mkdir -p "$FAOJ_ROOT/run"
+  mkdir "$LOCK" 2>/dev/null || die "another deploy holds $LOCK (remove it only if no deploy runs)"
+  trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+}
+
+maintenance() {
+  case "${1:-status}" in
+    on) mkdir -p "$FAOJ_ROOT/run"; : > "$FLAG"; chmod 644 "$FLAG"; say "maintenance ON (Caddy answers 503 with the fallback channels)";;
+    off) rm -f "$FLAG"; say "maintenance OFF";;
+    status) [ -e "$FLAG" ] && echo on || echo off;;
+    *) die "maintenance on|off|status";;
+  esac
+}
+
+wait_healthy() {  # rel, seconds, services…
+  local rel=$1 limit=$2; shift 2
+  local waited=0 svc state
+  while :; do
+    local pending=""
+    for svc in "$@"; do
+      state=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+        "$(dc_in "$rel" ps -q "$svc" 2>/dev/null | head -n1)" 2>/dev/null || echo missing)
+      case "$state" in healthy|running) ;; *) pending="$pending $svc:$state";; esac
+    done
+    [ -z "$pending" ] && return 0
+    [ "$waited" -ge "$limit" ] && { echo "not healthy:$pending" >&2; return 1; }
+    sleep 3; waited=$((waited + 3))
+  done
+}
+
+inside_smoke() {  # health from inside the web container (works while maintenance is on)
+  dc_in "$1" exec -T web /app/.venv/bin/python - <<'PY'
+import json, os, urllib.request as u
+host = os.environ["ALLOWED_HOSTS"].split(",")[0].strip().lstrip(".")
+for path in ("/health/live/", "/health/ready/"):
+    with u.urlopen(u.Request("http://127.0.0.1:8000" + path, headers={"Host": host}), timeout=5) as r:
+        assert r.status == 200 and json.load(r) == {"status": "ok"}, path
+print("inside smoke ok")
+PY
+}
+
+edge_smoke() {  # through Caddy, as LINE and staff reach it
+  python3 - "$PUBLIC_HOST" "${HTTPS_PORT:-443}" "${CADDY_LOCAL_CERTS:-}" <<'PY'
+import http.client, json, socket, ssl, sys
+host, port, local = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+ctx = ssl.create_default_context()
+if local:  # rehearsal: Caddy's own CA
+    ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+def get(path, method="GET"):
+    conn = http.client.HTTPSConnection("127.0.0.1", port, context=ctx, timeout=10)
+    conn.sock = ctx.wrap_socket(socket.create_connection(("127.0.0.1", port), 10), server_hostname=host)
+    conn.request(method, path, headers={"Host": host if port == 443 else f"{host}:{port}"})
+    r = conn.getresponse(); body = r.read(); return r.status, body
+checks = [("/health/live/", 200), ("/health/ready/", 200), ("/accounts/login/", 200),
+          ("/static/operations/app.css", 200), ("/internal/v1/outbox/claim", 404)]
+bad = []
+for path, want in checks:
+    status, body = get(path, "POST" if path.startswith("/internal") else "GET")
+    if status != want:
+        bad.append(f"{path} {status}≠{want}")
+if bad:
+    sys.exit("edge smoke failed: " + "; ".join(bad))
+print("edge smoke ok")
+PY
+}
+
+preflight() {
+  local f
+  for f in django.env app.secret.env migrate.secret.env db.secret.env n8n.secret.env; do
+    [ -r "$ENV_DIR/$f" ] || die "missing $ENV_DIR/$f"
+  done
+  [ -r "$FAOJ_ROOT/tls/db/server.key" ] || die "missing database TLS (bootstrap-host.sh)"
+  local free; free=$(python3 -c 'import shutil,sys; u=shutil.disk_usage(sys.argv[1]); print(int(100*u.free/u.total))' "$FAOJ_ROOT")
+  [ "$free" -ge 15 ] || die "only $free% disk free on $FAOJ_ROOT"
+}
+
+n8n_import() {  # this release's workflows, then a restart so n8n reloads them
+  dc_in "$1" run --rm n8n-import >/dev/null && dc_in "$1" restart n8n >/dev/null
+}
+
+backup_fresh_or_first() {  # production: refuse to migrate without a recent backup
+  [ "$FAOJ_ENV" = "production" ] || return 0
+  [ -n "$(current_dir)" ] || return 0  # first install: nothing to protect yet
+  local age; age=$(backup_age) || age=999999
+  [ "$age" -le 93600 ] || die "last database backup is ${age}s old; run 'faoj backup diff' first"
+}
+
+deploy() {
+  local image="" approval=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --approval) approval=${2:-}; shift 2;;
+      *) image=$1; shift;;
+    esac
+  done
+  [ -n "$image" ] || die "deploy <image@sha256:…>"
+  release_id "$image" >/dev/null
+  [ "$FAOJ_ENV" != "production" ] || [ -n "$approval" ] || die "production needs --approval \"…\" (E.8 step 1)"
+  lock; preflight; backup_fresh_or_first
+  local new old; new=$(install_bundle "$image"); old=$(current_dir)
+  say "release $(basename "$new") (previous: ${old:+$(basename "$old")})"
+  dc_in "$new" pull -q
+  if [ -n "$old" ]; then
+    maintenance on
+    say "drain: stop claiming (n8n, worker)"
+    dc_in "$old" stop -t 60 n8n worker || true
+    if [ "$FAOJ_ENV" = "production" ]; then
+      say "restore point: pgBackRest incremental backup"
+      dc_in "$old" exec -T -u postgres db pgbackrest backup --type=incr
+    fi
+  fi
+  ln -sfn "$new" "$RELEASES/current"
+  dc_in "$new" up -d --wait db
+  if [ "${BACKUP_MODE:-pgbackrest}" = "pgbackrest" ]; then
+    # Idempotent; WAL waits in pg_wal until the stanza exists, so create it before any write.
+    dc_in "$new" exec -T -u postgres db pgbackrest stanza-create --log-level-console=warn
+  fi
+  say "migrate (owner role, one job) and narrow runtime grants"
+  if ! dc_in "$new" run --rm migrate; then
+    say "migration failed: back to the previous release"
+    [ -n "$old" ] && { ln -sfn "$old" "$RELEASES/current"; dc_in "$old" up -d --remove-orphans; }
+    record failed "$image" "$approval" "migration failed"
+    die "migration failed (RB07); maintenance stays ${old:+on}"
+  fi
+  dc_in "$new" up -d --remove-orphans
+  if n8n_import "$new" && wait_healthy "$new" 240 web worker n8n caddy && inside_smoke "$new"; then
+    maintenance off
+    if edge_smoke; then
+      record ok "$image" "$approval" ""
+      say "deployed $(basename "$new")"
+      return 0
+    fi
+  fi
+  say "smoke failed"
+  if [ -n "$old" ]; then
+    say "rolling back to $(basename "$old") (images only; schema stays, RB07)"
+    maintenance on
+    ln -sfn "$old" "$RELEASES/current"
+    dc_in "$old" up -d --remove-orphans
+    n8n_import "$old" && wait_healthy "$old" 240 web worker n8n && inside_smoke "$old" && maintenance off
+  fi
+  record failed "$image" "$approval" "smoke failed"
+  die "deploy failed; see 'faoj status'"
+}
+
+rollback() {
+  local image=${1:-}
+  [ -n "$image" ] || image=$(previous_image)
+  [ -n "$image" ] || die "no previous successful release in $HISTORY"
+  lock
+  local rel; rel=$(install_bundle "$image")
+  say "rollback to $(basename "$rel") (no reverse migrations, no DB restore)"
+  maintenance on
+  dc stop -t 60 n8n worker || true
+  ln -sfn "$rel" "$RELEASES/current"
+  dc_in "$rel" up -d --remove-orphans
+  if n8n_import "$rel" && wait_healthy "$rel" 240 web worker n8n caddy && inside_smoke "$rel"; then
+    maintenance off; edge_smoke && { record ok "$image" "rollback" ""; say "rolled back"; return 0; }
+  fi
+  record failed "$image" "rollback" "smoke failed"
+  die "rollback smoke failed; maintenance may still be on (RB07)"
+}
+
+backup_age() {  # seconds since the newest database backup finished
+  if [ "${BACKUP_MODE:-pgbackrest}" = "dump" ]; then
+    python3 - "$FAOJ_ROOT/data/dumps" <<'PY'
+import os, sys, time
+d = sys.argv[1]
+files = [os.path.join(d, f) for f in os.listdir(d) if f.endswith("-faoj.dump")] if os.path.isdir(d) else []
+print(int(time.time() - max(os.path.getmtime(f) for f in files)) if files else 999999)
+PY
+  else
+    dc exec -T -u postgres db pgbackrest info --output=json | python3 -c '
+import json, sys, time
+stanzas = json.load(sys.stdin)
+stops = [b["timestamp"]["stop"] for s in stanzas for b in s.get("backup", [])]
+print(int(time.time() - max(stops)) if stops else 999999)'
+  fi
+}
+
+restic_cmd() {  # restic in the files-backup container, with the TLS options for rehearsals
+  local extra=()
+  [ -f "$FAOJ_ROOT/tls/backup/ca.crt" ] && extra=(--cacert /run/faoj-backup-tls/ca.crt)
+  dc run --rm -T files-backup "${extra[@]+"${extra[@]}"}" -o s3.bucket-lookup=path "$@"
+}
+
+backup() {
+  case "${1:-status}" in
+    stanza) dc exec -T -u postgres db pgbackrest stanza-create && dc exec -T -u postgres db pgbackrest check;;
+    full|diff|incr) dc exec -T -u postgres db pgbackrest backup --type="$1";;
+    files)
+      restic_cmd cat config >/dev/null 2>&1 || restic_cmd init
+      restic_cmd backup --tag files --host "$FAOJ_ENV" /backup/media /backup/n8n
+      restic_cmd forget --host "$FAOJ_ENV" --keep-daily 7 --keep-weekly 4 --prune;;
+    dump)
+      local day; day=$(date -u +%Y%m%dT%H%M%SZ); mkdir -p "$FAOJ_ROOT/data/dumps"
+      dc exec -T -u postgres db pg_dump -Fc faoj > "$FAOJ_ROOT/data/dumps/$day-faoj.dump"
+      dc exec -T -u postgres db pg_dump -Fc n8n > "$FAOJ_ROOT/data/dumps/$day-n8n.dump"
+      ls -1t "$FAOJ_ROOT/data/dumps"/*-faoj.dump | tail -n +8 | while read -r f; do rm -f "$f" "${f%-faoj.dump}-n8n.dump"; done
+      say "dump $day";;
+    status) echo "last database backup: $(backup_age)s ago";;
+    *) die "backup stanza|full|diff|incr|files|dump|status";;
+  esac
+}
+
+metrics() {
+  local sink=${1:-${METRICS_SINK:-stdout}} rel; rel=$(current_dir)
+  local app="{}" age=999999 wal=0 cert=0 unhealthy
+  if [ -n "$rel" ]; then
+    app=$(dc_in "$rel" exec -T web /app/.venv/bin/python manage.py ops_metrics 2>/dev/null || echo '{}')
+    age=$(backup_age 2>/dev/null || echo 999999)
+    if [ "${BACKUP_MODE:-pgbackrest}" != "dump" ]; then
+      wal=$(dc_in "$rel" exec -T -u postgres db psql -Atqc \
+        "select coalesce(extract(epoch from now() - last_archived_time)::int, 0) from pg_stat_archiver" faoj 2>/dev/null || echo 0)
+    fi
+  fi
+  unhealthy=$(docker ps --filter label=com.docker.compose.project=faoj --filter health=unhealthy -q | wc -l | tr -d ' ')
+  cert=$(echo | openssl s_client -connect "127.0.0.1:${HTTPS_PORT:-443}" -servername "$PUBLIC_HOST" 2>/dev/null \
+    | openssl x509 -noout -enddate 2>/dev/null | python3 -c '
+import sys, time, email.utils
+line = sys.stdin.read().strip().split("=", 1)[-1]
+try: print(int((email.utils.parsedate_to_datetime(line.replace(" GMT", " +0000")).timestamp() - time.time()) / 86400))
+except Exception: print(-1)')
+  python3 - "$sink" "$FAOJ_ENV" "$FAOJ_ROOT" "$app" "$age" "$wal" "$cert" "$unhealthy" \
+    "${OCI_COMPARTMENT_OCID:-}" "${OCI_REGION:-}" <<'PY'
+import json, os, shutil, subprocess, sys, tempfile, time
+sink, env, root, app, age, wal, cert, unhealthy, compartment, region = sys.argv[1:11]
+values = {"heartbeat": 1, "backup_age_seconds": int(age), "wal_archive_age_seconds": int(wal or 0),
+          "cert_days_left": int(cert), "containers_unhealthy": int(unhealthy)}
+usage = shutil.disk_usage(root)
+values["disk_used_percent"] = round(100 * (usage.total - usage.free) / usage.total, 1)
+if os.path.exists("/proc/meminfo"):
+    info = dict(l.split(":", 1) for l in open("/proc/meminfo"))
+    total, avail = (int(info[k].split()[0]) for k in ("MemTotal", "MemAvailable"))
+    values["mem_used_percent"] = round(100 * (total - avail) / total, 1)
+try:
+    values.update(json.loads(app))
+except ValueError:
+    values["app_metrics_error"] = 1
+if sink == "stdout":
+    print(json.dumps({"env": env, **values}, sort_keys=True)); sys.exit(0)
+stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+data = [{"namespace": "faoj_ops", "compartmentId": compartment, "name": name,
+         "dimensions": {"env": env}, "datapoints": [{"timestamp": stamp, "value": float(v)}]}
+        for name, v in sorted(values.items())]
+with tempfile.NamedTemporaryFile("w", suffix=".json", dir="/tmp", delete=False) as f:
+    json.dump(data, f); path = f.name
+os.chmod(path, 0o644)
+subprocess.run(["docker", "run", "--rm", "-v", f"{path}:/tmp/metrics.json:ro",
+                os.environ.get("OCI_CLI_IMAGE", "ghcr.io/oracle/oci-cli@sha256:48884d8710d30356cac71c7aa678873a97c53c594fefdf2724c80270f3ca563b"),
+                "monitoring", "metric-data", "post", "--auth", "instance_principal",
+                "--endpoint", f"https://telemetry-ingestion.{region}.oraclecloud.com",
+                "--metric-data", "file:///tmp/metrics.json"], check=True, stdout=subprocess.DEVNULL)
+os.unlink(path)
+PY
+}
+
+restore_drill() {
+  # RB05/E.9: restore production's latest backups into a separate stack with every outbound
+  # path off (no n8n, no worker, LINE/AI/push disabled), check the data, and measure RPO/RTO.
+  local keep=false; [ "${1:-}" = "--keep" ] && keep=true
+  local rel; rel=$(current_dir); [ -n "$rel" ] || die "no current release"
+  [ -r "$ENV_DIR/drill.secret.env" ] || die "missing $ENV_DIR/drill.secret.env (production repo read key, cipher pass, restic password)"
+  local source=${DRILL_SOURCE_ENV:-production} t0 drill db_image app_image
+  t0=$(date -u +%s); drill="$FAOJ_ROOT/drill"
+  db_image=$(grep '^DB_IMAGE=' "$rel/release.env" | cut -d= -f2-); app_image=$(grep '^APP_IMAGE=' "$rel/release.env" | cut -d= -f2-)
+  docker rm -f faoj-drill-db faoj-drill-web >/dev/null 2>&1 || true
+  if [ "$FAOJ_ENV" = staging ]; then
+    # E.2.1: staging (4 GB) is production's recovery host; its own stack pauses for the drill.
+    say "pause the staging stack for the drill"
+    maintenance on; dc stop -t 60 >/dev/null
+    trap 'docker rm -f faoj-drill-db faoj-drill-web >/dev/null 2>&1; dc start >/dev/null; maintenance off' EXIT
+  fi
+  rm -rf "$drill"; mkdir -p "$drill/pg" "$drill/media" "$drill/n8n"
+  local net=faoj-drill; docker network create "$net" >/dev/null 2>&1 || true
+  say "restore database (pgBackRest, archive-mode=off: nothing is pushed back to production's repo)"
+  # The production repository, read-only key: the restore and, during recovery, archive-get.
+  local repo=(--env-file "$ENV_DIR/drill.secret.env"
+    -e PGBACKREST_STANZA=faoj -e PGBACKREST_PG1_PATH=/var/lib/postgresql/data/pgdata
+    -e PGBACKREST_REPO1_TYPE=s3 -e PGBACKREST_REPO1_PATH="/pgbackrest/$source"
+    -e PGBACKREST_REPO1_S3_ENDPOINT="$BACKUP_S3_ENDPOINT" -e PGBACKREST_REPO1_S3_BUCKET="$BACKUP_DB_BUCKET"
+    -e PGBACKREST_REPO1_S3_REGION="$BACKUP_S3_REGION" -e PGBACKREST_REPO1_S3_URI_STYLE=path
+    -e PGBACKREST_REPO1_STORAGE_VERIFY_TLS="${BACKUP_S3_VERIFY_TLS:-y}" -e PGBACKREST_REPO1_CIPHER_TYPE=aes-256-cbc)
+  [ -f "$FAOJ_ROOT/tls/backup/ca.crt" ] && repo+=(-v "$FAOJ_ROOT/tls/backup/ca.crt:/run/faoj-backup-tls/ca.crt:ro" -e PGBACKREST_REPO1_STORAGE_CA_FILE=/run/faoj-backup-tls/ca.crt)
+  docker run --rm "${repo[@]}" \
+    -v "$drill/pg:/var/lib/postgresql/data" --user root --entrypoint sh "$db_image" -c \
+    'install -d -o postgres -g postgres -m 700 /var/lib/postgresql/data/pgdata && su postgres -c "pgbackrest restore --archive-mode=off --log-level-console=warn"'
+  say "start the restored database (TLS, archive off)"
+  docker run -d --name faoj-drill-db --network "$net" --network-alias db --init "${repo[@]}" \
+    -e PGDATA=/var/lib/postgresql/data/pgdata \
+    -v "$drill/pg:/var/lib/postgresql/data" -v "$FAOJ_ROOT/tls/db:/run/faoj-tls:ro" "$db_image" \
+    postgres -c ssl=on -c ssl_cert_file=/var/lib/postgresql/tls/server.crt -c ssl_key_file=/var/lib/postgresql/tls/server.key \
+    -c hba_file=/etc/postgresql/pg_hba.conf -c archive_mode=off >/dev/null
+  local i=0; until docker exec faoj-drill-db pg_isready -q -h /var/run/postgresql -d faoj 2>/dev/null \
+      && [ "$(docker exec -u postgres faoj-drill-db psql -Atqc 'select pg_is_in_recovery()' 2>/dev/null)" = "f" ]; do
+    i=$((i + 1)); [ "$i" -lt 300 ] || die "restored database did not finish recovery"; sleep 2; done
+  local pw; pw=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+  # The restored roles keep production's passwords; the drill app gets a fresh one instead.
+  docker exec -i -u postgres faoj-drill-db psql -q -v ON_ERROR_STOP=1 -v pw="$pw" -d faoj >/dev/null <<'SQL'
+SELECT format('ALTER ROLE faoj_app PASSWORD %L', :'pw')\gexec
+SQL
+  say "restore files (restic)"
+  local rcafile=(); [ -f "$FAOJ_ROOT/tls/backup/ca.crt" ] && rcafile=(--cacert /run/faoj-backup-tls/ca.crt)
+  docker run --rm --env-file "$ENV_DIR/drill.secret.env" -e AWS_DEFAULT_REGION="$BACKUP_S3_REGION" \
+    -v "$drill:/restore" -v "$FAOJ_ROOT/tls/backup:/run/faoj-backup-tls:ro" \
+    restic/restic:0.18.1@sha256:39d9072fb5651c80d75c7a811612eb60b4c06b32ffe87c2e9f3c7222e1797e76 \
+    "${rcafile[@]+"${rcafile[@]}"}" -o s3.bucket-lookup=path restore latest --host "$source" --target /restore/tree >/dev/null
+  [ -d "$drill/tree/backup/media" ] && cp -R "$drill/tree/backup/media/." "$drill/media/"
+  say "start the web app on 127.0.0.1:18000 with every outbound path off"
+  docker run -d --name faoj-drill-web --network "$net" \
+    --env-file "$ENV_DIR/django.env" --env-file "$ENV_DIR/app.secret.env" \
+    -e DATABASE_URL="postgresql://faoj_app:$pw@db:5432/faoj?sslmode=verify-full&sslrootcert=/run/faoj-tls/ca.crt" \
+    -e OUTBOUND_ENABLED=false -e LINE_PUSH_ENABLED=false -e AI_ENABLED=false -e STAFF_EMAIL_ENABLED=false \
+    -e PRIVATE_MEDIA_ROOT=/data/private-media -e BEHIND_TLS_PROXY=true \
+    -v "$drill/media:/data/private-media" -v "$FAOJ_ROOT/tls/db/ca.crt:/run/faoj-tls/ca.crt:ro" \
+    -p 127.0.0.1:18000:8000 "$app_image" >/dev/null
+  i=0; until [ "$(docker inspect -f '{{.State.Health.Status}}' faoj-drill-web 2>/dev/null)" = healthy ]; do
+    i=$((i + 1)); [ "$i" -lt 100 ] || die "restored web app is not healthy"; sleep 3; done
+  local report; report="$FAOJ_ROOT/drills/$(date -u +%Y%m%dT%H%M%SZ).json"; mkdir -p "$FAOJ_ROOT/drills"
+  docker exec faoj-drill-web /app/.venv/bin/python manage.py verify_restore --started "$t0" > "$report"
+  python3 - "$report" "$t0" <<'PY'
+import json, sys, time
+path, t0 = sys.argv[1], int(sys.argv[2])
+report = json.load(open(path)); report["rto_seconds"] = int(time.time()) - t0
+json.dump(report, open(path, "w"), indent=2, ensure_ascii=False)
+print(json.dumps({k: report[k] for k in ("rpo_seconds", "rto_seconds", "attachments_missing", "attachments_mismatched", "ok")}))
+PY
+  if ! $keep; then docker rm -f faoj-drill-db faoj-drill-web >/dev/null; docker network rm "$net" >/dev/null; rm -rf "$drill"; fi
+  say "drill report: $report"
+}
+
+quota_check() {  # E.2.1 guard 3: read-only, instance principal, from this release's bundle
+  local rel; rel=$(current_dir); [ -n "$rel" ] || die "no current release"
+  docker run --rm -e OCI_REGION="${OCI_REGION:-ap-singapore-1}" -e OCI_COMPARTMENT_OCID="${OCI_COMPARTMENT_OCID:-}" \
+    -v "$rel/oci:/q:ro" --entrypoint python3 \
+    "${OCI_CLI_IMAGE:-ghcr.io/oracle/oci-cli@sha256:48884d8710d30356cac71c7aa678873a97c53c594fefdf2724c80270f3ca563b}" \
+    /q/quota_check.py
+}
+
+K6_IMAGE=${K6_IMAGE:-grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603}  # v2.3.0
+
+load_test() {  # E.9 baseline through the edge with k6 (M13); synthetic subjects, never production
+  local profile=${1:-smoke}
+  case "$profile" in smoke|design) ;; *) die "load-test smoke|design";; esac
+  [ "$FAOJ_ENV" != production ] || die "load tests run on staging or a rehearsal, never production"
+  local rel caddy secret out since rc=0 sampler
+  rel=$(current_dir); [ -n "$rel" ] || die "no current release"
+  caddy=$(dc ps -q caddy); [ -n "$caddy" ] || die "caddy is not running"
+  secret=$(grep '^LINE_CHANNEL_SECRET=' "$ENV_DIR/app.secret.env" | cut -d= -f2-)
+  [ -n "$secret" ] || die "LINE_CHANNEL_SECRET is empty, so the webhook answers 503"
+  out="$FAOJ_ROOT/reports/load-$(date -u +%Y%m%dT%H%M%SZ)-$profile"
+  mkdir -p "$out"
+  # The staff password lives only in this run's env file, removed when k6 ends.
+  printf 'LOAD_PASSWORD=%s\nLINE_SECRET=%s\n' "$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')" \
+    "$secret" > "$out/.k6.env"
+  dc exec -T -e LOAD_PASSWORD="$(sed -n 's/^LOAD_PASSWORD=//p' "$out/.k6.env")" web \
+    /app/.venv/bin/python manage.py prepare_load_test > "$out/subjects.json"
+  since=$(now_iso)
+  ( while :; do docker stats --no-stream --format '{{json .}}' >> "$out/stats.jsonl" 2>/dev/null; sleep 15; done ) &
+  sampler=$!
+  disown "$sampler"  # no "Terminated" line when it is stopped
+  say "k6 $profile through $PUBLIC_HOST (report: $out)"
+  docker run --rm --network "container:$caddy" -u "$(id -u)" --env-file "$out/.k6.env" \
+    -e BASE_URL="https://$PUBLIC_HOST" -e EDGE_HOST="$PUBLIC_HOST" -e PROFILE="$profile" \
+    -e INSECURE="$([ -n "${CADDY_LOCAL_CERTS:-}" ] && echo 1)" \
+    -v "$rel/load:/load:ro" -v "$out:/out" "$K6_IMAGE" run --quiet /load/line_load.js \
+    > "$out/k6.log" 2>&1 || rc=$?
+  rm -f "$out/.k6.env"
+  kill "$sampler" 2>/dev/null || true
+  sleep 30  # the worker finishes the turns still queued
+  dc exec -T web /app/.venv/bin/python manage.py load_report --since "$since" > "$out/inside.json"
+  tail -n 1 "$out/k6.log" >&2
+  say "load report: $out (k6 exit $rc)"
+  return "$rc"
+}
+
+status() {
+  load_env
+  echo "env: $FAOJ_ENV  host: $PUBLIC_HOST  maintenance: $(maintenance status)"
+  echo "current: $(basename "$(current_dir)" 2>/dev/null)"
+  dc ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null || true
+}
+
+main() {
+  need docker; need python3
+  local cmd=${1:-help}; shift || true
+  case "$cmd" in
+    deploy) load_env; deploy "$@";;
+    rollback) load_env; rollback "$@";;
+    maintenance) maintenance "$@";;
+    backup) load_env; backup "$@";;
+    restore-drill) load_env; restore_drill "$@";;
+    metrics) load_env; metrics "$@";;
+    smoke) load_env; inside_smoke "$(current_dir)"; edge_smoke;;
+    quota-check) load_env; quota_check;;
+    line-usage) load_env; dc exec -T web /app/.venv/bin/python manage.py line_usage_report "$@";;
+    load-test) load_env; load_test "$@";;
+    status) status;;
+    releases) tail -n 20 "$HISTORY" 2>/dev/null || echo "no releases yet";;
+    *) sed -n '2,20p' "$0";;
+  esac
+}
+main "$@"

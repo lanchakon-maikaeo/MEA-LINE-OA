@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily differential database backup (pgBackRest)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=FAOJ_ROOT=@FAOJ_ROOT@
+ExecStart=/usr/local/sbin/faoj backup diff
+Nice=10

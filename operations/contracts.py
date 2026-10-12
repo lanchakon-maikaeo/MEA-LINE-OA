@@ -6,8 +6,8 @@ integers; floats are refused so no binary rounding ever reaches a stored amount.
 """
 
 import re
-from dataclasses import asdict, dataclass
-from datetime import date
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 
@@ -74,6 +74,8 @@ class CommandResult:
     revision: int
     status: str
     action_id: str
+    # ADR 0008: the other cases a mixed request was split into, [{"case_id", "case_number"}].
+    split: list = field(default_factory=list)
 
     def to_dict(self):
         return asdict(self)
@@ -102,8 +104,13 @@ MAX_SERIALS = 500
 IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9._:\-]{8,128}$")
 QUANTITY = re.compile(r"^\d{1,10}(\.\d+)?$")
 
-STAFF_CHANNELS = frozenset({Case.Channel.PHONE, Case.Channel.LETTER, Case.Channel.COUNTER})
-ON_BEHALF_FIELDS = {"requester_id", "channel", "intake_note"}
+STAFF_CHANNELS = frozenset(
+    {Case.Channel.PHONE, Case.Channel.LETTER, Case.Channel.COUNTER, Case.Channel.FALLBACK_FORM}
+)
+ON_BEHALF_FIELDS = {"requester_id", "channel", "intake_note", "reported_at"}
+# เวลาแจ้งจริง may go back this far (an outage plus a weekend), never into the future.
+REPORTED_AT_MAX_AGE = timedelta(days=30)
+REPORTED_AT_SKEW = timedelta(minutes=5)
 KIND_FIELDS = {
     # M09 Q5: withdrawals and returns may refer to the requester's earlier case (e.g. a problem).
     Case.Kind.WITHDRAWAL: {
@@ -114,7 +121,10 @@ KIND_FIELDS = {
         "required": {"condition", "reason"},
         "optional": {"source_reference", "related_case_number"},
     },
-    Case.Kind.PROBLEM: {"required": {"description"}, "optional": {"impact", "related_case_number"}},
+    Case.Kind.PROBLEM: {
+        "required": {"description"},
+        "optional": {"impact", "related_case_number", "topic", "latitude", "longitude"},
+    },
 }
 LINE_FIELDS = {"item_code", "quantity", "serials"}
 ACTION_FIELDS = {"reason"}
@@ -123,6 +133,7 @@ ACTION_EXTRA_FIELDS = {
     "request_handoff": {"to_division", "reason_category"},
     "decide_routing": {"division"},
     "set_priority": {"priority"},
+    "set_section": {"section"},
     "record_facts": {"facts", "clear"},
     # M07: lines are [{"line_no": n, ...}] of the case; deliveries are numbered per case.
     "approve": {"lines"},
@@ -254,6 +265,7 @@ class Submission:
     requester_id: int | None
     channel: str
     intake_note: str
+    reported_at: datetime | None = None
 
 
 def parse_submission(payload, on_behalf):
@@ -272,7 +284,13 @@ def parse_submission(payload, on_behalf):
     fields = {}
     for name in spec["required"]:
         fields[name] = _text(payload, name, True)
-    for name in spec["optional"] - {"needed_by", "related_case_number"}:
+    for name in spec["optional"] - {
+        "needed_by",
+        "related_case_number",
+        "topic",
+        "latitude",
+        "longitude",
+    }:
         fields[name] = _text(payload, name, False, 100 if name == "source_reference" else TEXT_MAX)
     if "needed_by" in spec["optional"]:
         fields["needed_by"] = None
@@ -281,6 +299,16 @@ def parse_submission(payload, on_behalf):
                 fields["needed_by"] = date.fromisoformat(payload["needed_by"])
             except (TypeError, ValueError):
                 fail(ErrorCode.VALIDATION_ERROR, "needed_by must be YYYY-MM-DD.")
+
+    if "latitude" in spec["optional"]:
+        fields.update(_location(payload))
+    if "topic" in spec["optional"]:
+        fields["topic"] = payload.get("topic") or ""
+        if fields["topic"] not in ("", *Case.Topic.values):
+            fail(
+                ErrorCode.VALIDATION_ERROR,
+                "topic must be meter, transformer, other, usage or suggestion.",
+            )
 
     raw_lines = payload.get("lines") or []
     if not isinstance(raw_lines, list) or len(raw_lines) > MAX_LINES:
@@ -304,22 +332,67 @@ def parse_submission(payload, on_behalf):
         if kind == Case.Kind.WITHDRAWAL and serials:
             fail(ErrorCode.VALIDATION_ERROR, "Serials are recorded at issue, not on request.")
         lines.append(LineInput(code.strip(), quantity, tuple(serials)))
+    if lines and fields.get("topic") in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
+        fail(ErrorCode.VALIDATION_ERROR, "This topic lists no items.")
     if len({line.item_code for line in lines}) != len(lines):
         fail(ErrorCode.VALIDATION_ERROR, "Combine quantities of the same item into one line.")
 
-    requester_id, channel, note = None, Case.Channel.LINE, ""
+    requester_id, channel, note, reported_at = None, Case.Channel.LINE, "", None
     if on_behalf:
         requester_id = payload.get("requester_id")
         if isinstance(requester_id, bool) or not isinstance(requester_id, int):
             fail(ErrorCode.VALIDATION_ERROR, "requester_id is required.")
         channel = payload.get("channel")
         if channel not in STAFF_CHANNELS:
-            fail(ErrorCode.VALIDATION_ERROR, "channel must be phone, letter or counter.")
+            fail(
+                ErrorCode.VALIDATION_ERROR,
+                "channel must be phone, letter, counter or fallback_form.",
+            )
         note = _text(payload, "intake_note", True)
+        reported_at = _reported_at(payload.get("reported_at"))
+        if channel == Case.Channel.FALLBACK_FORM and reported_at is None:
+            fail(ErrorCode.VALIDATION_ERROR, "reported_at is required for the fallback form.")
     related = ""
     if "related_case_number" in spec["optional"]:
         related = _text(payload, "related_case_number", False, 16)
-    return Submission(kind, tuple(lines), fields, related, requester_id, channel, note)
+    return Submission(kind, tuple(lines), fields, related, requester_id, channel, note, reported_at)
+
+
+def _location(payload):
+    """ตำแหน่งที่แจ้ง (ADR 0010): both coordinates or neither, within the world."""
+    lat, lng = payload.get("latitude"), payload.get("longitude")
+    if lat in (None, "") and lng in (None, ""):
+        return {}
+    try:
+        lat, lng = Decimal(str(lat)), Decimal(str(lng))
+    except (InvalidOperation, ValueError):
+        fail(ErrorCode.VALIDATION_ERROR, "latitude and longitude must be numbers.")
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        fail(ErrorCode.VALIDATION_ERROR, "latitude and longitude must be numbers.")
+    return {
+        "latitude": lat.quantize(Decimal("0.000001")),
+        "longitude": lng.quantize(Decimal("0.000001")),
+    }
+
+
+def _reported_at(value):
+    """เวลาแจ้งจริง: ISO date-time (local Bangkok time when naive), past 30 days, not future."""
+    from django.utils import timezone
+
+    if value in (None, ""):
+        return None
+    try:
+        moment = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        moment = None
+    if moment is None:
+        fail(ErrorCode.VALIDATION_ERROR, "reported_at must be an ISO date-time.")
+    if timezone.is_naive(moment):
+        moment = timezone.make_aware(moment)
+    now = timezone.now()
+    if moment > now + REPORTED_AT_SKEW or moment < now - REPORTED_AT_MAX_AGE:
+        fail(ErrorCode.VALIDATION_ERROR, "reported_at must be within the past 30 days.")
+    return moment
 
 
 def clean_reason(payload, required):

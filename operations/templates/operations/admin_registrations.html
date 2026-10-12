@@ -1,8 +1,8 @@
-{% extends "operations/admin_base.html" %}
+{% extends layout %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
-    <span class="eyebrow">แอดมิน</span>
+    <span class="eyebrow">{% if is_admin %}แอดมิน{% else %}ตามตัวเลือกระบบ{% endif %}</span>
     <h1>รับรองผู้แจ้ง</h1>
     <p class="lede">การเลือกเขตของผู้แจ้งเป็นเพียงคำขอ ตรวจตัวตนและเขตก่อนรับรอง</p>
   </div>
@@ -13,7 +13,7 @@
   <tbody>
   {% for reg in pending %}
     <tr>
-      <td>{{ reg.submitted_name }}</td><td>{{ reg.requested_district.name }}</td><td>{{ reg.created_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ reg.submitted_name }}{% if reg.employee %}<br><span class="tag">ตรงทะเบียนพนักงาน {{ reg.employee.employee_id }}</span>{% endif %}{% if reg.latitude %}<br><a href="https://www.google.com/maps?q={{ reg.latitude }},{{ reg.longitude }}" target="_blank" rel="noopener">ดูตำแหน่งที่ส่ง</a>{% endif %}</td><td>{{ reg.requested_district.name }}</td><td>{{ reg.created_at|date:"Y-m-d H:i" }}</td>
       <td>
         <form class="inline" method="post" action="{% url 'admin-registration-action' reg.pk 'approve' %}">
           {% csrf_token %}<label>หมายเหตุ <input name="reason"></label><button type="submit">รับรอง</button>
@@ -34,18 +34,22 @@
     <li>{{ reg.submitted_name }} — {{ reg.requested_district.name }} — {{ reg.get_status_display }} โดย {{ reg.decided_by.username }} {{ reg.decided_at|date:"Y-m-d H:i" }}</li>
   {% empty %}<li>ยังไม่มี</li>{% endfor %}
 </ul>
+{% if is_admin %}
 <h2>รับรองผู้แจ้งโดยตรง</h2>
-<p>สำหรับผู้แจ้งที่ไม่ใช้ LINE เจ้าหน้าที่กองรับเรื่องกลางจะยื่นเรื่องแทนได้</p>
+<p>สำหรับผู้แจ้งที่ไม่ใช้ LINE เจ้าหน้าที่กองจะบันทึกเรื่องแทนได้</p>
 <form method="post" action="{% url 'admin-requester-new' %}">
   <fieldset><legend>เพิ่มผู้แจ้ง</legend>{% csrf_token %}{{ requester_form.as_p }}<button type="submit">รับรอง</button></fieldset>
 </form>
+{% endif %}
 <h2>ผู้แจ้งที่รับรองแล้ว</h2>
+{% include "operations/_list_tools.html" with list="requesters" placeholder="ค้นหาชื่อผู้แจ้ง" filters=requester_filters %}
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">เขต</th><th scope="col">สถานะ</th></tr></thead>
-  <tbody>
+  <tbody data-list-items="requesters">
   {% for requester in requesters %}
-    <tr><td>{{ requester.pk }}</td><td>{{ requester.display_name }}</td><td>{{ requester.district.name }}</td><td>{{ requester.get_status_display }}</td></tr>
+    <tr data-item data-district="{{ requester.district.code }}" data-status="{{ requester.status }}" data-search="{{ requester.display_name|lower }} {{ requester.district.name|lower }}"><td>{{ requester.pk }}</td><td>{{ requester.display_name }}</td><td>{{ requester.district.name }}</td><td>{{ requester.get_status_display }}</td></tr>
   {% empty %}<tr><td colspan="4">ยังไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
+<p class="list-empty" data-list-empty="requesters" hidden>ไม่พบผู้แจ้งที่ตรงกับการค้นหา</p>
 {% endblock %}

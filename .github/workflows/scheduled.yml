@@ -1,0 +1,35 @@
+# Weekly (M12, E.8): re-scan the newest release images for vulnerabilities found since they were
+# built. A finding opens no automatic upgrade: the fix goes through a PR, CI, Release and a
+# staging deploy like any change. Dependency update PRs come from .github/dependabot.yml.
+name: Scheduled
+on:
+  schedule:
+    - cron: "0 20 * * 0" # Sunday 20:00 UTC = Monday 03:00 Bangkok
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  REGISTRY: ${{ vars.OCIR_REGISTRY }}
+  NAMESPACE: ${{ vars.OCIR_NAMESPACE }}
+  TRIVY_IMAGE: aquasec/trivy@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+jobs:
+  rescan:
+    if: vars.OCIR_REGISTRY != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Re-scan the release of the newest main commit
+        env:
+          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
+          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+        run: |
+          set -u
+          status=0
+          for name in app db; do
+            ref="$REGISTRY/$NAMESPACE/faoj/$name:$GITHUB_SHA"
+            docker run --rm -e TRIVY_USERNAME="$OCIR_USERNAME" -e TRIVY_PASSWORD="$OCIR_TOKEN" "$TRIVY_IMAGE" \
+              image --quiet --platform linux/arm64 --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+              --exit-code 1 "$ref" || status=1
+          done
+          [ "$status" = 0 ] || echo "::error::New fixable HIGH/CRITICAL findings in the current release: rebuild through a PR (E.8)."
+          exit "$status"

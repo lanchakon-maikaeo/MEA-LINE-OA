@@ -32,6 +32,11 @@
       <select id="nc-channel" name="channel" required>{% for value, label in channels %}<option value="{{ value }}"{% if values.channel == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
     </div>
     <div class="field">
+      <label for="nc-reported">เวลาแจ้งจริง</label>
+      <input id="nc-reported" name="reported_at" type="datetime-local" value="{{ values.reported_at|default:'' }}" aria-describedby="nc-reported-help">
+      <p class="helptext" id="nc-reported-help">ต้องกรอกเมื่อรับจากแบบฟอร์มสำรอง ใส่เวลาที่ผู้แจ้งส่งแบบฟอร์มหรือโทรมา กรอบเวลานับจากตอนบันทึกนี้</p>
+    </div>
+    <div class="field">
       <label for="nc-related">อ้างเรื่องเดิม (ถ้ามี)</label>
       <input id="nc-related" name="related_case_number" value="{{ values.related_case_number|default:'' }}" placeholder="เช่น P69-000001" autocomplete="off">
     </div>
@@ -53,8 +58,9 @@
     <div class="field"><label for="nc-source">เอกสารการจ่ายเดิม (ถ้ามี)</label><input id="nc-source" name="source_reference" value="{{ values.source_reference|default:'' }}"></div>
   </div>
   <div class="kind-group kind-problem">
-    <h2 class="kind-title">ข้อมูลเรื่องแจ้งปัญหา</h2>
-    <div class="field"><label for="nc-description">อาการหรือปัญหาที่พบ</label><textarea id="nc-description" name="description" rows="3">{{ values.description|default:'' }}</textarea></div>
+    <h2 class="kind-title">ข้อมูลเรื่องแจ้งปัญหา/ข้อเสนอแนะ</h2>
+    <div class="field"><label for="nc-topic">หัวข้อ</label><select id="nc-topic" name="topic"><option value="">— ไม่ระบุ (ให้ระบบดูจากรายละเอียด) —</option>{% for value, label in topics %}<option value="{{ value }}"{% if values.topic == value %} selected{% endif %}>{{ label }}{% if value == "usage" %} (ลักใช้ไฟ ไฟแพง ร้องเรียน){% endif %}</option>{% endfor %}</select><p class="helptext">หัวข้อการใช้ไฟฟ้าไปที่ กตฟ. และไม่ส่งข้อความให้ AI</p></div>
+    <div class="field"><label for="nc-description">ปัญหาที่พบ หรือข้อเสนอแนะ</label><textarea id="nc-description" name="description" rows="3">{{ values.description|default:'' }}</textarea></div>
     <div class="field"><label for="nc-impact">ผลกระทบต่อผู้ใช้ไฟ</label><textarea id="nc-impact" name="impact" rows="2">{{ values.impact|default:'' }}</textarea></div>
   </div>
 

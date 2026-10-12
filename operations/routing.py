@@ -7,7 +7,7 @@ by themselves: each change here is a person's decision with the authority the ba
 
 from django.utils import timezone
 
-from operations import coordination, policy, workflow
+from operations import coordination, identity, policy, workflow
 from operations.contracts import ErrorCode, fail
 from operations.models import (
     AckClock,
@@ -17,6 +17,7 @@ from operations.models import (
     EquipmentType,
     Handoff,
     RoutingReview,
+    Section,
 )
 
 A = AuthorityGrant.Activity
@@ -25,8 +26,8 @@ STAFF_FACTS = (*BOOLEAN_FACTS, "severe_impact", "equipment")
 
 
 def _member(ctx, division_id):
-    """Holds any role in the division; admin rights alone do not make someone a member."""
-    return ctx.scope is not None and bool(ctx.scope.division_roles.get(division_id))
+    """Holds any role in the division (or is ผู้ช่วยเหลือระบบ); admin rights alone do not."""
+    return identity.holds(ctx.scope, division_id)
 
 
 def _require_member(ctx, division_id, message):
@@ -312,7 +313,7 @@ def _clean_equipment(value):
             category = category or found.category
             if found.category != category:
                 fail(ErrorCode.VALIDATION_ERROR, f"{item} is not in {category}.")
-        if category not in EquipmentType.Category.values:
+        if category not in policy.TOPICS or (item and category == policy.USAGE):
             fail(ErrorCode.VALIDATION_ERROR, "Unknown category.")
         rows.append({"category": category, "item": item})
     return rows
@@ -376,7 +377,32 @@ def complete_triage(ctx, case, payload, reason, target):
     return {"priority": state.confirmed_priority, "rules": rules}
 
 
+def set_section(ctx, case, payload, reason, target):
+    """Q12: the owner division says which of its แผนก looks after the case (or none)."""
+    if ctx.requester is not None or not _member(ctx, case.owner_division_id):
+        fail(ErrorCode.FORBIDDEN, "Only staff of the owner division can set the section.")
+    value = payload.get("section")
+    section = None
+    if value not in (None, ""):
+        try:
+            section = Section.objects.get(
+                pk=int(value), division_id=case.owner_division_id, is_active=True
+            )
+        except (TypeError, ValueError, Section.DoesNotExist):
+            fail(ErrorCode.VALIDATION_ERROR, "Choose a section of the owner division.")
+    previous = case.section
+    if previous == section:
+        fail(ErrorCode.VALIDATION_ERROR, "The case is already with this section.")
+    case.section = section
+    case.status = target
+    return {
+        "section": section.name if section else "",
+        "previous": previous.name if previous else "",
+    }
+
+
 HANDLERS = {
+    "set_section": set_section,
     "complete_triage": complete_triage,
     "request_handoff": request_handoff,
     "accept_handoff": accept_handoff,

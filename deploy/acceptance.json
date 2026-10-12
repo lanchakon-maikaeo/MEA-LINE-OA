@@ -1,0 +1,287 @@
+{
+  "schema": 1,
+  "about": "M13 acceptance matrix (PROJECT.md M13 Acceptance and E.10 G01-G10). Each row names the tests and the release evidence that show it on this machine, and what can only be shown elsewhere. A row with 'external' never passes from local evidence; a gate passes only when every row passes and the gate's signer has signed (signoff.json). deploy/release_candidate.py reads this file.",
+  "evidence": {
+    "ci": "make ci: migrate, check, test, test-e2e, security (reports/ci.json)",
+    "tests": "make test on the candidate commit",
+    "acceptance-tests": "the tests named in this file, run with -v 2",
+    "simulate-line": "make simulate-line on two seeds, no findings",
+    "ai-extract": "eval_ai gate for the active extraction version on the candidate source",
+    "ai-answer": "answer_ai gate for the active answer version on the candidate source",
+    "image-scan": "Trivy on the candidate app and db images (HIGH/CRITICAL fixable = 0)",
+    "rehearsal-deploy": "faoj deploy of the candidate digest on the laptop rehearsal, edge smoke ok",
+    "rollback-rehearsal": "faoj rollback to the previous digest and forward again",
+    "restore-drill": "faoj restore-drill: RPO/RTO measured, files match their checksums",
+    "load-rehearsal": "faoj load-test design on the laptop rehearsal (E.9 thresholds)",
+    "line-usage": "manage.py line_usage_report on the candidate's local data",
+    "live-line": "the user's phone on LINE @894attlg through a tunnel: three journeys end to end"
+  },
+  "m13": [
+    {
+      "id": "A01",
+      "need": "LINE OA ส่วนตัวจริง → n8n container → ThaiLLM API จริง → เว็บเฉพาะกอง/แอดมิน → ผล LINE ถึงเจ้าของเรื่อง ครบสามงาน",
+      "tests": [
+        "test_m03_line.DraftConversationTests.test_guided_withdrawal_becomes_a_case_owned_by_the_requester",
+        "test_m05_ai.ChatTests.test_free_text_fills_the_draft_and_answers_with_the_same_token",
+        "test_m04_orchestration.SendingTests.test_send_endpoint_retries_unknown_pushes_through_the_outbox",
+        "test_m07_fulfilment.NotificationTests.test_a_delivery_asks_for_receipt_with_bound_buttons"
+      ],
+      "evidence": ["live-line", "simulate-line", "ci"],
+      "external": "ทำซ้ำบน faoj-staging กับ OA ทดสอบเมื่อมี OCI (G06)"
+    },
+    {
+      "id": "A02",
+      "need": "P0: แจ้งอันตรายได้ P0 และคำแนะนำทันที แม้ AI ล่ม",
+      "tests": [
+        "test_m06_policy.ProposalTests.test_a_hazard_report_sets_p0_as_floor_even_when_equipment_is_unknown",
+        "test_m09_problems.HazardTests.test_a_reported_hazard_is_p0_and_guided_while_ai_is_down",
+        "test_m13_chat_answers.KeywordTests.test_hazard_words_get_the_guidance_at_once",
+        "test_m13_dialogue_sim.MutationTests.test_a_hazard_without_guidance_fails"
+      ],
+      "evidence": ["simulate-line"]
+    },
+    {
+      "id": "A03",
+      "need": "unknown: ไม่รู้ของ ไม่รู้ยอด หรือระบบภายนอกไม่ตอบ ไม่เดาและไม่ทำซ้ำ",
+      "tests": [
+        "test_m06_policy.EngineScenarioTests.test_design_scenarios_map_to_the_expected_rule_owner_and_priority",
+        "test_m07_fulfilment.AllocationTests.test_no_figures_means_shortage_unknown",
+        "test_m11_registry.ExternalOperationTests.test_no_answer_to_the_question_keeps_it_unknown_and_refuses_to_send"
+      ]
+    },
+    {
+      "id": "A04",
+      "need": "partial: อนุมัติ จ่าย และคืนบางส่วน แล้วยุติส่วนที่เหลือ",
+      "tests": [
+        "test_m07_fulfilment.IssueTests.test_req_syn_001_partial_issue_keeps_the_case_open",
+        "test_m07_fulfilment.EndingTests.test_terminating_the_rest_after_a_partial_issue",
+        "test_m08_returns.EndingTests.test_req_syn_002_partial_return_then_the_rest_is_stopped",
+        "test_m07_fulfilment.NotificationTests.test_partial_approval_waits_and_not_approved_is_normal"
+      ]
+    },
+    {
+      "id": "A05",
+      "need": "override: เจ้าหน้าที่เลือกต่างจากข้อเสนอได้พร้อมเหตุผล และข้อเสนอเก่าไม่ทับการตัดสิน",
+      "tests": [
+        "test_m06_policy.HandoffTests.test_s10_choosing_another_division_needs_a_reason_and_waits_for_acceptance",
+        "test_m06_policy.ProposalTests.test_staff_facts_win_and_equipment_for_problem_cases_routes_the_case",
+        "test_m06_policy.ProposalTests.test_s16_an_old_proposal_stays_stale_and_never_overwrites_a_decision",
+        "test_m10_web.ScopeTests.test_handoff_against_the_proposal_shows_the_typed_reason"
+      ]
+    },
+    {
+      "id": "A06",
+      "need": "own-requester: ผู้แจ้งเห็นและกดได้เฉพาะเรื่องของตัวเอง แม้อยู่เขตเดียวกัน",
+      "tests": [
+        "test_m01_identity.RegistrationTests.test_requesters_in_the_same_district_see_only_their_own",
+        "test_m03_line.DraftConversationTests.test_status_replies_show_only_own_cases",
+        "test_m03_line.DraftConversationTests.test_another_users_button_is_refused",
+        "test_m13_chat_answers.KeywordTests.test_my_cases_lists_only_the_requesters_own",
+        "test_m13_dialogue_sim.MutationTests.test_a_case_shown_to_someone_else_breaks_isolation"
+      ],
+      "evidence": ["simulate-line"]
+    },
+    {
+      "id": "A07",
+      "need": "division scope: เจ้าหน้าที่เห็นเฉพาะกองตน ทั้งหน้า URL ตรง ไฟล์แนบ และ export",
+      "tests": [
+        "test_m01_identity.StaffScopeTests.test_staff_see_only_their_division_even_by_direct_url",
+        "test_m10_web.ScopeTests.test_division_queue_lists_only_its_own_cases",
+        "test_m10_web.ScopeTests.test_case_page_search_and_revision_are_404_outside_scope",
+        "test_m10_web.ScopeTests.test_attachment_download_follows_the_case_scope",
+        "test_m10_web.ExportTests.test_csv_holds_only_the_division_and_is_spreadsheet_safe"
+      ]
+    },
+    {
+      "id": "A08",
+      "need": "admin scope: แอดมินเห็นทุกกองแบบมี audit สิทธิ์ผู้พัฒนาแยก และ export ทุกกองเฉพาะแอดมิน",
+      "tests": [
+        "test_m01_identity.StaffScopeTests.test_admin_sees_every_division_but_developer_rights_are_separate",
+        "test_m01_identity.AdminGuardTests.test_account_management_cannot_bypass_developer_role",
+        "test_m10_web.ScopeTests.test_admin_switches_to_every_division_and_views_are_audited",
+        "test_m10_web.ExportTests.test_every_division_export_is_admin_only"
+      ]
+    },
+    {
+      "id": "A09",
+      "need": "LINE pending → approved: ลงทะเบียนแล้วรอรับรอง ไม่ได้สิทธิ์จนกว่าจะอนุมัติ",
+      "tests": [
+        "test_m03_line.RegistrationTests.test_following_grants_nothing_and_registration_waits_for_admin",
+        "test_m01_identity.RegistrationTests.test_registration_waits_for_admin_and_district_choice_grants_nothing",
+        "test_m01_identity.RegistrationTests.test_admin_console_lists_and_approves_registrations",
+        "test_m13_line_people.RegistrationTests.test_a_matching_employee_is_approved_by_the_system"
+      ],
+      "evidence": ["live-line"]
+    },
+    {
+      "id": "A10",
+      "need": "role changes: ถอนบทบาท ย้ายกอง ระงับบัญชี มีผลกับ session ที่เปิดอยู่ทันที",
+      "tests": [
+        "test_m01_identity.StaffScopeTests.test_role_revocation_applies_to_an_open_session",
+        "test_m01_identity.StaffScopeTests.test_division_move_and_deactivation_apply_immediately",
+        "test_m10_web.GuardTests.test_no_role_and_revoked_users_are_refused",
+        "test_m12_support.GrantTests.test_role_comes_with_every_authority_and_ends_with_it"
+      ]
+    },
+    {
+      "id": "A11",
+      "need": "model/key changes ทั้งหน้าเว็บและ configuration: ทดสอบ → ประเมิน → เปลี่ยน, key ไม่รั่ว, หยุดใช้ได้",
+      "tests": [
+        "test_m05_ai.ConfigurationTests.test_api_key_is_encrypted_write_only_and_never_logged",
+        "test_m05_ai.ConfigurationTests.test_activation_needs_test_eval_and_a_fresh_test_after_rotation",
+        "test_m05_ai.ConfigurationTests.test_import_command_reuses_identical_configuration",
+        "test_m05_ai.SwitchTests.test_switch_menu_offers_only_ready_versions",
+        "test_m13_release.StopTriageTests.test_the_admin_page_and_the_command_stop_a_task"
+      ],
+      "evidence": ["ai-extract", "ai-answer"]
+    },
+    {
+      "id": "A12",
+      "need": "AI down: แชตถามทีละช่อง ตอบจากคำสำคัญ กติกายังเสนอกอง และหยุดใช้ AI รายงานได้",
+      "tests": [
+        "test_m05_ai.ChatTests.test_all_models_failing_falls_back_to_questions",
+        "test_m05_ai.ChatTests.test_watchdog_answers_in_time_and_a_late_result_sends_nothing",
+        "test_m05_security.SecurityGuardTests.test_kill_switch_blocks_queued_and_inflight_output",
+        "test_m06_policy.AITriageTests.test_failed_or_stale_ai_never_blocks_the_rules",
+        "test_m13_release.StopAnswerTests.test_with_the_answer_ai_stopped_the_bank_still_answers_by_keyword",
+        "test_m13_release.StopTriageTests.test_stopping_closes_waiting_triage_and_new_cases_keep_the_rules"
+      ]
+    },
+    {
+      "id": "A13",
+      "need": "ส่งไม่สำเร็จ: ผลส่ง failed/unknown/deferred ถูกบันทึก ไม่ส่งซ้ำมั่ว งบข้อความกันไว้ให้เรื่องสำคัญ และแอดมินส่งซ้ำได้",
+      "tests": [
+        "test_m03_line.ReplyTests.test_failed_and_unknown_outcomes_are_recorded",
+        "test_m04_orchestration.SendingTests.test_send_endpoint_retries_unknown_pushes_through_the_outbox",
+        "test_m04_orchestration.SendingTests.test_budget_tiers_keep_a_reserve_for_critical_and_stop_at_the_limit",
+        "test_m04_orchestration.LeaseTests.test_failures_back_off_then_dead_letter_and_admins_requeue",
+        "test_m04_orchestration.MaintenanceTests.test_admin_sees_budget_held_deliveries_and_requeues_dead_letters"
+      ]
+    },
+    {
+      "id": "A14",
+      "need": "load + restore + rollback มีหลักฐาน",
+      "tests": ["test_m12_operations.VerifyRestoreTests.test_missing_and_changed_files_fail_the_drill"],
+      "evidence": ["load-rehearsal", "restore-drill", "rollback-rehearsal", "rehearsal-deploy"],
+      "external": "วัดซ้ำบน faoj-prod (A1 1 OCPU/8 GB) และ restore ลง faoj-staging บน OCI (G08)"
+    },
+    {
+      "id": "A15",
+      "need": "รายงาน push ต่อเรื่องและ forecast โควตา LINE พร้อมข้อเสนอแพ็กเกจ",
+      "tests": [
+        "test_m13_release.UsageReportTests.test_pushes_per_case_forecasts_and_the_package",
+        "test_m13_release.UsageReportTests.test_the_c23_rule_proposes_a_package"
+      ],
+      "evidence": ["line-usage"],
+      "external": "ตัวเลขจริงจาก pilot อย่างน้อยสองเดือน แล้วเจ้าของงบตัดสินแพ็กเกจ"
+    },
+    {
+      "id": "A16",
+      "need": "gate ภายนอกที่ยังไม่มีหลักฐานไม่ถูกเปลี่ยนเป็นผ่านด้วย fixture",
+      "tests": ["test_m13_release.CandidateTests.test_external_rows_and_unsigned_gates_never_pass"]
+    },
+    {
+      "id": "A17",
+      "need": "pilot rollout และ go/no-go ที่ผู้รับผิดชอบรับรอง",
+      "external": "เจ้าของโครงการและ release owner ลงนามใน Docs/release/go-no-go.md"
+    }
+  ],
+  "gates": [
+    {
+      "id": "G01",
+      "title": "ขอบเขตและระดับบริการ",
+      "signer": "เจ้าของกระบวนการ + ผู้ดูแลระบบ",
+      "rows": [
+        {"need": "ขอบเขตสาม workflow ทำงานครบ", "evidence": ["ci", "simulate-line"]},
+        {"need": "load/SLO/RPO/RTO", "evidence": ["load-rehearsal", "restore-drill"], "external": "วัดบน faoj-prod และเจ้าของระบบรับรองตัวเลข E.9"},
+        {"need": "pilot districts และคนดูแล", "external": "ผู้ใช้เลือกกลุ่มเขต pilot และตัวแทนรับปัญหา"}
+      ]
+    },
+    {
+      "id": "G02",
+      "title": "ตัวตน/ข้อมูล/อำนาจ",
+      "signer": "ฝอจ. + เจ้าของตัวตน/ข้อมูล",
+      "rows": [
+        {"need": "สิทธิ์ตามกอง บทบาท และผู้แจ้งรายคน", "tests": ["test_m01_identity.StaffScopeTests.test_staff_see_only_their_division_even_by_direct_url", "test_m01_identity.RegistrationTests.test_requesters_in_the_same_district_see_only_their_own"]},
+        {"need": "อักษรย่อสองกอง ตารางแผนก เบอร์ตามหัวข้อ รายการของจริง", "external": "ฝอจ. ส่งข้อมูลจริง (Q7, Q10, Q12)"},
+        {"need": "ทะเบียนพนักงานจริง บัญชีเจ้าหน้าที่จริง และผู้อนุมัติกติกา FAJO-2", "external": "เจ้าของตัวตน/ข้อมูลและเจ้าของกติการับรอง"},
+        {"need": "retention และประกาศความเป็นส่วนตัว (ตำแหน่ง, ไม่ระบุตัวตน)", "external": "data owner รับรอง"}
+      ]
+    },
+    {
+      "id": "G03",
+      "title": "ธุรกรรมและ routing",
+      "signer": "QA + เจ้าของกระบวนการ",
+      "rows": [
+        {"need": "S01–S16 และ R02, transition/partial/concurrency/idempotency", "tests": ["test_m06_policy.EngineScenarioTests.test_design_scenarios_map_to_the_expected_rule_owner_and_priority", "test_m02_cases.ConcurrencyTests.test_parallel_retries_of_one_key_create_one_case", "test_m07_fulfilment.ConcurrencyTests.test_parallel_issues_from_one_store_stay_within_it", "test_m08_returns.ConcurrencyTests.test_the_same_serial_arriving_twice_at_once_counts_once"], "evidence": ["tests"]},
+        {"need": "QA ตรวจและเจ้าของกระบวนการรับรองกติกากับงานจริง", "external": "QA และเจ้าของกระบวนการ"}
+      ]
+    },
+    {
+      "id": "G04",
+      "title": "Security",
+      "signer": "ผู้รับผิดชอบ security",
+      "rows": [
+        {"need": "dependency/secret/image scans", "evidence": ["ci", "image-scan"]},
+        {"need": "same-district other-user, cross-division, export, revoked session, AI config authorization, signed LINE actions", "tests": ["test_m03_line.WebhookTests.test_unsigned_tampered_or_unconfigured_requests_are_refused", "test_m03_line.DraftConversationTests.test_another_users_button_is_refused", "test_m10_web.ScopeTests.test_attachment_download_follows_the_case_scope", "test_m01_identity.StaffScopeTests.test_suspension_and_session_revocation_end_open_sessions", "test_m05_ai.ConfigurationTests.test_api_key_is_encrypted_write_only_and_never_logged"]},
+        {"need": "ผู้รับผิดชอบ security ตรวจ threat cases E.7", "external": "ผู้รับผิดชอบ security"}
+      ]
+    },
+    {
+      "id": "G05",
+      "title": "AI",
+      "signer": "ผู้รับผิดชอบ AI + ฝอจ.",
+      "rows": [
+        {"need": "held-out evaluation จาก API จริง ผูกกับ source ของ candidate", "evidence": ["ai-extract", "ai-answer"]},
+        {"need": "model/key switch ทั้งเว็บและ configuration และ fallback", "tests": ["test_m05_ai.ConfigurationTests.test_activation_needs_test_eval_and_a_fresh_test_after_rotation", "test_m05_ai.ChatTests.test_all_models_failing_falls_back_to_questions"]},
+        {"need": "ThaiLLM API ของบัญชีองค์กร (ตอนนี้ใช้ OpenTyphoon กับข้อมูลจำลอง) และคลังคำตอบจริงของ ฝอจ.", "external": "endpoint/key/โควตาจริง ประเมินซ้ำ และ ฝอจ. ทบทวนผล"},
+        {"need": "AI คัดกรอง v13", "external": "ไม่อยู่ใน candidate นี้ ผู้ใช้ตัดสินภายหลัง ต้องประเมินใหม่"}
+      ]
+    },
+    {
+      "id": "G06",
+      "title": "Integration",
+      "signer": "เจ้าของระบบเชื่อมต่อ",
+      "rows": [
+        {"need": "LINE จริง + n8n container + AI API จริง", "evidence": ["live-line"], "external": "ทำซ้ำบน faoj-staging กับ OA ทดสอบ"},
+        {"need": "timeout/reconciliation และสัญญากับระบบทะเบียน", "tests": ["test_m11_registry.ExternalOperationTests.test_a_timeout_after_the_registry_applied_it_is_settled_by_asking"], "external": "เจ้าของระบบทะเบียนยืนยันเอกสารหรือ API"}
+      ]
+    },
+    {
+      "id": "G07",
+      "title": "CI/CD",
+      "signer": "ผู้ดูแล release",
+      "rows": [
+        {"need": "immutable images, release.json, rollback rehearsal", "evidence": ["rehearsal-deploy", "rollback-rehearsal", "image-scan"]},
+        {"need": "PR checks บน GitHub, OCIR, staging promotion", "external": "รันจริงบน GitHub และ OCI"}
+      ]
+    },
+    {
+      "id": "G08",
+      "title": "Operations",
+      "signer": "ผู้ดูแลระบบ/DB",
+      "rows": [
+        {"need": "load report และ restore drill", "evidence": ["load-rehearsal", "restore-drill"], "external": "วัดบน faoj-prod และกู้ลง faoj-staging"},
+        {"need": "alerts ถึงผู้รับจริง และผู้ดูแลคนที่ 2", "external": "OCI Monitoring/Notifications และรายชื่อเวร"}
+      ]
+    },
+    {
+      "id": "G09",
+      "title": "UAT",
+      "signer": "ตัวแทนผู้ใช้",
+      "rows": [
+        {"need": "สคริปต์ UAT และอบรม", "evidence": ["live-line"]},
+        {"need": "ตัวแทนเขตและ ฝอจ. ทำสามเส้นทางและกรณีเห็นต่าง/ข้อมูลขาดสำเร็จ", "external": "ตัวแทนผู้ใช้ทำตาม Docs/release/uat-script.md"}
+      ]
+    },
+    {
+      "id": "G10",
+      "title": "Release",
+      "signer": "เจ้าของโครงการ + release owner",
+      "rows": [
+        {"need": "release manifest และ open risks ที่มีเจ้าของ", "tests": ["test_m13_release.CandidateTests.test_external_rows_and_unsigned_gates_never_pass"]},
+        {"need": "pilot go/no-go และ rollback owner", "external": "ลงนามใน Docs/release/go-no-go.md"}
+      ]
+    }
+  ]
+}

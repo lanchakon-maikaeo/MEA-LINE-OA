@@ -19,6 +19,7 @@ from operations.models import (
     DIVISION_ROLES,
     GLOBAL_ROLES,
     AuditEvent,
+    AuthorityGrant,
     ChannelIdentity,
     District,
     Division,
@@ -42,10 +43,12 @@ class StaffScope:
     is_admin: bool = False
     is_developer_admin: bool = False
     division_roles: dict[int, frozenset[str]] = field(default_factory=dict)
+    # ADR 0007: acts for every division with every role; bound by no separation of duties.
+    is_support: bool = False
 
     @property
     def has_any_access(self):
-        return self.is_admin or bool(self.division_roles)
+        return self.is_admin or self.is_support or bool(self.division_roles)
 
 
 NO_SCOPE = StaffScope(user_id=None)
@@ -76,12 +79,41 @@ def staff_scope(user):
         # Developer-admin is an extra duty of an admin, never a standalone path.
         is_developer_admin=is_admin and Role.DEVELOPER_ADMIN in global_roles,
         division_roles={division: frozenset(r) for division, r in roles.items()},
+        is_support=Role.SYSTEM_SUPPORT in global_roles,
     )
+
+
+def intake_division():
+    """The central intake desk, or None: the real structure has none (ADR 0008)."""
+    return Division.objects.filter(is_intake=True, is_active=True).first()
+
+
+def holds(scope, division_id, roles=None):
+    """Membership for acting: a role in the division (any of `roles`), or ผู้ช่วยเหลือระบบ.
+    Admin rights alone never make someone a member."""
+    if scope is None:
+        return False
+    if scope.is_support:
+        return True
+    held = scope.division_roles.get(division_id, frozenset())
+    return bool(held if roles is None else held & set(roles))
+
+
+def separated(ctx_or_scope):
+    """Whether the separation of duties (approver ≠ issuer, receiver ≠ inspector, …) binds
+    this actor: ผู้ช่วยเหลือระบบ is exempt (ADR 0007), and the organisation may turn it off for
+    everyone in ตัวเลือกระบบ (ADR 0009, e.g. one account per division)."""
+    from operations import options  # local: options builds on models only
+
+    scope = getattr(ctx_or_scope, "scope", ctx_or_scope)
+    if scope is not None and getattr(scope, "is_support", False):
+        return False
+    return options.get(options.SEPARATION) == "on"
 
 
 def can_access_division(scope, division_id, roles=None):
     """Own-division rule: admins see all divisions, staff only divisions they hold a role in."""
-    if scope.is_admin:
+    if scope.is_admin or scope.is_support:
         return True
     held = scope.division_roles.get(division_id, frozenset())
     return bool(held) if roles is None else bool(held & set(roles))
@@ -89,7 +121,7 @@ def can_access_division(scope, division_id, roles=None):
 
 def filter_by_division(queryset, scope, field_name):
     """Restrict a queryset of division-owned rows to the scope; deny by default."""
-    if scope.is_admin:
+    if scope.is_admin or scope.is_support:
         return queryset
     return queryset.filter(**{f"{field_name}__in": list(scope.division_roles)})
 
@@ -220,6 +252,8 @@ def grant_role(actor, user, role, division=None, reason=""):
         raise ValidationError("Unknown role.")
     if role == Role.DEVELOPER_ADMIN and not scope.is_developer_admin:
         raise PermissionDenied("Only a developer-admin can grant developer-admin.")
+    if role == Role.SYSTEM_SUPPORT:
+        raise PermissionDenied("ผู้ช่วยเหลือระบบให้ได้ด้วยคำสั่งบนเครื่องเท่านั้น (ADR 0007).")
     if role in GLOBAL_ROLES and division is not None:
         raise ValidationError("Global roles cannot be scoped to a division.")
     if role in DIVISION_ROLES and (division is None or not division.is_active):
@@ -273,6 +307,10 @@ def revoke_role(actor, grant, reason):
     grant.revoked_by = actor
     grant.reason = reason
     grant.save(update_fields=["revoked_at", "revoked_by", "reason"])
+    if grant.role == Role.SYSTEM_SUPPORT:
+        from operations import support  # ADR 0007: its authority ends with the role (RB06)
+
+        support.revoke_grants(grant.user, actor, reason)
     audit(
         actor,
         "role.revoked",
@@ -332,7 +370,134 @@ def set_staff_active(actor, user, active, reason):
     user.is_active = active
     user.save(update_fields=["is_active"])
     _end_sessions(user)
+    if not active:
+        # ADR 0010: a suspended account loses its LINE link too.
+        ChannelIdentity.objects.filter(staff_user=user).update(
+            staff_user=None, staff_linked_at=None
+        )
     audit(actor, "staff.activated" if active else "staff.suspended", user, reason)
+
+
+# What a division holds over its own work, granted with ทำได้ทุกงานในกอง.
+DIVISION_AUTHORITY = (
+    AuthorityGrant.Activity.WITHDRAWAL_APPROVAL,
+    AuthorityGrant.Activity.ALLOCATION,
+    AuthorityGrant.Activity.CONDITION_CERTIFICATION,
+    AuthorityGrant.Activity.PRIORITY_EXCEPTION,
+)
+
+
+@transaction.atomic
+def grant_full_division(actor, user, division, reason, approval_reference):
+    """ทำได้ทุกงานในกอง (user, 10 Oct 2569: one account per division for now): every division
+    role, and the authority a division holds over its own work (routing decisions for the
+    coordinator), in one step. Each grant stays its own row, so a later split of duties revokes
+    them one by one; nothing that already exists is granted twice. `actor` None = manage.py."""
+    if actor is not None:
+        require_admin(actor)
+        if actor.pk == user.pk:
+            raise ValidationError("ให้สิทธิ์แก่ตัวเองไม่ได้ (Q16)")
+    reason = _require_reason(reason)
+    approval_reference = _require_reason(approval_reference)
+    division = Division.objects.select_for_update().get(pk=division.pk)
+    user = User.objects.select_for_update().get(pk=user.pk)
+    if not division.is_active or not user.is_active:
+        raise ValidationError("ใช้ได้กับกองและบัญชีที่ใช้งานอยู่เท่านั้น")
+    roles = 0
+    for role in sorted(DIVISION_ROLES):
+        if RoleGrant.objects.filter(
+            user=user, role=role, division=division, revoked_at__isnull=True
+        ).exists():
+            continue
+        grant = RoleGrant.objects.create(
+            user=user, role=role, division=division, granted_by=actor, reason=reason
+        )
+        audit(actor, "role.granted", grant, reason, user=user.pk, role=role, division=division.code)
+        roles += 1
+    coordinator = division.kind == Division.Kind.COORDINATION
+    wanted = (
+        [(AuthorityGrant.Activity.ROUTING_DECISION, None)]
+        if coordinator
+        else [(activity, division) for activity in DIVISION_AUTHORITY]
+    )
+    now = timezone.now()
+    granted = 0
+    for activity, scope_division in wanted:
+        held = AuthorityGrant.objects.filter(
+            user=user,
+            activity=activity,
+            division=scope_division,
+            category="",
+            item__isnull=True,
+            revoked_at__isnull=True,
+        ).exclude(valid_until__lte=now)
+        if held.exists():
+            continue
+        grant = AuthorityGrant.objects.create(
+            user=user,
+            activity=activity,
+            division=scope_division,
+            valid_from=now,
+            reason=reason,
+            approval_reference=approval_reference,
+            granted_by=actor,
+        )
+        audit(
+            actor,
+            "authority.granted",
+            grant,
+            reason,
+            user=user.pk,
+            activity=activity,
+            division=scope_division.code if scope_division else None,
+            reference=approval_reference,
+        )
+        granted += 1
+    return roles, granted
+
+
+@transaction.atomic
+def set_employee_id(actor, user, employee_id, reason=""):
+    """รหัสพนักงาน of a staff account, used to link LINE by an employee check (ADR 0010)."""
+    require_admin(actor)
+    employee_id = (employee_id or "").strip()[:32]
+    if (
+        employee_id
+        and StaffProfile.objects.filter(employee_id=employee_id).exclude(user=user).exists()
+    ):
+        raise ValidationError("รหัสพนักงานนี้อยู่ในบัญชีอื่นแล้ว")
+    profile = StaffProfile.objects.select_for_update().get(user=user)
+    previous = profile.employee_id
+    profile.employee_id = employee_id
+    profile.save(update_fields=["employee_id"])
+    audit(actor, "staff.employee_id_set", user, reason, previous=previous, value=employee_id)
+
+
+@transaction.atomic
+def set_section(actor, user, section, reason=""):
+    """แผนก of a staff member (real structure Q13): one, in a division where they hold a role,
+    or none. It changes no right; queues and reports use it."""
+    require_admin(actor)
+    profile = StaffProfile.objects.select_for_update().get(user=user)
+    if section is not None:
+        held = RoleGrant.objects.filter(
+            user=user, division_id=section.division_id, revoked_at__isnull=True
+        ).exists()
+        if not held or not section.is_active:
+            raise ValidationError("เลือกแผนกในกองที่บัญชีนี้มีบทบาทอยู่")
+    if profile.section_id == (section.pk if section else None):
+        raise ValidationError("บัญชีนี้อยู่แผนกนี้แล้ว")
+    previous = profile.section
+    profile.section = section
+    profile.save(update_fields=["section"])
+    audit(
+        actor,
+        "staff.section_changed",
+        user,
+        reason,
+        section=section.name if section else "",
+        previous=previous.name if previous else "",
+    )
 
 
 @transaction.atomic
@@ -428,12 +593,28 @@ def set_intake_division(actor, division, reason):
     audit(actor, "division.intake_set", division, reason, previous=[d.code for d in previous])
 
 
+@transaction.atomic
+def clear_intake_division(actor, reason):
+    """ADR 0008: no central intake; new cases go straight to the division the rules name."""
+    reason = _require_reason(reason)
+    require_admin(actor)
+    previous = list(Division.objects.select_for_update().filter(is_intake=True))
+    if not previous:
+        raise ValidationError("There is no intake division.")
+    Division.objects.filter(pk__in=[d.pk for d in previous]).update(is_intake=False)
+    for division in previous:
+        audit(actor, "division.intake_cleared", division, reason)
+
+
 # --- Requester registration (LINE identity from a signed event, wired in M03) -----------------
 
 
 @transaction.atomic
-def submit_registration(channel, external_id, submitted_name, district_code):
-    """Record a registration request. Choosing a district is a claim, never a permission."""
+def submit_registration(
+    channel, external_id, submitted_name, district_code, employee=None, location=None
+):
+    """Record a registration request. Choosing a district is a claim, never a permission; a
+    matched employee and a shared location (10 Oct 2569 Q1, Q3) are evidence for the decider."""
     submitted_name = " ".join((submitted_name or "").split())
     if not submitted_name or len(submitted_name) > 200:
         raise ValidationError("Name is required (max 200 characters).")
@@ -453,8 +634,47 @@ def submit_registration(channel, external_id, submitted_name, district_code):
         identity.status = ChannelIdentity.Status.PENDING
         identity.requester = None
         identity.save(update_fields=["status", "requester"])
+    latitude, longitude = location or (None, None)
     return RegistrationRequest.objects.create(
-        identity=identity, submitted_name=submitted_name, requested_district=district
+        identity=identity,
+        submitted_name=submitted_name,
+        requested_district=district,
+        employee=employee,
+        latitude=latitude,
+        longitude=longitude,
+    )
+
+
+SYSTEM_USERNAME = "system"
+
+
+def system_user():
+    """The account that records what the system decides by itself (e.g. an approval that
+    matched the employee list); it cannot log in."""
+    user, created = User.objects.get_or_create(
+        username=SYSTEM_USERNAME, defaults={"is_active": False}
+    )
+    if created:
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        StaffProfile.objects.create(user=user, display_name="ระบบ (อนุมัติอัตโนมัติ)")
+    return user
+
+
+@transaction.atomic
+def auto_approve_registration(registration):
+    """การอนุมัติอัตโนมัติ (ADR 0010): only for a request whose employee check passed, while
+    ตัวเลือกระบบ says so; recorded in the audit trail with the employee it matched."""
+    from operations import options
+
+    registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
+    if options.get(options.REGISTRATION_CHECK) != "employee_auto" or registration.employee is None:
+        raise ValidationError("Automatic approval is not enabled for this request.")
+    return _approve(
+        system_user(),
+        registration,
+        f"ตรงทะเบียนพนักงาน {registration.employee.employee_id}",
+        automatic=True,
     )
 
 
@@ -500,9 +720,33 @@ def cancel_registration(channel, external_id):
     return registration
 
 
+def may_decide_registrations(user):
+    """ตัวเลือกระบบ (ADR 0009): admins always; supervisors or any division staff when chosen."""
+    from operations import options
+
+    scope = staff_scope(user)
+    if scope.is_admin or scope.is_support:
+        return True
+    choice = options.get(options.REGISTRATION)
+    if choice == "staff":
+        return bool(scope.division_roles)
+    if choice == "supervisor":
+        return any(Role.SUPERVISOR in roles for roles in scope.division_roles.values())
+    return False
+
+
+def _require_registration_decider(actor):
+    if not may_decide_registrations(actor):
+        raise PermissionDenied("ผู้ที่ได้รับเลือกในตัวเลือกระบบเท่านั้นที่อนุมัติการลงทะเบียนได้")
+
+
 @transaction.atomic
 def approve_registration(actor, registration, reason=""):
-    require_admin(actor)
+    _require_registration_decider(actor)
+    return _approve(actor, registration, reason)
+
+
+def _approve(actor, registration, reason="", automatic=False):
     registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
     if registration.status != RegistrationRequest.Status.PENDING:
         raise ValidationError("Registration is not pending.")
@@ -523,19 +767,45 @@ def approve_registration(actor, registration, reason=""):
     _registration_event(registration)
     audit(
         actor,
-        "registration.approved",
+        "registration.auto_approved" if automatic else "registration.approved",
         registration,
         reason,
+        actor_label="system" if automatic else "",
         district=registration.requested_district.code,
         requester_id=requester.pk,
+        employee=registration.employee.employee_id if registration.employee else None,
     )
+    return requester
+
+
+UNKNOWN_DISTRICT = "D00"
+
+
+@transaction.atomic
+def anonymous_requester(identity_row):
+    """ผู้แจ้งไม่ระบุตัวตน (ADR 0010): one per LINE account, without a district or a name;
+    it may only report problems and suggestions (services check the kind)."""
+    requester = Requester.objects.filter(anonymous_identity=identity_row).first()
+    if requester is not None:
+        return requester
+    district, _ = District.objects.get_or_create(
+        code=UNKNOWN_DISTRICT, defaults={"name": "ไม่ระบุเขต", "is_active": False}
+    )
+    requester = Requester.objects.create(
+        display_name="ไม่ระบุตัวตน",
+        district=district,
+        approved_by=system_user(),
+        is_anonymous=True,
+        anonymous_identity=identity_row,
+    )
+    audit(None, "requester.anonymous_created", requester, actor_label="line")
     return requester
 
 
 @transaction.atomic
 def reject_registration(actor, registration, reason):
     reason = _require_reason(reason)
-    require_admin(actor)
+    _require_registration_decider(actor)
     registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
     if registration.status != RegistrationRequest.Status.PENDING:
         raise ValidationError("Registration is not pending.")

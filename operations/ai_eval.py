@@ -917,6 +917,10 @@ def run_next_job():
             from operations import ai_triage
 
             report = ai_triage.run_gate(job.version)
+        elif job.version.task == AIConfigVersion.Task.ANSWER:
+            from operations import ai_answer
+
+            report = ai_answer.run_gate(job.version)
         else:
             report = run_gate(job.version)
         version = ai.record_eval(job.version, report)

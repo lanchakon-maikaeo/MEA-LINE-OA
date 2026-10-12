@@ -1,0 +1,10 @@
+[Unit]
+Description=Monthly restore drill of production backups (RB05, E.9)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=FAOJ_ROOT=@FAOJ_ROOT@
+ExecStart=/usr/local/sbin/faoj restore-drill
+Nice=10

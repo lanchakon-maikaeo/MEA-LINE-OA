@@ -27,6 +27,30 @@
 <form method="post" action="{% url 'admin-user-action' target.pk 'grant' %}">
   <fieldset><legend>เพิ่มบทบาท</legend>{% csrf_token %}{{ grant_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
 </form>
+<form method="post" action="{% url 'admin-user-action' target.pk 'employee-id' %}">
+  <fieldset><legend>รหัสพนักงาน (ใช้เชื่อม LINE ด้วยการยืนยันกับทะเบียนพนักงาน)</legend>{% csrf_token %}
+    <p><label for="u-emp">รหัสพนักงาน</label> <input id="u-emp" name="employee_id" maxlength="32" value="{{ target.staff_profile.employee_id }}"></p>
+    <p><label for="u-emp-reason">เหตุผล</label> <input id="u-emp-reason" name="reason" maxlength="500"></p>
+    <button type="submit">บันทึก</button></fieldset>
+</form>
+<p>LINE: {% if line %}เชื่อมแล้ว {{ line.staff_linked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่ได้เชื่อม{% endif %}</p>
+{% if line %}<form method="post" action="{% url 'admin-user-action' target.pk 'line-unlink' %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">เลิกเชื่อม LINE ของบัญชีนี้</button></form>{% endif %}
+<form method="post" action="{% url 'admin-user-action' target.pk 'full-division' %}">
+  <fieldset><legend>ทำได้ทุกงานในกอง (ทุกบทบาทและอำนาจของกองในครั้งเดียว)</legend>{% csrf_token %}
+    <p class="helptext">ให้ทีละรายการ จึงถอนบางบทบาทหรืออำนาจภายหลังได้เมื่อจะแยกหน้าที่ ถ้าต้องการให้คนเดียวทำต่อกันได้ทุกขั้น ให้ปิดการแยกหน้าที่ในตัวเลือกระบบด้วย</p>
+    <p><label for="u-full-division">กอง</label> <select id="u-full-division" name="division" required>{% for d in active_divisions %}<option value="{{ d.pk }}">{{ d.code }} {{ d.name }}</option>{% endfor %}</select></p>
+    <p><label for="u-full-reason">เหตุผล</label> <input id="u-full-reason" name="reason" maxlength="500" required></p>
+    <p><label for="u-full-ref">เลขอ้างอิงการมอบอำนาจ</label> <input id="u-full-ref" name="approval_reference" maxlength="200" required></p>
+    <button type="submit">ให้ทำได้ทุกงานในกองนี้</button></fieldset>
+</form>
+{% if sections %}
+<form method="post" action="{% url 'admin-user-action' target.pk 'section' %}">
+  <fieldset><legend>แผนก (ใช้แยกคิวและรายงาน ไม่เปลี่ยนสิทธิ์)</legend>{% csrf_token %}
+    <p><label for="u-section">แผนก</label> <select id="u-section" name="section"><option value="">— ไม่สังกัดแผนก —</option>{% for s in sections %}<option value="{{ s.pk }}"{% if target.staff_profile.section_id == s.pk %} selected{% endif %}>{{ s.division.code }} · {{ s.name }}</option>{% endfor %}</select></p>
+    <p><label for="u-section-reason">เหตุผล</label> <input id="u-section-reason" name="reason" maxlength="500"></p>
+    <button type="submit">บันทึกแผนก</button></fieldset>
+</form>
+{% endif %}
 <form method="post" action="{% url 'admin-user-action' target.pk 'move' %}">
   <fieldset><legend>ย้ายกอง (ย้ายทุกบทบาทในกองต้นทาง)</legend>{% csrf_token %}{{ move_form.as_p }}<button type="submit">ย้าย</button></fieldset>
 </form>

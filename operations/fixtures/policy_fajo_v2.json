@@ -1,0 +1,335 @@
+{
+  "code": "FAJO-2",
+  "is_synthetic": false,
+  "title": "กติกาการส่งเข้ากองตามโครงสร้างจริงของ ฝอจ. รุ่น 2 (ADR 0008, ข้อเสนอแนะ)",
+  "note": "ส่งเรื่องตรงถึงกองตามหัวข้อ ไม่มีจุดรับเรื่องกลางและหน่วยทะเบียนกลาง: มิเตอร์ → กคว., หม้อแปลงและอุปกรณ์อื่น → กองอุปกรณ์การจำหน่าย, การใช้ไฟฟ้า (ลักใช้ไฟ ไฟแพง ร้องเรียน) → กตฟ., ข้อเสนอแนะ → ฝอจ. (ส่งต่อกองที่เกี่ยวข้องได้), ไม่ชัด → ผู้ประสานระดับฝ่าย ตารางแผนกยังว่าง (Q12) ปฏิทิน กรอบเวลา และข้อความฉุกเฉินยังเป็นค่าจากกติกาจำลอง DEMO-PE-3 จนเจ้าของกติการับรองค่าจริง",
+  "effective_from": "2026-10-10T00:00:00+07:00",
+  "effective_until": null,
+  "units": {
+    "coordinator": "ฝอจ."
+  },
+  "responsibility": [
+    {
+      "rule": "R01",
+      "kinds": [
+        "withdrawal"
+      ],
+      "category": "meter",
+      "owner": "กคว."
+    },
+    {
+      "rule": "R02",
+      "kinds": [
+        "withdrawal"
+      ],
+      "category": "transformer",
+      "owner": "กองอุปกรณ์ฯ"
+    },
+    {
+      "rule": "R03",
+      "kinds": [
+        "withdrawal",
+        "return",
+        "problem"
+      ],
+      "category": "other",
+      "owner": "กองอุปกรณ์ฯ"
+    },
+    {
+      "rule": "R04",
+      "kinds": [
+        "return"
+      ],
+      "category": "meter",
+      "owner": "กคว."
+    },
+    {
+      "rule": "R04",
+      "kinds": [
+        "return"
+      ],
+      "category": "transformer",
+      "owner": "กองอุปกรณ์ฯ"
+    },
+    {
+      "rule": "R05",
+      "kinds": [
+        "problem"
+      ],
+      "category": "meter",
+      "owner": "กคว."
+    },
+    {
+      "rule": "R05",
+      "kinds": [
+        "problem"
+      ],
+      "category": "transformer",
+      "owner": "กองอุปกรณ์ฯ"
+    },
+    {
+      "rule": "R05",
+      "kinds": [
+        "problem"
+      ],
+      "category": "usage",
+      "owner": "กตฟ."
+    },
+    {
+      "rule": "R05",
+      "kinds": [
+        "problem"
+      ],
+      "category": "suggestion",
+      "owner": "ฝอจ."
+    }
+  ],
+  "sections": [],
+  "priority": {
+    "floors": {
+      "hazard_reported": "P0"
+    },
+    "ack_minutes": {
+      "P0": 15,
+      "P1": 120,
+      "P2": 480,
+      "P3": 1440,
+      "none": 1440
+    },
+    "remind_after": 1,
+    "escalate_after": 2
+  },
+  "hazard_terms": [
+    "ไฟไหม้",
+    "ไฟลุก",
+    "ไหม้",
+    "ควัน",
+    "ประกายไฟ",
+    "สะเก็ดไฟ",
+    "ไฟช็อต",
+    "ช็อต",
+    "ไฟดูด",
+    "ไฟรั่ว",
+    "สายขาด",
+    "ขาดห้อย",
+    "ระเบิด",
+    "น้ำมันรั่ว",
+    "น้ำมันซึม",
+    "ร้อนจัด",
+    "กลิ่นไหม้",
+    "เสาล้ม",
+    "จะล้ม",
+    "อันตราย",
+    "บาดเจ็บ"
+  ],
+  "negations": [
+    "ไม่มี",
+    "ไม่ได้",
+    "ไม่พบ",
+    "ไม่เห็น",
+    "ไม่"
+  ],
+  "handoff_reasons": {
+    "new_evidence": "ข้อมูลหน้างานใหม่",
+    "wrong_division": "ส่งผิดกอง",
+    "resource_limit": "ข้อจำกัดทรัพยากร",
+    "different_order": "ลำดับงานต่าง",
+    "outdated_rule": "กติกาล้าสมัย"
+  },
+  "equipment_terms": [
+    {
+      "term": "มิเตอร์",
+      "category": "meter"
+    },
+    {
+      "term": "มาตรวัดไฟ",
+      "category": "meter"
+    },
+    {
+      "term": "เครื่องวัดหน่วยไฟ",
+      "category": "meter"
+    },
+    {
+      "term": "หม้อวัดไฟ",
+      "category": "meter"
+    },
+    {
+      "term": "หม้อแปลง",
+      "category": "transformer"
+    },
+    {
+      "term": "ทรานส์ฟอร์มเมอร์",
+      "category": "transformer"
+    },
+    {
+      "term": "transformer",
+      "category": "transformer"
+    },
+    {
+      "term": "ฟิวส์",
+      "category": "other"
+    },
+    {
+      "term": "เบรกเกอร์",
+      "category": "other"
+    },
+    {
+      "term": "เบรคเกอร์",
+      "category": "other"
+    },
+    {
+      "term": "สายไฟ",
+      "category": "other"
+    },
+    {
+      "term": "สายเคเบิล",
+      "category": "other"
+    },
+    {
+      "term": "เคเบิล",
+      "category": "other"
+    },
+    {
+      "term": "ลักใช้ไฟ",
+      "category": "usage"
+    },
+    {
+      "term": "ลักลอบใช้ไฟ",
+      "category": "usage"
+    },
+    {
+      "term": "ขโมยไฟ",
+      "category": "usage"
+    },
+    {
+      "term": "ต่อไฟตรง",
+      "category": "usage"
+    },
+    {
+      "term": "ไฟแพง",
+      "category": "usage"
+    },
+    {
+      "term": "ค่าไฟแพง",
+      "category": "usage"
+    },
+    {
+      "term": "ค่าไฟสูง",
+      "category": "usage"
+    },
+    {
+      "term": "ค่าไฟผิดปกติ",
+      "category": "usage"
+    },
+    {
+      "term": "ร้องเรียนการใช้ไฟ",
+      "category": "usage"
+    },
+    {
+      "term": "การใช้ไฟผิดปกติ",
+      "category": "usage"
+    },
+    {
+      "term": "ข้อเสนอแนะ",
+      "category": "suggestion"
+    },
+    {
+      "term": "เสนอแนะ",
+      "category": "suggestion"
+    }
+  ],
+  "calendar": {
+    "timezone": "Asia/Bangkok",
+    "weekdays": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "periods": [
+      [
+        "07:30",
+        "12:00"
+      ],
+      [
+        "13:00",
+        "15:30"
+      ]
+    ],
+    "holidays": [
+      "2026-10-13",
+      "2026-10-23",
+      "2026-12-07",
+      "2026-12-10",
+      "2026-12-31",
+      "2027-01-01",
+      "2027-04-13",
+      "2027-04-14",
+      "2027-04-15"
+    ],
+    "continuous_priorities": [
+      "P0"
+    ],
+    "holidays_note": "วันหยุดจำลองจากวันหยุดราชการบางวัน ต้องแทนด้วยปฏิทินจริงของหน่วยงาน"
+  },
+  "deadlines": {
+    "ack": {
+      "P0": 15,
+      "P1": 120,
+      "P2": 420,
+      "P3": 1260,
+      "none": 1260
+    },
+    "child_accept": {
+      "P0": 15,
+      "P1": 120,
+      "P2": 420,
+      "P3": 1260,
+      "none": 1260
+    },
+    "first_response": {
+      "P0": 15,
+      "P1": 120,
+      "P2": 420,
+      "P3": 840,
+      "none": 840
+    },
+    "resolve": {
+      "P0": 240,
+      "P1": 420,
+      "P2": 1260,
+      "P3": 2100,
+      "none": 2100
+    },
+    "child_result": {
+      "P0": 240,
+      "P1": 420,
+      "P2": 1260,
+      "P3": 2100,
+      "none": 2100
+    },
+    "approval": {
+      "P0": 60,
+      "P1": 240,
+      "P2": 420,
+      "P3": 1260,
+      "none": 1260
+    },
+    "inspection": {
+      "P0": 60,
+      "P1": 240,
+      "P2": 420,
+      "P3": 1260,
+      "none": 1260
+    },
+    "issue": {
+      "P0": 240,
+      "P1": 420,
+      "P2": 1260,
+      "P3": 2100,
+      "none": 2100
+    }
+  },
+  "emergency_guidance": "หากมีอันตรายต่อชีวิตหรือทรัพย์สินขณะนี้ ให้ออกห่างจากจุดเกิดเหตุและแจ้งช่องทางฉุกเฉินที่หน่วยงานกำหนดทันที (ข้อความจำลอง รอแผนฉุกเฉินที่รับรอง) เจ้าหน้าที่จะคัดกรองเรื่องนี้เป็นลำดับแรก"
+}

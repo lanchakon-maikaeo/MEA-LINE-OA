@@ -1,0 +1,14 @@
+{# Search and filter dropdowns over [data-list-items={{ list }}] (app.js); hidden without script. #}
+<div class="list-tools" data-list="{{ list }}" role="search" aria-label="ค้นหาและกรองรายการ">
+  <label class="visually-hidden" for="find-{{ list }}">ค้นหา</label>
+  <input id="find-{{ list }}" class="list-tools__search" type="search" placeholder="{{ placeholder }}" data-list-search autocomplete="off">
+  {% for key, title, choices in filters %}
+    <label class="visually-hidden" for="filter-{{ list }}-{{ key }}">{{ title }}</label>
+    <select id="filter-{{ list }}-{{ key }}" class="pill-select" data-list-filter="{{ key }}">
+      <option value="">{{ title }}: ทั้งหมด</option>
+      {% for value, text in choices %}<option value="{{ value }}">{{ text }}</option>{% endfor %}
+    </select>
+  {% endfor %}
+  {% if folds %}<button class="chip" type="button" data-list-toggle="open">ขยายทั้งหมด</button><button class="chip" type="button" data-list-toggle="close">ย่อทั้งหมด</button>{% endif %}
+  <span class="list-tools__count" data-list-count aria-live="polite"></span>
+</div>

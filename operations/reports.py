@@ -8,14 +8,15 @@ pilot.
 
 import csv
 import io
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.conf import settings
-from django.db.models import Count
+from django.db.models import Count, Q
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from operations import queues, workflow
-from operations.models import AckClock, Case, CaseTriage, ChildWork, Decision
+from operations.models import AckClock, Case, CaseLine, CaseTriage, ChildWork, Decision
 
 WINDOW_DAYS = 30
 FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
@@ -31,34 +32,239 @@ def _clock_minutes(clock, calendar):
     return max(used - clock.paused_minutes, 0)
 
 
-def division_report(user, division, now=None):
-    """One division's numbers (or every division's for `division` None in the admin view)."""
-    now = now or timezone.now()
-    admin_all = division is None
-    visible = queues.visible(user)
-    host = visible.filter(queues.tab_condition("host", division, user, now, admin_all))
-    owned_open = visible.filter(status__in=workflow.OPEN)
-    if division is not None:
-        owned_open = owned_open.filter(owner_division=division)
-    open_clocks = AckClock.objects.filter(case__in=owned_open, stopped_at__isnull=True)
-    since = now - timedelta(days=WINDOW_DAYS)
-    calendar = queues.calendar_now()
+PERIODS = (7, 30, 90)
+AGE_BUCKETS = (
+    ("lt1", "น้อยกว่า 1 วัน", 0, 1),
+    ("1to3", "1–3 วัน", 1, 3),
+    ("3to7", "3–7 วัน", 3, 7),
+    ("7to14", "7–14 วัน", 7, 14),
+    ("gt14", "เกิน 14 วัน", 14, None),
+)
+LEVELS = ("P0", "P1", "P2", "P3", "none")
 
-    ack = AckClock.objects.filter(
-        kind__in=[AckClock.Kind.INTAKE, AckClock.Kind.HANDOFF],
-        stopped_at__gte=since,
-        case__in=visible,
+
+def period(days):
+    """The report window in days (7, 30 or 90; 30 when anything else is asked)."""
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        return WINDOW_DAYS
+    return days if days in PERIODS else WINDOW_DAYS
+
+
+class _Sets:
+    """The case sets one report counts, so a figure and its drill-down list always agree."""
+
+    def __init__(self, user, division, now, days):
+        self.user, self.division, self.now, self.days = user, division, now, days
+        self.admin_all = division is None
+        self.since = now - timedelta(days=days)
+        self.visible = queues.visible(user)
+        self.owned = (
+            self.visible if division is None else self.visible.filter(owner_division=division)
+        )
+        self.owned_open = self.owned.filter(status__in=workflow.OPEN)
+        self.host = self.visible.filter(
+            queues.tab_condition("host", division, user, now, self.admin_all)
+        )
+        self.district = self.visible.filter(
+            queues.tab_condition("district", division, user, now, self.admin_all)
+        )
+
+    def open_clocks(self):
+        return AckClock.objects.filter(case__in=self.owned_open, stopped_at__isnull=True)
+
+    def overdue(self):
+        late = self.open_clocks().filter(due_at__lte=self.now, paused_at__isnull=True)
+        return self.owned_open.filter(pk__in=late.values("case"))
+
+    def escalated(self):
+        raised = self.open_clocks().filter(escalated_at__isnull=False)
+        return self.owned_open.filter(pk__in=raised.values("case"))
+
+    def children(self):
+        work = ChildWork.objects.filter(status__in=ChildWork.OPEN)
+        if self.division is not None:
+            work = work.filter(division=self.division)
+        return self.visible.filter(pk__in=work.values("case"))
+
+    def ack_clocks(self):
+        clocks = AckClock.objects.filter(
+            kind__in=[AckClock.Kind.INTAKE, AckClock.Kind.HANDOFF],
+            stopped_at__gte=self.since,
+            case__in=self.visible,
+        )
+        return clocks if self.division is None else clocks.filter(division=self.division)
+
+    def resolve_clocks(self):
+        clocks = AckClock.objects.filter(
+            kind=AckClock.Kind.RESOLVE, stopped_at__gte=self.since, case__in=self.visible
+        )
+        return clocks if self.division is None else clocks.filter(division=self.division)
+
+    def finished(self):
+        return self.owned.filter(status=Case.Status.CLOSED, ended_at__gte=self.since).exclude(
+            kind=Case.Kind.PROBLEM
+        )
+
+    def level(self, level):
+        if level == "none":
+            condition = Q(triage__isnull=True) | Q(
+                triage__effective_priority="", triage__suggested_priority=""
+            )
+        else:
+            condition = Q(triage__effective_priority=level) | Q(
+                triage__effective_priority="", triage__suggested_priority=level
+            )
+        return self.owned_open.filter(condition)
+
+    def age(self, key):
+        bucket = next((b for b in AGE_BUCKETS if b[0] == key), None)
+        if bucket is None:
+            return self.owned_open.none()
+        _, _, low, high = bucket
+        cases = self.owned_open.filter(submitted_at__lte=self.now - timedelta(days=low))
+        if high is not None:
+            cases = cases.filter(submitted_at__gt=self.now - timedelta(days=high))
+        return cases
+
+    def day(self, field, value):
+        """Cases whose `field` (submitted_at or ended_at) falls on a Bangkok date."""
+        try:
+            day = date.fromisoformat(value)
+        except (TypeError, ValueError):
+            return self.owned.none()
+        start = timezone.make_aware(datetime.combine(day, time.min))
+        return self.owned.filter(**{f"{field}__gte": start, f"{field}__lt": start + timedelta(1)})
+
+
+# metric -> (title; with {value} where the metric takes one, queue tab with the same cases)
+METRICS = {
+    "open": ("เรื่องที่ต้องทำ", "host"),
+    "overdue": ("เรื่องที่เกินกรอบเวลา", None),
+    "escalated": ("เรื่องที่ถูกยกระดับ", None),
+    "district": ("เรื่องที่รอเขตตอบ", "district"),
+    "children": ("เรื่องที่มีงานย่อยค้าง", "child"),
+    "level": ("เรื่องที่เปิดอยู่ ระดับ{value}", None),
+    "kind": ("เรื่องที่เปิดอยู่ ชนิด{value}", None),
+    "status": ("เรื่องที่เปิดอยู่ สถานะ{value}", None),
+    "section": ("เรื่องที่เปิดอยู่ของ{value}", None),
+    "age": ("เรื่องที่เปิดอยู่มา{value}", None),
+    "item": ("เรื่องที่เปิดอยู่ที่มีรายการ {value}", None),
+    "new": ("เรื่องที่เข้ามาวันที่ {value}", None),
+    "ended": ("เรื่องที่จบวันที่ {value}", None),
+    "ack": ("เรื่องที่นับเวลาตอบรับ", None),
+    "resolve": ("เรื่องที่นับเวลาแก้ปัญหา", None),
+    "finish": ("เรื่องเบิก/คืนที่ปิดแล้ว", None),
+}
+
+
+def drilldown(user, division, metric, value, now=None, days=WINDOW_DAYS):
+    """(title, queue tab or None, cases) behind one figure of the report; None if unknown."""
+    if metric not in METRICS:
+        return None
+    sets = _Sets(user, division, now or timezone.now(), period(days))
+    title, tab = METRICS[metric]
+    shown = value
+    if metric == "level":
+        if value not in LEVELS:
+            return None
+        shown = queues.level_name(value) if value != "none" else queues.UNTRIAGED
+        cases = sets.level(value)
+    elif metric == "kind":
+        if value not in Case.Kind.values:
+            return None
+        cases, shown = sets.owned_open.filter(kind=value), Case.Kind(value).label
+    elif metric == "status":
+        if value not in workflow.OPEN:
+            return None
+        cases, shown = sets.owned_open.filter(status=value), Case.Status(value).label
+    elif metric == "section":
+        # Real structure Q12: a แผนก of this division, or "none" for cases not given one.
+        if value == "none":
+            cases, shown = sets.owned_open.filter(section__isnull=True), "ที่ยังไม่ระบุแผนก"
+        elif value.isdigit() and division is not None:
+            section = division.sections.filter(pk=int(value)).first()
+            if section is None:
+                return None
+            cases, shown = sets.owned_open.filter(section=section), section.name
+        else:
+            return None
+    elif metric == "age":
+        bucket = next((b for b in AGE_BUCKETS if b[0] == value), None)
+        if bucket is None:
+            return None
+        cases, shown = sets.age(value), bucket[1]
+    elif metric == "item":
+        cases = sets.owned_open.filter(lines__item__code=value).distinct()
+    elif metric in ("new", "ended"):
+        cases = sets.day("submitted_at" if metric == "new" else "ended_at", value)
+        shown = _thai_day(value)
+    elif metric == "ack":
+        cases = sets.visible.filter(pk__in=sets.ack_clocks().values("case"))
+    elif metric == "resolve":
+        cases = sets.visible.filter(pk__in=sets.resolve_clocks().values("case"))
+    else:
+        cases = {
+            "open": sets.host,
+            "overdue": sets.overdue(),
+            "escalated": sets.escalated(),
+            "district": sets.district,
+            "children": sets.children(),
+            "finish": sets.finished(),
+        }[metric]
+    return title.format(value=shown), tab, cases
+
+
+def _thai_day(value):
+    try:
+        day = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return value
+    return f"{day.day}/{day.month}/{day.year + 543}"
+
+
+def _per_day(cases, field, since, tz):
+    rows = (
+        cases.filter(**{f"{field}__gte": since})
+        .annotate(day=TruncDate(field, tzinfo=tz))
+        .values("day")
+        .annotate(n=Count("pk"))
     )
-    resolve = AckClock.objects.filter(
-        kind=AckClock.Kind.RESOLVE, stopped_at__gte=since, case__in=visible
+    return {row["day"]: row["n"] for row in rows}
+
+
+def trend(sets):
+    """New and ended cases per Bangkok day over the window, oldest first."""
+    tz = timezone.get_current_timezone()
+    today = timezone.localdate(sets.now)
+    first = today - timedelta(days=sets.days - 1)
+    since = timezone.make_aware(datetime.combine(first, time.min))
+    new = _per_day(sets.owned, "submitted_at", since, tz)
+    ended = _per_day(sets.owned.filter(ended_at__isnull=False), "ended_at", since, tz)
+    days = [first + timedelta(days=i) for i in range(sets.days)]
+    return [(d, new.get(d, 0), ended.get(d, 0)) for d in days]
+
+
+def aging(sets):
+    return [(key, label, sets.age(key).count()) for key, label, _, _ in AGE_BUCKETS]
+
+
+def top_items(sets, limit=6):
+    rows = (
+        CaseLine.objects.filter(case__in=sets.owned_open)
+        .values("item__code", "item__name")
+        .annotate(n=Count("case", distinct=True))
+        .order_by("-n", "item__code")[:limit]
     )
-    closed = visible.filter(status=Case.Status.CLOSED, ended_at__gte=since).exclude(
-        kind=Case.Kind.PROBLEM
-    )
-    if division is not None:
-        ack = ack.filter(division=division)
-        resolve = resolve.filter(division=division)
-        closed = closed.filter(owner_division=division)
+    return [(r["item__code"], r["item__name"], r["n"]) for r in rows]
+
+
+def division_report(user, division, now=None, days=WINDOW_DAYS):
+    """One division's numbers (or every division's for `division` None in the admin view)."""
+    sets = _Sets(user, division, now or timezone.now(), period(days))
+    calendar = queues.calendar_now()
+    ack, resolve, closed = sets.ack_clocks(), sets.resolve_clocks(), sets.finished()
     finished = []
     starts = dict(
         Decision.objects.filter(case__in=closed, action="complete_triage")
@@ -72,45 +278,49 @@ def division_report(user, division, now=None):
         if pk in starts:
             finished.append(calendar.minutes_between(starts[pk], ended_at, levels.get(pk, "")))
 
+    owned_open = sets.owned_open
     by_status = dict(owned_open.values_list("status").annotate(n=Count("pk")))
     by_kind = dict(owned_open.values_list("kind").annotate(n=Count("pk")))
+    by_section = dict(owned_open.values_list("section_id").annotate(n=Count("pk")))
+    sections = list(division.sections.filter(is_active=True)) if division is not None else []
     by_level = {}
     for triage in CaseTriage.objects.filter(case__in=owned_open):
         level = triage.effective_priority or triage.suggested_priority or "none"
         by_level[level] = by_level.get(level, 0) + 1
-    total = owned_open.count()
-    children = ChildWork.objects.filter(status__in=ChildWork.OPEN, case__in=visible)
-    if division is not None:
-        children = children.filter(division=division)
+    untriaged = owned_open.filter(triage__isnull=True).count()
+    if untriaged:
+        by_level["none"] = by_level.get("none", 0) + untriaged
     return {
         "division": division,
-        "open": host.count(),
-        "total": total,
-        "overdue": open_clocks.filter(due_at__lte=now, paused_at__isnull=True)
-        .values("case")
-        .distinct()
-        .count(),
-        "escalated": open_clocks.filter(escalated_at__isnull=False)
-        .values("case")
-        .distinct()
-        .count(),
-        "district": visible.filter(
-            queues.tab_condition("district", division, user, now, admin_all)
-        ).count(),
-        "children": children.count(),
+        "days": sets.days,
+        "open": sets.host.count(),
+        "total": owned_open.count(),
+        "overdue": sets.overdue().count(),
+        "escalated": sets.escalated().count(),
+        "district": sets.district.count(),
+        "children": sets.children().count(),
         "by_status": [
-            (label, by_status.get(value, 0))
+            (value, label, by_status.get(value, 0))
             for value, label in Case.Status.choices
             if value in workflow.OPEN and by_status.get(value)
         ],
-        "by_kind": [(label, by_kind.get(value, 0)) for value, label in Case.Kind.choices],
-        "by_level": [(key, by_level.get(key, 0)) for key in ("P0", "P1", "P2", "P3", "none")],
+        "by_kind": [(value, label, by_kind.get(value, 0)) for value, label in Case.Kind.choices],
+        "by_section": (
+            [(str(s.pk), s.name, by_section.get(s.pk, 0)) for s in sections]
+            + [("none", "ยังไม่ระบุแผนก", by_section.get(None, 0))]
+            if sections
+            else []
+        ),
+        "by_level": [(key, by_level.get(key, 0)) for key in LEVELS],
         "avg_ack": _average(_clock_minutes(c, calendar) for c in ack),
         "ack_count": ack.count(),
         "avg_resolve": _average(_clock_minutes(c, calendar) for c in resolve),
         "resolve_count": resolve.count(),
         "avg_finish": _average(finished),
         "finish_count": len(finished),
+        "trend": trend(sets),
+        "aging": aging(sets),
+        "items": top_items(sets),
     }
 
 
@@ -155,6 +365,7 @@ HEADER = [
     "กองเจ้าภาพ",
     "ผู้รับผิดชอบ",
     "ยื่นเมื่อ",
+    "เวลาแจ้งจริง",
     "ปิดเมื่อ",
     "กรอบเวลาที่ใกล้สุด",
     "ครบกำหนด",
@@ -188,6 +399,7 @@ def export_csv(cases, now=None):
                     case.owner_division.code,
                     _person(assignee),
                     _when(case.submitted_at),
+                    _when(case.reported_at),
                     _when(case.ended_at),
                     row.clock.get_kind_display() if row.clock else "",
                     _when(row.clock.due_at) if row.clock else "",

@@ -199,6 +199,13 @@ ACTIONS = {
             "M06",
             _per_kind(lambda k, st: _same(_working(st))),
         ),
+        # Real structure Q12: the section (แผนก) that looks after the case, inside the owner.
+        ActionSpec(
+            "set_section",
+            "ระบุแผนก",
+            "M06",
+            _per_kind(lambda k, st: _same([s for s in st if s not in TERMINAL])),
+        ),
         ActionSpec(
             "record_facts",
             "ยืนยัน/แก้ข้อเท็จจริง",

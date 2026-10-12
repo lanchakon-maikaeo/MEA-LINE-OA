@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily staging database dump
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=FAOJ_ROOT=@FAOJ_ROOT@
+ExecStart=/usr/local/sbin/faoj backup dump
+Nice=10
