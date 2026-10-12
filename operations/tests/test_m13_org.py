@@ -231,6 +231,43 @@ class OwnerDeskTests(OrgTestCase):
             self.submit(payload, actor=Actor.staff(self.admin))
         self.assertEqual(caught.exception.code, ErrorCode.FORBIDDEN)
 
+    def test_filing_for_another_division_lands_on_a_page_the_filer_may_open(self):
+        """K15 (found by the browser test on the real structure): the message names every case
+        and its division, and the next page is never a case the filer cannot open."""
+        form = {
+            "idempotency_key": uuid.uuid4().hex,
+            "requester_id": str(self.req1.pk),
+            "kind": "withdrawal",
+            "channel": "phone",
+            "intake_note": "เขตโทรหา กตฟ. เรื่องมิเตอร์",
+            "purpose": "ขอมิเตอร์",
+            "row-0-item": "MTR_SYN_A",
+            "row-0-quantity": "1",
+        }
+        client = Client()
+        client.force_login(self.ktf)
+        response = client.post("/cases/new/", form, follow=True)
+        case = Case.objects.get(intake_note=form["intake_note"])
+        self.assertEqual(case.owner_division.code, "กคว.")
+        self.assertRedirects(response, "/cases/new/")
+        self.assertContains(response, f"บันทึกเรื่อง {case.number} แทนผู้แจ้งแล้ว เข้าคิวคัดกรองของ กคว.")
+        self.assertContains(response, "บัญชีนี้จึงเปิดดูไม่ได้")
+        split = {
+            **form,
+            "idempotency_key": uuid.uuid4().hex,
+            "intake_note": "คำขอเดียวสองกอง",
+            "row-1-item": "FUSE_SYN_A",
+            "row-1-quantity": "3",
+        }
+        client.force_login(self.kae)
+        response = client.post("/cases/new/", split, follow=True)
+        meter, fuses = Case.objects.filter(intake_note="คำขอเดียวสองกอง").order_by("number")
+        self.assertEqual(
+            (meter.owner_division.code, fuses.owner_division.code), ("กคว.", "กองอุปกรณ์ฯ")
+        )
+        self.assertRedirects(response, f"/cases/{fuses.number}/")
+        self.assertContains(response, f"{meter.number} (กคว.), {fuses.number} (กองอุปกรณ์ฯ)")
+
     def resolved(self):
         _, case = self.submit({"kind": "problem", "topic": "transformer", "description": "ดับ"})
         self.act(self.kae, case, "start_triage")

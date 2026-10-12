@@ -62,8 +62,8 @@ def open_case(page, base_url, number):
     expect(page.get_by_role("heading", name=number)).to_be_visible()
 
 
-def file_case(page, base_url, kind, rows, **fields):
-    """Intake files a case for the synthetic requester on the web form (round 1 Q16)."""
+def submit_case(page, base_url, kind, rows, **fields):
+    """Staff file a case for the synthetic requester on the web form (round 1 Q16)."""
     page.goto(base_url + "/cases/new/")
     page.locator("#nc-requester").select_option(label="ผู้แจ้งทดสอบ E2E · การไฟฟ้านครหลวงเขตวัดเลียบ")
     page.locator(f"input[name=kind][value={kind}]").check()
@@ -80,6 +80,11 @@ def file_case(page, base_url, kind, rows, **fields):
         page.locator(f"[name=row-{i}-serials]").fill(serials)
     with page.expect_navigation():
         page.get_by_role("button", name="บันทึกเรื่อง").click()
+
+
+def file_case(page, base_url, kind, rows, **fields):
+    """File a case the filer's division owns; the next page is that case."""
+    submit_case(page, base_url, kind, rows, **fields)
     number = page.locator("h1").inner_text().strip()
     assert page.url.endswith(f"/cases/{number}/"), page.url
     return number
@@ -301,6 +306,11 @@ def real_structure(browser, base_url, password):
     ktf.screenshot(path="reports/e2e-real-usage-phone.png", full_page=True)
     answer_for_district(ktf)
     assert ktf.goto(base_url + "/divisions/กคว./").status == 404
+    # K15: the rules give a meter to กคว.; กตฟ. files it and stays on a page it may open.
+    submit_case(ktf, base_url, "withdrawal", [("MTR_SYN_A", "1", "")], purpose="ขอมิเตอร์")
+    assert ktf.url.endswith("/cases/new/"), ktf.url
+    expect(ktf.locator(".notice--success")).to_contain_text("เข้าคิวคัดกรองของ กคว.")
+    expect(ktf.locator(".notice--success")).to_contain_text("บัญชีนี้จึงเปิดดูไม่ได้")
     ktf.goto(base_url + "/reports/")
     expect(ktf.get_by_text("แผนกตรวจสอบการใช้ไฟฟ้า 1").first).to_be_visible()
     ktf.context.close()
@@ -390,7 +400,10 @@ with Path("reports/e2e-server.log").open("w") as log:
             "PASS Chromium: M10 hazard problem, route chosen against the proposal (phone, keyboard)"
         )
         print("PASS Chromium: real structure, one request split per division, issued in its แผนก")
-        print("PASS Chromium: real structure, electricity use to กตฟ., resolved (phone), scope")
+        print(
+            "PASS Chromium: real structure, electricity use to กตฟ., resolved (phone), scope, "
+            "filing a case for another division"
+        )
     finally:
         process.terminate()
         try:

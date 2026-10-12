@@ -6,7 +6,8 @@
 
 - release candidate: `m13-rc1` = commit `9c0a4c3` บน branch `feat/m02-m03-cases-line`
 - รายละเอียดทั้งหมด (image, AI, กติกา, ตัวเลือกระบบ, หลักฐานพร้อม sha256): [m13-rc1/release-manifest.json](m13-rc1/release-manifest.json) และตาราง [m13-rc1/acceptance-matrix.md](m13-rc1/acceptance-matrix.md)
-- image ที่ซ้อมบนเครื่องอยู่ใน registry จำลอง ตอนขึ้น OCI ต้อง build ใหม่ผ่าน Release workflow จาก commit เดียวกันหลัง merge แล้วใส่ digest จริงด้านล่าง
+- image ที่ซ้อมบนเครื่องอยู่ใน registry จำลอง ตอนขึ้น OCI ต้อง build ใหม่ผ่าน Release workflow หลัง merge แล้วใส่ digest จริงด้านล่าง
+- branch มี commit หลัง m13-rc1 ที่แก้โค้ดแอป (การแก้ K15) image ที่ build หลัง merge จึงเป็นรุ่นถัดไป ต้องสร้างบันทึกรุ่นใหม่และประเมิน AI บน staging ก่อนตัดสิน
 
 | รายการ | ค่า |
 | --- | --- |

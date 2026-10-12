@@ -822,21 +822,33 @@ def case_new(request):
         except CommandFailed as exc:
             errors.append(_error_text(exc))
         else:
-            case = Case.objects.get(pk=result.case_id)
-            others = [s["case_number"] for s in result.split]
-            if others:
+            numbers = [result.case_number, *(s["case_number"] for s in result.split)]
+            owners = dict(
+                Case.objects.filter(number__in=numbers).values_list(
+                    "number", "owner_division__code"
+                )
+            )
+            if result.split:
                 # ADR 0008: one request with items of several divisions, one case each.
-                messages.success(
-                    request,
-                    f"บันทึกแทนผู้แจ้งแล้ว แยกเป็น {len(others) + 1} เรื่องตามกอง: "
-                    + ", ".join([case.number, *others]),
+                text = f"บันทึกแทนผู้แจ้งแล้ว แยกเป็น {len(numbers)} เรื่องตามกอง: " + ", ".join(
+                    f"{number} ({owners[number]})" for number in numbers
                 )
             else:
-                messages.success(
-                    request,
-                    f"บันทึกเรื่อง {case.number} แทนผู้แจ้งแล้ว เข้าคิวคัดกรองของ {case.owner_division.code}",
-                )
-            return redirect("case-detail", number=case.number)
+                text = f"บันทึกเรื่อง {numbers[0]} แทนผู้แจ้งแล้ว เข้าคิวคัดกรองของ {owners[numbers[0]]}"
+            # K15: staff of any division may file, but open only their own division's cases.
+            # Show the first case this account can open; otherwise stay on a new form.
+            visible = set(
+                queues.visible(request.user)
+                .filter(number__in=numbers)
+                .values_list("number", flat=True)
+            )
+            shown = next((number for number in numbers if number in visible), None)
+            if shown is None:
+                where = "เรื่องนี้" if len(numbers) == 1 else "ทุกเรื่อง"
+                messages.success(request, f"{text} {where}อยู่ในคิวของกองอื่น บัญชีนี้จึงเปิดดูไม่ได้")
+                return redirect("case-new")
+            messages.success(request, text)
+            return redirect("case-detail", number=shown)
     return render(
         request,
         "operations/case_new.html",
