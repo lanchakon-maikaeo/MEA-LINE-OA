@@ -166,7 +166,9 @@ status() {
 files() {
   say "copying private files and n8n data from the restic backup"
   rm -rf "$ROOT/restore/files"
-  dc run --rm -T files-backup -o s3.bucket-lookup=path restore latest --host production --target /restore/files
+  # Explicit checks: called as `files || true` from check, set -e does not apply in here.
+  dc run --rm -T files-backup -o s3.bucket-lookup=path restore latest --host production \
+    --target /restore/files || { say "no files copied (restic failed)"; return 1; }
   # The restic image (pinned in compose.yaml) has a shell: copy without another image.
   dc run --rm -T --no-deps -v "$ROOT/restore/files/backup:/from:ro" -v "$ROOT/data:/to" \
     --entrypoint sh files-backup -c 'cp -a /from/media/. /to/media/ 2>/dev/null; cp -a /from/n8n/. /to/n8n/ 2>/dev/null; true'
