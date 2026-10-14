@@ -128,10 +128,23 @@ build() {
 
 start() {
   [ -e "$ROOT/releases/current" ] || die "run build first"
+  if [ ! -e "$ROOT/run/standby-restored" ] && [ -s "$ROOT/data/postgres/pgdata/PG_VERSION" ]; then
+    # A cluster without the restore marker was made by the image's initdb (the database was
+    # started before any restore). Drop it only when it holds no tables of the app.
+    dc up -d db >/dev/null
+    local tables
+    tables=$(dc exec -T db gosu postgres psql -Atq -d faoj -c \
+      "select count(*) from pg_tables where schemaname = 'public'" 2>/dev/null || echo unknown)
+    [ "$tables" = 0 ] || die "a database that is not a restored standby holds $tables tables in $ROOT/data/postgres: look before removing it"
+    say "removing the empty cluster that initdb made before the first restore"
+    dc stop db >/dev/null; dc rm -f db >/dev/null
+    rm -rf "$ROOT/data/postgres/pgdata"
+  fi
   if [ ! -s "$ROOT/data/postgres/pgdata/PG_VERSION" ]; then
     say "restoring production's newest backup as a standby (first start)"
     dc run --rm --no-deps -T --entrypoint "" db \
       gosu postgres pgbackrest --stanza=faoj restore --type=standby --log-level-console=warn
+    touch "$ROOT/run/standby-restored"
   fi
   dc up -d db
   say "standby running; 'deploy/standby.sh status' shows how far behind it is"
@@ -164,6 +177,8 @@ files() {
 check() {
   [ -e "$ROOT/releases/current" ] || exit 0
   [ -e "$ROOT/run/promoted" ] && exit 0  # after a failover this Mac is production
+  # Never start the database before a restore: the image would initdb an empty primary.
+  [ -e "$ROOT/run/standby-restored" ] || exit 0
   dc up -d db >/dev/null 2>&1 || true
   local lag; lag=$(lag_seconds || true)
   echo "[$(date '+%m-%d %H:%M')] lag ${lag:-?}s" >> "$LOG"
