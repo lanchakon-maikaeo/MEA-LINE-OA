@@ -131,7 +131,7 @@ start() {
   if [ ! -e "$ROOT/run/standby-restored" ] && [ -s "$ROOT/data/postgres/pgdata/PG_VERSION" ]; then
     # A cluster without the restore marker was made by the image's initdb (the database was
     # started before any restore). Drop it only when it holds no tables of the app.
-    dc up -d db >/dev/null
+    dc up -d --wait db >/dev/null 2>&1 || true  # psql before it is ready answers nothing
     local tables
     tables=$(dc exec -T db gosu postgres psql -Atq -d faoj -c \
       "select count(*) from pg_tables where schemaname = 'public'" 2>/dev/null || echo unknown)
