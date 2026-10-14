@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The Mac as a warm standby for production (ADR 0015 Q9). Same `faoj`, Compose stack and images
 # as the E5 host, under FAOJ_ROOT=~/faoj-standby. Normally only PostgreSQL runs here, in standby
-# mode, replaying production's WAL from Object Storage (about 5 minutes behind) with the
+# mode, replaying production's WAL from Object Storage (5-10 minutes behind) with the
 # backup-READER key: this Mac can read production's backups but never write to them.
 #
 #   deploy/standby.sh setup      copy production's settings from E5 (needs the e5-move tunnel),
@@ -10,7 +10,7 @@
 #   deploy/standby.sh start      first time: restore the newest backup as a standby; then start
 #   deploy/standby.sh status     in recovery? how far behind production? last files copy
 #   deploy/standby.sh files      copy private files and n8n data from the restic backup
-#   deploy/standby.sh check      launchd, every 5 minutes: keep it running, files hourly, warn
+#   deploy/standby.sh check      launchd, every 5 minutes: keep it running, files daily, warn
 #                                when it falls more than 15 minutes behind
 #   deploy/standby.sh failover   a person decides production is gone: stop E5's ngrok if it
 #                                still answers, promote this database, start the whole stack
@@ -144,6 +144,9 @@ start() {
     say "restoring production's newest backup as a standby (first start)"
     dc run --rm --no-deps -T --entrypoint "" db \
       gosu postgres pgbackrest --stanza=faoj restore --type=standby --log-level-console=warn
+    # Object Storage allows 50,000 requests a month (Always Free), shared with production's
+    # backups: ask for new WAL every 5 minutes, not every 5 seconds (about 17k a month).
+    echo "wal_retrieve_retry_interval = '5min'" >> "$ROOT/data/postgres/pgdata/postgresql.auto.conf"
     touch "$ROOT/run/standby-restored"
   fi
   dc up -d db
@@ -188,7 +191,8 @@ check() {
     notify "เครื่องสำรอง ฝอจ. ตามไม่ทัน" "ข้อมูลบน Mac ช้ากว่า production $((lag / 60)) นาที ดู deploy/standby.sh status"
   fi
   local last; last=$(stat -f %m "$ROOT/run/files-at" 2>/dev/null || echo 0)
-  if [ $(( $(date +%s) - last )) -ge 3600 ]; then files >> "$LOG" 2>&1 || true; fi
+  # Daily, not hourly: each restic restore costs Object Storage requests (Always Free budget).
+  if [ $(( $(date +%s) - last )) -ge 86400 ]; then files >> "$LOG" 2>&1 || true; fi
 }
 
 failover() {
