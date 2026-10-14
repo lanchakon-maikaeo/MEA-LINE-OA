@@ -90,7 +90,9 @@ reader_key() {
     --query 'sort_by(data[?"lifecycle-state"==`ACTIVE`], &"time-created")[-1].id' --raw-output)
   printf '%s' "$access" | grep -Eq '^[0-9a-f]{40}$' || die "faoj-backup-reader has no active Customer Secret Key"
   secret=$(python3 -c 'import getpass; print(getpass.getpass("backup-reader secret key …'"${access: -6}"' (hidden, then Enter): ").strip())')
-  [ -n "$secret" ] || die "no secret typed"
+  # An OCI Customer Secret Key's secret is 44 base64 characters; anything else was mispasted.
+  printf '%s' "$secret" | grep -Eq '^[A-Za-z0-9+/]{43}=$' \
+    || die "that is not a secret key (${#secret} characters; OCI's are 44 ending in =): paste it once, as shown when it was generated"
   # The reader key replaces the writer key everywhere on this Mac.
   set_kv "$ROOT/env/db.secret.env" PGBACKREST_REPO1_S3_KEY "$access"
   set_kv "$ROOT/env/db.secret.env" PGBACKREST_REPO1_S3_KEY_SECRET "$secret"

@@ -294,6 +294,8 @@ if found_access:
 if yes(label):
     access = found_access or ask("   Access key (40 characters 0-9 a-f)")
     secret = ask("   Secret key (shown once when the key was generated)")
+    if secret and not re.fullmatch(r"[A-Za-z0-9+/]{43}=", secret):
+        sys.exit(f"that is not a secret key ({len(secret)} characters; OCI's are 44 ending in =)")
     if access and secret:
         out["db.secret.env"] = {"PGBACKREST_REPO1_S3_KEY": access, "PGBACKREST_REPO1_S3_KEY_SECRET": secret}
         out["backup.secret.env"] = {"AWS_ACCESS_KEY_ID": access, "AWS_SECRET_ACCESS_KEY": secret}
