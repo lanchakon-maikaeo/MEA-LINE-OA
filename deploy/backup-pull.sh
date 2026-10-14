@@ -20,7 +20,12 @@ perm=$(stat -f %Lp "$CONFIG" 2>/dev/null || stat -c %a "$CONFIG")
 . "$CONFIG"
 : "${S3_ENDPOINT:?}" "${S3_REGION:?}" "${S3_KEY:?}" "${S3_SECRET:?}" "${DEST:?}"
 SOURCE_ENV=${SOURCE_ENV:-production}
-mkdir -p "$DEST/pgbackrest" "$DEST/restic"
+# A launchd job may not write into OneDrive (macOS privacy): say so instead of failing quietly.
+if ! mkdir -p "$DEST/pgbackrest" "$DEST/restic" 2>/dev/null; then
+  osascript -e 'display notification "macOS ไม่ให้งานเบื้องหลังเขียนลง OneDrive รัน make backup-pull ใน Terminal แทน" with title "สำเนา backup รายสัปดาห์ ฝอจ."' >/dev/null 2>&1 || true
+  echo "cannot write $DEST from here: run 'make backup-pull' in Terminal" >&2
+  exit 1
+fi
 ca=(); [ -n "${S3_CA_FILE:-}" ] && ca=(-v "$S3_CA_FILE:/ca.crt:ro" -e RCLONE_CA_CERT=/ca.crt)
 run() {  # bucket/path → local folder; sync = an exact copy, older versions are kept by the source
   docker run --rm "${ca[@]+"${ca[@]}"}" \

@@ -121,22 +121,33 @@ backup-pull:
 	deploy/backup-pull.sh
 
 backup-pull-schedule:
-	sed -e "s#@REPO@#$(CURDIR)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.backup-pull.plist \
+	install -d -m 700 $(HOME)/.config/faoj/bin
+	install -m 700 deploy/backup-pull.sh $(HOME)/.config/faoj/bin/backup-pull.sh
+	sed -e "s#@BIN@#$(HOME)/.config/faoj/bin#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.backup-pull.plist \
 		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.backup-pull.plist
+	-launchctl bootout gui/$$(id -u)/th.or.mea.faoj.backup-pull 2>/dev/null
 	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.backup-pull.plist
 
 # ADR 0015 Q13: this Mac checks production every minute and alerts after three failures.
+# launchd jobs cannot read the repository inside OneDrive (macOS privacy: Operation not
+# permitted), so each schedule runs a copy in ~/.config/faoj/bin; run the target again after
+# changing the script.
+FAOJ_BIN = $(HOME)/.config/faoj/bin
 health-schedule:
-	chmod +x deploy/healthcheck.sh
-	sed -e "s#@REPO@#$(CURDIR)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.health.plist \
+	install -d -m 700 $(FAOJ_BIN)
+	install -m 700 deploy/healthcheck.sh $(FAOJ_BIN)/healthcheck.sh
+	sed -e "s#@BIN@#$(FAOJ_BIN)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.health.plist \
 		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.health.plist
+	-launchctl bootout gui/$$(id -u)/th.or.mea.faoj.health 2>/dev/null
 	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.health.plist
 
 # ADR 0015 Q9: keep the Mac standby replaying production's WAL (deploy/standby.sh check).
 standby-schedule:
-	chmod +x deploy/standby.sh
-	sed -e "s#@REPO@#$(CURDIR)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.standby.plist \
+	install -d -m 700 $(FAOJ_BIN)
+	install -m 700 deploy/standby.sh $(FAOJ_BIN)/standby.sh
+	sed -e "s#@BIN@#$(FAOJ_BIN)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.standby.plist \
 		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.standby.plist
+	-launchctl bootout gui/$$(id -u)/th.or.mea.faoj.standby 2>/dev/null
 	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.standby.plist
 
 # Same blocking scan as the Release workflow, on locally built images (IMAGES="ref …").
