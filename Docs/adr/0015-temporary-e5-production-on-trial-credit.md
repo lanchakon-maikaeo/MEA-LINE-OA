@@ -34,7 +34,7 @@ status: accepted
 - **Q12:** `notifications.plan_catch_up` และตัวเลือก `catch_up_push` กับ `catch_up_apology`
 - **Q21:** `FormOnceMiddleware`, `FormSubmission` (0033) และร่างฟอร์มใน `app.js`
 - **Q13:** `deploy/healthcheck.sh` (`make health-schedule`)
-- **Q9 และ Q10:** `deploy/standby.sh` (`make standby-schedule`) ใช้ key ของ backup-reader ซึ่งเขียน `~/.config/faoj/backup-pull.env` ให้ `make backup-pull-schedule` ด้วย
+- **Q9 และ Q10:** `deploy/standby.sh` (`make standby-schedule`) ใช้ key ของ backup-reader ซึ่งเขียน `~/.config/faoj/backup-pull.env` ให้ `make backup-pull-schedule` ด้วย standby ทำงานตั้งแต่ 22:47 ข้อมูลตามหลัง production **5–10 นาที** ไม่ใช่ 5 นาทีตาม Q4 เพราะถาม WAL ทุก 5 นาทีเพื่อให้อยู่ในโควตา Object Storage 50,000 request ต่อเดือนของ Always Free ที่ใช้ร่วมกับ backup ของ E5 และคัดลอกไฟล์วันละครั้ง งานเบื้องหลังรันจาก `~/.config/faoj/bin` เพราะ macOS ไม่ให้ launchd อ่านไฟล์ใน OneDrive
 - **Q6 และ Q20:** `release.json` มี `unsafe_migrations`, `postgres_major` และ `n8n_major` ส่วน `faoj auto-promote` ปิดไว้ก่อน มีช่วงเวลา 18-07, soak 60 นาที และ staging gate `metric`
 - **บั๊กของ `faoj` ที่พบบน Linux จริง:** bundle อ่านไม่ได้ (`umask 077`), deploy ครั้งแรกที่ล้มทำให้รอบต่อไปติด และ `bash -s` ถูก docker กิน stdin
 
