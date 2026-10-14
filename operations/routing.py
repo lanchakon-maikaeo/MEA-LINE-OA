@@ -5,9 +5,10 @@ revision, then records the Decision, audit, outbox event and receipt. Recommenda
 by themselves: each change here is a person's decision with the authority the backend checks.
 """
 
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from operations import coordination, identity, policy, workflow
+from operations import ai_routing, coordination, identity, policy, routing_words, workflow
 from operations.contracts import ErrorCode, fail
 from operations.models import (
     AckClock,
@@ -103,6 +104,7 @@ def request_handoff(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "The route is waiting for a coordinator's decision.")
     state = policy.state_for(case)
     recommendation = state.current_recommendation
+    keywords = _keywords(case, payload, recommendation)
     category = str(payload.get("reason_category") or "")
     if recommendation is None or recommendation.proposed_owner_id != to.pk:
         # Choosing differently from the proposal is allowed, with the reason recorded (B.6).
@@ -140,6 +142,7 @@ def request_handoff(ctx, case, payload, reason, target):
         recommendation=recommendation,
         requested_by=ctx.user,
         requested_at=now,
+        keywords=keywords,
     )
     return {
         "outcome": "handoff_requested",
@@ -147,7 +150,25 @@ def request_handoff(ctx, case, payload, reason, target):
         "to_division": to.code,
         "followed_proposal": bool(recommendation and recommendation.proposed_owner_id == to.pk),
         "recommendation_id": recommendation.pk if recommendation else None,
+        **({"keywords": keywords} if keywords else {}),
     }
+
+
+def _keywords(case, payload, recommendation):
+    """คำสำคัญให้ระบบจำ (ADR 0013, Q2, Q8): only when ส่วนกลาง hands on a case the rules could
+    not place, and only words from the case's own text."""
+    wanted = payload.get("keywords")
+    if not wanted:
+        return []
+    if not routing_words.may_teach(case, recommendation):
+        fail(
+            ErrorCode.VALIDATION_ERROR,
+            "คำสำคัญใช้ได้เฉพาะเรื่องที่ส่วนกลางส่งต่อ เมื่อกติกาบอกกองไม่ได้",
+        )
+    try:
+        return routing_words.clean(case, wanted)
+    except ValidationError as exc:
+        fail(ErrorCode.VALIDATION_ERROR, " ".join(exc.messages))
 
 
 def _answer(ctx, case, accept, reason):
@@ -166,6 +187,7 @@ def _answer(ctx, case, accept, reason):
     if accept:
         data["owner_from"] = _move_owner(case, handoff.to_division)
         data["owner_to"] = handoff.to_division.code
+        routing_words.after_handoff(case, handoff, ctx.user)  # learn or move (ADR 0013)
     return data
 
 
@@ -224,6 +246,8 @@ def decide_routing(ctx, case, payload, reason, target):
     if review is None and not escalated:
         fail(ErrorCode.VALIDATION_ERROR, "Nothing is waiting for a coordinator on this case.")
     division = _division(payload.get("division"))
+    recommendation = policy.state_for(case).current_recommendation
+    keywords = _keywords(case, payload, recommendation)
     now = timezone.now()
     data = {"division": division.code}
     handoff = _pending(case)
@@ -252,8 +276,12 @@ def decide_routing(ctx, case, payload, reason, target):
     review.save()
     data["review_id"] = review.pk
     if division.pk != case.owner_division_id:
+        previous = case.owner_division
         data["owner_from"] = _move_owner(case, division)
         data["owner_to"] = division.code
+        routing_words.after_decision(case, recommendation, previous, division, ctx.user, keywords)
+        if keywords:
+            data["keywords"] = keywords
     return data
 
 
@@ -374,6 +402,7 @@ def complete_triage(ctx, case, payload, reason, target):
     ):
         fail(ErrorCode.VALIDATION_ERROR, f"Confirm a level of at least {floor} first.")
     case.status = target
+    ai_routing.after_triage(case, ctx.user)  # ADR 0013 Q31: kept, so the keyword is learned
     return {"priority": state.confirmed_priority, "rules": rules}
 
 

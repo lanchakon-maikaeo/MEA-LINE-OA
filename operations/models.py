@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 from django.db.models import F, Q
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
@@ -40,6 +41,10 @@ class Division(models.Model):
     is_synthetic = models.BooleanField(default=False)
     # The central intake unit (กองรับเรื่องกลาง): owner of every case at submission.
     is_intake = models.BooleanField(default=False)
+    # หน้าที่ของกอง (ADR 0013, Q14 ข): what the division does, in the admin's words; the AI reads
+    # it when no duty entry fits. The examples test the AI and never reach its prompt (Q25).
+    duty_overview = models.TextField(blank=True)
+    duty_examples = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["code"]
@@ -166,6 +171,18 @@ class Requester(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "ใช้งาน"
         SUSPENDED = "suspended", "ระงับ"
+        # การถอนการรับรอง (14 Oct 2569): final; the LINE account has to register again and gets a
+        # new requester. Cases and messages stay with this one.
+        REVOKED = "revoked", "ถอนแล้ว"
+
+    class EmployeeLink(models.TextChoices):
+        """How `employee` was set. Only a verified or admin link counts as proof of who this is;
+        a name match only shows the position (user, 14 Oct 2569)."""
+
+        VERIFIED = "verified", "ยืนยันด้วยรหัสพนักงาน"
+        NAME = "name", "ชื่อตรงทะเบียนพนักงาน"
+        ADMIN = "admin", "แอดมินผูก"
+        UNLINKED = "unlinked", "แอดมินยกเลิกการผูก"
 
     display_name = models.CharField(max_length=200)
     district = models.ForeignKey(District, on_delete=models.PROTECT)
@@ -191,6 +208,23 @@ class Requester(models.Model):
     division = models.ForeignKey(
         "Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # ทะเบียนพนักงาน behind this person, for the position and staff roles on the requester list.
+    # Empty `employee_link`: not decided yet, so a unique name match may still fill it.
+    employee = models.ForeignKey(
+        "Employee", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    employee_link = models.CharField(max_length=16, choices=EmployeeLink.choices, blank=True)
+    # รหัสแทนตัว (user, 14 Oct 2569): a random code for an anonymous reporter, shown only on the
+    # admin's problem list so reports from one LINE account can be told apart without knowing
+    # who it is. Never derived from the LINE ID; empty for everyone else.
+    alias = models.CharField(max_length=8, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["alias"], condition=~Q(alias=""), name="requester_unique_alias"
+            )
+        ]
 
     def __str__(self):
         return "ไม่ระบุตัวตน" if self.is_anonymous else self.display_name
@@ -597,6 +631,21 @@ class ActionReceipt(models.Model):
         ]
 
 
+class FormSubmission(models.Model):
+    """ADR 0015 Q21: the one-time key of a staff web form. The same key sent again (a submit
+    repeated after an outage or a double click) is not applied twice; rows go after a day."""
+
+    key = models.CharField(max_length=64)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    path = models.CharField(max_length=300)
+    location = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "key"], name="form_submission_once")]
+        indexes = [models.Index(fields=["created_at"])]
+
+
 class OutboxEvent(models.Model):
     """Intent to notify or orchestrate, committed with the change it describes (envelope v1).
 
@@ -746,9 +795,14 @@ class Conversation(models.Model):
 
 class ConversationMessage(models.Model):
     """Text the user typed, kept verbatim as source material (AI extraction arrives in M05).
-    `case`: the requester's answer to staff who asked for more information on that case."""
+    `case`: the requester's answer to staff who asked for more information on that case.
+    `requester`: who the user was when typing it (anonymous included), so the requester page
+    never shows what the same LINE account typed while reporting anonymously (ADR 0010)."""
 
     identity = models.ForeignKey(ChannelIdentity, on_delete=models.PROTECT, related_name="+")
+    requester = models.ForeignKey(
+        Requester, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     inbox = models.OneToOneField(WebhookInbox, on_delete=models.PROTECT, related_name="+")
     draft = models.ForeignKey(
         ConversationDraft, null=True, blank=True, on_delete=models.PROTECT, related_name="messages"
@@ -990,6 +1044,7 @@ class AIConfigVersion(models.Model):
         EXTRACT = "extract", "สกัดร่างจากแชต (M05)"
         TRIAGE = "triage", "เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06)"
         ANSWER = "answer", "ตอบแชตผู้แจ้งจากคลังคำตอบ (ADR 0012)"
+        ROUTING = "routing", "เสนอกองจากหน้าที่ของกอง (ADR 0013)"
 
     class Status(models.TextChoices):
         CANDIDATE = "candidate", "รอทดสอบ/ประเมิน"
@@ -1389,6 +1444,8 @@ class Handoff(models.Model):
     )
     decided_at = models.DateTimeField(null=True, blank=True)
     decision_reason = models.TextField(blank=True)
+    # คำที่ระบบจำ (ADR 0013, Q4, Q8): words ฝอจ. picked from an R10 case; learned on acceptance.
+    keywords = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["id"]
@@ -2372,3 +2429,198 @@ class ChatAnswer(models.Model):
 
     def __str__(self):
         return self.title
+
+
+# --- Personal data out of AI calls (ADR 0014) ---------------------------------------------------
+
+
+class MaskedWord(models.Model):
+    """คำที่ต้องปิดเสมอ (ADR 0014, 14 Oct 2569 Q30, Q34): a word the AI must never see, such as a
+    person's name the lists do not know. Any staff member adds one with a reason; only an admin
+    removes one, because removing it lets the word reach the AI again."""
+
+    word = models.CharField(max_length=100)
+    reason = models.TextField()
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+    removed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    removed_at = models.DateTimeField(null=True, blank=True)
+    removal_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-added_at"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("word"),
+                condition=Q(removed_at__isnull=True),
+                name="masked_word_unique_active",
+            )
+        ]
+
+    def __str__(self):
+        return self.word
+
+
+class MaskCount(models.Model):
+    """How many values the masking hid before an AI call, per day, task and kind; never the
+    values themselves (ADR 0014, Q30)."""
+
+    day = models.DateField()
+    task = models.CharField(max_length=16)
+    kind = models.CharField(max_length=16)
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-day", "task", "kind"]
+        constraints = [
+            models.UniqueConstraint(fields=["day", "task", "kind"], name="mask_count_unique")
+        ]
+
+
+# --- คำที่ระบบจำ and คำถามที่บอทตอบไม่ได้ (ADR 0013) ----------------------------------------------
+
+
+class RoutingWord(models.Model):
+    """คำที่ระบบจำ (ADR 0013; 14 Oct 2569 Q2-Q13, Q31, Q36): a word from a case the rules could
+    not route, with the division that took it, so the next such case with the word goes there."""
+
+    class Source(models.TextChoices):
+        HANDOFF = "handoff", "ส่วนกลางเลือกตอนโอน"
+        AI = "ai", "คำที่ AI ยกมา กองรับเรื่องแล้ว"
+
+    word = models.CharField(max_length=40)
+    kind = models.CharField(max_length=16, choices=Case.Kind.choices)
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    source = models.CharField(max_length=16, choices=Source.choices)
+    learned_from = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="+")
+    taught_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    uses = models.PositiveIntegerField(default=0)  # cases it matched at submission
+    moves = models.PositiveIntegerField(default=0)  # Q13: "ย้ายบ่อย" from two moves
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["kind", "word"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("word"),
+                "kind",
+                condition=Q(cancelled_at__isnull=True),
+                name="routing_word_unique_active",
+            )
+        ]
+
+    def __str__(self):
+        return self.word
+
+
+class UnansweredQuestion(models.Model):
+    """คำถามที่บอทตอบไม่ได้ (14 Oct 2569 Q1 ค, Q11): text typed outside a draft that the answer
+    bank did not know, the same words counted together. Stored with personal data masked
+    (ADR 0014) and without who typed it: an admin sees what people ask, not who asked."""
+
+    class Status(models.TextChoices):
+        OPEN = "open", "รอแอดมิน"
+        ANSWERED = "answered", "เพิ่มเป็นคำตอบแล้ว"
+        IGNORED = "ignored", "ไม่ต้องตอบ"
+
+    key = models.CharField(max_length=64, unique=True)  # SHA-256 of the masked words
+    text = models.TextField()
+    channel = models.CharField(max_length=16, default="line")
+    count = models.PositiveIntegerField(default=1)
+    first_at = models.DateTimeField()
+    last_at = models.DateTimeField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    answer_key = models.CharField(max_length=40, blank=True)
+    handled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    handled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-last_at"]
+        indexes = [models.Index(fields=["status", "-count"])]
+
+    def __str__(self):
+        return self.text[:60]
+
+
+# --- หน้าที่ของกอง and the routing AI (ADR 0013) ---------------------------------------------------
+
+
+class DutyEntry(models.Model):
+    """งานที่ดูแล (ADR 0013, Q14 ก): one thing a division takes care of, as an admin wrote it.
+    The routing AI answers which entry a message is about; the entry names the division. The
+    examples (two or more) are the AI's test, never its prompt (Q25)."""
+
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="duties")
+    title = models.CharField(max_length=100)
+    description = models.TextField(max_length=1000)
+    examples = models.JSONField(default=list)
+    is_active = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["division__code", "title"]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def code(self):
+        """How the AI names this entry (its schema allows only these)."""
+        return f"E{self.pk}"
+
+
+class AIRoutingRun(models.Model):
+    """One ask of the routing AI for an unclear case (ADR 0013): the entry or division it
+    proposed, the words it quoted and the keyword it gave, or why it gave nothing."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอ AI"
+        DONE = "done", "AI เสนอแล้ว"
+        NONE = "none", "AI ไม่เสนอ"
+        FAILED = "failed", "AI ใช้ไม่ได้"
+        SKIPPED = "skipped", "ไม่ต้องถามแล้ว"
+
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="routing_runs")
+    case_revision = models.PositiveIntegerField()
+    config_version = models.ForeignKey(
+        AIConfigVersion, on_delete=models.PROTECT, related_name="routing_runs"
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    entry = models.ForeignKey(
+        DutyEntry, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    quote = models.TextField(blank=True)
+    keyword = models.CharField(max_length=40, blank=True)
+    # The case went straight to the division (ตัวเลือกระบบ routing_ai "direct", entries only).
+    applied = models.BooleanField(default=False)
+    attempts = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        # One ask per case: the case sits with ส่วนกลาง across many decisions (revisions).
+        constraints = [models.UniqueConstraint(fields=["case"], name="routing_run_one_per_case")]

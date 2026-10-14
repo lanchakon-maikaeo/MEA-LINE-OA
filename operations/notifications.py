@@ -9,6 +9,7 @@ LINE is `unknown`, counts against the budget and is retried with the same X-Line
 
 import calendar
 import logging
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 
@@ -18,7 +19,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from operations import identity as identity_services
-from operations import line_api, orchestration
+from operations import line_api, options, orchestration
 from operations.models import (
     ChannelIdentity,
     Decision,
@@ -111,6 +112,65 @@ def push_enabled():
         and settings.LINE_CHANNEL_ACCESS_TOKEN
         and settings.LINE_PUSH_ENABLED
     )
+
+
+# --- Answers held up by an outage (ADR 0015 Q12) -------------------------------------------
+
+KIND_CATCH_UP = "catch_up"
+CATCH_UP_QUIET = timedelta(seconds=45)  # later answers for the same person replace this one
+CATCH_UP_ONCE_PER = timedelta(minutes=30)
+CATCH_UP_APOLOGY = "ขอโทษที่ตอบช้า ระบบเพิ่งกลับมาใช้งานได้ ข้อความที่ส่งไว้ยังอยู่ครบ"
+
+
+def plan_catch_up(inbox, messages, now=None):
+    """The reply to a message could not use its reply token (LINE redelivered it after an
+    outage): push the newest answer instead, once per person per outage, inside the normal
+    budget (normal level stops at the 20% reserve). Returns the planned delivery or None."""
+    if not messages or options.get(options.CATCH_UP) != "on" or not inbox.source_user_id:
+        return None
+    identity = ChannelIdentity.objects.filter(
+        channel=ChannelIdentity.Channel.LINE, external_id=inbox.source_user_id
+    ).first()
+    if identity is None:
+        return None
+    now = now or timezone.now()
+    with transaction.atomic():
+        recent = N.objects.filter(
+            identity=identity,
+            kind=KIND_CATCH_UP,
+            status__in=[N.Status.SENT, N.Status.UNKNOWN],
+            sent_at__gte=now - CATCH_UP_ONCE_PER,
+        )
+        if recent.exists():
+            return None
+        N.objects.filter(identity=identity, kind=KIND_CATCH_UP, status=N.Status.PLANNED).update(
+            status=N.Status.SKIPPED, detail="superseded by a newer answer"
+        )
+        batch = list(messages[:4])
+        minutes = options.get(options.CATCH_UP_APOLOGY)
+        if minutes != "never" and now - inbox.occurred_at >= timedelta(minutes=int(minutes)):
+            batch.insert(0, {"type": "text", "text": CATCH_UP_APOLOGY})
+        first = None
+        for message in batch:
+            delivery = N.objects.create(
+                kind=KIND_CATCH_UP,
+                level=N.Level.NORMAL,
+                identity=identity,
+                text=str(message.get("text") or message.get("altText") or "")[:5000] or "-",
+                message=message,
+                send_after=now + CATCH_UP_QUIET,
+            )
+            first = first or delivery
+        OutboxEvent.objects.create(
+            event_type=orchestration.EVENT_NOTIFICATION,
+            subject_type="delivery",
+            subject_id=str(first.pk),
+            correlation_id=uuid.uuid4(),
+            payload={"delivery_id": first.pk, "kind": KIND_CATCH_UP, "level": N.Level.NORMAL},
+            occurred_at=now,
+            next_attempt_at=first.send_after,
+        )
+    return first
 
 
 # --- Planning --------------------------------------------------------------------------------
@@ -314,6 +374,7 @@ def _recipient_problem(delivery):
     if (
         settings.APP_ENV != "production"
         and identity.external_id not in settings.LINE_ALLOWED_RECIPIENTS
+        and options.get(options.LINE_AUDIENCE) != "everyone"
     ):
         return "not in allowlist"
     if not identity.is_following:

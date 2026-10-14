@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for a minor release every 10 minutes (timer; does nothing until 'faoj auto-promote on')
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=false
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

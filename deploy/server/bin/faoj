@@ -8,6 +8,12 @@
 #
 #   faoj deploy <image@sha256:…> [--approval "who/when/where approved"]
 #   faoj rollback [<image@sha256:…>]           previous release when omitted; no DB restore
+#   faoj install <image@sha256:…>              unpack a release and make it current, start nothing
+#                                              (the Mac standby, ADR 0015 Q9)
+#   faoj auto-deploy on|off "reason" | status | check   staging follows CI's main tag (default off)
+#   faoj promote [<image@sha256:…>] --approval "…"      production takes the release staging passed
+#   faoj auto-promote on|off "reason" | status | check  production takes MINOR releases by itself
+#                                              in its window after the soak (ADR 0015 Q6/Q20)
 #   faoj maintenance on|off|status
 #   faoj backup stanza|full|diff|incr|files|dump|status
 #   faoj restore-drill [--keep]                  restore production backups in a side stack
@@ -27,6 +33,9 @@ RELEASES="$FAOJ_ROOT/releases"
 HISTORY="$RELEASES/history.jsonl"
 FLAG="$FAOJ_ROOT/run/maintenance"
 LOCK="$FAOJ_ROOT/run/deploy.lock"
+AUTO_FLAG="$FAOJ_ROOT/run/auto-deploy"
+PROMOTE_FLAG="$FAOJ_ROOT/run/auto-promote"
+export OCI_CLI_IMAGE=${OCI_CLI_IMAGE:-ghcr.io/oracle/oci-cli@sha256:48884d8710d30356cac71c7aa678873a97c53c594fefdf2724c80270f3ca563b}
 
 die() { echo "faoj: $*" >&2; exit 1; }
 say() { echo "[$(date -u +%H:%M:%S)] $*" >&2; }
@@ -50,6 +59,18 @@ release_id() {
 }
 
 current_dir() { [ -L "$RELEASES/current" ] && (cd "$RELEASES/current" && pwd -P) || echo ""; }
+current_image() {
+  local rel; rel=$(current_dir)
+  [ -n "$rel" ] && sed -n 's/^APP_IMAGE=//p' "$rel/release.env" || true
+}
+last_result() {  # result of the newest history row for an image ("" when never deployed here)
+  [ -s "$HISTORY" ] || return 0
+  python3 - "$HISTORY" "$1" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+print(next((r.get("result", "") for r in reversed(rows) if r.get("app_image") == sys.argv[2]), ""))
+PY
+}
 previous_image() {
   [ -s "$HISTORY" ] || return 0
   python3 - "$HISTORY" <<'PY'
@@ -65,15 +86,27 @@ dc_in() {
   local rel=$1; shift
   local profiles=()
   [ "${CLAMAV_ENABLED:-true}" = "true" ] && profiles+=(--profile clamav)
+  [ -n "${NGROK_DOMAIN:-}" ] && profiles+=(--profile ngrok)
   docker compose -p faoj -f "$rel/compose.yaml" \
     --env-file "$ENV_DIR/compose.env" --env-file "$rel/release.env" "${profiles[@]+"${profiles[@]}"}" "$@"
 }
 dc() { local rel; rel=$(current_dir); [ -n "$rel" ] || die "no current release"; dc_in "$rel" "$@"; }
 
+registry_login() {  # OCIR on an OCI host: a short-lived token from the instance principal, nothing stored
+  local host=${1%%/*}
+  case "$host" in *.ocir.io) ;; *) return 0;; esac
+  docker run --rm "$OCI_CLI_IMAGE" raw-request --http-method GET --auth instance_principal \
+      --target-uri "https://$host/20180419/docker/token" 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["token"])' 2>/dev/null \
+    | docker login -u BEARER_TOKEN --password-stdin "$host" >/dev/null 2>&1 \
+    || say "OCIR login with the instance principal failed; using Docker's saved login"
+}
+
 install_bundle() {
   local image=$1 id dir cid
   id=$(release_id "$image"); dir="$RELEASES/$id"
   if [ ! -f "$dir/release.env" ]; then
+    registry_login "$image"
     say "pull $image"
     docker pull -q "$image" >/dev/null
     rm -rf "$dir.tmp"; mkdir -p "$dir.tmp/n8n" "$dir.tmp/workflows"
@@ -92,7 +125,9 @@ install_bundle() {
       echo "RELEASE_ID=$id"
       echo "RELEASE_DIR=$dir"
     } > "$dir.tmp/release.env"
-    chmod -R go-w "$dir.tmp"; chmod 755 "$dir.tmp/bin/faoj"
+    # Readable by the containers' own users (n8n runs as node): the folders made above under
+    # umask 077 hid /workflows from n8n on Linux (14 Oct 2026). The bundle holds no secrets.
+    chmod -R go-w,go+rX "$dir.tmp"; chmod 755 "$dir.tmp/bin/faoj"
     mv "$dir.tmp" "$dir"
   fi
   echo "$dir"
@@ -200,6 +235,8 @@ n8n_import() {  # this release's workflows, then a restart so n8n reloads them
 backup_fresh_or_first() {  # production: refuse to migrate without a recent backup
   [ "$FAOJ_ENV" = "production" ] || return 0
   [ -n "$(current_dir)" ] || return 0  # first install: nothing to protect yet
+  # A first install that failed midway (no "ok" release yet) has nothing to protect either.
+  grep -q '"result": "ok"' "$HISTORY" 2>/dev/null || return 0
   local age; age=$(backup_age) || age=999999
   [ "$age" -le 93600 ] || die "last database backup is ${age}s old; run 'faoj backup diff' first"
 }
@@ -217,6 +254,9 @@ deploy() {
   [ "$FAOJ_ENV" != "production" ] || [ -n "$approval" ] || die "production needs --approval \"…\" (E.8 step 1)"
   lock; preflight; backup_fresh_or_first
   local new old; new=$(install_bundle "$image"); old=$(current_dir)
+  # A first install that failed midway left "current" without any "ok" release: there is nothing
+  # to drain, back up or roll back to, and its containers may hold settings since corrected.
+  grep -q '"result": "ok"' "$HISTORY" 2>/dev/null || old=""
   say "release $(basename "$new") (previous: ${old:+$(basename "$old")})"
   dc_in "$new" pull -q
   if [ -n "$old" ]; then
@@ -280,6 +320,91 @@ rollback() {
   die "rollback smoke failed; maintenance may still be on (RB07)"
 }
 
+auto_deploy() {  # option ข: staging follows the tag CI moves after a passing release; off by default
+  local action=${1:-status}; shift || true
+  case "$action" in
+    on|off)
+      case "$FAOJ_ENV" in staging|rehearsal) ;; *) die "auto-deploy is for staging; production uses 'faoj promote'";; esac
+      local reason=${1:-} who=${SUDO_USER:-${USER:-?}}
+      [ -n "$reason" ] || die "auto-deploy $action \"reason\""
+      mkdir -p "$FAOJ_ROOT/run" "$RELEASES"
+      if [ "$action" = on ]; then
+        printf '%s\t%s\t%s\n' "$(now_iso)" "$who" "$reason" > "$AUTO_FLAG"; chmod 644 "$AUTO_FLAG"
+      else
+        rm -f "$AUTO_FLAG"
+      fi
+      printf '%s\t%s\t%s\t%s\n' "$(now_iso)" "$who" "$action" "$reason" >> "$RELEASES/auto-deploy.log"
+      say "auto-deploy $action";;
+    status)
+      if [ -e "$AUTO_FLAG" ]; then
+        echo "on since $(cut -f1 "$AUTO_FLAG") by $(cut -f2 "$AUTO_FLAG"): $(cut -f3 "$AUTO_FLAG")"
+      else
+        echo "off"
+      fi
+      echo "follows: $(current_image | sed 's/@.*//'):${AUTO_DEPLOY_TAG:-main}";;
+    check) auto_check;;
+    *) die "auto-deploy on|off \"reason\" | status | check";;
+  esac
+}
+
+auto_check() {  # the timer: deploy the tagged release when it is new here and has not failed here
+  [ -e "$AUTO_FLAG" ] || return 0
+  case "$FAOJ_ENV" in staging|rehearsal) ;; *) die "auto-deploy is for staging";; esac
+  [ ! -e "$FLAG" ] || { say "maintenance is on: auto-deploy waits"; return 0; }
+  local current repo tag tagged
+  current=$(current_image)
+  [ -n "$current" ] || { say "no release yet: install the first one with 'faoj deploy'"; return 0; }
+  repo=${current%@*}; tag="$repo:${AUTO_DEPLOY_TAG:-main}"
+  registry_login "$repo"
+  docker pull -q "$tag" >/dev/null || die "cannot pull $tag"
+  tagged=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$tag" | grep -F "$repo@sha256:" || true)
+  [ -n "$tagged" ] || die "no digest for $tag"
+  # The same image under the tag (even through another index) is already running.
+  if printf '%s\n' "$tagged" | grep -qxF "$current"; then return 0; fi
+  tagged=$(printf '%s\n' "$tagged" | head -n1)
+  if [ "$(last_result "$tagged")" = failed ]; then
+    say "skip $tagged: it failed here before (see 'faoj releases')"; return 0
+  fi
+  say "auto-deploy $tagged"
+  deploy "$tagged" --approval "auto-deploy of $tag"
+}
+
+staging_release() {  # digest of the newest release_running{env=staging} datapoint, last 30 minutes
+  local start
+  start=$(date -u -d '-30 min' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-30M +%Y-%m-%dT%H:%M:%SZ)
+  docker run --rm "$OCI_CLI_IMAGE" monitoring metric-data summarize-metrics-data --auth instance_principal \
+      --compartment-id "${OCI_COMPARTMENT_OCID:?set OCI_COMPARTMENT_OCID in compose.env}" --namespace faoj_ops \
+      --query-text 'release_running[1m]{env = "staging"}.max()' --start-time "$start" --end-time "$(now_iso)" \
+    | python3 -c '
+import json, sys
+items = json.load(sys.stdin).get("data", [])
+seen = [(max(p["timestamp"] for p in i["aggregated-datapoints"]), i["dimensions"].get("release", ""))
+        for i in items if i.get("aggregated-datapoints")]
+print(max(seen)[1] if seen else "")'
+}
+
+promote() {  # option ข: production deploys exactly the release staging runs and reported as passed
+  local approval="" want=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --approval) approval=${2:-}; shift 2;;
+      *) want=$1; shift;;
+    esac
+  done
+  [ "$FAOJ_ENV" = production ] || die "promote is for production; staging uses deploy or auto-deploy"
+  [ -n "$approval" ] || die "promote needs --approval \"…\" (E.8 step 1)"
+  local current repo staged
+  current=$(current_image)
+  [ -n "$current" ] || die "no release yet: install the first one with 'faoj deploy'"
+  repo=${current%@*}
+  staged=$(staging_release) || die "cannot read staging's release from OCI Monitoring"
+  [ -n "$staged" ] || die "staging reported no passing release in the last 30 minutes"
+  [ -z "$want" ] || [ "${want#*@}" = "$staged" ] || die "staging runs $staged, not ${want#*@}"
+  [ "$repo@$staged" != "$current" ] || { say "production already runs $staged"; return 0; }
+  say "promote $staged (passed on staging)"
+  deploy "$repo@$staged" --approval "$approval (promoted from staging)"
+}
+
 backup_age() {  # seconds since the newest database backup finished
   if [ "${BACKUP_MODE:-pgbackrest}" = "dump" ]; then
     python3 - "$FAOJ_ROOT/data/dumps" <<'PY'
@@ -323,9 +448,13 @@ backup() {
 }
 
 metrics() {
-  local sink=${1:-${METRICS_SINK:-stdout}} rel; rel=$(current_dir)
-  local app="{}" age=999999 wal=0 cert=0 unhealthy
+  local sink=${METRICS_SINK:-stdout} rel; rel=$(current_dir)
+  case "${1:-}" in --sink) sink=${2:?metrics --sink stdout|oci};; stdout|oci) sink=$1;; esac
+  local app="{}" age=999999 wal=0 cert=0 unhealthy release="" image
   if [ -n "$rel" ]; then
+    # Only a release whose deploy passed smoke here and is serving; promote reads this (option ข).
+    image=$(current_image)
+    if [ ! -e "$FLAG" ] && [ "$(last_result "$image")" = ok ]; then release=${image#*@}; fi
     app=$(dc_in "$rel" exec -T web /app/.venv/bin/python manage.py ops_metrics 2>/dev/null || echo '{}')
     age=$(backup_age 2>/dev/null || echo 999999)
     if [ "${BACKUP_MODE:-pgbackrest}" != "dump" ]; then
@@ -341,9 +470,9 @@ line = sys.stdin.read().strip().split("=", 1)[-1]
 try: print(int((email.utils.parsedate_to_datetime(line.replace(" GMT", " +0000")).timestamp() - time.time()) / 86400))
 except Exception: print(-1)')
   python3 - "$sink" "$FAOJ_ENV" "$FAOJ_ROOT" "$app" "$age" "$wal" "$cert" "$unhealthy" \
-    "${OCI_COMPARTMENT_OCID:-}" "${OCI_REGION:-}" <<'PY'
+    "${OCI_COMPARTMENT_OCID:-}" "${OCI_REGION:-}" "$release" <<'PY'
 import json, os, shutil, subprocess, sys, tempfile, time
-sink, env, root, app, age, wal, cert, unhealthy, compartment, region = sys.argv[1:11]
+sink, env, root, app, age, wal, cert, unhealthy, compartment, region, release = sys.argv[1:12]
 values = {"heartbeat": 1, "backup_age_seconds": int(age), "wal_archive_age_seconds": int(wal or 0),
           "cert_days_left": int(cert), "containers_unhealthy": int(unhealthy)}
 usage = shutil.disk_usage(root)
@@ -357,16 +486,20 @@ try:
 except ValueError:
     values["app_metrics_error"] = 1
 if sink == "stdout":
-    print(json.dumps({"env": env, **values}, sort_keys=True)); sys.exit(0)
+    print(json.dumps({"env": env, "release": release, **values}, sort_keys=True)); sys.exit(0)
 stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 data = [{"namespace": "faoj_ops", "compartmentId": compartment, "name": name,
          "dimensions": {"env": env}, "datapoints": [{"timestamp": stamp, "value": float(v)}]}
         for name, v in sorted(values.items())]
+if release:  # its own metric: a release dimension on the others would split the alarm series
+    data.append({"namespace": "faoj_ops", "compartmentId": compartment, "name": "release_running",
+                 "dimensions": {"env": env, "release": release},
+                 "datapoints": [{"timestamp": stamp, "value": 1.0}]})
 with tempfile.NamedTemporaryFile("w", suffix=".json", dir="/tmp", delete=False) as f:
     json.dump(data, f); path = f.name
 os.chmod(path, 0o644)
 subprocess.run(["docker", "run", "--rm", "-v", f"{path}:/tmp/metrics.json:ro",
-                os.environ.get("OCI_CLI_IMAGE", "ghcr.io/oracle/oci-cli@sha256:48884d8710d30356cac71c7aa678873a97c53c594fefdf2724c80270f3ca563b"),
+                os.environ["OCI_CLI_IMAGE"],
                 "monitoring", "metric-data", "post", "--auth", "instance_principal",
                 "--endpoint", f"https://telemetry-ingestion.{region}.oraclecloud.com",
                 "--metric-data", "file:///tmp/metrics.json"], check=True, stdout=subprocess.DEVNULL)
@@ -452,8 +585,7 @@ quota_check() {  # E.2.1 guard 3: read-only, instance principal, from this relea
   local rel; rel=$(current_dir); [ -n "$rel" ] || die "no current release"
   docker run --rm -e OCI_REGION="${OCI_REGION:-ap-singapore-1}" -e OCI_COMPARTMENT_OCID="${OCI_COMPARTMENT_OCID:-}" \
     -v "$rel/oci:/q:ro" --entrypoint python3 \
-    "${OCI_CLI_IMAGE:-ghcr.io/oracle/oci-cli@sha256:48884d8710d30356cac71c7aa678873a97c53c594fefdf2724c80270f3ca563b}" \
-    /q/quota_check.py
+    "$OCI_CLI_IMAGE" /q/quota_check.py
 }
 
 K6_IMAGE=${K6_IMAGE:-grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603}  # v2.3.0
@@ -500,12 +632,89 @@ status() {
   dc ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null || true
 }
 
+auto_promote() {  # ADR 0015 Q6/Q20: production follows the main tag for minor releases only
+  local action=${1:-status}; shift || true
+  case "$action" in
+    on|off)
+      [ "$FAOJ_ENV" = production ] || die "auto-promote is for production; staging uses auto-deploy"
+      local reason=${1:-} who=${SUDO_USER:-${USER:-?}}
+      [ -n "$reason" ] || die "auto-promote $action \"reason\""
+      mkdir -p "$FAOJ_ROOT/run" "$RELEASES"
+      if [ "$action" = on ]; then
+        printf '%s\t%s\t%s\n' "$(now_iso)" "$who" "$reason" > "$PROMOTE_FLAG"; chmod 644 "$PROMOTE_FLAG"
+      else
+        rm -f "$PROMOTE_FLAG"
+      fi
+      printf '%s\t%s\tauto-promote %s\t%s\n' "$(now_iso)" "$who" "$action" "$reason" >> "$RELEASES/auto-deploy.log"
+      say "auto-promote $action";;
+    status)
+      if [ -e "$PROMOTE_FLAG" ]; then
+        echo "on since $(cut -f1 "$PROMOTE_FLAG") by $(cut -f2 "$PROMOTE_FLAG"): $(cut -f3 "$PROMOTE_FLAG")"
+      else
+        echo "off"
+      fi
+      echo "window ${AUTO_PROMOTE_WINDOW:-18-07} Asia/Bangkok, soak ${AUTO_PROMOTE_SOAK_MINUTES:-60} min, staging gate ${AUTO_PROMOTE_STAGING_GATE:-metric}"
+      [ -s "$RELEASES/waiting-major" ] && echo "waiting for a person: $(cat "$RELEASES/waiting-major")"
+      return 0;;
+    check) auto_promote_check;;
+    *) die "auto-promote on|off \"reason\" | status | check";;
+  esac
+}
+
+in_window() {  # "18-07" = from 18:00 to 06:59 Bangkok time; "always" for any hour
+  local window=${AUTO_PROMOTE_WINDOW:-18-07} hour start end
+  [ "$window" = always ] && return 0
+  hour=$((10#$(TZ=Asia/Bangkok date +%H))); start=$((10#${window%-*})); end=$((10#${window#*-}))
+  if [ "$start" -le "$end" ]; then [ "$hour" -ge "$start" ] && [ "$hour" -lt "$end" ]
+  else [ "$hour" -ge "$start" ] || [ "$hour" -lt "$end" ]; fi
+}
+
+auto_promote_check() {  # the timer: every gate must pass, otherwise it waits quietly
+  [ -e "$PROMOTE_FLAG" ] || return 0
+  [ "$FAOJ_ENV" = production ] || die "auto-promote is for production"
+  [ ! -e "$FLAG" ] || return 0
+  in_window || return 0
+  local current repo tag tagged dir age class staged
+  current=$(current_image); [ -n "$current" ] || return 0
+  repo=${current%@*}; tag="$repo:${AUTO_DEPLOY_TAG:-main}"
+  registry_login "$repo"
+  docker pull -q "$tag" >/dev/null 2>&1 || { say "cannot pull $tag"; return 0; }
+  tagged=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$tag" | grep -F "$repo@sha256:" | head -n1 || true)
+  [ -n "$tagged" ] || return 0
+  printf '%s\n' "$tagged" | grep -qxF "$current" && return 0
+  [ "$(last_result "$tagged")" = failed ] && return 0
+  dir=$(install_bundle "$tagged")
+  age=$(python3 -c 'import json,sys; from datetime import datetime, UTC
+m = json.load(open(sys.argv[1])); print(int((datetime.now(UTC) - datetime.fromisoformat(m["built_at"])).total_seconds() // 60))' "$dir/release.json")
+  [ "$age" -ge "${AUTO_PROMOTE_SOAK_MINUTES:-60}" ] || return 0
+  if [ "${AUTO_PROMOTE_STAGING_GATE:-metric}" = metric ]; then
+    staged=$(staging_release 2>/dev/null || true)
+    [ "$staged" = "${tagged#*@}" ] || return 0
+  fi
+  class=$(python3 "$(current_dir)/release_class.py" "$dir/release.json" "$(current_dir)/release.json")
+  if [ "$class" != minor ]; then
+    if [ "$(cat "$RELEASES/waiting-major" 2>/dev/null)" != "$tagged $class" ]; then
+      echo "$tagged $class" > "$RELEASES/waiting-major"
+      say "major release waits for a person: $class (sudo faoj deploy $tagged --approval \"…\")"
+    fi
+    return 0
+  fi
+  rm -f "$RELEASES/waiting-major"
+  say "auto-promote $tagged (minor, built $age min ago)"
+  deploy "$tagged" --approval "auto-promote of $tag (minor, in window, soaked $age min)"
+}
+
 main() {
   need docker; need python3
   local cmd=${1:-help}; shift || true
   case "$cmd" in
     deploy) load_env; deploy "$@";;
     rollback) load_env; rollback "$@";;
+    install) load_env; [ -n "${1:-}" ] || die "install <image@sha256:…>"
+      ln -sfn "$(install_bundle "$1")" "$RELEASES/current"; say "current: $(basename "$(current_dir)")";;
+    auto-deploy) load_env; auto_deploy "$@";;
+    auto-promote) load_env; auto_promote "$@";;
+    promote) load_env; promote "$@";;
     maintenance) maintenance "$@";;
     backup) load_env; backup "$@";;
     restore-drill) load_env; restore_drill "$@";;
@@ -516,7 +725,7 @@ main() {
     load-test) load_env; load_test "$@";;
     status) status;;
     releases) tail -n 20 "$HISTORY" 2>/dev/null || echo "no releases yet";;
-    *) sed -n '2,20p' "$0";;
+    *) sed -n '2,22p' "$0";;
   esac
 }
 main "$@"

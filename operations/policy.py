@@ -914,6 +914,12 @@ def refresh(case, trigger, now=None):
     ai_run = latest_ai_run(case)
     facts = case_facts(case, state, ai_run, policy)
     result = evaluate(policy, facts, case.owner_division.code, now)
+    learned = policy is not None and policy.units.get("intake") is None
+    if learned:
+        from operations import ai_routing, routing_words  # local: both read this module
+
+        result = routing_words.apply(case, result)  # คำที่ระบบจำ for an R10 case (ADR 0013)
+        result = ai_routing.apply(case, result)  # then the routing AI's proposal (Q15)
     digest = digest_of(
         {
             "revision": case.revision,
@@ -961,6 +967,8 @@ def refresh(case, trigger, now=None):
     state.save()
     reconcile_clocks(case, state, policy, now)
     maybe_request_ai(case, now)
+    if learned:
+        ai_routing.maybe_request(case, result, now)
     return changed
 
 

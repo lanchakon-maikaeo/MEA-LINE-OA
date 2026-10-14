@@ -50,3 +50,28 @@
 		import maintenance_page
 	}
 }
+
+# ADR 0015 (Q2, Q7): LINE comes in through the ngrok static domain. The ngrok container reaches
+# this port inside the Compose network only, and only the webhook path is served; the staff web
+# stays on {$PUBLIC_HOST}. ngrok ended TLS, so Django is told the request came over https.
+http://:8081 {
+	header -Server
+
+	@maintenance file {
+		root /srv/run
+		try_files /maintenance
+	}
+	handle @maintenance {
+		respond "ระบบรับเรื่อง ฝอจ. ปิดปรับปรุงชั่วคราว" 503
+	}
+
+	handle /webhooks/line {
+		reverse_proxy web:8000 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}

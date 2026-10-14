@@ -4,7 +4,7 @@ ENV_FILE = $(if $(wildcard .env),--env-file .env,)
 RUN = $(UV) run --locked $(ENV_FILE)
 
 .PHONY: bootstrap guard db migrate seed-demo dev line-worker clamav n8n n8n-import eval-ai simulate-line tunnel check test test-module test-e2e security ci build smoke down \
-	deploy rollback restore-drill oci-quota-check oci-stack backup-pull backup-pull-schedule image-scan rehearsal-up rehearsal-release rehearsal-down \
+	deploy rollback restore-drill oci-quota-check oci-stack backup-pull backup-pull-schedule health-schedule standby-schedule image-scan rehearsal-up rehearsal-release rehearsal-down \
 	load-test acceptance-tests release-candidate
 bootstrap:
 	$(PYTHON) scripts/bootstrap_env.py
@@ -124,6 +124,20 @@ backup-pull-schedule:
 	sed -e "s#@REPO@#$(CURDIR)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.backup-pull.plist \
 		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.backup-pull.plist
 	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.backup-pull.plist
+
+# ADR 0015 Q13: this Mac checks production every minute and alerts after three failures.
+health-schedule:
+	chmod +x deploy/healthcheck.sh
+	sed -e "s#@REPO@#$(CURDIR)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.health.plist \
+		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.health.plist
+	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.health.plist
+
+# ADR 0015 Q9: keep the Mac standby replaying production's WAL (deploy/standby.sh check).
+standby-schedule:
+	chmod +x deploy/standby.sh
+	sed -e "s#@REPO@#$(CURDIR)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.standby.plist \
+		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.standby.plist
+	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.standby.plist
 
 # Same blocking scan as the Release workflow, on locally built images (IMAGES="ref …").
 image-scan:

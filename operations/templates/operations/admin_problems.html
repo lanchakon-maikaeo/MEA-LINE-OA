@@ -1,0 +1,53 @@
+{% extends "operations/admin_base.html" %}
+{% load ui %}
+{% block title %}ปัญหาและข้อเสนอแนะ — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>ปัญหาและข้อเสนอแนะ</h1>
+    <p class="lede">เรื่องแจ้งปัญหาและข้อเสนอแนะทั้งหมดทุกช่องทาง เรียงตามเวลาแจ้งจริง ใหม่สุดก่อน ผู้แจ้งไม่ระบุตัวตนแสดงเป็นรหัสแทนตัว คนเดียวกันได้รหัสเดิม แต่ไม่มีใครรู้ว่าเป็นใคร</p>
+  </div>
+  <div class="page-head__actions"><a class="btn btn--outline" href="{% url 'admin-problems-csv' %}{% if query %}?{{ query }}{% endif %}">ดาวน์โหลด CSV</a></div>
+</div>
+<form class="report-filters" method="get" aria-label="ตัวกรอง">
+  {% for key, title, choices in filters %}
+    <label class="visually-hidden" for="p-{{ key }}">{{ title }}</label>
+    <select id="p-{{ key }}" name="{{ key }}" class="pill-select{% if key in chosen %} is-set{% endif %}">
+      <option value="">{{ title }}: ทั้งหมด</option>
+      {% for value, text in choices %}<option value="{{ value }}"{% for k, v in chosen.items %}{% if k == key and v == value %} selected{% endif %}{% endfor %}>{{ text }}</option>{% endfor %}
+    </select>
+  {% endfor %}
+  <label for="p-from">ตั้งแต่</label> <input id="p-from" type="date" name="from" value="{{ chosen.from|default:'' }}">
+  <label for="p-to">ถึง</label> <input id="p-to" type="date" name="to" value="{{ chosen.to|default:'' }}">
+  <button class="btn btn--sm" type="submit">กรอง</button>
+  {% if chosen %}<a class="btn btn--sm btn--ghost" href="{% url 'admin-problems' %}">ล้างตัวกรอง</a>{% endif %}
+</form>
+<p class="muted">{{ page.paginator.count }} เรื่อง · ไฟล์ CSV ใช้ตัวกรองเดียวกัน ไม่มีชื่อ รหัสแทนตัว ข้อความที่แจ้ง พิกัด หรือชื่อเจ้าหน้าที่ และทุกการดาวน์โหลดถูกบันทึก</p>
+<div class="table-wrap"><table>
+  <thead><tr><th scope="col">เลขเรื่อง</th><th scope="col">หัวข้อ</th><th scope="col">ข้อความที่แจ้ง</th><th scope="col">ผู้แจ้ง</th><th scope="col">ช่องทาง</th><th scope="col">วันเวลาแจ้ง</th><th scope="col">กองเจ้าภาพ</th><th scope="col">สถานะ</th></tr></thead>
+  <tbody>
+  {% for row in rows %}{% with case=row.case %}
+    <tr>
+      <td class="nowrap"><a href="{% url 'case-detail' case.number %}">{{ case.number }}</a></td>
+      <td>{{ row.topic }}</td>
+      <td>{{ case.description|truncatechars:120 }}</td>
+      <td>{% if row.reporter_link %}<a href="{{ row.reporter_link }}">{{ row.reporter }}</a>{% else %}{{ row.reporter }}{% endif %}</td>
+      <td>{{ case.get_channel_display }}{% if row.on_behalf %}<br><span class="muted">บันทึกแทนโดย {{ row.on_behalf }}</span>{% endif %}</td>
+      <td class="nowrap">{{ row.reported|thai_datetime }}{% if row.recorded %}<br><span class="muted">บันทึก {{ row.recorded|thai_datetime }}</span>{% endif %}</td>
+      <td>{{ case.owner_division.code }}</td>
+      <td>{{ case.get_status_display }}</td>
+    </tr>
+  {% endwith %}{% empty %}
+    <tr><td colspan="8">ไม่มีเรื่องที่ตรงกับตัวกรอง</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% if page.paginator.num_pages > 1 %}
+<nav class="pager" aria-label="หน้า">
+  {% if page.has_previous %}<a class="btn btn--secondary btn--sm" href="?{{ page_query }}page={{ page.previous_page_number }}">ก่อนหน้า</a>{% else %}<span></span>{% endif %}
+  <span>หน้า {{ page.number }} / {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a class="btn btn--secondary btn--sm" href="?{{ page_query }}page={{ page.next_page_number }}">ถัดไป</a>{% else %}<span></span>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

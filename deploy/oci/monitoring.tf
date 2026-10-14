@@ -17,15 +17,17 @@ resource "oci_ons_subscription" "email" {
 }
 
 locals {
-  envs = { for name, h in var.hosts : h.env => name }
+  # Only envs with a VM on OCI: staging runs on the Mac (ADR 0015) and posts no OCI metrics.
+  # Two hosts share an env while one moves.
+  envs = toset([for h in values(local.vms) : h.env])
   # name => [env or "all", query condition, severity, runbook]
   alarms = merge(
-    { for env, _ in local.envs : "host-down-${env}" => [env, "heartbeat[1m]{env = \"${env}\"}.absent()", "CRITICAL", "RB01"] },
-    { for env, _ in local.envs : "disk-${env}" => [env, "disk_used_percent[5m]{env = \"${env}\"}.max() > 80", "WARNING", "RB01"] },
-    { for env, _ in local.envs : "memory-${env}" => [env, "mem_used_percent[5m]{env = \"${env}\"}.mean() > 85", "WARNING", "RB01"] },
-    { for env, _ in local.envs : "unhealthy-${env}" => [env, "containers_unhealthy[5m]{env = \"${env}\"}.min() > 0", "CRITICAL", "RB01"] },
-    { for env, _ in local.envs : "backup-age-${env}" => [env, "backup_age_seconds[10m]{env = \"${env}\"}.min() > 93600", "CRITICAL", "RB05"] },
-    { for env, _ in local.envs : "certificate-${env}" => [env, "cert_days_left[1h]{env = \"${env}\"}.max() < 14", "WARNING", "RB01"] },
+    { for env in local.envs : "host-down-${env}" => [env, "heartbeat[1m]{env = \"${env}\"}.absent()", "CRITICAL", "RB01"] },
+    { for env in local.envs : "disk-${env}" => [env, "disk_used_percent[5m]{env = \"${env}\"}.max() > 80", "WARNING", "RB01"] },
+    { for env in local.envs : "memory-${env}" => [env, "mem_used_percent[5m]{env = \"${env}\"}.mean() > 85", "WARNING", "RB01"] },
+    { for env in local.envs : "unhealthy-${env}" => [env, "containers_unhealthy[5m]{env = \"${env}\"}.min() > 0", "CRITICAL", "RB01"] },
+    { for env in local.envs : "backup-age-${env}" => [env, "backup_age_seconds[10m]{env = \"${env}\"}.min() > 93600", "CRITICAL", "RB05"] },
+    { for env in local.envs : "certificate-${env}" => [env, "cert_days_left[1h]{env = \"${env}\"}.max() < 14", "WARNING", "RB01"] },
     {
       "wal-archive-production" = ["production", "wal_archive_age_seconds[5m]{env = \"production\"}.min() > 600", "CRITICAL", "RB05"]
       "outbox-production"      = ["production", "outbox_oldest_pending_seconds[5m]{env = \"production\"}.min() > 300", "CRITICAL", "RB01"]

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from datetime import timedelta
 from decimal import Decimal
@@ -13,7 +14,7 @@ from django.core.management.base import CommandError
 from django.test import Client, override_settings
 from django.utils import timezone
 
-from operations import ai, ai_eval, ai_harness, ai_screen, line_api
+from operations import ai, ai_eval, ai_harness, ai_screen, line_api, pii
 from operations.management.commands.run_worker import run_once
 from operations.models import (
     AIConfigVersion,
@@ -661,11 +662,15 @@ class EvaluationTests(AITestCase):
 
     def perfect(self, body):
         payload = json.loads(body["messages"][1]["content"])
+        # The message arrives with personal data masked (ADR 0014): a label stands for any text.
+        sent = re.compile(
+            re.escape(pii.LABEL.sub("PIILABEL", payload["message"])).replace("PIILABEL", ".+?")
+        )
         case = next(
             c
             for name in ("v1", "v4", "redteam", "redteam2")
             for c in ai_eval.load(ai_eval.DATASETS[name])[2]
-            if payload["message"] in (c["text"], ai_harness.minimize(c["text"])[0])
+            if any(sent.fullmatch(t) for t in (c["text"], ai_harness.minimize(c["text"])[0]))
         )
         requests = [
             request(r["intent"], *[(code, qty, code) for code, qty in r["items"]])

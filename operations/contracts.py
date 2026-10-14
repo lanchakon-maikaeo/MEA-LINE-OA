@@ -130,8 +130,8 @@ LINE_FIELDS = {"item_code", "quantity", "serials"}
 ACTION_FIELDS = {"reason"}
 ACTION_EXTRA_FIELDS = {
     "assign": {"assignee_id"},
-    "request_handoff": {"to_division", "reason_category"},
-    "decide_routing": {"division"},
+    "request_handoff": {"to_division", "reason_category", "keywords"},
+    "decide_routing": {"division", "keywords"},
     "set_priority": {"priority"},
     "set_section": {"section"},
     "record_facts": {"facts", "clear"},

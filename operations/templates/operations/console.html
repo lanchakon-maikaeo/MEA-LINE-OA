@@ -9,7 +9,12 @@
     {% if scope.has_any_access %}<p class="lede">งานที่รออยู่ด้านบน ตัวเลขและกราฟด้านล่าง กดการ์ด ตัวเลข หรือแถบใดก็ได้เพื่อเปิดรายการเรื่องที่นับ</p>{% endif %}
     {% if scope.is_admin %}<p class="muted">แอดมินระบบ{% if scope.is_developer_admin %} · แอดมินผู้พัฒนา{% endif %} · ดูคิวได้ทุกกอง (อ่านอย่างเดียว) ส่วนการบันทึกทำได้เฉพาะกองที่คุณมีบทบาท</p>{% endif %}
   </div>
-  {% if scope.is_admin %}<div class="page-head__actions"><a class="btn" href="{% url 'queue-all' %}">คิวทุกกอง</a></div>{% endif %}
+  {% if scope.has_any_access %}<div class="page-head__actions">
+    {% if scope.is_admin %}<a class="btn" href="{% url 'queue-all' %}">คิวทุกกอง</a>{% endif %}
+    <a class="btn btn--secondary" href="{% url 'duties' %}">หน้าที่ของกอง</a>
+    <a class="btn btn--secondary" href="{% url 'routing-words' %}">คำที่ระบบจำ</a>
+    <a class="btn btn--secondary" href="{% url 'pii' %}">{% icon "lock" "sm" %} ปิดข้อมูลก่อนส่ง AI</a>
+  </div>{% endif %}
 </div>
 
 {% if not scope.has_any_access %}

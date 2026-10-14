@@ -697,7 +697,11 @@ def _requester_turn(turn):
     message = None
     if text is not None:
         message = ConversationMessage.objects.create(
-            identity=turn.identity, inbox=turn.inbox, draft=draft, text=text
+            identity=turn.identity,
+            requester=turn.requester,
+            inbox=turn.inbox,
+            draft=draft,
+            text=text,
         )
         from operations import answers  # local: answers builds on this module (ADR 0012)
 
@@ -759,6 +763,10 @@ def _free_text(turn, draft, text, message=None):
     if turn.conversation.prompt == "track" and text:
         turn.say("ไม่พบเลขเรื่องในรูปแบบที่ถูกต้อง เช่น W69-000001")
         return
+    if text and draft is None and not turn.conversation.prompt and not _open_drafts(turn).exists():
+        from operations import questions  # local: questions reads answers, which read this module
+
+        questions.record(turn, text)  # คำถามที่บอทตอบไม่ได้ (Q11)
     _reprompt(turn, draft)
 
 
@@ -1684,15 +1692,23 @@ def _attachment(turn, draft):
 
 
 def _may_send(user_id):
+    from operations import options
+
     if not settings.OUTBOUND_ENABLED or not settings.LINE_CHANNEL_ACCESS_TOKEN:
         return False, "outbound disabled"
-    if settings.APP_ENV != "production" and user_id not in settings.LINE_ALLOWED_RECIPIENTS:
+    if (
+        settings.APP_ENV != "production"
+        and user_id not in settings.LINE_ALLOWED_RECIPIENTS
+        and options.get(options.LINE_AUDIENCE) != "everyone"
+    ):
         return False, "not in allowlist"
     return True, ""
 
 
 def send_reply(inbox_id, messages):
-    """Use the event's reply token once, before its deadline; never falls back to push here."""
+    """Use the event's reply token once, before its deadline. A reply that can no longer go
+    (deadline passed, or LINE refused the token of a redelivered event) is handed to
+    notifications.plan_catch_up (ADR 0015 Q12), which decides whether a push may carry it."""
     if not messages:
         return
     S = WebhookInbox.ReplyStatus
@@ -1709,15 +1725,29 @@ def send_reply(inbox_id, messages):
             inbox.reply_status = S.UNKNOWN
         inbox.reply_used_at = timezone.now()
         inbox.save(update_fields=["reply_used_at", "reply_status", "reply_detail"])
-        if inbox.reply_status != S.UNKNOWN:
-            return
-        token = inbox.reply_token
+        outcome, token = inbox.reply_status, inbox.reply_token
+    if outcome == S.EXPIRED:
+        _catch_up(inbox_id, messages)
+    if outcome != S.UNKNOWN:
+        return
+    token_refused = False
     try:
         line_api.reply(token, messages)
         status, detail = S.SENT, ""
     except line_api.LineApiError as exc:
         status, detail = S.FAILED, f"{exc.status}"
+        token_refused = exc.status == 400 and "reply token" in (exc.detail or "").lower()
     except OSError as exc:
         # Timeout or connection loss: LINE may or may not have delivered it.
         status, detail = S.UNKNOWN, type(exc).__name__
     WebhookInbox.objects.filter(pk=inbox_id).update(reply_status=status, reply_detail=detail)
+    if status == S.FAILED and token_refused:  # the expired token of a redelivered event
+        _catch_up(inbox_id, messages)
+
+
+def _catch_up(inbox_id, messages):
+    from operations import notifications  # local: notifications imports this module's peers
+
+    inbox = WebhookInbox.objects.get(pk=inbox_id)
+    if notifications.plan_catch_up(inbox, messages):
+        WebhookInbox.objects.filter(pk=inbox_id).update(reply_detail="catch-up push planned")

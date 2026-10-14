@@ -13,6 +13,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 PINNED = re.compile(r"^\s*image:\s*(\S+@sha256:[0-9a-f]{64})\s*$", re.M)
+POSTGRES = re.compile(r"^FROM postgres:(\d+)", re.M)
+sys.path.insert(0, str(Path(__file__).resolve().parent / "server"))
+from release_class import unsafe  # noqa: E402 - beside this file, also shipped in the bundle
 
 
 def workflows_digest(folder):
@@ -42,6 +45,16 @@ def manifest(root, commit, db_image):
         "migrations": sorted(
             p.stem for p in (root / "operations/migrations").glob("[0-9]*.py") if p.is_file()
         ),
+        # ADR 0015 Q6: what makes a release major (a person approves it) for faoj auto-promote.
+        "unsafe_migrations": sorted(
+            p.stem
+            for p in (root / "operations/migrations").glob("[0-9]*.py")
+            if p.is_file() and unsafe(p.read_text())
+        ),
+        "postgres_major": next(
+            iter(POSTGRES.findall((root / "deploy/server/db/Dockerfile").read_text())), ""
+        ),
+        "n8n_major": pick("n8nio/n8n").split("@")[0].rsplit(":", 1)[-1].split(".")[0],
     }
 
 

@@ -1,0 +1,88 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}ปิดข้อมูลก่อนส่ง AI — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_class %}page--reading{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">ข้อมูลส่วนบุคคล</span>
+    <h1>ปิดข้อมูลก่อนส่ง AI</h1>
+    <p class="lede">ทุกครั้งที่ระบบส่งข้อความที่คนพิมพ์ให้ AI ระบบจะแทนข้อมูลส่วนบุคคลด้วยป้าย เช่น [เบอร์โทร-1] ก่อนส่ง และเติมค่าจริงกลับเมื่อได้คำตอบ ค่าจริงไม่ถูกเก็บและไม่ถูกส่งออกไปไหน</p>
+  </div>
+</div>
+
+<section class="section" aria-labelledby="pii-kinds">
+  <div class="section-head"><h2 id="pii-kinds">ข้อมูลที่ระบบปิด</h2></div>
+  <ul>{% for label in kinds %}<li>{{ label }}</li>{% endfor %}</ul>
+  <p class="muted">คำนำหน้าชื่อยังอยู่ เช่น นาย[ชื่อ-1] ส่วนชื่อถนน ซอย และเขตไม่ถูกปิด เพราะบอกว่างานอยู่ที่ไหน ไม่ได้บอกว่าใครเป็นใคร ชื่อที่ไม่มีคำนำหน้าและไม่อยู่ในทะเบียนของระบบอาจหลุดไปได้ ถ้าเจอชื่อแบบนี้ ให้เพิ่มในรายการคำที่ต้องปิดเสมอด้านล่าง</p>
+</section>
+
+<section class="section" aria-labelledby="pii-try">
+  <div class="section-head"><h2 id="pii-try">ลองปิดข้อมูล</h2></div>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="preview">
+    <div class="field"><label for="pii-text">ข้อความ</label><textarea id="pii-text" name="text" rows="4" maxlength="{{ preview_max }}" required>{{ tried.text|default:"" }}</textarea></div>
+    <button class="btn btn--sm" type="submit">ดูว่า AI จะได้รับอะไร</button>
+    <span class="muted">ระบบไม่เก็บข้อความนี้ และไม่ได้ส่งให้ AI</span>
+  </form>
+  {% if tried %}
+    <h3>สิ่งที่ AI จะได้รับ</h3>
+    <p class="t-strong pre">{{ tried.masked }}</p>
+    {% if tried.counts %}<p class="muted">ปิดไป: {% for label, n in tried.counts %}{{ label }} {{ n }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+    {% else %}<p class="muted">ไม่พบข้อมูลที่ต้องปิด</p>{% endif %}
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="pii-counts">
+  <div class="section-head"><h2 id="pii-counts">ข้อมูลที่ถูกปิดใน {{ days }} วันล่าสุด</h2></div>
+  {% if by_kind %}
+    <div class="table-wrap"><table>
+      <thead><tr><th scope="col">ชนิด</th><th scope="col" class="num">จำนวน</th></tr></thead>
+      <tbody>{% for label, n in by_kind %}<tr><td>{{ label }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="muted">แยกตามงาน AI: {% for label, n in by_task %}{{ label }} {{ n }}{% if not forloop.last %} · {% endif %}{% endfor %} (นับเฉพาะการใช้งานจริง ไม่นับการประเมินที่ใช้ข้อความจำลอง และไม่เก็บค่าที่ถูกปิด)</p>
+  {% else %}
+    <p class="muted">ยังไม่มีข้อมูลที่ถูกปิดจากการใช้งานจริง</p>
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="pii-words">
+  <div class="section-head"><h2 id="pii-words">คำที่ต้องปิดเสมอ</h2></div>
+  <p class="muted">เจ้าหน้าที่ทุกคนเพิ่มคำได้ เช่นชื่อคนที่ระบบไม่รู้จัก แต่เอาคำออกได้เฉพาะแอดมิน เพราะเมื่อเอาออกแล้ว AI จะเห็นคำนั้นอีก{% if not scope.is_admin %} รายการนี้แสดงเฉพาะอักษรแรกของคำ เพราะมีชื่อคนอยู่{% endif %}</p>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="add">
+    <div class="field"><label for="pii-word">คำ</label><input id="pii-word" name="word" minlength="2" maxlength="100" required autocomplete="off"></div>
+    <div class="field"><label for="pii-reason">เหตุผล</label><input id="pii-reason" name="reason" maxlength="500" required></div>
+    <button class="btn btn--sm" type="submit">เพิ่มคำ</button>
+  </form>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">คำ</th><th scope="col">เพิ่มโดย</th><th scope="col">เมื่อ</th>{% if scope.is_admin %}<th scope="col">เหตุผล</th><th scope="col">เอาออก</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for w in words %}
+      <tr>
+        <td>{{ w.shown }}</td>
+        <td>{{ w.by }}</td>
+        <td class="nowrap">{{ w.row.added_at|thai_datetime }}</td>
+        {% if scope.is_admin %}
+          <td>{{ w.row.reason }}</td>
+          <td>
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="remove">
+              <input type="hidden" name="word_id" value="{{ w.row.pk }}">
+              <label class="visually-hidden" for="pii-rm-{{ w.row.pk }}">เหตุผลที่เอาออก</label>
+              <input id="pii-rm-{{ w.row.pk }}" name="reason" maxlength="500" required placeholder="เหตุผล">
+              <button class="btn btn--sm btn--secondary" type="submit">เอาออก</button>
+            </form>
+          </td>
+        {% endif %}
+      </tr>
+    {% empty %}
+      <tr><td colspan="{% if scope.is_admin %}5{% else %}3{% endif %}">ยังไม่มีคำในรายการ</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

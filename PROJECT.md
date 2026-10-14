@@ -2,7 +2,7 @@
 
 เอกสารหลัก: ขอบเขตโครงการ · Priority Engine · Production-ready · แผนพัฒนาตามโมดูล · Technology Stack · CI/CD · โมดูลสำหรับ AI implement · คำศัพท์กลาง
 
-ปรับปรุง: 12 ตุลาคม 2569 | สถานะ: M00–M11 เสร็จในเครื่อง (done local); M12 implementation done (ซ้อมครบบนเครื่อง รอ OCI tenancy เพื่อทดสอบ runtime); M13 done (local): release candidate `m13-rc1` (commit `9c0a4c3`) มีหลักฐานบนเครื่องครบและทดสอบกับ LINE จริงแล้ว G01–G10 ยังไม่ผ่านเพราะรอหลักฐานภายนอกและผู้รับรอง; ยังไม่ deploy staging/production บน OCI
+ปรับปรุง: 14 ตุลาคม 2569 | สถานะ: M00–M11 เสร็จในเครื่อง (done local); M12 implementation done (ซ้อมครบบนเครื่อง รอ OCI tenancy เพื่อทดสอบ runtime); M13 done (local): release candidate `m13-rc1` (commit `9c0a4c3`) มีหลักฐานบนเครื่องครบและทดสอบกับ LINE จริงแล้ว G01–G10 ยังไม่ผ่านเพราะรอหลักฐานภายนอกและผู้รับรอง; OCI tenancy MEAFlow (Free Tier) และ stack `faoj` สร้างแล้ว 12 ต.ค. 2569 ยังรอเครื่อง A1 (Out of host capacity, K16) จึงยังไม่ deploy staging/production ระหว่างรอใช้ Mac เป็น staging ชั่วคราว
 
 ขอบเขตงานรอบนี้: ปรับแผนในเอกสารเท่านั้น ยกเลิกกรอบเวลาเดิม และกำหนดเป้าหมาย production-ready ตามโมดูล ยังไม่เริ่ม implementation เพิ่ม คำสั่งและลำดับพัฒนาด้านล่างเป็นแผนสำหรับเมื่อผู้ใช้สั่งเริ่มพัฒนา
 
@@ -704,7 +704,7 @@ ThaiLLM มีช่องทาง API สำหรับนักพัฒน�
 - เป้าหมายไม่เกิน 2 push ต่อเรื่อง แพ็กเกจฟรีจึงรองรับประมาณ 150 เรื่องต่อเดือนสำหรับทั้งระบบ
 - ช่วง onboarding ผลลงทะเบียนอาจกินโควตามาก ให้เปิดเขตใน pilot เป็นรอบและให้ผู้ใช้กดดูผลลงทะเบียนเองเมื่อเข้า tier 2
 - M13 รายงาน push ต่อเรื่องและจำนวนเรื่องจริงจาก pilot ถ้า forecast เกิน 80% ของโควตาฟรีสองเดือนติดกัน หรือ forecast เมื่อเปิดครบ 18 เขตเกิน 300 ให้เสนอ Basic ต่อเจ้าของงบ และตั้ง `LINE_PUSH_MONTHLY_BUDGET` ต่ำกว่าโควตาแพ็กเกจเพื่อคุมค่าข้อความส่วนเกิน
-- staging ใช้ OA เดียวกับ production (ตัดสินใจ 12 ต.ค. 2569) จึงใช้โควตาก้อนเดียวกัน: push บน staging ปิดเป็นค่าเริ่มต้น เปิดแล้วส่งเฉพาะ allowlist ไม่เกิน 10 ข้อความต่อเดือน
+- staging ใช้ OA เดียวกับ production (ตัดสินใจ 12 ต.ค. 2569) จึงใช้โควตาก้อนเดียวกัน: push บน staging ปิดเป็นค่าเริ่มต้น เปิดแล้วส่งเฉพาะ allowlist ไม่เกิน 10 ข้อความต่อเดือน ตั้งแต่ 14 ต.ค. 2569 ตัวเลือกระบบ `line_audience` (แสดงและเปลี่ยนได้ที่หน้ารับรองผู้แจ้ง) ให้เครื่องที่ไม่ใช่ production ตอบทุกคนได้ ค่าเริ่มต้นยังเป็นบัญชีทดสอบเท่านั้น และเพดาน push 10 ข้อความยังใช้อยู่
 
 ### C.3 โครงสร้างโค้ดและจุดรวมกติกา
 
@@ -1459,7 +1459,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Ampere A1 Flex | 2 OCPU + 12 GB รวมทั้ง tenancy (1,500 OCPU-ชม. และ 9,000 GB-ชม./เดือน) | `faoj-prod` 1 OCPU/8 GB + `faoj-staging` 1 OCPU/4 GB รันทั้งเดือน = 1,488 OCPU-ชม. และ 8,928 GB-ชม. (เดือน 31 วัน) | 0 — ห้ามสร้างเครื่องที่สามหรือ deploy แบบ blue/green สองเครื่อง |
 | AMD Micro | 2 เครื่อง 1/8 OCPU/1 GB | ไม่ใช้ เพราะ boot volume ขั้นต่ำ 47 GB จะกินโควตา block storage | — |
-| Block Volume | 200 GB รวม boot; volume backup 5 ชุด | boot 50 + 50 GB, data prod 70 GB, data staging 30 GB = 200 GB; backup: data prod ก่อน release ≤ 3 ชุด + boot prod 1 ชุด | 0 GB / backup 1 ชุด |
+| Block Volume | 200 GB รวม boot; volume backup 5 ชุด; volume หนึ่งก้อนเล็กสุด 50 GB | prod: boot 50 + data 70 GB; staging: boot 80 GB ไม่มี data volume (`/srv/faoj` อยู่บน boot เพราะ data 30 GB สร้างไม่ได้ และ 50 + 50 เกินงบ) = 200 GB; backup: data prod ก่อน release ≤ 3 ชุด + boot prod 1 ชุด | 0 GB / backup 1 ชุด |
 | Object Storage | 20 GB รวมทุก tier สำหรับบัญชี Always Free อย่างเดียว (บัญชีจ่ายเงินได้ 10 GB ต่อ tier), 50,000 requests/เดือน | ทุกอย่างอยู่ Standard (Infrequent Access มีค่าดึงข้อมูล): pgBackRest ของ prod ≤ 8 GB, restic ไฟล์แนบ+n8n ≤ 5 GB, image ใน OCIR ≤ 2 GB (เก็บ 5 รุ่นล่าสุด) รวม ≤ 15 GB; WAL ทุก 5 นาทีราว 9–17k requests/เดือน | alert ที่ 16 GB และ 40,000 requests |
 | Outbound transfer | 10 TB/เดือน | webhook/ข้อความ/ไฟล์และสำเนา backup นอก OCI รวมไม่ถึง 100 GB | มาก |
 | Load Balancer | Flexible 1 ตัว 10 Mbps | ไม่ใช้ — Caddy บน VM รับ TLS เอง | — |
@@ -1683,15 +1683,15 @@ flowchart LR
 | --- | --- | --- |
 | `ci.yml` | ทุก PR: locked install, Ruff, Django checks, model migration drift, unit/transaction/contract tests บน PostgreSQL, Playwright smoke, secret/dependency scan; เมื่อทำ M04/M05 เพิ่ม workflow import/replay บน n8n container และ fake provider ไม่ใช้ key จริง | read-only token; ไม่มี production secrets/DB; ต้องเก็บ test report แม้ล้มเหลวและ block merge เมื่อ required check ไม่ผ่าน |
 | `release.yml` | หลัง merge main: build application OCI image จาก commit, pin/scan n8n image, workflow export validation, SBOM/provenance และ release manifest รวม app/n8n digests กับ workflow revision | package write เฉพาะ build job; ไม่ rebuild ตอน promote; image label มี commit/model-contract version |
-| `staging.yml` | digest ที่ผ่าน release: ตรวจ config/migration plan, deploy staging, health/smoke และ LINE/AI integration ตามรอบที่กำหนด | environment ทดสอบ, allowlist ผู้รับ, ใช้ credentials ทดสอบ; record digest+schema+ผล test |
-| `production.yml` | promote release digest ที่ผ่าน staging และได้รับ release authorization | จำกัด ref/actor/environment, deploy ทีละรายการด้วย concurrency lock; ไม่ cancel กลาง migration; ไม่มี run จาก fork/PR |
+| staging ตาม tag `main` (ข้อ ข. 12 ต.ค. 2569 แทน `staging.yml`) | `release.yml` ย้าย tag `faoj/app:main` เมื่อรุ่นจาก main ผ่านสแกนที่บล็อก; timer `faoj-auto-deploy` บน staging ตรวจทุก 5 นาที เจอ digest ใหม่ก็ `faoj deploy` แบบเดิม (backup, migrate, smoke, ย้อนเองถ้าไม่ผ่าน) | ปิดเป็นค่าเริ่มต้น เปิด/ปิดด้วย `faoj auto-deploy on\|off "เหตุผล"` (มีบันทึก) ปิดช่วง UAT ได้; production เปิดไม่ได้; รุ่นที่เคยล้มบนเครื่องนี้ไม่ลองซ้ำ; GitHub ไม่มีสิทธิ์เข้าเครื่อง |
+| production ด้วย `faoj promote` (แทน `production.yml`) | ผู้ปฏิบัติการรัน `sudo faoj promote --approval "…"` บน production: อ่าน digest ที่ staging รายงานว่าผ่านจาก OCI Monitoring (`release_running`, ส่งเฉพาะรุ่นที่ smoke ผ่านและไม่อยู่ในช่วงปิดปรับปรุง) แล้ว deploy digest นั้น | ต้องมี `--approval`; ใส่ digest เองได้แต่ต้องตรงกับที่ staging ผ่าน; ยังใช้ lock และขั้นตอน deploy เดียวกัน |
 | `scheduled.yml` | ตามรอบ: vulnerability scan, dependency update PR, backup age/restore drill, AI regression กับรุ่นที่จะเปลี่ยน | ยังคงพิจารณา patch/model change ผ่าน staging ไม่ auto-upgrade production |
 
 Security scan gate: secret ที่ใช้งานได้และ critical/high vulnerability ที่กระทบ runtime ต้อง block release; false positive/ข้อยกเว้นต้องมีเหตุผล หลักฐาน เจ้าของ วันหมดอายุ และ compensating control ไม่ใช้ ignore ทั้งไฟล์หรือ skip scanner เมื่อ network ล่ม Pin scanner และตรวจแหล่ง artifact ก่อนรัน [Trivy documentation](https://trivy.dev/docs/latest/guide/)
 
 Repository ต้องมี merge restrictions, required CI และ reviewer สำหรับ schema/permission/pipeline เปลี่ยนแปลง ตรวจความสามารถของแผน Git hosting จริงก่อนพึ่ง enforcement: GitHub Free private repository ไม่ได้ให้ environment protection ครบ หากไม่มี required reviewer gate ให้ CI ทำ continuous delivery จนได้ release artifact และให้ผู้ปฏิบัติการที่มีสิทธิ์บน host รัน deploy script หลังบันทึกการรับรอง โดยไม่ให้ CI ถือ production credential; หากต้องการ automatic gated deployment ให้ใช้แผน/ระบบ CI ที่รองรับจริง [GitHub environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
 
-**บน OCI:** `release.yml` build application image แบบ multi-arch แล้ว push ไป OCI Container Registry ด้วย auth token ที่ push ได้เฉพาะ repository ของโครงการ (CI ไม่มี credential ของ VM หรือ production DB) ผู้ปฏิบัติการเข้า VM ผ่าน OCI Bastion แล้วรัน `make deploy ENV=staging|production RELEASE=<digest>` เพื่อ pull ตาม digest และ deploy แบบ in-place เพราะโควตาไม่พอสำหรับเครื่องที่สอง ช่วงสลับ container ให้ Caddy ตอบ 503 พร้อมหน้า maintenance (เป้าไม่เกิน 1 นาที) แล้วตรวจ inbox/reconcile ตาม RB01 ไม่สมมติว่า LINE จะส่ง webhook ซ้ำให้
+**บน OCI:** `release.yml` build application image แบบ multi-arch แล้ว push ไป OCI Container Registry ด้วย auth token ที่ push ได้เฉพาะ repository ของโครงการ (CI ไม่มี credential ของ VM หรือ production DB) เครื่องดึง image ด้วย instance principal (`faoj-hosts` อ่าน repos ได้) ผ่าน token อายุสั้นที่ขอใหม่ก่อน pull ทุกครั้ง จึงไม่ต้องเก็บ auth token บนเครื่อง ถ้าขอไม่ได้จะใช้ `docker login` ที่ผู้ปฏิบัติการทำไว้ ผู้ปฏิบัติการเข้า VM ผ่าน OCI Bastion แล้วรัน `make deploy ENV=staging|production RELEASE=<digest>` เพื่อ pull ตาม digest และ deploy แบบ in-place เพราะโควตาไม่พอสำหรับเครื่องที่สอง ช่วงสลับ container ให้ Caddy ตอบ 503 พร้อมหน้า maintenance (เป้าไม่เกิน 1 นาที) แล้วตรวจ inbox/reconcile ตาม RB01 ไม่สมมติว่า LINE จะส่ง webhook ซ้ำให้
 
 Pin third-party actions ด้วย commit SHA และ container ด้วย digest ตรวจ update ผ่าน PR; `GITHUB_TOKEN` เริ่ม `contents:read` แล้วเพิ่มเฉพาะ job ห้ามใช้ privileged `pull_request_target` เพื่อ checkout/run code จาก PR ที่ไม่เชื่อถือ แยก runner ของงานทดสอบออกจาก deployment และไม่รัน PR บน host ที่มี production secrets; ใช้ OIDC เมื่อปลายทางรองรับ หรือ credential จำกัดขอบเขต/อายุที่ rotate ได้ [GitHub secure use](https://docs.github.com/en/actions/reference/security/secure-use)
 
@@ -1768,7 +1768,7 @@ Runbooks (เขียนครบใน M12, 8 ตุลาคม 2569; คำ�
 | G04 Security | threat cases E.7, dependency/image/secret reports, same-district other-user/cross-district/cross-division download/export, no-role/revoked-session, AI config authorization และ signed LINE actions ผ่าน | ผู้รับผิดชอบ security | ยังไม่ตรวจรับ · บนเครื่อง: secret/dependency/image scan สะอาด เทสต์ภัยคุกคามผ่าน · รอ: ผู้รับผิดชอบ security |
 | G05 AI | held-out evaluation จาก API จริง, model ID/profile version/prompt, provider revision เมื่อมี, model/key switch ผ่านเว็บและ configuration, evidence validation/fallback และเจ้าหน้าที่ทบทวนผล | ผู้รับผิดชอบ AI + ฝอจ. | ยังไม่ตรวจรับ · บนเครื่อง: สกัดร่าง v11 และตอบแชต v14 ผ่าน gate บน source ของ candidate (OpenTyphoon ข้อมูลจำลอง) คัดกรองไม่อยู่ในรุ่นนี้ · รอ: ThaiLLM ขององค์กร คลังคำตอบจริง ผู้รับรอง |
 | G06 Integration | LINE จริงบน @894attlg ผ่าน staging ก่อน go-live, n8n container/workflows และ ThaiLLM API ที่บัญชีใช้ได้จริง, manual-reference หรือ API contract ของสต็อก, timeout/reconciliation ผ่าน | เจ้าของระบบเชื่อมต่อ | ยังไม่ตรวจรับ · บนเครื่อง: LINE @894attlg จริงผ่าน tunnel + n8n + AI ครบสามงาน · รอ: staging กับ @894attlg และระบบทะเบียนจริง |
-| G07 CI/CD | PR checks fail ได้จริง, immutable app/n8n images และ workflow revision, staging promotion, secret isolation, migration/rollback rehearsal | ผู้ดูแล release | ยังไม่ตรวจรับ · บนเครื่อง: image เดียว deploy และ rollback ซ้อม · รอ: GitHub OCIR และ staging promotion |
+| G07 CI/CD | PR checks fail ได้จริง, immutable app/n8n images และ workflow revision, staging promotion, secret isolation, migration/rollback rehearsal | ผู้ดูแล release | ยังไม่ตรวจรับ · บนเครื่อง: image เดียว deploy และ rollback ซ้อม, staging ตาม tag `main` และ `faoj promote` (ข้อ ข.) ซ้อมแล้ว · รอ: GitHub OCIR และ staging บน OCI |
 | G08 Operations | load report, alerts มีผู้รับ, restore drill app DB+n8n metadata/volume+files+secret recovery ผ่าน RPO/RTO, runbooks และรายชื่อเวร | ผู้ดูแลระบบ/DB | ยังไม่ตรวจรับ · บนเครื่อง: restore drill และ load design บน Mac · รอ: faoj-prod alert ถึงผู้รับจริง ผู้ดูแลคนที่ 2 |
 | G09 UAT | ตัวแทนเขต/ฝอจ. ทำสามเส้นทางและกรณีเห็นต่าง/ข้อมูลขาดสำเร็จ; training/คู่มือพร้อม | ตัวแทนผู้ใช้ | ยังไม่ตรวจรับ · มีสคริปต์ UAT ผู้ใช้ทำ U01–U03 บนเครื่องแล้ว · รอ: ตัวแทนเขตและ ฝอจ. บน staging |
 | G10 Release | release manifest, open risks ที่มีเจ้าของ/กำหนดแก้, pilot go/no-go, rollback owner และหลักฐาน G01–G09 | เจ้าของโครงการ + release owner | ยังไม่ตรวจรับ · มี release manifest acceptance matrix ความเสี่ยงที่มีเจ้าของ และแบบ go/no-go · รอ: ลงนาม |
@@ -2061,7 +2061,7 @@ Django บันทึกผล/ส่ง LINE ตรวจ recipient ล่า�
 | แบ่งงาน | แบบผสม c1 ตาม E.12: worker ของ Django ทำรอบแชตและวางแผนการแจ้งเตือน, n8n ส่งการแจ้งเตือน/recovery/ขั้น AI (M05) แยกตาม event type |
 | การแจ้งเตือนที่เปิดใช้ | ขอข้อมูลเพิ่ม (critical), ผลลงทะเบียน (normal), เจ้าหน้าที่ยกเลิก/ไม่รับเรื่อง (normal); ผู้แจ้งยกเลิกเองและอัปเดตอื่นไม่ push แต่แสดง "มีอัปเดตใหม่" ครั้งเดียวเมื่อผู้แจ้งทักหรือกดเมนูครั้งถัดไป (พร้อมคำถามของเจ้าหน้าที่เมื่อรอข้อมูลเพิ่ม) |
 | งบข้อความ | งบ 300/เดือน (ไม่เกินโควตาที่ LINE รายงาน), กัน 20% ให้ critical (tier 2 จาก 80%), tier 3 หยุดทุกอย่างเมื่อถึงงบหรือ LINE ตอบ monthly limit, debounce 10 นาที (tier 1: 60 นาที) รวมไม่เกิน 5 ข้อความต่อ push, reconcile กับ consumption API ทุกชั่วโมง, แจ้งเตือนแอดมินที่ 50/80/95% และเมื่อคาดว่าจะเกินงบ |
-| นอก production | push ปิดเป็นค่าเริ่มต้น เปิดด้วย `LINE_PUSH_ENABLED=true` เท่านั้น ส่งเฉพาะ allowlist และเพดาน 10 ข้อความ/เดือน (OA เดียวใช้ร่วมทุก environment) |
+| นอก production | push ปิดเป็นค่าเริ่มต้น เปิดด้วย `LINE_PUSH_ENABLED=true` เท่านั้น ส่งเฉพาะ allowlist และเพดาน 10 ข้อความ/เดือน (OA เดียวใช้ร่วมทุก environment) ถ้าแอดมินเลือก `line_audience` = ทุกคน บอทตอบและ push ถึงทุกคนภายใต้เพดานเดิม |
 | เจ้าหน้าที่ | ไม่แจ้งทาง LINE; จะแจ้งทางอีเมลไปยังที่อยู่ที่กำหนดภายหลัง — ตารางการส่งรองรับช่องทาง `email` แล้ว แต่ยังไม่ส่งจริงจนมีที่อยู่และ SMTP |
 | n8n | `n8nio/n8n:2.42.3` pin digest (amd64/arm64), metadata ใน database/role `n8n` แยกใน PostgreSQL เดิม (เพิกถอน CONNECT ของ PUBLIC บนฐานธุรกิจ), encryption key ใน `.env`, editor `127.0.0.1:5678`, เก็บ execution เฉพาะที่ล้มเหลว 7 วัน, ปิด env access ใน node |
 
@@ -2567,10 +2567,10 @@ Implement M12: ทำ OCI infrastructure ตาม E.2.1 ไม่เกิน�
 **วิธีตั้ง OCI หลังสมัครบัญชีแล้ว (เจ้าของบัญชีทำ):**
 
 1. `make oci-stack` → OCI Console → Developer Services → Resource Manager → Stacks → Create stack → .zip → ใส่ `ssh_public_key`, `admin_cidrs` (IP บ้าน/ที่ทำงาน /32), `alert_emails` (อีเมลตัวเอง + อีเมลของช่อง Teams) → Plan → อ่าน → Apply; กดยืนยันอีเมล subscription ที่ได้รับ
-2. Identity → Users: สร้างผู้ใช้ service 5 คนตามกลุ่ม (`faoj-readers` สำหรับผู้ช่วยพัฒนา + API key, `faoj-ci` + auth token, `faoj-deployers` + auth token, `faoj-backup-writers` + Customer Secret Key, `faoj-backup-readers` + Customer Secret Key) ค่าลับไม่ส่งในแชต
+2. Identity → Users: สร้างผู้ใช้ service ตามกลุ่ม (`faoj-readers` สำหรับผู้ช่วยพัฒนา + API key, `faoj-ci` + auth token, `faoj-backup-writers` + Customer Secret Key, `faoj-backup-readers` + Customer Secret Key) ค่าลับไม่ส่งในแชต; `faoj-deployers` ไม่ต้องสร้างแล้วเพราะเครื่องใช้ instance principal (เก็บกลุ่มไว้เป็นทางสำรอง)
 3. GitHub → Settings → Secrets and variables → Actions: variables `OCIR_REGISTRY` (`ap-singapore-1.ocir.io`), `OCIR_NAMESPACE` (จาก output); secrets `OCIR_USERNAME` (`<namespace>/<user>`), `OCIR_TOKEN` → push main แล้ว Release workflow พิมพ์ digest
-4. เข้าเครื่องผ่าน Bastion (managed SSH session) → `sudo docker login ap-singapore-1.ocir.io` (ผู้ใช้ deployer) → `sudo faoj-install <app@sha256:…>` → ใส่ LINE credentials ใน `app.secret.env`, S3 key ใน `db.secret.env`/`backup.secret.env`, `BACKUP_S3_ENDPOINT`/`OCI_COMPARTMENT_OCID` ใน `compose.env` → `sudo faoj deploy <digest>` (production ใส่ `--approval`) → `sudo faoj backup stanza` และ `faoj backup full` บน prod
-5. staging: `seed_staging` แล้วตั้ง Webhook URL ของ @894attlg เป็น output `webhook_url` ของ staging, เปิด Use webhook และ Webhook redelivery
+4. เข้าเครื่องผ่าน Bastion (managed SSH session) → `sudo faoj-install <app@sha256:…>` (login OCIR ด้วย instance principal เอง) → ใส่ LINE credentials ใน `app.secret.env`, S3 key ใน `db.secret.env`/`backup.secret.env`, `BACKUP_S3_ENDPOINT`/`OCI_COMPARTMENT_OCID` ใน `compose.env` → `sudo faoj deploy <digest>` (production ใส่ `--approval`) → `sudo faoj backup stanza` และ `faoj backup full` บน prod
+5. staging: `seed_staging` แล้วตั้ง Webhook URL ของ @894attlg เป็น output `webhook_url` ของ staging, เปิด Use webhook และ Webhook redelivery; ถ้าจะให้ staging ตามรุ่นใหม่เอง `sudo faoj auto-deploy on "เหตุผล"` (ข้อ ข.)
 6. เก็บ `PGBACKREST_REPO1_CIPHER_PASS`, `RESTIC_PASSWORD`, `N8N_ENCRYPTION_KEY` ใน Vault (`faoj-vault`) และในที่เก็บรหัสผ่านของเจ้าของ; ใส่สำเนาใน `drill.secret.env` บน staging เพื่อซ้อมกู้รายเดือน
 7. Mac: `~/.config/faoj/backup-pull.env` (key ของ backup-readers, ปลายทาง OneDrive) → `make backup-pull` ครั้งแรก → `make backup-pull-schedule`
 
@@ -2831,7 +2831,7 @@ AI ใช้ไม่ได้ (RB02):
 | K03 | AI ใช้ OpenTyphoon กับข้อมูลจำลอง ยังไม่ใช่ ThaiLLM ของบัญชีองค์กร | ผลประเมินอาจไม่ตรงกับโมเดลที่ใช้จริง | ผู้รับผิดชอบ AI | ได้ key และโควตาจริงแล้วประเมินซ้ำบนคลังคำตอบจริง (G05) |
 | K04 | คลังคำตอบเป็นร่าง 14 ข้อ | บอทตอบด้วยข้อมูลที่ยังไม่รับรอง | ฝอจ. | แก้และรับรองในหน้า "คลังคำตอบ" แล้วประเมิน AI ตอบแชตใหม่ |
 | K05 | AI คัดกรองปิดใน candidate นี้ | เรื่องปัญหาบางเรื่องไม่มีระดับที่เสนอ เจ้าหน้าที่ต้องเลือกเอง | ผู้ใช้ | อบรมตาม U03 ตัดสิน AI คัดกรองหลัง pilot ด้วยการประเมินใหม่ |
-| K06 | OA เดียวใช้ทั้งทดสอบและ production (ผู้ใช้ตัดสิน 12 ต.ค. 2569 ว่ายังไม่สร้าง OA แยก) | ทดสอบไปรบกวนผู้ใช้จริงหรือโควตา, rich menu จาก staging ทับของ production, หลัง go-live ทดสอบ LINE จริงบน staging ไม่ได้ | เจ้าของ OA | ทำตาม checklist OA เดียวใน C.2.3: allowlist และเพดาน push นอก production, ย้าย webhook เองตอน go-live, ตั้ง rich menu จาก production, เปลี่ยน secret ของ staging หลัง go-live |
+| K06 | OA เดียวใช้ทั้งทดสอบและ production (ผู้ใช้ตัดสิน 12 ต.ค. 2569 ว่ายังไม่สร้าง OA แยก) | ทดสอบไปรบกวนผู้ใช้จริงหรือโควตา, rich menu จาก staging ทับของ production, หลัง go-live ทดสอบ LINE จริงบน staging ไม่ได้ | เจ้าของ OA | ทำตาม checklist OA เดียวใน C.2.3: allowlist และเพดาน push นอก production (เปิดให้ทุกคนได้ด้วยตัวเลือก `line_audience` เมื่อเจ้าของ OA ตัดสินให้เครื่องทดสอบรับผู้ใช้จริง), ย้าย webhook เองตอน go-live, ตั้ง rich menu จาก production, เปลี่ยน secret ของ staging หลัง go-live |
 | K07 | ยังไม่รู้จำนวน push จริงต่อเดือน | โควตาฟรี 300 หมดกลางเดือน | เจ้าของงบ | `faoj line-usage` ทุกเดือนช่วง pilot ตัดสินแพ็กเกจตามเกณฑ์ C.2.3 |
 | K08 | load test มีแค่บน Mac | A1 1 OCPU อาจรับโหลดออกแบบไม่ได้ | ผู้ดูแลระบบ | `faoj load-test design` บน `faoj-prod` ก่อนเปิดใช้ ถ้าไม่ผ่านใช้เงื่อนไขย้ายใน E.2.1 |
 | K09 | redteam-v2 ยังมีร่าง 3 จาก 20 ที่มีข้อความแทรกหลุดเข้าร่าง | ร่างมีข้อความแปลก | ผู้รับผิดชอบ AI | ผู้แจ้งตรวจและยืนยันร่างทุกครั้ง เฝ้าดูในหน้า AI ช่วง pilot |
@@ -2840,6 +2840,7 @@ AI ใช้ไม่ได้ (RB02):
 | K12 | ประกาศความเป็นส่วนตัวและระยะเก็บข้อมูลยังไม่รับรอง | เก็บตำแหน่งและข้อมูลผู้แจ้งโดยไม่มีฐาน | data owner | รับรองก่อน G02 |
 | K13 | rollback ซ้อมกับรุ่นที่ schema เดียวกันเท่านั้น | rollback ข้าม migration ใหญ่ยังไม่มีหลักฐาน | release owner | ซ้อมบน staging กับรุ่นจริงก่อนหน้าเมื่อมี release แรกบน OCI |
 | K14 | ปิดแล้ว 12 ต.ค. 2569: เทสต์ browser (`make test-e2e`) เคยเดินเฉพาะกองจำลอง SIM-* | หน้าเว็บของโครงสร้างจริงอาจมีจุดที่เทสต์ browser ไม่เห็น | ผู้ช่วยพัฒนา | เพิ่ม 2 เส้นทางบนโครงสร้างจริงแล้ว ผ่านบนโค้ดของ candidate และเจอ K15 |
+| K16 | OCI สิงคโปร์ไม่มีเครื่อง A1 ว่าง (`Out of host capacity`) ตอนสร้าง stack 12 ต.ค. 2569 | สร้าง staging/production ไม่ได้จนกว่าจะมีเครื่องว่าง | ผู้ใช้ (เจ้าของบัญชี) | กด Plan แล้ว Apply ใน Resource Manager ซ้ำเป็นระยะ ตรวจว่า plan เพิ่มแค่เครื่องและ volume attachment; ไม่อัปเกรด PAYG ตาม ADR 0006 และคำสั่งผู้ใช้ "ห้ามตัดบัตร"; ตั้งแต่ 13 ต.ค. LaunchAgent บน Mac ลองให้ทุก 6 นาที (พักเมื่อเจอ `TooManyRequests`) และ 14 ต.ค. ผู้ใช้เลือกใช้ Mac เป็น staging ไปก่อน |
 | K15 | เจ้าหน้าที่บันทึกเรื่องแทนผู้แจ้งแล้วเรื่องไปอยู่คิวของกองอื่น หน้าเว็บขึ้นว่าบันทึกสำเร็จแต่ตามด้วยหน้า 404 (เจอจากเทสต์ browser บนโครงสร้างจริง) | เจ้าหน้าที่ไม่แน่ใจว่าบันทึกได้หรือไม่ และอาจบันทึกซ้ำ | ผู้ช่วยพัฒนา | แก้แล้วหลังบันทึกของ m13-rc1: ข้อความบอกเลขและกองของทุกเรื่อง แล้วพาไปเรื่องแรกที่บัญชีนั้นเปิดได้ ถ้าไม่มีก็อยู่หน้าบันทึกเรื่องใหม่ (`OwnerDeskTests` และ e2e) เข้ารุ่นถัดไปพร้อมการประเมิน AI ใหม่ที่ต้องทำอยู่แล้ว (K03) ถ้าใช้ m13-rc1 ไปก่อนให้ดูเลขเรื่องจากข้อความสีเขียว |
 
 **สรุปความพร้อม:** ยังไม่พร้อม production G01–G10 ยังไม่ผ่านทุกข้อเพราะรอหลักฐานภายนอกหรือผู้รับรอง (ดู [acceptance-matrix.md](Docs/release/m13-rc1/acceptance-matrix.md)) หลักฐานบนเครื่องครบตามตาราง รุ่นนี้พร้อมขึ้น `faoj-staging` เพื่อทำ UAT ทันทีที่มี OCI tenancy และการตัดสิน go/no-go เป็นของเจ้าของโครงการกับ release owner ตาม [go-no-go.md](Docs/release/go-no-go.md)
@@ -2861,6 +2862,117 @@ AI ใช้ไม่ได้ (RB02):
 - **K15 จากเทสต์ใหม่:** เจ้าหน้าที่ของกองหนึ่งบันทึกเรื่องแทนผู้แจ้งแล้วกติกาส่งเรื่องไปกองอื่น (ไม่มีจุดรับเรื่องกลาง ADR 0008) หน้าเว็บพาไปหน้าเรื่องที่บัญชีนั้นไม่มีสิทธิ์ดู จึงเห็นข้อความบันทึกสำเร็จตามด้วย 404 เทสต์ระดับ service ผ่านเพราะเรื่องถูกสร้างและส่งถูกกอง ปัญหาอยู่ที่หน้าเว็บหลังบันทึก แก้แล้วใน commit แยกหลังบันทึกของ m13-rc1: ข้อความบอกเลขและกองของทุกเรื่อง หน้าถัดไปเป็นเรื่องแรกที่บัญชีนั้นเปิดได้ ถ้าไม่มีก็เป็นหน้าบันทึกเรื่องใหม่ การแก้อยู่ใน `operations/` จึงเปลี่ยน source digest: ผล AI v11/v14 บนเครื่องผูกกับ m13-rc1 ไม่ใช่โค้ดนี้ และรุ่นถัดไปต้องประเมิน AI ใหม่ ซึ่งต้องทำอยู่แล้วเมื่อได้ ThaiLLM ขององค์กร (K03)
 - **CI บน GitHub:** ปรับ `timeout-minutes` ของ CI จาก 15 เป็น 25 เพราะรอบล่าสุดบน GitHub (8 ต.ค.) ใช้ 507 วินาทีกับเทสต์ 493 รายการ และตอนนี้มี 676 รายการ
 - บันทึกรุ่นใน [Docs/release/m13-rc1](Docs/release/m13-rc1/acceptance-matrix.md) สร้างใหม่จาก image และฐานข้อมูลเดิม ตัวตนของรุ่น ผล AI กติกา ตัวเลือกระบบ และสถานะ gate ไม่เปลี่ยน เปลี่ยนเฉพาะถ้อยคำเรื่อง OA ใน G06/A01 และไฟล์หลักฐานของ `make ci`
+
+#### CD ข้อ ข. และขึ้น OCI จริง (12 ต.ค. 2569)
+
+ผู้ใช้ถามว่าทำ CI/CD บน OCI ได้ไหม ผู้ช่วยพัฒนาเสนอสามทาง (ย้ายไป OCI DevOps ซึ่งไม่อยู่ใน Always Free, ให้ staging ดึงรุ่นใหม่เอง, ให้ GitHub สั่ง deploy ผ่าน Bastion) ผู้ใช้เลือก **ข.** และสั่ง "deploy จริงบน OCI ย้ำว่าต้องฟรี ห้ามตัดบัตรเด็ดขาด"
+
+- **ข. ทำแล้ว:** `release.yml` ย้าย tag `main` เฉพาะรุ่นจาก main ที่สแกนผ่าน; `faoj auto-deploy on|off "เหตุผล" | status | check` (ปิดเป็นค่าเริ่มต้น, staging เท่านั้น, ข้ามรุ่นที่เคยล้มบนเครื่องนี้) กับ timer ทุก 5 นาทีที่ bootstrap เปิดบน staging; `faoj promote --approval "…"` บน production deploy digest ที่ staging รายงานผ่าน metric `release_running`; เครื่อง login OCIR ด้วย instance principal; แก้ `faoj metrics --sink stdout` ที่เคยอ่าน `--sink` เป็นชื่อปลายทาง
+- **หลักฐาน:** `AutoDeployTests` 4 รายการและ `PipelineTests` ใหม่ 1 รายการ (ชุด M12 แบบไม่ใช้ DB 19 รายการผ่าน); actionlint ผ่าน; ซ้อมบนเครื่องด้วย registry จริงในเครื่อง: deploy A, tag B เป็น `main`, ตอนปิดอยู่ `check` ไม่ทำอะไร, เปิดแล้ว `check` deploy B เอง (28 วินาที), รอบถัดไปไม่ทำอะไร (1.7 วินาที), metric รายงาน digest ของ B และว่างระหว่างปิดปรับปรุง, รุ่น C ที่มีประวัติล้มถูกข้าม
+- **OCI จริง:** tenancy `MEAFlow` home region Singapore สมัครวันนี้ ตรวจแล้วเป็น `FREE_TIER` ไม่เคยอัปเกรด (`time-plan-upgrade` ว่าง) Oracle ระบุว่าไม่ตัดบัตรถ้าไม่อัปเกรด ผู้ใช้ล็อกอินเองผ่าน `oci session authenticate` (MFA เปิด) ผู้ช่วยพัฒนาสร้าง stack `faoj` ใน Resource Manager ตรวจ plan ว่าอยู่ใน Always Free ทั้งหมด ระบบสิทธิ์ของ Claude Code บล็อก Apply ครั้งแรก ผู้ใช้อนุญาตในแชต
+  - Apply รอบแรกสร้าง 51 จาก 56 รายการ (compartment, quota, network, Bastion, buckets, OCIR, Vault, alarms, budget $1 แจ้งที่ $0.01, data volume ของ prod 70 GB) ที่ล้มมีสองเรื่อง: quota `zero compute-core quotas` ล้าง quota ระดับ region ของ A1 ด้วย (แก้โดยตั้ง `standard-a1-*-regional-count` และให้เครื่องรอ quota) และ volume 30 GB ต่ำกว่าขั้นต่ำ 50 GB (staging ใช้ boot 80 GB แทน)
+  - รอบต่อมาเจอ `Out of host capacity` (K16) ลูปลองซ้ำอัตโนมัติถูกระบบสิทธิ์บล็อก ผู้ใช้เลือกกด Plan/Apply เองใน Console
+- **14 ต.ค.:** ลองมาสองวันยังไม่ได้เครื่อง (agent 39 รอบ: ไปถึง OCI 16 รอบ ได้ `Out of host capacity` ทุกรอบ, อีก 22 รอบโดน `TooManyRequests`) ผู้ใช้เลือกให้ลองต่อและใช้ Mac เป็น staging ไปก่อน: Compose ในเครื่อง build ใหม่ที่ `5459020`, Cloudflare quick tunnel ไปที่ `/webhooks/line` (ผู้ใช้ตั้ง webhook และเปิด redelivery เอง) และ `caffeinate` ระหว่างที่ tunnel เปิด URL ของ tunnel เปลี่ยนทุกครั้งที่ cloudflared เริ่มใหม่ และวันเดียวกันเน็ตของ Mac หลุด 08:04–08:44 Cloudflare ลบ quick tunnel ทิ้ง ต้องเปิดใหม่และตั้ง webhook ใหม่ 11:03 วันเดียวกันจึงเปลี่ยนเป็น ngrok แพ็กเกจฟรีที่ได้โดเมนถาวร `crabmeat-lake-lunar.ngrok-free.dev` (ผู้ใช้สมัครและใส่ authtoken เอง, Verify ผ่าน) URL ไม่เปลี่ยนเมื่อเน็ตหลุดหรือรีสตาร์ต แต่ต้องเปิด ngrok ใหม่หลังรีสตาร์ต Mac ไม่เลือก Tailscale Funnel เพราะแผนฟรีใช้ได้เฉพาะงานที่ไม่ใช่เชิงพาณิชย์ ทางที่ไม่เลือก: E2.1.Micro (RAM 1 GB ไม่พอระบบที่ใช้ราว 6 GB) และอัปเกรด PAYG (ขัด ADR 0006 และคำสั่งผู้ใช้)
+- **ยังไม่ทำ:** สร้างเครื่อง, push image แรกขึ้น OCIR, `faoj-install` บน staging, ค่า LINE ใน `app.secret.env` (ผู้ใช้ใส่เอง), webhook (ผู้ใช้ย้ายเอง), ผู้ใช้ `faoj-ci` + GitHub secrets ก่อน merge, Customer Secret Key ของ backup ก่อน deploy production
+
+#### หน้ารับรองผู้แจ้ง: ระงับ ถอน ข้อความ และตัวตน (14 ต.ค. 2569)
+
+ผู้ใช้ขอให้รายชื่อผู้แจ้งที่รับรองแล้ว "ลบ ถอน ผู้ใช้" ได้, "ดูข้อความที่พิมพ์มา" ได้ และบอกตัวตน ตำแหน่งงาน ("map จากรายชื่อในอนาคต") กับบทบาทในระบบ "เช่น user, user และ admin" คำตอบของผู้ใช้สี่ข้อ:
+
+- ทำได้แค่ระงับกับถอน ไม่ลบข้อมูล
+- แอดมินเท่านั้น ไม่ต้องเป็นตัวเลือกระบบ
+- ไม่ส่ง push บอทบอกเองเมื่อผู้แจ้งทักมา
+- ผู้แจ้งที่ไม่ได้ยืนยันด้วยรหัสพนักงาน ผูกกับทะเบียนพนักงานอัตโนมัติเมื่อชื่อตรงพนักงานคนเดียว
+
+สิ่งที่ทำ:
+
+- **รายชื่อ:** เพิ่มคอลัมน์ตัวตน (ยืนยันรหัสพนักงาน, ชื่อตรงทะเบียนแต่ยังไม่ได้ยืนยัน, แอดมินผูก หรือยังไม่ผูก พร้อมช่องทาง), ตำแหน่งงานจาก `Employee.position` และบทบาทในระบบ (ผู้แจ้งหรือผู้แจ้งภายใน ต่อด้วยบทบาทเจ้าหน้าที่ เช่น "ผู้แจ้ง · แอดมินระบบ") ผู้แจ้งไม่ระบุตัวตนไม่อยู่ในรายชื่อนี้แล้ว คนที่ถอนแล้วอยู่ในส่วนพับท้ายรายการ แอดมินกดชื่อเปิดหน้าผู้แจ้งได้ ผู้อนุมัติที่ไม่ใช่แอดมินเห็นรายชื่อแต่เปิดหน้าผู้แจ้งไม่ได้
+- **หน้าผู้แจ้ง** (`/console/admin/requesters/<id>/`): ระงับหรือเปิดใช้, ถอนการรับรอง (ต้องมีเหตุผล และถอนต้องติ๊กยืนยัน), ผูกหรือยกเลิกผูกทะเบียนพนักงาน และประวัติจาก audit
+- **ถอน:** ผู้แจ้งเป็น `revoked` และบัญชี LINE ที่ใช้อยู่เป็น `revoked` เรื่อง ร่าง และข้อความเดิมอยู่ครบ ลงทะเบียนใหม่แล้วได้ผู้แจ้งรายใหม่ตามทางเดิมของ `submit_registration` ถ้า LINE นั้นเชื่อมบัญชีเจ้าหน้าที่อยู่ การเชื่อมยังอยู่ (ADR 0010)
+- **ข้อความ:** `ConversationMessage.requester` เก็บว่าพิมพ์ในฐานะผู้แจ้งคนไหน หน้าข้อความ (แสดง 300 ข้อความล่าสุด) จึงไม่แสดงสิ่งที่ LINE เดียวกันพิมพ์ตอนแจ้งแบบไม่ระบุตัวตน และไม่บอกเลขเรื่องของผู้แจ้งรายอื่น ทุกครั้งที่เปิดดูบันทึก `requester.messages_viewed` migration `0028` เติมค่าให้ข้อความเก่าจากร่างหรือเรื่องที่ผูก ถ้าไม่มีใช้ผู้แจ้งของ LINE นั้นเมื่อข้อความมาหลังรับรอง นอกนั้นเป็นผู้แจ้งไม่ระบุตัวตน หรือเว้นว่างซึ่งไม่แสดง
+- **ทะเบียนพนักงาน:** `Requester.employee` กับ `employee_link` (`verified`, `name`, `admin`, `unlinked`) การยืนยันด้วยรหัสพนักงานผูกตอนรับรอง ส่วนการผูกจากชื่อทำตอนรับรอง ตอนแอดมินเพิ่มผู้แจ้งโดยตรง และทุกครั้งที่นำเข้า CSV โดยตัดคำนำหน้า ช่องว่าง และตัวพิมพ์ใหญ่เล็ก ผูกเฉพาะเมื่อชื่อตรงพนักงานที่ใช้งานอยู่คนเดียวทั้งทะเบียน และเขตไม่ขัดกัน ซึ่งเป็นกติกาเดียวกับการตรวจรหัสพนักงาน นำเข้ารอบหลังแล้วชื่อไม่ตรงคนเดียวระบบยกเลิกการผูกเอง ที่แอดมินผูกหรือยกเลิกไว้ระบบไม่ทับ
+- **บทบาท:** มาจากบัญชีเจ้าหน้าที่ที่เชื่อม LINE เดียวกัน หรือบัญชีเจ้าหน้าที่ที่มีรหัสพนักงานเดียวกันเมื่อรหัสนั้นยืนยันแล้วหรือแอดมินผูก การผูกจากชื่อไม่ทำให้ใครเห็นเป็นเจ้าหน้าที่
+- **วิธีจัดการของแอดมิน** (ผู้ใช้สั่ง "build เลย และวิธีการจัดการโดยแอดมินถ้าเกิดเหตุการณ์ข้อ 1-2"): รายชื่อมีตัวกรอง "ตัวตน" (ยืนยันแล้ว, ชื่อตรง รอยืนยัน, ต้องตรวจ, ยังไม่ผูก) และกล่องบอกจำนวนที่ต้องตรวจ ข้อความหลังนำเข้า CSV ก็บอกจำนวนนี้ หน้าผู้แจ้งแสดงพนักงานที่ชื่อตรงกันทุกคนพร้อมหมายเหตุ และทุกขั้นต้องใส่เหตุผลและเข้าประวัติ
+  - **ข้อ 1 ชื่อตรงแต่ระบบไม่ผูก (ต้องตรวจ):** ชื่อนี้มีหลายคนในทะเบียน หรือทะเบียนระบุเขตอื่น แอดมินตรวจกับตัวจริงก่อน เช่น โทรถามหรือถามหัวหน้าเขต แล้วเลือกตามสาเหตุ:
+    - เป็นคนในทะเบียน เช่น ย้ายเขตแล้วแต่ทะเบียนยังเก่า: กด "ยืนยันว่าเป็นคนนี้" ที่แถวของพนักงานคนนั้น
+    - ผู้แจ้งเลือกเขตผิด: ใช้ "แก้เขตของผู้แจ้ง" (`requester.district_changed`) เรื่องเดิมคงเขตเดิม เรื่องใหม่ใช้เขตใหม่ แล้วระบบตรวจชื่ออีกรอบ ถ้าผูกได้จะเป็นการผูกจากชื่อ ต้องกดยืนยันอีกครั้งถ้าจะนับเป็นตัวตน
+    - ทะเบียนผิด: แก้ไฟล์ CSV แล้วนำเข้าใหม่ ระบบผูกให้เอง
+    - ไม่ใช่พนักงานคนใดเลย: ปล่อยไว้ไม่ผูก ถ้าไม่ควรเป็นผู้แจ้งให้ระงับหรือถอน
+  - **ข้อ 2 ผูกจากชื่อแต่ยังไม่ยืนยัน (รอยืนยัน):** แสดงตำแหน่งได้ แต่ไม่นับเป็นตัวตนและไม่ใช้หาบทบาท
+    - ตรวจแล้วใช่: กด "ยืนยันว่าเป็นคนนี้" (`requester.employee_confirmed`) การผูกกลายเป็นแอดมินผูก ถ้ามีบัญชีเจ้าหน้าที่ที่ใช้รหัสพนักงานเดียวกัน บทบาทจะขึ้นในรายชื่อ
+    - ตรวจแล้วไม่ใช่: กด "ยกเลิกการผูก" ระบบจะไม่ผูกจากชื่อให้อีก ถ้ารู้รหัสที่ถูกให้ใช้ "ผูกด้วยรหัสพนักงาน"
+  - ชื่อสะกดต่างจากทะเบียนจนระบบหาไม่เจอ: ใช้ "ผูกด้วยรหัสพนักงาน"
+- **ใครคุยกับบอทได้** (ผู้ใช้สั่ง "ให้กำหนดว่าคนที่ลงทะเบียนแล้วใช้ได้เลย" และ "ให้แสดงในหน้ารับรองด้วย"): ตัวเลือกระบบใหม่ `line_audience` มีผลเฉพาะเครื่องที่ไม่ใช่ production ค่าเริ่มต้น "เฉพาะบัญชีทดสอบ" ตาม `LINE_ALLOWED_RECIPIENTS` อีกค่าคือ "ทุกคน" บอทตอบทุกคนที่ทักมาจึงลงทะเบียนเองได้ และ push ได้ภายในเพดานเดิม การรับรองยังเป็นไปตามข้อการยืนยันตัวตน (ไม่อนุมัติทุกคนอัตโนมัติ เพราะ ADR 0010 Q1 ให้เบิกและคืนของต้องยืนยันตัวตน) หน้ารับรองแสดงค่านี้คู่กับการยืนยันตัวตนและผู้อนุมัติ แอดมินเปลี่ยนได้ในหน้านั้นพร้อมเหตุผล
+  - บน staging (Mac) เปิดเป็น "ทุกคน" ตามคำสั่ง และผู้ใช้สั่ง "ให้แอดมินกดรับรองไปก่อนจนกว่าจะมีรายชื่อ" จึงเปลี่ยนการยืนยันตัวตนจาก `employee_auto` (ค่าที่ตั้งไว้ตอนทดสอบ M13) เป็น `approval` และผู้อนุมัติเป็นแอดมินเท่านั้น เมื่อนำเข้าทะเบียนพนักงานจริงแล้วค่อยทบทวนว่าจะใช้ `employee_auto` หรือไม่
+- **หลักฐาน:** `operations/tests/test_m13_requesters.py` 11 รายการ (รายชื่อและสิทธิ์, การผูกจากชื่อ, ข้อ 1–2 กับการแก้เขต, ใครคุยกับบอทได้, ระงับและถอน, ข้อความกับ audit, migration ของข้อความเก่า) push ถึงคนนอกรายชื่อเมื่อเปิดเป็นทุกคนอยู่ใน `test_m04_orchestration` และ `manage.py test` ทั้งชุด 693 รายการผ่าน; ขึ้น staging บน Mac แล้ว migration เติมผู้แจ้งให้ข้อความเดิมครบ 20/20
+- **ข้อจำกัด:** รายชื่อยังแสดง 100 รายล่าสุดเหมือนเดิม ไม่มีการลบหรือปกปิดข้อมูลส่วนบุคคลจนกว่านโยบาย retention จะได้รับรอง (E.7) การแก้อยู่ใน `operations/` จึงเปลี่ยน source digest อีกครั้ง
+
+#### หน้าแอดมิน "ปัญหาและข้อเสนอแนะ" (14 ต.ค. 2569)
+
+ผู้ใช้สั่ง "มีให้ลงทะเบียนแบบไม่ระบุตัวตน แต่จะแค่แจ้งปัญหาและข้อเสนอแนะได้ เบิกและส่งคืนไม่ได้ และจำกัดข้อความตามที่ตั้งในระบบ และให้เพิ่มหน้าในส่วนของ admin ให้แสดง ข้อเสนอแนะ/ปัญหา ที่ได้รับแจ้งมาทั้งหมดพร้อมระบุผู้แจ้ง ช่องทาง วันเวลา" แล้วให้ซักคำถาม (grill-me)
+
+- **การแจ้งแบบไม่ระบุตัวตน:** ไม่ต้องแก้ ระบบเป็นแบบนั้นอยู่แล้วตาม ADR 0010 (staging เปิดอยู่ จำกัดวันละ 3 เรื่องต่อบัญชี LINE)
+- **คำตอบของผู้ใช้:**
+  - Q1 ข: ผู้แจ้งไม่ระบุตัวตนแสดงเป็นรหัสแทนตัว
+  - Q2 ก: ทุกหัวข้อ ทุกสถานะ ทุกช่องทาง ใหม่สุดก่อน หน้าละ 50 กรองตามหัวข้อ สถานะ ช่องทาง กอง และช่วงวันที่
+  - Q3: คอลัมน์ตามที่เสนอ
+  - Q4 ก: มี CSV แต่ "ไม่เอาชื่อหรือข้อมูล PDPA"
+  - Q5 ก: รหัสแทนตัวแสดงเฉพาะหน้านี้
+  - Q6 ก: CSV ใส่แค่ประเภทผู้แจ้ง
+  - Q7 ก: ตัดข้อความที่พิมพ์ พิกัด และชื่อเจ้าหน้าที่ออกจาก CSV
+- **ที่ทำ:** หน้า `/console/admin/problems/` (`operations/problems_web.py`, แอดมินเท่านั้น, เมนูแอดมิน "ปัญหาและข้อเสนอแนะ")
+  - คอลัมน์: เลขเรื่อง, หัวข้อ (เรื่องเก่าที่ไม่มีหัวข้อเป็น "ไม่ระบุหัวข้อ"), ข้อความย่อ, ผู้แจ้ง (ชื่อกับเขตลิงก์ไปหน้าผู้แจ้ง / ผู้แจ้งภายใน / "ไม่ระบุตัวตน #รหัส"), ช่องทางกับ "บันทึกแทนโดย", เวลาแจ้งจริงกับเวลาบันทึกเมื่อต่างกันเกินหนึ่งนาที, กองเจ้าภาพ, สถานะ
+  - รหัสแทนตัวคือ `Requester.alias` สุ่ม 4 ตัวจากอักษรที่ไม่ชวนสับสน ไม่คำนวณจาก LINE ID migration `0029` เติมให้ผู้แจ้งไม่ระบุตัวตนเดิม หน้าเรื่องยังแสดงแค่ "ไม่ระบุตัวตน"
+  - CSV `/console/admin/problems.csv` ใช้ตัวกรองเดียวกัน มี BOM และกันสูตร Excel ตัดที่ `EXPORT_MAX_ROWS` และบันทึก `cases.problems_exported` (ตัวกรองและจำนวนแถว) คอลัมน์: เลขเรื่อง, หัวข้อ, ประเภทผู้แจ้ง, เขต, ช่องทาง, เจ้าหน้าที่บันทึกแทน, กองผู้บันทึก, วันเวลาแจ้งจริง, วันเวลาบันทึก, กองเจ้าภาพ, สถานะ, วันที่ปิด
+  - การเปิดดูหน้าไม่บันทึก audit เหมือนหน้าเรื่องทั่วไป (ข้อที่ผู้ช่วยพัฒนาเสนอและผู้ใช้ยืนยัน)
+- **หลักฐาน:** `operations/tests/test_m13_problems.py` 8 รายการ: รายการกับรหัสแทนตัว, รหัสไม่ไปโผล่ในหน้าเรื่อง, ตัวกรองกับหน้า, สิทธิ์, CSV ไม่มีข้อมูลส่วนบุคคลและมี audit, รหัสไม่ซ้ำกับ migration และ `manage.py test` ทั้งชุด 701 รายการผ่าน; ขึ้น staging บน Mac แล้ว (migration `0029` เติมรหัสให้ผู้แจ้งไม่ระบุตัวตนเดิมครบ)
+
+#### การส่งกองเมื่อกติกาบอกไม่ได้: คำที่ระบบจำ หน้าที่ของกอง และ AI ส่งกอง (14 ต.ค. 2569)
+
+ผู้ใช้สั่ง "ถ้ามีคำถามหรือคำขอไม่ตรง keyword แล้วไม่ทราบว่าควรส่งงานนี้ไปกองไหน สมมติว่าไปส่วนกลาง ฝอจ. แต่เมื่อมีการมอบหมายที่ถูกต้องแล้ว ให้จำการกระทำนี้ว่าเรื่องนี้ไปกองไหนอัตโนมัติ" และต่อมา "ในหน้าแอดมินให้สร้างระบบกรอกบทบาท หน้าที่ของแต่ละกองเพื่อที่ AI จะได้ทราบว่ากองนี้ทำอะไร" แล้วซักคำถาม 36 ข้อ (grill-me) รายละเอียดการตัดสินใจอยู่ใน [ADR 0013](docs/adr/0013-learned-words-and-duty-based-routing.md)
+
+- **ลำดับการเลือกกอง (Q15):** กติกาหลัก → คำที่ระบบจำ → AI จากหน้าที่ของกอง → ส่วนกลาง
+- **คำที่ระบบจำ** (`operations/routing_words.py`, หน้า `/routing/words/`):
+  - ส่วนกลางใส่คำสำคัญไม่เกิน 3 คำตอนโอนเรื่อง R10 ระบบจำเมื่อกองปลายทางรับเรื่อง หรือเมื่อผู้มีอำนาจตัดสินเส้นทาง
+  - ตัวเลือกระบบ `learned_routes`: ส่งตรง (ค่าเริ่มต้นตามที่ผู้ใช้เลือก), เสนอ หรือปิด
+  - ถ้าส่งผิดกอง คำย้ายตามกองใหม่ และขึ้นป้าย "ย้ายบ่อย" เมื่อย้ายตั้งแต่ 2 ครั้ง
+  - แอดมินกับส่วนกลางยกเลิกหรือย้ายคำได้ กองอื่นเห็นเฉพาะคำของกองตัวเอง
+  - ข้อเสนอของคำที่จำอยู่ในข้อเสนอของเรื่อง (`policy.refresh`) ส่วนกลางจึงกดส่งต่อตามข้อเสนอได้ครั้งเดียว
+- **คำถามที่บอทตอบไม่ได้** (`operations/questions.py`, หน้าแอดมิน `/console/admin/questions/`):
+  - เก็บข้อความนอกร่างเรื่องที่คำสำคัญและ AI ตอบไม่ได้ แบบปิดข้อมูลส่วนบุคคล ไม่เก็บว่าใครถาม และนับข้อความเดียวกันรวมกัน
+  - ปุ่ม "เพิ่มเป็นคำตอบในคลัง" เปิดฟอร์มคลังคำตอบพร้อมคำถาม ส่วนปุ่ม "ไม่ต้องตอบ" เก็บไว้ในจัดการแล้ว
+- **หน้าที่ของกอง** (`operations/duties.py`, หน้าแอดมิน `/console/admin/duties/`, หน้าอ่าน `/duties/`):
+  - ภาพรวมของกอง และรายการงานที่ดูแล แต่ละรายการมีตัวอย่างข้อความอย่างน้อย 2 ข้อไว้ทดสอบ AI เท่านั้น
+  - ทุกการแก้ต้องระบุเหตุผลและมีบันทึก แอดมินกับส่วนกลางเห็นทุกกอง คนในกองเห็นกองตัวเอง
+- **AI ส่งกอง** (`operations/ai_routing.py`, งาน AI ใหม่ `routing`):
+  - AI ตอบรายการงานพร้อมคำที่ยกจากข้อความ ถ้าไม่ตรงรายการใดตอบกองจากภาพรวมได้ แต่เป็นการเสนอเสมอ ข้อนี้แก้ ADR 0002
+  - ตัวเลือกระบบ `routing_ai`: เสนอ (ค่าเริ่มต้น) หรือส่งตรง
+  - ในโหมดส่งตรง ระบบย้ายเรื่องเองในชื่อ "AI ส่งกองตามหน้าที่" และจำคำของ AI เมื่อกองคัดกรองเสร็จโดยไม่โอนออก
+  - การประเมินใช้ตัวอย่างของแอดมินกับชุดข้อความหลอก `ai_routing_redteam_v1.json` (12 ข้อ ล็อก SHA-256) เกณฑ์ `routing_ai_accuracy` เริ่ม 90% ไม่ตอบนอกรายการ ข้อความหลอกได้ผล 0 และผ่าน 2 รอบ
+  - ผลประเมินผูกกับหน้าที่ของกองที่ AI อ่าน แอดมินกดประเมินได้จากหน้าหน้าที่ของกอง และหน้านั้นนับเรื่องที่ AI ส่งตรงแล้วถูกโอนต่อด้วยเหตุผล "ส่งผิดกอง"
+  - **ยังไม่ได้เปิดใช้:** ผู้ใช้สั่ง "build ได้เลย ส่วนหน้าที่กรอกทีหลัง" จึงสร้างรุ่น v15 (งาน `routing`, typhoon-v2.5-30b → typhoon-s-thaillm-8b → OpenThaiGPT 8B แบบเดียวกับสกัดร่าง v11) ทดสอบการเชื่อมต่อผ่านทั้งสามโมเดล แต่ประเมินไม่ได้จนกว่าจะกรอกหน้าที่ของกองพร้อมตัวอย่าง การเปิดครั้งแรกรอผู้ใช้สั่งหลังประเมินผ่าน
+- **ที่เลือกเองตามหลักเดิม (บอกผู้ใช้แล้ว):**
+  - จำคำของ AI ที่ขั้น "คัดกรองเสร็จ" เพราะระบบไม่มีปุ่มชื่อ "รับเรื่อง"
+  - การตัดสินเส้นทางของผู้มีอำนาจย้ายคำได้ด้วย
+  - "ปิดการจำ" ทั้งไม่ใช้และไม่จำคำใหม่
+  - ถ้ากองที่คำชี้ไปถูกปิด เรื่องไปส่วนกลาง
+- **migration:** `0031_routing_words` (คำที่ระบบจำ คำสำคัญบนการโอน และคำถามที่บอทตอบไม่ได้), `0032_division_duties` (หน้าที่ของกอง รายการงาน งาน AI `routing` และ `AIRoutingRun`)
+
+#### ปิดข้อมูลส่วนบุคคลก่อนส่ง AI (14 ต.ค. 2569)
+
+ผู้ใช้อนุมัติให้ production ส่งข้อความเรื่องจริงให้ AI ได้ โดยต้องปิดข้อมูลส่วนบุคคลก่อน (Q22) รายละเอียดอยู่ใน [ADR 0014](docs/adr/0014-mask-personal-data-before-every-ai-call.md)
+
+- **ที่ทำ:** `operations/pii.py` และ `ai.post()` เป็นทางเดียวที่ทุกงาน AI ใช้ส่งข้อความ (สกัดร่าง ตอบแชต ถามต่อ ตัวกรองคำสั่งแฝง คัดกรอง AI ส่งกอง) ยกเว้นตัวจำลองบทสนทนา
+  - ปิดชื่อคน เบอร์โทร เลขบัตรประชาชน อีเมล LINE ID ลิงก์ บ้านเลขที่และรหัสไปรษณีย์ เลขบัญชี ตัวเลขยาวตั้งแต่ 6 หลัก และคำที่ต้องปิดเสมอ ด้วยป้ายที่นับใหม่ทุกครั้ง แล้วเติมค่าจริงกลับในคำตอบ
+  - หน้า `/console/pii/` ให้เจ้าหน้าที่ทุกคนลองปิดข้อความ ดูจำนวนที่ปิดใน 30 วัน และเพิ่มคำที่ต้องปิดเสมอ ส่วนการเอาคำออกเป็นของแอดมิน ผู้ใช้แจ้งว่าไม่เห็นลิงก์ (เดิมอยู่แค่ในเมนูรูปโปรไฟล์และเมนูมือถือ) จึงเพิ่มปุ่มในหน้าภาพรวม (คู่กับหน้าที่ของกองและคำที่ระบบจำ) และในเมนูแอดมิน
+  - migration `0030_ai_masking`
+- **บน Mac staging:**
+  - `.env` เพิ่ม `DJANGO_DEBUG=false` เพราะ URL ของ ngrok เคยแสดงหน้า debug
+  - หยุด AI (`AI_ENABLED=false`) ตั้งแต่ราว 15:10 จนตัวปิดขึ้นระบบและประเมินผ่าน แล้วเปิดกลับราว 15:55
+- **ประเมินใหม่โดยเปิดตัวปิด** (source ของส่วนนี้ บันทึกลงรุ่นแล้ว):
+  - สกัดร่าง v11 ผ่าน gate: heldout-v4 ประเภท 0.975 ของและจำนวน 0.972 JSON 1.0, redteam-v1 1.0, redteam-v2 0.85, security 227 เทสต์ (`reports/ai-eval-v11-pii.*`)
+  - ตอบแชต v14 ผ่าน: เลือกคำตอบถูก 0.975 และ 1.0, คำตอบที่เขียนใช้ได้ 0.97, red-team 0 ครั้ง (`reports/ai-eval-v14-pii.log`)
+- **หลักฐาน:** `test_m13_pii.py` 15 รายการ, `test_m13_routing_words.py` 10 รายการ, `test_m13_duties.py` 8 รายการ (ผู้ให้บริการ AI เป็นตัวปลอมในเทสต์) และ `manage.py test` ทั้งชุด 734 รายการผ่าน; ขึ้น staging บน Mac แล้วทั้งสามส่วน (migration `0030`–`0032`) หน้าใหม่ทุกหน้าตอบ 200 การแก้อยู่ใน `operations/` จึงเปลี่ยน source digest อีกครั้ง
 
 ```text
 Implement M13: รวมระบบและตรวจ acceptance G01–G10 โดยอ้าง commit/image/model/policy เดียวกับ candidate release

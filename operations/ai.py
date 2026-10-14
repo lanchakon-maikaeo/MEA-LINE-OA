@@ -24,7 +24,7 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from operations import identity
+from operations import identity, pii
 from operations.contracts import CommandFailed, ErrorCode, check_quantity_for_item, parse_quantity
 from operations.models import (
     AIConfigEntry,
@@ -271,6 +271,7 @@ def create_version(
     return version
 
 
+@pii.counted_as("eval")
 def test_version(actor, version):
     """Connection + schema test of every model in the chain (network; outside transactions)."""
     identity.require_developer_admin(actor)
@@ -282,6 +283,10 @@ def test_version(actor, version):
         from operations import ai_answer
 
         return ai_answer.test_version(actor, version)
+    if version.task == AIConfigVersion.Task.ROUTING:
+        from operations import ai_routing
+
+        return ai_routing.test_version(actor, version)
     results = []
     for profile in version.chain():
         started = time.monotonic()
@@ -314,12 +319,14 @@ def test_version(actor, version):
 
 def record_eval(version, report):
     """Store an evaluation report; the primary must meet all thresholds, fallbacks safety ones."""
-    from operations import ai_answer, ai_eval, ai_triage
+    from operations import ai_answer, ai_eval, ai_routing, ai_triage
 
     if version.task == AIConfigVersion.Task.TRIAGE:
         passed = ai_triage.gate_passed(report, version)
     elif version.task == AIConfigVersion.Task.ANSWER:
         passed = ai_answer.gate_passed(report, version)
+    elif version.task == AIConfigVersion.Task.ROUTING:
+        passed = ai_routing.gate_passed(report, version)
     else:
         passed = ai_eval.gate_passed(report, version)
     AIConfigVersion.objects.filter(pk=version.pk).update(eval_passed=passed, eval_result=report)
@@ -356,6 +363,12 @@ def activation_blocker(version):
 
         if not ai_answer.gate_passed(version.eval_result, version):
             return "Answer evidence is missing, stale or failed, or the answer bank changed."
+        return None
+    if version.task == AIConfigVersion.Task.ROUTING:
+        from operations import ai_routing
+
+        if not ai_routing.gate_passed(version.eval_result, version):
+            return "Routing evidence is missing, stale or failed, or the duties changed."
         return None
     if version.eval_result.get("gate") != EVAL_GATE:
         return "The evaluation predates the current application/security gate; evaluate again."
@@ -474,6 +487,15 @@ class SchemaError(Exception):
 class _NoProviderRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise AIError("Provider redirects are not allowed.")
+
+
+def post(url, api_key, body, timeout, task):
+    """_post with personal data masked out of what people typed and put back into the answer
+    (ADR 0014). Only the dialogue simulator, whose requesters are synthetic, calls _post."""
+    masker = pii.Masker.for_ai()
+    sent = masker.mask_body(body)
+    pii.record(task, masker.counts)
+    return masker.restore_response(_post(url, api_key, sent, timeout))
 
 
 def _post(url, api_key, body, timeout):
@@ -846,7 +868,8 @@ def call_model(profile, messages, catalog, timeout):
             "json_schema": {"name": "extraction", "strict": True, "schema": schema},
         }
     started = time.monotonic()
-    data = _post(f"{credential.base_url}/chat/completions", decrypt_key(credential), body, timeout)
+    url = f"{credential.base_url}/chat/completions"
+    data = post(url, decrypt_key(credential), body, timeout, "extract")
     return _content(data), data.get("usage") or {}, int((time.monotonic() - started) * 1000)
 
 

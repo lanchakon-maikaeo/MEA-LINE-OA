@@ -29,6 +29,9 @@
             {% if nav.registrations %}<a href="{% url 'admin-registrations' %}">รับรองผู้แจ้ง</a>{% endif %}
             {% if nav.scope.is_admin %}<a href="{% url 'admin-users' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>ตั้งค่าระบบ (แอดมิน)</a>{% endif %}
             <p class="drawer__group">บัญชี</p>
+            <a href="{% url 'duties' %}"{% if nav.url_name == 'duties' %} aria-current="page"{% endif %}>หน้าที่ของกอง</a>
+            <a href="{% url 'routing-words' %}"{% if nav.url_name == 'routing-words' %} aria-current="page"{% endif %}>คำที่ระบบจำ (ส่งกอง)</a>
+            <a href="{% url 'pii' %}"{% if nav.url_name == 'pii' %} aria-current="page"{% endif %}>ปิดข้อมูลก่อนส่ง AI</a>
             <a href="{% url 'account' %}">บัญชีของฉัน</a>
           </nav>
         </details>
@@ -70,6 +73,9 @@
               <div class="menu__sep"></div>
               <a class="menu__item" href="{% url 'account' %}">{% icon "user" "sm" %} บัญชีของฉัน</a>
               <a class="menu__item" href="{% url 'password_change' %}">{% icon "key" "sm" %} เปลี่ยนรหัสผ่าน</a>
+              <a class="menu__item" href="{% url 'duties' %}">{% icon "info" "sm" %} หน้าที่ของกอง</a>
+              <a class="menu__item" href="{% url 'routing-words' %}">{% icon "grid" "sm" %} คำที่ระบบจำ (ส่งกอง)</a>
+              <a class="menu__item" href="{% url 'pii' %}">{% icon "lock" "sm" %} ปิดข้อมูลก่อนส่ง AI</a>
               <div class="menu__sep"></div>
               <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="menu__item" type="submit">{% icon "logout" "sm" %} ออกจากระบบ</button></form>
             </div>

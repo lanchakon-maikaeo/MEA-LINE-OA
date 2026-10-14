@@ -16,7 +16,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from operations import ai, ai_grounding, conversation, line_api, orchestration, policy
+from operations import ai, ai_grounding, conversation, line_api, orchestration, policy, questions
 from operations.conversation import FIELDS, KIND_LABELS, D, Turn
 from operations.models import (
     AIConfigVersion,
@@ -267,6 +267,8 @@ def process(run_id):
         elif chat is not None and chat["key"] and not (typed and chat["key"] == "none"):
             status = R.ANSWERED
             run.result = {**run.result, "answer": _answer(turn, draft, chat)}
+            if chat["key"] == "none" and draft is None:
+                questions.record(turn, source_text)  # คำถามที่บอทตอบไม่ได้ (Q11)
         elif typed:
             # Neither a request nor an approved answer: the step takes the text, as without AI.
             status = R.TAKEN
@@ -278,6 +280,8 @@ def process(run_id):
             conversation._reprompt(turn, draft)
         else:
             status = R.APPLIED
+            if draft is None and not _proposals(extraction):
+                questions.record(turn, source_text)  # neither a request nor an answer (Q11)
             apply(turn, draft, extraction, run)
         replies = _finish(run, status, attempts, extraction, turn)
         draft = _current_draft(turn) if status == R.APPLIED and _proposals(extraction) else None

@@ -9,6 +9,7 @@ from django.utils import timezone
 from operations import (
     ai_chat,
     ai_eval,
+    ai_routing,
     attachments,
     conversation,
     notifications,
@@ -16,7 +17,7 @@ from operations import (
     policy,
     staff_email,
 )
-from operations.models import OutboxEvent, PostbackToken, WebhookInbox
+from operations.models import FormSubmission, OutboxEvent, PostbackToken, WebhookInbox
 
 HEARTBEAT = Path("/tmp/worker-heartbeat")  # noqa: S108 - container-local liveness marker
 logger = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ def handle_event(event):
         replies = conversation.handle_inbox(inbox_id)
         conversation.send_reply(inbox_id, replies)
         ai_chat.start_loading(inbox_id)  # only when the message went to AI
+    elif event.event_type == orchestration.EVENT_ROUTING_AI:
+        ai_routing.process(event.payload["ai_routing_run_id"])  # ADR 0013
     else:
         notifications.plan_for_event(event)
         staff_email.plan_for_event(event)  # M10: การแจ้งเตือนเจ้าหน้าที่
@@ -97,5 +100,8 @@ def run_once(limit=20):
     attachments.purge_rejected()
     PostbackToken.objects.filter(
         expires_at__lt=timezone.now() - timezone.timedelta(days=1)
+    ).delete()
+    FormSubmission.objects.filter(  # ADR 0015 Q21: one-time form keys last a day
+        created_at__lt=timezone.now() - timezone.timedelta(days=1)
     ).delete()
     return len(events)

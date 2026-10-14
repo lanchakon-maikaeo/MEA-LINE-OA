@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 from functools import wraps
 
 from django.conf import settings
@@ -9,12 +10,12 @@ from django.contrib.auth.views import PasswordChangeView
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
-from django.views.decorators.http import require_POST, require_safe
+from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from operations import (
     ai,
@@ -30,6 +31,7 @@ from operations import (
     options,
     orchestration,
     policy,
+    questions,
     queues,
 )
 from operations.models import (
@@ -41,7 +43,9 @@ from operations.models import (
     Attachment,
     AuditEvent,
     AuthorityGrant,
+    ChannelIdentity,
     ChatAnswer,
+    ConversationMessage,
     District,
     Division,
     Employee,
@@ -58,6 +62,7 @@ from operations.models import (
     Section,
     StockMovement,
     StockSnapshot,
+    UnansweredQuestion,
 )
 
 User = get_user_model()
@@ -349,7 +354,15 @@ def admin_registrations(request):
         .select_related("requested_district", "decided_by")
         .order_by("-decided_at")[:50]
     )
-    requesters = Requester.objects.select_related("district").order_by("-approved_at")[:100]
+    # Anonymous reporters are not approved people, and staff never see who they are (ADR 0010).
+    people = (
+        Requester.objects.filter(is_anonymous=False)
+        .select_related("district", "division", "employee")
+        .order_by("-approved_at")
+    )
+    requesters = _requester_rows(people.exclude(status=Requester.Status.REVOKED)[:100])
+    revoked = _requester_rows(people.filter(status=Requester.Status.REVOKED)[:100])
+    states = [row["state"] for row in requesters]
     is_admin = identity.staff_scope(request.user).is_admin
     return render(
         request,
@@ -360,6 +373,20 @@ def admin_registrations(request):
             "pending": pending,
             "recent": recent,
             "requesters": requesters,
+            "revoked": revoked,
+            "to_review": states.count("review"),
+            "to_confirm": states.count("name"),
+            # Who may talk to the bot (user, 14 Oct 2569: "ให้แสดงในหน้ารับรองด้วย").
+            "is_production": settings.APP_ENV == "production",
+            "audience": options.get(options.LINE_AUDIENCE),
+            "audience_option": options.OPTIONS[options.LINE_AUDIENCE],
+            "testers": len(settings.LINE_ALLOWED_RECIPIENTS),
+            "check_label": options.OPTIONS[options.REGISTRATION_CHECK].label_of(
+                options.get(options.REGISTRATION_CHECK)
+            ),
+            "approver_label": options.OPTIONS[options.REGISTRATION].label_of(
+                options.get(options.REGISTRATION)
+            ),
             "requester_filters": [
                 (
                     "district",
@@ -370,11 +397,255 @@ def admin_registrations(request):
                         .values_list("code", "name")
                     ),
                 ),
-                ("status", "สถานะ", Requester.Status.choices),
+                (
+                    "status",
+                    "สถานะ",
+                    [c for c in Requester.Status.choices if c[0] != Requester.Status.REVOKED],
+                ),
+                ("identity", "ตัวตน", employees.IDENTITY_STATES),
             ],
             "requester_form": forms.RequesterCreateForm(),
         },
     )
+
+
+def _requester_rows(requesters):
+    """What the requester list says about each person (user, 14 Oct 2569): how we know who they
+    are, their position from ทะเบียนพนักงาน, and their role in the system."""
+    requesters = list(requesters)
+    roles = identity.requester_roles(requesters)
+    people = employees.name_index()
+    lines = defaultdict(list)
+    for line in ChannelIdentity.objects.filter(requester__in=requesters):
+        lines[line.requester_id].append(line)
+    link = Requester.EmployeeLink
+    rows = []
+    for requester in requesters:
+        own = lines[requester.pk]
+        if requester.is_internal:
+            channel = "LINE ของเจ้าหน้าที่"
+        elif any(line.status == ChannelIdentity.Status.ACTIVE for line in own):
+            channel = "LINE"
+        elif own:
+            channel = "LINE ถูกถอน"
+        else:
+            channel = "ไม่ใช้ LINE (แอดมินเพิ่มโดยตรง)"
+        employee = requester.employee
+        if employee is None:
+            proof = "ยังไม่ผูกทะเบียนพนักงาน"
+        elif requester.employee_link == link.NAME:
+            proof = f"ชื่อตรงทะเบียน {employee.employee_id} (ยังไม่ได้ยืนยัน)"
+        elif requester.employee_link == link.ADMIN:
+            proof = f"แอดมินผูกรหัสพนักงาน {employee.employee_id}"
+        else:
+            proof = f"ยืนยันรหัสพนักงาน {employee.employee_id}"
+        found = employees.same_name(requester, people)
+        state = employees.identity_state(requester, found)
+        rows.append(
+            {
+                "requester": requester,
+                "state": state,
+                "note": employees.review_note(requester, found) if state == "review" else "",
+                "same_name": found,
+                "proof": proof,
+                "channel": channel,
+                "position": employee.position if employee else "",
+                "role": " · ".join(
+                    ["ผู้แจ้งภายใน" if requester.is_internal else "ผู้แจ้ง", *roles[requester.pk]]
+                ),
+                "where": requester.division.code
+                if requester.is_internal and requester.division_id
+                else requester.district.name,
+            }
+        )
+    return rows
+
+
+REQUESTER_MESSAGES = 300  # newest messages on one page
+REQUESTER_HISTORY = {
+    "registration.approved": "รับรองการลงทะเบียน",
+    "registration.auto_approved": "ระบบรับรองเอง (ตรงทะเบียนพนักงาน)",
+    "requester.created_direct": "แอดมินเพิ่มผู้แจ้งโดยตรง",
+    "requester.internal_created": "เริ่มเป็นผู้แจ้งภายใน",
+    "requester.suspended": "ระงับ",
+    "requester.activated": "เปิดใช้อีกครั้ง",
+    "requester.revoked": "ถอนการรับรอง",
+    "requester.messages_viewed": "เปิดดูข้อความที่พิมพ์มา",
+    "requester.employee_matched": "ระบบผูกทะเบียนพนักงานจากชื่อที่ตรง",
+    "requester.employee_unmatched": "ระบบยกเลิกการผูก เพราะชื่อไม่ตรงพนักงานคนเดียวแล้ว",
+    "requester.employee_linked": "แอดมินผูกทะเบียนพนักงาน",
+    "requester.employee_confirmed": "แอดมินยืนยันว่าเป็นพนักงานที่ชื่อตรง",
+    "requester.employee_unlinked": "แอดมินยกเลิกการผูกทะเบียนพนักงาน",
+    "requester.district_changed": "แอดมินแก้เขต",
+}
+ACTOR_LABELS = {"system": "ระบบ", "line": "LINE", "manage.py": "คำสั่งของผู้ดูแลระบบ"}
+
+
+@admin_required
+@require_safe
+def admin_requester_detail(request, pk):
+    requester = get_object_or_404(
+        Requester.objects.select_related(
+            "district", "division", "employee", "approved_by__staff_profile"
+        ),
+        pk=pk,
+        is_anonymous=False,
+    )
+    events = (
+        AuditEvent.objects.filter(
+            Q(target_type="Requester", target_id=str(requester.pk))
+            | Q(
+                action__in=["registration.approved", "registration.auto_approved"],
+                data__requester_id=requester.pk,
+            )
+        )
+        .select_related("actor__staff_profile")
+        .order_by("-pk")[:50]
+    )
+    row = _requester_rows([requester])[0]
+    # Employees with the same name, for an admin to confirm (user, 14 Oct 2569): while the
+    # link is not proved, whether the system tied one by name or left it to an admin.
+    candidates = [
+        {
+            "employee": e,
+            "place": e.district.name
+            if e.district_id
+            else (e.division.code if e.division_id else ""),
+            "note": _candidate_note(requester, e, row["same_name"]),
+        }
+        for e in (row["same_name"] if row["state"] != "verified" else [])
+    ]
+    history = []
+    for event in events:
+        actor = event.actor
+        data = event.data if event.action.startswith("requester.") else {}
+        detail = f" · รหัสพนักงาน {data['employee']}" if data.get("employee") else ""
+        if data.get("district"):
+            detail = f" · {data.get('previous', '')} → {data['district']}"
+        history.append(
+            {
+                "at": event.created_at,
+                "what": REQUESTER_HISTORY.get(event.action, event.action) + detail,
+                "who": getattr(getattr(actor, "staff_profile", None), "display_name", "")
+                or getattr(actor, "username", "")
+                or ACTOR_LABELS.get(event.actor_label, event.actor_label or "ระบบ"),
+                "why": event.reason,
+            }
+        )
+    return render(
+        request,
+        "operations/admin_requester_detail.html",
+        {
+            "requester": requester,
+            "row": row,
+            "candidates": candidates,
+            "districts": District.objects.filter(is_active=True).order_by("code"),
+            "lines": ChannelIdentity.objects.filter(requester=requester).select_related(
+                "staff_user__staff_profile"
+            ),
+            "history": history,
+            "message_count": ConversationMessage.objects.filter(requester=requester).count(),
+            "case_count": requester.cases.count(),
+            "managed": requester.status != Requester.Status.REVOKED,
+        },
+    )
+
+
+def _candidate_note(requester, employee, found):
+    """Why the system did not tie this employee by itself, for the admin who checks."""
+    if employee.pk == requester.employee_id:
+        return "ผูกจากชื่ออยู่ตอนนี้ ยังไม่ได้ยืนยัน"
+    notes = []
+    if len(found) > 1:
+        notes.append(f"ชื่อนี้มี {len(found)} คนในทะเบียน")
+    if employee.district_id not in (None, requester.district_id):
+        notes.append(f"ทะเบียนระบุ{employee.district.name}")
+    if requester.employee_link == Requester.EmployeeLink.UNLINKED:
+        notes.append("แอดมินเคยยกเลิกการผูก")
+    return " · ".join(notes)
+
+
+@admin_required
+@require_safe
+def admin_requester_messages(request, pk):
+    """What the person typed in LINE as this requester, never what the same LINE account typed
+    while reporting anonymously (ADR 0010). Admins only, and every opening is audited."""
+    requester = get_object_or_404(Requester, pk=pk, is_anonymous=False)
+    rows = ConversationMessage.objects.filter(requester=requester)
+    total = rows.count()
+    shown = list(
+        rows.select_related("case", "draft__case").order_by("-created_at", "-pk")[
+            :REQUESTER_MESSAGES
+        ]
+    )
+    for message in shown:
+        # A case or draft of another requester (an anonymous one of the same LINE account) is
+        # never named here, so this page cannot tell who reported it.
+        draft = message.draft if message.draft and message.draft.requester_id == pk else None
+        if message.case and message.case.requester_id == pk:
+            message.about, message.about_case = "ตอบที่ขอข้อมูลเพิ่มของเรื่อง", message.case
+        elif draft is not None and draft.case is not None:
+            message.about, message.about_case = "ร่างที่ยื่นเป็นเรื่อง", draft.case
+        elif draft is not None:
+            kind = f" {draft.get_kind_display()}" if draft.kind else ""
+            message.about = f"ร่างเรื่อง{kind} ({draft.get_status_display()})"
+            message.about_case = None
+        else:
+            message.about, message.about_case = "ข้อความทั่วไป", None
+    identity.audit(request.user, "requester.messages_viewed", requester, shown=len(shown))
+    return render(
+        request,
+        "operations/admin_requester_messages.html",
+        {"requester": requester, "rows": shown, "total": total},
+    )
+
+
+@admin_required
+@require_POST
+def admin_requester_action(request, pk, action):
+    requester = get_object_or_404(Requester, pk=pk, is_anonymous=False)
+    actor, data = request.user, request.POST
+    reason = data.get("reason", "")
+    if action in {"suspend", "activate"}:
+        _run(
+            request,
+            lambda: identity.set_requester_active(actor, requester, action == "activate", reason),
+            "เปิดใช้ผู้แจ้งแล้ว" if action == "activate" else "ระงับผู้แจ้งแล้ว",
+        )
+    elif action == "revoke":
+        if data.get("confirm") != "1":
+            messages.error(request, "ติ๊กยืนยันก่อนถอนการรับรอง")
+        else:
+            _run(
+                request,
+                lambda: identity.revoke_requester(actor, requester, reason),
+                "ถอนการรับรองแล้ว ถ้าจะใช้ LINE ต่อต้องลงทะเบียนใหม่",
+            )
+    elif action == "link-employee":
+        _run(
+            request,
+            lambda: identity.link_requester_employee(
+                actor, requester, data.get("employee_id", ""), reason
+            ),
+            "ผูกกับทะเบียนพนักงานแล้ว",
+        )
+    elif action == "unlink-employee":
+        _run(
+            request,
+            lambda: identity.unlink_requester_employee(actor, requester, reason),
+            "ยกเลิกการผูกกับทะเบียนพนักงานแล้ว",
+        )
+    elif action == "district":
+        _run(
+            request,
+            lambda: identity.set_requester_district(
+                actor, requester, data.get("district", ""), reason
+            ),
+            "แก้เขตแล้ว เรื่องเดิมยังอยู่เขตเดิม เรื่องใหม่ใช้เขตนี้",
+        )
+    else:
+        raise Http404
+    return redirect("admin-requester-detail", pk=requester.pk)
 
 
 @admin_required
@@ -868,7 +1139,12 @@ def admin_options(request):
             ),
             "บันทึกตัวเลือกแล้ว",
         )
-        return redirect("admin-options")
+        # The requester approval page shows and changes who may talk to the bot as well.
+        return redirect(
+            "admin-registrations"
+            if request.POST.get("next") == "registrations"
+            else "admin-options"
+        )
     history = (
         AuditEvent.objects.filter(action="option.changed")
         .select_related("actor")
@@ -901,7 +1177,7 @@ def admin_answers(request):
                 "เลิกใช้คำตอบแล้ว",
             )
         else:
-            _run(
+            saved = _run(
                 request,
                 lambda: answers.save(
                     request.user,
@@ -916,10 +1192,25 @@ def admin_answers(request):
                 ),
                 "บันทึกคำตอบแล้ว",
             )
+            asked = UnansweredQuestion.objects.filter(
+                pk=data.get("question") or 0, status=UnansweredQuestion.Status.OPEN
+            ).first()
+            if saved is not None and asked is not None:
+                # คำถามที่บอทตอบไม่ได้ (Q11): the question now has an answer in the bank.
+                questions.handle(
+                    request.user,
+                    asked,
+                    UnansweredQuestion.Status.ANSWERED,
+                    "เพิ่มเป็นคำตอบในคลัง",
+                    answer_key=key,
+                )
         return redirect(f"{reverse('admin-answers')}#a-{key}")
     from operations import ai_answer
 
     active = ai.active_version(AIConfigVersion.Task.ANSWER)
+    asked = UnansweredQuestion.objects.filter(
+        pk=request.GET.get("question") or 0, status=UnansweredQuestion.Status.OPEN
+    ).first()
     return render(
         request,
         "operations/admin_answers.html",
@@ -936,6 +1227,40 @@ def admin_answers(request):
             "history": AuditEvent.objects.filter(action__startswith="chat_answer.")
             .select_related("actor")
             .order_by("-created_at")[:20],
+            "question": asked,
+        },
+    )
+
+
+@admin_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def admin_questions(request):
+    """คำถามที่บอทตอบไม่ได้ (14 Oct 2569 Q11): what people asked that คลังคำตอบ did not know,
+    masked and without names; an admin adds an answer or marks it not to be answered."""
+    if request.method == "POST":
+        question = get_object_or_404(UnansweredQuestion, pk=request.POST.get("question") or 0)
+        _run(
+            request,
+            lambda: questions.handle(
+                request.user,
+                question,
+                request.POST.get("status", ""),
+                request.POST.get("reason", ""),
+            ),
+            "บันทึกแล้ว",
+        )
+        return redirect("admin-questions")
+    rows = UnansweredQuestion.objects.select_related("handled_by")
+    return render(
+        request,
+        "operations/admin_questions.html",
+        {
+            "waiting": rows.filter(status=UnansweredQuestion.Status.OPEN).order_by(
+                "-count", "-last_at"
+            )[:200],
+            "handled": rows.exclude(status=UnansweredQuestion.Status.OPEN).order_by("-handled_at")[
+                :100
+            ],
         },
     )
 
@@ -963,7 +1288,9 @@ def admin_employees(request):
                 messages.info(
                     request,
                     f"เพิ่ม {summary['created']} แก้ {summary['updated']} "
-                    f"ปิด {summary['closed']} รายการ",
+                    f"ปิด {summary['closed']} รายการ · ผูกผู้แจ้งจากชื่อ {summary['matched']} "
+                    f"ยกเลิกการผูกที่ชื่อไม่ตรงแล้ว {summary['unmatched']} "
+                    f"ชื่อตรงแต่ต้องให้แอดมินตรวจ {summary['review']} ราย",
                 )
         return redirect("admin-employees")
     active = Employee.objects.filter(is_active=True)

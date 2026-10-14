@@ -154,8 +154,12 @@ def llm_labels(profile, parts, timeout):
             "json_schema": {"name": "screen", "strict": True, "schema": _schema(len(parts))},
         }
     credential = profile.credential
-    data = ai._post(
-        f"{credential.base_url}/chat/completions", ai.decrypt_key(credential), body, timeout
+    data = ai.post(
+        f"{credential.base_url}/chat/completions",
+        ai.decrypt_key(credential),
+        body,
+        timeout,
+        "screen",
     )
     try:
         labels = json.loads(ai._content(data))["labels"]

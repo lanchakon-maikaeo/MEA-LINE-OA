@@ -210,4 +210,107 @@
       window.location.reload();
     }
   });
+
+  // ADR 0015 Q21: what was typed survives an outage. Each POST form gets a one-time key (the
+  // server applies a key once) and keeps a draft in this browser for 24 hours: never
+  // passwords, files or hidden fields. The draft goes when the server confirms the submit
+  // (cookie faoj_form_done); a maintenance page sets no cookie, so the draft is still there.
+  var DRAFT = "faoj:draft:", DAY = 864e5, store = null;
+  try {
+    store = window.localStorage;
+    store.setItem(DRAFT + "probe", "1");
+    store.removeItem(DRAFT + "probe");
+  } catch (e) {
+    store = null;
+  }
+  function newKey() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    return Date.now().toString(16) + "-" + Math.random().toString(16).slice(2) + "-" + Math.random().toString(16).slice(2);
+  }
+  function draftFields(form) {
+    return Array.prototype.filter.call(form.elements, function (el) {
+      var type = (el.type || "").toLowerCase();
+      return el.name && !el.disabled && el.name !== "csrfmiddlewaretoken" && el.name !== "_form_key" &&
+        ["password", "file", "hidden", "submit", "button", "reset"].indexOf(type) < 0;
+    });
+  }
+  function readDraft(key) {
+    try {
+      var draft = JSON.parse(store.getItem(key) || "null");
+      return draft && Date.now() - draft.t < DAY ? draft : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  if (store) {
+    var done = (document.cookie.match(/(?:^|; )faoj_form_done=([^;]+)/) || [])[1];
+    for (var i = store.length - 1; i >= 0; i--) {
+      var name = store.key(i);
+      if (!name || name.indexOf(DRAFT) !== 0) continue;
+      var old = readDraft(name);
+      if (!old || (done && old.k === done)) store.removeItem(name);
+    }
+    if (done) document.cookie = "faoj_form_done=; Max-Age=0; path=/";
+  }
+  document.querySelectorAll("form").forEach(function (form, index) {
+    if ((form.getAttribute("method") || "").toLowerCase() !== "post") return;
+    var once = form.querySelector('input[name="_form_key"]');
+    if (!once) {
+      once = document.createElement("input");
+      once.type = "hidden";
+      once.name = "_form_key";
+      form.appendChild(once);
+    }
+    once.value = newKey();
+    if (!store || form.hasAttribute("data-no-draft")) return;
+    var key = DRAFT + window.location.pathname + "|" + (form.getAttribute("action") || "") + "|" + index;
+    var saved = readDraft(key), restored = false;
+    if (saved) {
+      draftFields(form).forEach(function (el) {
+        if (!Object.prototype.hasOwnProperty.call(saved.v, el.name)) return;
+        var value = saved.v[el.name];
+        if (el.type === "checkbox" || el.type === "radio") {
+          var on = Array.isArray(value) ? value.indexOf(el.value) >= 0 : value === el.value;
+          if (el.checked !== on) { el.checked = on; restored = true; }
+        } else if (!el.value && typeof value === "string" && value) {
+          el.value = value;
+          restored = true;
+        }
+      });
+    }
+    if (restored) {
+      var note = document.createElement("p");
+      note.className = "draft-note";
+      note.setAttribute("role", "status");
+      note.textContent = "เติมข้อความที่พิมพ์ค้างไว้ให้แล้ว ";
+      var drop = document.createElement("button");
+      drop.type = "button";
+      drop.className = "btn btn--secondary btn--sm";
+      drop.textContent = "ล้างข้อความนี้";
+      drop.addEventListener("click", function () {
+        store.removeItem(key);
+        window.location.reload();
+      });
+      note.appendChild(drop);
+      form.insertBefore(note, form.firstChild);
+    }
+    function save() {
+      var values = {};
+      draftFields(form).forEach(function (el) {
+        if (el.type === "checkbox" || el.type === "radio") {
+          if (!el.checked) return;
+          values[el.name] = el.type === "checkbox" ? (values[el.name] || []).concat(el.value) : el.value;
+        } else if (el.value) {
+          values[el.name] = el.value;
+        }
+      });
+      try {
+        if (Object.keys(values).length) store.setItem(key, JSON.stringify({ t: Date.now(), k: once.value, v: values }));
+        else store.removeItem(key);
+      } catch (e) { /* storage full: the form still works */ }
+    }
+    form.addEventListener("input", save);
+    form.addEventListener("change", save);
+    form.addEventListener("submit", save);
+  });
 })();

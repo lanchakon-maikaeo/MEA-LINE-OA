@@ -470,6 +470,12 @@ summary.chip::-webkit-details-marker { display: none; }
 .notice--warning { background: var(--canvas); border: 1px solid var(--ink); }
 .notice--info { background: var(--info-tint); color: var(--info-deep); }
 .notice__body { flex: 1; min-width: 0; }
+/* ADR 0015 Q21: a form refilled from the draft kept in this browser. */
+.draft-note {
+  display: flex; flex-wrap: wrap; gap: var(--s-8) var(--s-12); align-items: center;
+  margin: 0 0 var(--s-12); padding: var(--s-8) var(--s-12); border-radius: 12px;
+  background: var(--info-tint); color: var(--info-deep); font-size: 14px;
+}
 .notice__body strong { display: block; }
 .notice .btn { margin-left: auto; }
 

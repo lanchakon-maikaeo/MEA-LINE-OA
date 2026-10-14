@@ -13,7 +13,7 @@ from django.db import connection
 from django.test import Client, TransactionTestCase, override_settings
 from django.utils import timezone
 
-from operations import identity, line_api, notifications, orchestration, services
+from operations import identity, line_api, notifications, options, orchestration, services
 from operations.contracts import Actor
 from operations.management.commands.run_worker import run_once
 from operations.models import (
@@ -424,6 +424,10 @@ class SendingTests(OrchestrationTestCase):
         self.assertEqual(self.pushes, [])
         with override_settings(APP_ENV="production", LINE_ALLOWED_RECIPIENTS=frozenset()):
             Requester.objects.filter(pk=self.alice.pk).update(status="active")
+            self.assertEqual(notifications.send(self.planned().pk).outcome, "sent")
+        # ตัวเลือกระบบ line_audience (14 Oct 2569): a test host may open the bot to everyone.
+        options.change(None, options.LINE_AUDIENCE, "everyone", "เปิดให้ทุกคนลงทะเบียน")
+        with override_settings(LINE_ALLOWED_RECIPIENTS=frozenset()):
             self.assertEqual(notifications.send(self.planned().pk).outcome, "sent")
 
     def test_line_outcomes_are_recorded_as_they_are(self):

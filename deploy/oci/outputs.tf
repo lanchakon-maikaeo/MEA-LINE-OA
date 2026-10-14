@@ -1,9 +1,16 @@
+locals {
+  public_ips = { for name, i in oci_core_instance.host : name => (
+    name == var.web_ip_host ? oci_core_public_ip.web[0].ip_address : i.public_ip
+  ) }
+}
+
 output "hosts" {
-  description = "Public name (sslip.io, Q9) and address of each host."
+  description = "Staff web name (sslip.io) and address of each host. LINE's webhook goes through the ngrok static domain (ADR 0015 Q2), not this name."
   value = { for name, i in oci_core_instance.host : name => {
-    public_ip   = i.public_ip
-    public_host = "${replace(i.public_ip, ".", "-")}.sslip.io"
-    webhook_url = "https://${replace(i.public_ip, ".", "-")}.sslip.io/webhooks/line"
+    public_ip   = local.public_ips[name]
+    public_host = "${replace(local.public_ips[name], ".", "-")}.sslip.io"
+    staff_url   = "https://${replace(local.public_ips[name], ".", "-")}.sslip.io/"
+    reserved_ip = name == var.web_ip_host
     instance_id = i.id
   } }
 }

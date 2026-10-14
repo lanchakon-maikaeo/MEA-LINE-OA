@@ -30,6 +30,7 @@ from operations import (
     registry,
     returns,
     routing,
+    routing_words,
     support,
     workflow,
 )
@@ -412,11 +413,15 @@ def _route(kind, lines, intake, now):
 
 
 def _proposed_owner(case, coordinator, now):
-    """The owner the rules propose for this case, or the coordinator when they cannot tell."""
+    """The owner the rules propose for this case, or the coordinator when they cannot tell;
+    such a case may go where คำที่ระบบจำ send it (ADR 0013)."""
     current = policy.current_policy()
     facts = policy.build_facts(policy.case_data(case), {}, {}, current, policy.active_catalog())
-    proposed = policy.evaluate(current, facts, coordinator.code, now)["proposed_owner"]
-    return Division.objects.filter(code=proposed, is_active=True).first() or coordinator
+    result = policy.evaluate(current, facts, coordinator.code, now)
+    proposed = Division.objects.filter(code=result["proposed_owner"], is_active=True).first()
+    if proposed is None or proposed == coordinator:
+        return routing_words.place(case, result, coordinator) or coordinator
+    return proposed
 
 
 @_dependency_guard
@@ -523,6 +528,47 @@ def _take(ctx, case, payload, reason, target):
     case.assignee = ctx.user
     case.status = target
     return {"assignee_id": ctx.user.pk}
+
+
+def route_by_ai(case_id, run):
+    """ตัวเลือกระบบ routing_ai "direct" (ADR 0013): an unclear case that waits with ส่วนกลาง and
+    that the routing AI placed by a registered duty goes to that division. The system records
+    the move; no person acted. Anything that moved meanwhile leaves only the proposal."""
+    with transaction.atomic():
+        case = Case.objects.select_for_update().select_related("owner_division").get(pk=case_id)
+        coordinator = routing_words.coordinator_division()
+        waiting = (
+            coordinator is not None
+            and case.owner_division_id == coordinator.pk
+            and case.status == Case.Status.SUBMITTED
+            and run.division.is_active
+            and not Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).exists()
+            and not RoutingReview.objects.filter(
+                case=case, status=RoutingReview.Status.OPEN
+            ).exists()
+        )
+        if not waiting:
+            policy.refresh(case, "routing_ai")
+            return None
+        from_status = case.status
+        data = {
+            "owner_from": routing._move_owner(case, run.division),
+            "owner_to": run.division.code,
+            "entry": run.entry.title if run.entry else "",
+            "quote": run.quote,
+            "routing_run": run.pk,
+        }
+        case.section = policy.section_for(case)
+        case.revision += 1
+        case.updated_at = timezone.now()
+        case.save()
+        type(run).objects.filter(pk=run.pk).update(applied=True)
+        context = _Context(label="AI ส่งกองตามหน้าที่")
+        _record(
+            context, case, "route_by_ai", from_status, "", data, EVENT_DECISION_RECORDED, None, None
+        )
+        policy.after_decision(case, "route_by_ai", actor_is_staff=False)
+        return case
 
 
 def _assign(ctx, case, payload, reason, target):

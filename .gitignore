@@ -29,6 +29,9 @@ Docs/adr/*
 !Docs/adr/0010-identity-checks-anonymous-reports-and-staff-on-line.md
 !Docs/adr/0011-simulated-requesters-talk-to-the-real-bot.md
 !Docs/adr/0012-chat-answers-from-an-approved-bank.md
+!Docs/adr/0013-learned-words-and-duty-based-routing.md
+!Docs/adr/0014-mask-personal-data-before-every-ai-call.md
+!Docs/adr/0015-temporary-e5-production-on-trial-credit.md
 archive/
 *.jpg
 *.jpeg

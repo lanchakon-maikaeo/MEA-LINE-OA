@@ -1,0 +1,24 @@
+{% extends "operations/base.html" %}
+{% block title %}หน้าที่ของกอง — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_class %}page--reading{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">การส่งกอง</span>
+    <h1>หน้าที่ของกอง</h1>
+    <p class="lede">{% if all %}ทุกกองทำอะไรและดูแลอะไร ใช้ประกอบการโอนเรื่องที่กติกาบอกกองไม่ได้{% else %}หน้าที่ของกองของคุณตามที่แอดมินกรอกไว้ AI ใช้ข้อมูลนี้เสนอกองให้เรื่องที่กติกาบอกไม่ได้{% endif %} แอดมินเป็นผู้แก้</p>
+  </div>
+</div>
+{% for d in divisions %}
+<section class="section" aria-labelledby="sd-{{ d.pk }}">
+  <div class="section-head"><h2 id="sd-{{ d.pk }}">{{ d.code }} {{ d.name }}</h2></div>
+  {% if d.duty_overview %}<p class="pre">{{ d.duty_overview }}</p>{% endif %}
+  <ul>
+    {% for e in d.duties.all %}{% if e.is_active %}<li><strong>{{ e.title }}</strong>: {{ e.description }}</li>{% endif %}{% endfor %}
+  </ul>
+  {% if not d.duty_overview and not d.duties.exists %}<p class="muted">ยังไม่ได้กรอก</p>{% endif %}
+</section>
+{% empty %}
+<p class="muted">ไม่มีกองที่คุณดูได้</p>
+{% endfor %}
+{% endblock %}

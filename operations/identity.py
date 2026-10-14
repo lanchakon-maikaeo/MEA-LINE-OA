@@ -6,6 +6,7 @@ next request of sessions that are already open. Callers never pass roles or dist
 
 import secrets
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 from django.contrib.auth import get_user_model
@@ -23,6 +24,7 @@ from operations.models import (
     ChannelIdentity,
     District,
     Division,
+    Employee,
     OutboxEvent,
     RegistrationRequest,
     Requester,
@@ -747,6 +749,8 @@ def approve_registration(actor, registration, reason=""):
 
 
 def _approve(actor, registration, reason="", automatic=False):
+    from operations import employees  # local: employees audits through this module
+
     registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
     if registration.status != RegistrationRequest.Status.PENDING:
         raise ValidationError("Registration is not pending.")
@@ -755,7 +759,12 @@ def _approve(actor, registration, reason="", automatic=False):
         display_name=registration.submitted_name,
         district=registration.requested_district,
         approved_by=actor,
+        employee=registration.employee,
+        employee_link=Requester.EmployeeLink.VERIFIED if registration.employee else "",
     )
+    if registration.employee is None:
+        employees.match_requesters([requester])
+        requester.refresh_from_db()
     identity.requester = requester
     identity.status = ChannelIdentity.Status.ACTIVE
     identity.save(update_fields=["requester", "status"])
@@ -779,6 +788,15 @@ def _approve(actor, registration, reason="", automatic=False):
 
 
 UNKNOWN_DISTRICT = "D00"
+ALIAS_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # no 0/O, 1/I/L
+
+
+def new_alias():
+    """รหัสแทนตัวผู้แจ้งไม่ระบุตัวตน: four random characters, unique, unrelated to the LINE ID."""
+    while True:
+        alias = "".join(secrets.choice(ALIAS_ALPHABET) for _ in range(4))
+        if not Requester.objects.filter(alias=alias).exists():
+            return alias
 
 
 @transaction.atomic
@@ -797,6 +815,7 @@ def anonymous_requester(identity_row):
         approved_by=system_user(),
         is_anonymous=True,
         anonymous_identity=identity_row,
+        alias=new_alias(),
     )
     audit(None, "requester.anonymous_created", requester, actor_label="line")
     return requester
@@ -830,18 +849,167 @@ def revoke_identity(actor, identity, reason):
     audit(actor, "identity.revoked", identity, reason)
 
 
-@transaction.atomic
-def set_requester_active(actor, requester, active, reason):
+def _managed_requester(actor, requester, reason):
+    """The requester row, locked, for an admin change with a reason. Anonymous reporters are not
+    managed here (staff never see who they are) and a revoked requester is final."""
     reason = _require_reason(reason)
     require_admin(actor)
-    requester.status = Requester.Status.ACTIVE if active else Requester.Status.SUSPENDED
+    requester = Requester.objects.select_for_update().get(pk=requester.pk)
+    if requester.is_anonymous:
+        raise ValidationError("ผู้แจ้งไม่ระบุตัวตนจัดการจากหน้านี้ไม่ได้")
+    if requester.status == Requester.Status.REVOKED:
+        raise ValidationError("ผู้แจ้งรายนี้ถอนการรับรองแล้ว ต้องลงทะเบียนใหม่")
+    return requester, reason
+
+
+@transaction.atomic
+def set_requester_active(actor, requester, active, reason):
+    """การระงับผู้แจ้ง: the person keeps their LINE link and history but can do nothing until
+    an admin opens the account again; the bot tells them when they next write."""
+    requester, reason = _managed_requester(actor, requester, reason)
+    status = Requester.Status.ACTIVE if active else Requester.Status.SUSPENDED
+    if requester.status == status:
+        raise ValidationError("ผู้แจ้งรายนี้ใช้งานได้อยู่แล้ว" if active else "ผู้แจ้งรายนี้ถูกระงับอยู่แล้ว")
+    requester.status = status
     requester.save(update_fields=["status"])
     audit(actor, "requester.activated" if active else "requester.suspended", requester, reason)
+    return requester
+
+
+@transaction.atomic
+def revoke_requester(actor, requester, reason):
+    """การถอนการรับรองผู้แจ้ง (user, 14 Oct 2569): final, and no data is deleted. Each LINE
+    account of the requester is revoked too, so it has to register again and gets a new
+    requester; cases, drafts and messages stay with this one. A staff link on the same LINE
+    account is kept: each side keeps its own rights (ADR 0010). Nothing is pushed to the person;
+    the bot asks them to register again when they next write."""
+    requester, reason = _managed_requester(actor, requester, reason)
+    requester.status = Requester.Status.REVOKED
+    requester.save(update_fields=["status"])
+    lines = ChannelIdentity.objects.filter(
+        requester=requester, status=ChannelIdentity.Status.ACTIVE
+    ).update(status=ChannelIdentity.Status.REVOKED)
+    audit(actor, "requester.revoked", requester, reason, line_accounts=lines)
+    return requester
+
+
+@transaction.atomic
+def link_requester_employee(actor, requester, employee_id, reason):
+    """An admin ties a requester to ทะเบียนพนักงาน (for the position and staff roles) after
+    checking who they are; it replaces a name match, which never overrides it. Confirming the
+    employee a name already matched is recorded as such."""
+    requester, reason = _managed_requester(actor, requester, reason)
+    employee = Employee.objects.filter(
+        employee_id=(employee_id or "").strip(), is_active=True
+    ).first()
+    if employee is None:
+        raise ValidationError("ไม่พบรหัสพนักงานนี้ในทะเบียนพนักงานที่ใช้งานอยู่")
+    link = Requester.EmployeeLink
+    if requester.employee_id == employee.pk and requester.employee_link == link.ADMIN:
+        raise ValidationError("ผูกกับพนักงานคนนี้อยู่แล้ว")
+    confirmed = requester.employee_id == employee.pk and requester.employee_link == link.NAME
+    requester.employee = employee
+    requester.employee_link = link.ADMIN
+    requester.save(update_fields=["employee", "employee_link"])
+    action = "requester.employee_confirmed" if confirmed else "requester.employee_linked"
+    audit(actor, action, requester, reason, employee=employee.employee_id)
+    return requester
+
+
+@transaction.atomic
+def set_requester_district(actor, requester, district_code, reason):
+    """An admin corrects the district a requester chose (for example when ทะเบียนพนักงาน
+    puts them in another one). Cases keep the district they were filed with; new cases use
+    this one. The name match is checked again for the new district."""
+    from operations import employees  # local: employees audits through this module
+
+    requester, reason = _managed_requester(actor, requester, reason)
+    if requester.is_internal:
+        raise ValidationError("ผู้แจ้งภายในแจ้งในนามกอง ไม่มีเขต")
+    district = District.objects.filter(code=district_code, is_active=True).first()
+    if district is None:
+        raise ValidationError("ไม่รู้จักเขตนี้")
+    if district.pk == requester.district_id:
+        raise ValidationError("ผู้แจ้งอยู่เขตนี้อยู่แล้ว")
+    previous = requester.district.code
+    requester.district = district
+    requester.save(update_fields=["district"])
+    audit(
+        actor,
+        "requester.district_changed",
+        requester,
+        reason,
+        previous=previous,
+        district=district.code,
+    )
+    employees.match_requesters([requester])
+    requester.refresh_from_db()
+    return requester
+
+
+@transaction.atomic
+def unlink_requester_employee(actor, requester, reason):
+    """An admin removes a wrong link; a later name match will not tie it again."""
+    requester, reason = _managed_requester(actor, requester, reason)
+    if requester.employee_id is None:
+        raise ValidationError("ผู้แจ้งรายนี้ยังไม่ได้ผูกกับทะเบียนพนักงาน")
+    previous = requester.employee.employee_id
+    requester.employee = None
+    requester.employee_link = Requester.EmployeeLink.UNLINKED
+    requester.save(update_fields=["employee", "employee_link"])
+    audit(actor, "requester.employee_unlinked", requester, reason, employee=previous)
+    return requester
+
+
+def _grant_label(grant):
+    label = Role(grant.role).label
+    return f"{label} {grant.division.code}" if grant.division_id else label
+
+
+def requester_roles(requesters):
+    """Staff roles of the people on the requester list (user, 14 Oct 2569: "user, user และ
+    admin"), by requester pk. A person is a staff account when it is linked to their LINE
+    (ADR 0010), or holds the same employee ID that they proved or an admin set; a name match
+    alone never makes anyone staff. Only active grants of active accounts count."""
+    requesters = list(requesters)
+    users = defaultdict(set)
+    linked = ChannelIdentity.objects.filter(
+        requester__in=requesters, staff_user__isnull=False
+    ).values_list("requester_id", "staff_user_id")
+    for requester_id, user_id in linked:
+        users[requester_id].add(user_id)
+    proven = defaultdict(list)
+    for requester in requesters:
+        if requester.employee_id and requester.employee_link in {
+            Requester.EmployeeLink.VERIFIED,
+            Requester.EmployeeLink.ADMIN,
+        }:
+            proven[requester.employee.employee_id].append(requester.pk)
+    profiles = StaffProfile.objects.filter(employee_id__in=list(proven)).values_list(
+        "user_id", "employee_id"
+    )
+    for user_id, employee_id in profiles:
+        for requester_id in proven[employee_id]:
+            users[requester_id].add(user_id)
+    grants = defaultdict(set)
+    active = RoleGrant.objects.filter(
+        user_id__in={u for ids in users.values() for u in ids},
+        revoked_at__isnull=True,
+        user__is_active=True,
+    ).select_related("division")
+    for grant in active:
+        grants[grant.user_id].add(_grant_label(grant))
+    return {
+        requester.pk: sorted({label for u in users[requester.pk] for label in grants[u]})
+        for requester in requesters
+    }
 
 
 @transaction.atomic
 def create_requester(actor, display_name, district_code, reason):
     """Approve a requester who does not use LINE; staff file their cases on their behalf."""
+    from operations import employees  # local: employees audits through this module
+
     reason = _require_reason(reason)
     require_admin(actor)
     display_name = " ".join((display_name or "").split())
@@ -854,4 +1022,6 @@ def create_requester(actor, display_name, district_code, reason):
         display_name=display_name, district=district, approved_by=actor
     )
     audit(actor, "requester.created_direct", requester, reason, district=district.code)
+    employees.match_requesters([requester])
+    requester.refresh_from_db()
     return requester

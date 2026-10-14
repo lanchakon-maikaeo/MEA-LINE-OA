@@ -23,7 +23,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 
-from operations import ai, answers, identity
+from operations import ai, answers, identity, pii
 from operations.models import AIConfigVersion, ChatAnswer
 
 PROMPT_VERSION = "answer-v2"  # v2: full answer text (with hours), no particles
@@ -348,8 +348,12 @@ def _call_schema(profile, messages, schema, timeout):
         }
     started = time.monotonic()
     credential = profile.credential
-    data = ai._post(
-        f"{credential.base_url}/chat/completions", ai.decrypt_key(credential), body, timeout
+    data = ai.post(
+        f"{credential.base_url}/chat/completions",
+        ai.decrypt_key(credential),
+        body,
+        timeout,
+        "answer",
     )
     return ai._content(data), int((time.monotonic() - started) * 1000)
 
@@ -586,6 +590,7 @@ def run_once(version, sets, rows):
     return {"metrics": values, "passed": passes(values), "cases": scored}
 
 
+@pii.counted_as("eval")
 def run_gate(version, runs=RUNS):
     """Security suites on the current source, then runs over the frozen sets with today's
     approved answers (write mode: the key and the reply are both measured)."""

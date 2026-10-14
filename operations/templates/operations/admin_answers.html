@@ -53,13 +53,15 @@
   <p class="list-empty" data-list-empty="answers" hidden>ไม่พบคำตอบที่ตรงกับการค้นหา</p>
 </section>
 <section class="section" aria-labelledby="ans-new">
-  <details class="fold">
+  <details class="fold"{% if question %} open{% endif %}>
   <summary><span class="fold__title" id="ans-new">เพิ่มคำตอบใหม่</span></summary>
   <div class="fold__body">
+  {% if question %}<p class="notice">จากคำถามที่บอทตอบไม่ได้ (ถาม {{ question.count }} ครั้ง): <strong>{{ question.text }}</strong><br><span class="muted">บันทึกแล้วคำถามนี้จะถูกทำเครื่องหมายว่าเพิ่มเป็นคำตอบแล้ว</span></p>{% endif %}
   <form method="post" action="{% url 'admin-answers' %}">
     {% csrf_token %}
+    {% if question %}<input type="hidden" name="question" value="{{ question.pk }}">{% endif %}
     <div class="field"><label for="n-key">รหัส (ภาษาอังกฤษตัวเล็ก ไม่เว้นวรรค)</label><input id="n-key" name="key" pattern="[a-z0-9_\-]+" maxlength="40" required></div>
-    <div class="field"><label for="n-title">หัวข้อ</label><input id="n-title" name="title" maxlength="100" required></div>
+    <div class="field"><label for="n-title">หัวข้อ</label><input id="n-title" name="title" maxlength="100" required value="{{ question.text|truncatechars:100|default:'' }}"></div>
     <div class="field"><label for="n-text">ข้อความที่บอทตอบ</label><textarea id="n-text" name="text" rows="4" maxlength="1000" required></textarea></div>
     <div class="field"><label for="n-kw">คำสำคัญ (บรรทัดละคำ)</label><textarea id="n-kw" name="keywords" rows="3"></textarea></div>
     <div class="field"><label for="n-act">ต่อท้ายคำตอบด้วย</label><select id="n-act" name="action">{% for v, label in actions %}<option value="{{ v }}">{{ label }}</option>{% endfor %}</select></div>

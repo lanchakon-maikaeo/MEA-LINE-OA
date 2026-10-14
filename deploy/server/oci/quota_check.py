@@ -8,28 +8,50 @@ read only). `evaluate` is pure so it is tested without OCI (operations.tests.tes
 import json
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 GB = 1024**3
 
 
-def evaluate(usage, budget):
-    """Problems as (level, text); level "over" breaks the budget, "near" is an early warning."""
+def evaluate(usage, budget, today=None):
+    """Problems as (level, text); level "over" breaks the budget, "near" is an early warning.
+
+    While the trial credit lasts (ADR 0015) its shapes, OCPUs, memory and block storage are
+    allowed on top of Always Free; from credit.until on they count as over.
+    """
     problems = []
-    for shape in sorted(set(usage["shapes"]) - set(budget["allowed_shapes"])):
+    credit = budget.get("credit")
+    today = today or datetime.now(ZoneInfo("Asia/Bangkok")).date()
+    active = bool(credit) and today < date.fromisoformat(credit["until"])
+    allowed = set(budget["allowed_shapes"]) | (set(credit["shapes"]) if active else set())
+    for shape in sorted(set(usage["shapes"]) - allowed):
         problems.append(("over", f"shape not in the budget: {shape}"))
+    block_limit = budget["block_storage_gb"] + (credit["caps"]["block_gb"] if active else 0)
     checks = [
         ("A1 OCPUs", usage["a1_ocpus"], budget["a1_ocpus"]),
         ("A1 memory GB", usage["a1_memory_gb"], budget["a1_memory_gb"]),
-        ("block storage GB", usage["block_storage_gb"], budget["block_storage_gb"]),
+        ("block storage GB", usage["block_storage_gb"], block_limit),
         ("volume backups", usage["volume_backups"], budget["volume_backups"]),
         ("object storage GB", usage["object_storage_gb"], budget["object_storage_gb"]),
         ("load balancers", usage["load_balancers"], budget["load_balancers"]),
     ]
+    if active:
+        checks += [
+            ("credit OCPUs", usage.get("credit_ocpus", 0), credit["caps"]["ocpus"]),
+            ("credit memory GB", usage.get("credit_memory_gb", 0), credit["caps"]["memory_gb"]),
+        ]
     for name, used, limit in checks:
         if used > limit:
             problems.append(("over", f"{name}: {used} > {limit}"))
+    ends = date.fromisoformat(credit["until"]) if credit else None
+    if (
+        active
+        and usage.get("credit_ocpus", 0)
+        and today >= ends - timedelta(days=credit["warn_days_before"])
+    ):
+        problems.append(("near", f"trial credit ends {credit['until']}: move off the E4/E5 host"))
     if (
         budget["object_storage_gb_alert"]
         < usage["object_storage_gb"]
@@ -49,7 +71,7 @@ def evaluate(usage, budget):
     return problems
 
 
-def gather(tenancy, signer, region):  # pragma: no cover - needs OCI
+def gather(tenancy, signer, region, budget):  # pragma: no cover - needs OCI
     import oci
 
     config = {"region": region}
@@ -71,6 +93,8 @@ def gather(tenancy, signer, region):  # pragma: no cover - needs OCI
         "shapes": [],
         "a1_ocpus": 0,
         "a1_memory_gb": 0,
+        "credit_ocpus": 0,
+        "credit_memory_gb": 0,
         "block_storage_gb": 0,
         "volume_backups": 0,
         "object_storage_gb": 0,
@@ -86,6 +110,9 @@ def gather(tenancy, signer, region):  # pragma: no cover - needs OCI
             if instance.shape == "VM.Standard.A1.Flex":
                 usage["a1_ocpus"] += instance.shape_config.ocpus
                 usage["a1_memory_gb"] += instance.shape_config.memory_in_gbs
+            elif instance.shape in (budget.get("credit") or {}).get("shapes", []):
+                usage["credit_ocpus"] += instance.shape_config.ocpus
+                usage["credit_memory_gb"] += instance.shape_config.memory_in_gbs
         for ad in domains:
             for boot in page(
                 blocks.list_boot_volumes, availability_domain=ad, compartment_id=cid
@@ -115,7 +142,7 @@ def main():  # pragma: no cover - needs OCI
     budget = json.loads((Path(__file__).with_name("budget.json")).read_text())
     signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
     region = os.environ.get("OCI_REGION", "ap-singapore-1")
-    usage = gather(signer.tenancy_id, signer, region)
+    usage = gather(signer.tenancy_id, signer, region, budget)
     problems = evaluate(usage, budget)
     over = [text for level, text in problems if level == "over"]
     print(json.dumps({"usage": usage, "problems": problems}, indent=2))

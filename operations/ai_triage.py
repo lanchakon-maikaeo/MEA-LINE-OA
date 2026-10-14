@@ -22,7 +22,7 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from operations import ai, ai_harness, ai_screen, identity, policy, workflow
+from operations import ai, ai_harness, ai_screen, identity, pii, policy, workflow
 from operations.models import AIConfigVersion, AITriageRun, Case, EquipmentType
 
 logger = logging.getLogger(__name__)
@@ -270,8 +270,12 @@ def call(profile, messages, catalog, timeout):
         }
     started = time.monotonic()
     credential = profile.credential
-    data = ai._post(
-        f"{credential.base_url}/chat/completions", ai.decrypt_key(credential), body, timeout
+    data = ai.post(
+        f"{credential.base_url}/chat/completions",
+        ai.decrypt_key(credential),
+        body,
+        timeout,
+        "triage",
     )
     return ai._content(data), int((time.monotonic() - started) * 1000)
 
@@ -671,6 +675,7 @@ def run_once(version, sets, catalog, rules, now):
     return {"metrics": values, "passed": passes(values), "cases": scored}
 
 
+@pii.counted_as("eval")
 def run_gate(version, runs=RUNS):
     """Security suites on the current source, then three runs over the locked sets."""
     from operations import ai_eval

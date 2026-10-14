@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- deploy/healthcheck.sh every minute while this Mac is on (ADR 0015 Q13 a). Install with
+     make health-schedule; remove with launchctl bootout gui/$(id -u)/th.or.mea.faoj.health -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>th.or.mea.faoj.health</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@REPO@/deploy/healthcheck.sh</string>
+  </array>
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+  <key>StandardOutPath</key><string>@HOME@/Library/Logs/faoj-health.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/Library/Logs/faoj-health.log</string>
+</dict>
+</plist>

@@ -223,6 +223,19 @@ services:
       db: {condition: service_healthy}
     profiles: ["tools"]
 
+  # ADR 0015 (Q2): the ngrok static domain follows production from host to host, so LINE's
+  # webhook URL never changes. Only one agent may hold the domain: stop it on the old host first.
+  ngrok:
+    image: ngrok/ngrok:3@sha256:14d80d083e5b53145f416bbbd36238336c9de4016c43fd950eb2eb845670583b
+    env_file:
+      - ${FAOJ_ROOT}/env/ngrok.secret.env
+    command: ["http", "--url=${NGROK_DOMAIN:-none}", "http://caddy:8081", "--log=stdout", "--log-format=logfmt"]
+    depends_on: [caddy]
+    profiles: ["ngrok"]
+    mem_limit: 64m
+    restart: unless-stopped
+    logging: *logging
+
   clamav:
     image: clamav/clamav-debian:1.4@sha256:6d0680780fd29855cb7018f68272cb520821f614259e2066f8ec669069ac91b3
     volumes:

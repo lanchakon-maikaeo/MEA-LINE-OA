@@ -597,6 +597,78 @@ class ReplyTests(LineTestCase):
                 self.assertEqual(WebhookInbox.objects.get(pk=inbox_id).reply_status, status)
 
 
+class CatchUpTests(LineTestCase):
+    """ADR 0015 Q12: an answer that missed its reply token goes out once by push."""
+
+    def setUp(self):
+        super().setUp()
+        from operations.models import ChannelIdentity
+
+        for user in (ALICE, BOB):  # people who talked to the bot before the outage
+            ChannelIdentity.objects.get_or_create(
+                channel=ChannelIdentity.Channel.LINE, external_id=user
+            )
+
+    def expired(self, minutes_ago=0, user=ALICE):
+        self.post(self.text(user, "สวัสดี"))
+        inbox = WebhookInbox.objects.latest("id")
+        WebhookInbox.objects.filter(pk=inbox.pk).update(
+            reply_deadline=timezone.now() - timedelta(seconds=1),
+            occurred_at=timezone.now() - timedelta(minutes=minutes_ago),
+        )
+        return inbox.pk
+
+    def planned(self):
+        from operations.models import NotificationDelivery as N
+
+        return list(N.objects.filter(kind="catch_up", status="planned").order_by("id"))
+
+    def test_late_answer_is_planned_as_one_push_with_an_apology_after_ten_minutes(self):
+        conversation.send_reply(self.expired(minutes_ago=12), [conversation.text_message("a")])
+        texts_ = [d.text for d in self.planned()]
+        self.assertEqual(len(texts_), 2)
+        self.assertIn("ขอโทษที่ตอบช้า", texts_[0])
+        self.assertEqual(texts_[1], "a")
+        self.assertEqual(self.sent, [])  # pushed later by n8n, inside the push budget
+
+    def test_newer_answer_replaces_the_waiting_one_and_a_sent_one_is_not_repeated(self):
+        from operations.models import NotificationDelivery as N
+
+        conversation.send_reply(self.expired(), [conversation.text_message("old")])
+        conversation.send_reply(self.expired(), [conversation.text_message("new")])
+        self.assertEqual([d.text for d in self.planned()], ["new"])
+        self.assertEqual(N.objects.filter(kind="catch_up", status="skipped").count(), 1)
+        N.objects.filter(kind="catch_up", status="planned").update(
+            status="sent", sent_at=timezone.now()
+        )
+        conversation.send_reply(self.expired(), [conversation.text_message("again")])
+        self.assertEqual(self.planned(), [])
+
+    def test_refused_reply_token_is_caught_up_but_other_errors_are_not(self):
+        bad = line_api.LineApiError(400, '{"message":"Invalid reply token"}')
+        with patch.object(line_api, "reply", side_effect=bad):
+            conversation.send_reply(self.stored_live(), [conversation.text_message("x")])
+        self.assertEqual(len(self.planned()), 1)
+        with patch.object(line_api, "reply", side_effect=line_api.LineApiError(400, "bad")):
+            conversation.send_reply(self.stored_live(user=BOB), [conversation.text_message("y")])
+        self.assertEqual(len(self.planned()), 1)
+
+    def test_admin_can_turn_it_off(self):
+        from operations import options
+
+        options.change(None, options.CATCH_UP, "off", "ทดสอบปิดคำตอบที่ค้าง")
+        conversation.send_reply(self.expired(minutes_ago=30), [conversation.text_message("a")])
+        self.assertEqual(self.planned(), [])
+
+    def stored_live(self, user=ALICE):
+        self.post(self.text(user, "สวัสดี"))
+        inbox = WebhookInbox.objects.latest("id")
+        WebhookInbox.objects.filter(pk=inbox.pk).update(
+            reply_deadline=timezone.now() + timedelta(seconds=50)
+        )
+        return inbox.pk
+
+
 # --- Attachments ------------------------------------------------------------------------------
 
 

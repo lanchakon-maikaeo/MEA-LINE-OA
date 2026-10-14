@@ -13,6 +13,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from operations import (
+    ai_routing,
     coordination,
     identity,
     inventory,
@@ -21,6 +22,7 @@ from operations import (
     queues,
     registry,
     returns,
+    routing_words,
     workflow,
 )
 from operations.fulfilment import CANCEL_RESOLUTIONS
@@ -664,6 +666,9 @@ def build_form(action, st, params, demo=False):
                 True,
                 _divisions(case.owner_division_id),
                 initial if initial != case.owner_division.code else "",
+                help="ดูว่าแต่ละกองดูแลอะไรได้ที่เมนู 'หน้าที่ของกอง'"
+                if routing_words.teachable(case)
+                else "",
             )
         )
         add(
@@ -676,9 +681,20 @@ def build_form(action, st, params, demo=False):
             )
         )
         add(_reason(False, help_text="จำเป็นเมื่อเลือกกองต่างจากข้อเสนอ"))
+        if routing_words.teachable(case):
+            add(
+                Field(
+                    "keywords",
+                    "คำสำคัญให้ระบบจำ",
+                    initial=ai_routing.keyword_for(case),
+                    help=routing_words.KEYWORDS_HELP,
+                )
+            )
     elif action == "decide_routing":
         add(Field("division", "กองที่รับเรื่อง", "select", True, _divisions()))
         add(_reason(True))
+        if routing_words.teachable(case):
+            add(Field("keywords", "คำสำคัญให้ระบบจำ", help=routing_words.KEYWORDS_HELP))
     elif action == "set_section":
         add(
             Field(

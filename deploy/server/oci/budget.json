@@ -1,6 +1,8 @@
 {
-  "_comment": "OCI Always Free budget of E.2.1 (checked 8 Oct 2026). Changing it needs a review; Terraform defaults in deploy/oci must match (test_m12).",
-  "allowed_shapes": ["VM.Standard.A1.Flex"],
+  "_comment": "OCI Always Free budget of E.2.1 (checked 8 Oct 2026; staging boot-only 12 Oct 2026, OCI volumes are at least 50 GB). Changing it needs a review; Terraform defaults in deploy/oci must match (test_m12). ADR 0015 (14 Oct 2026): faoj-prod-e5 runs on the SGD 400 trial credit until credit.until; the account is never upgraded.",
+  "allowed_shapes": [
+    "VM.Standard.A1.Flex"
+  ],
   "a1_ocpus": 2,
   "a1_memory_gb": 12,
   "block_storage_gb": 200,
@@ -10,7 +12,45 @@
   "ocir_images_per_repo": 5,
   "load_balancers": 0,
   "instances": {
-    "faoj-prod": {"ocpus": 1, "memory_gb": 8, "boot_gb": 50, "data_gb": 70},
-    "faoj-staging": {"ocpus": 1, "memory_gb": 4, "boot_gb": 50, "data_gb": 30}
+    "faoj-prod": {
+      "ocpus": 1,
+      "memory_gb": 8,
+      "boot_gb": 50,
+      "data_gb": 70
+    },
+    "faoj-staging": {
+      "ocpus": 1,
+      "memory_gb": 4,
+      "boot_gb": 80,
+      "data_gb": 0
+    }
+  },
+  "credit": {
+    "until": "2026-11-10",
+    "amount_sgd": 400,
+    "alert_percents": [
+      50,
+      80
+    ],
+    "shapes": [
+      "VM.Standard.E5.Flex",
+      "VM.Standard.E4.Flex"
+    ],
+    "caps": {
+      "ocpus": 4,
+      "memory_gb": 32,
+      "block_gb": 200
+    },
+    "warn_days_before": 3,
+    "instances": {
+      "faoj-prod-e5": {
+        "shape": "VM.Standard.E5.Flex",
+        "ocpus": 2,
+        "memory_gb": 16,
+        "boot_gb": 50,
+        "data_gb": 100
+      }
+    },
+    "move_by": "2026-11-07"
   }
 }
