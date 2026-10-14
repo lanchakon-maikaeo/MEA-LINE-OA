@@ -370,7 +370,7 @@ deploy_e5() {
   check || die "fill in the secrets above first (on E5: sudo nano /srv/faoj/env/<file>)"
   source_tree
   build
-  say "faoj deploy on E5 (empty database; LINE still goes to the Mac)"
+  say "faoj deploy on E5 (before the cutover: an empty database; after it: production, brief maintenance)"
   cat <<'EOF' | as_root "'$APPROVAL'"
 set -euo pipefail
 # The faoj of the source just built, not the one of an older (or half-installed) release.
