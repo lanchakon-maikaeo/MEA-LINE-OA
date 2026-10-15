@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stand-in for gosu (M12): the upstream binary carries an old Go runtime with unfixed CVEs it never
+# reaches; setpriv from util-linux drops to the user and execs, which is all gosu does here.
+set -eu
+user=$1; shift
+exec setpriv --reuid="$user" --regid="$user" --init-groups "$@"

@@ -1,7 +1,7 @@
 name: mea-faoj-local
 services:
   db:
-    image: postgres:17-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
     environment:
       POSTGRES_DB: mea_demo
       POSTGRES_USER: mea_demo
@@ -67,7 +67,7 @@ services:
       start_period: 20s
       retries: 3
   n8n-db-init:
-    image: postgres:17-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:?Run make bootstrap first}
       N8N_DB_PASSWORD: ${N8N_DB_PASSWORD:?Run make bootstrap first}

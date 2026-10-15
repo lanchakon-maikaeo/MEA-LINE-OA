@@ -129,11 +129,51 @@ def registry_division():
     return Division.objects.filter(code=code, is_active=True).first() if code else None
 
 
+def per_division():
+    """ADR 0008 (real structure Q6, Q15): no registry unit; each division uploads its own SAP
+    exports and decides the registry discrepancies of its own facts and cases."""
+    return registry_division() is None
+
+
 def is_registry_staff(user):
-    division = registry_division()
-    if division is None or not getattr(user, "is_authenticated", False):
+    """Decides ส่วนต่างทะเบียน: the registry unit's staff, or (per division) any division's staff
+    for their own (see `may_decide`)."""
+    if not getattr(user, "is_authenticated", False):
         return False
-    return bool(identity.staff_scope(user).division_roles.get(division.pk))
+    scope = identity.staff_scope(user)
+    division = registry_division()
+    if division is None:
+        return scope.is_support or bool(scope.division_roles)
+    return scope.is_support or bool(scope.division_roles.get(division.pk))
+
+
+def home_divisions(d):
+    """The divisions a discrepancy belongs to: whose fact, whose case, and where it was sent."""
+    ids = {d.division_id}
+    if d.record_id:
+        ids.add(d.record.division_id)
+    if d.case_id:
+        ids.add(d.case.owner_division_id)
+    return ids - {None}
+
+
+def may_decide(user, d):
+    if not is_registry_staff(user):
+        return False
+    scope = identity.staff_scope(user)
+    return (
+        not per_division()
+        or scope.is_support
+        or bool(home_divisions(d) & set(scope.division_roles))
+    )
+
+
+def own_divisions(user):
+    """None for a full view (registry unit, ผู้ช่วยเหลือระบบ, admin); else the user's divisions."""
+    scope = identity.staff_scope(user)
+    if not per_division() or scope.is_support or scope.is_admin:
+        return None
+    return set(scope.division_roles)
 
 
 def case_condition(divisions):
@@ -981,9 +1021,10 @@ def reconcile(found_by=None, now=None):
     }
 
 
-def unreconciled(now=None):
+def unreconciled(now=None, divisions=None):
     """Q11: facts older than 7 days whose document is in no export and whose day no export
-    covers yet (a warning for registry staff, not a discrepancy)."""
+    covers yet (a warning for registry staff, not a discrepancy); `divisions` narrows to the
+    facts those divisions recorded (ADR 0008)."""
     now = now or timezone.now()
     spans = coverage()
     known = set(
@@ -992,6 +1033,8 @@ def unreconciled(now=None):
         .distinct()
     )
     old = RegistryRecord.objects.filter(recorded_at__lt=now - timedelta(days=UNRECONCILED_DAYS))
+    if divisions is not None:
+        old = old.filter(division_id__in=divisions)
     return [
         r
         for r in old.select_related("case").order_by("recorded_at")
@@ -1035,8 +1078,13 @@ def _reason(text, message="ระบุเหตุผล"):
     return text[:2000]
 
 
-def _registry_only(actor):
-    _require(is_registry_staff(actor), "เฉพาะเจ้าหน้าที่กองทะเบียนตัดสินส่วนต่างทะเบียน")
+def _registry_only(actor, d=None):
+    _require(
+        is_registry_staff(actor) and (d is None or may_decide(actor, d)),
+        "เฉพาะเจ้าหน้าที่กองทะเบียนตัดสินส่วนต่างทะเบียน"
+        if not per_division()
+        else "เฉพาะกองเจ้าของข้อเท็จจริงตัดสินส่วนต่างทะเบียนนี้",
+    )
 
 
 def _close(d, actor, resolution, reason, now):
@@ -1051,6 +1099,7 @@ def fix_number(actor, discrepancy_id, number, reason):
     registry's number, and the comparison runs again at once."""
     _registry_only(actor)
     d = _locked(discrepancy_id)
+    _registry_only(actor, d)
     if d.status == D.Status.RESOLVED or d.record is None:
         raise ValidationError("แก้เลขเอกสารได้เฉพาะส่วนต่างที่ยังเปิดและผูกกับบันทึก")
     number = (number or "").strip()[:64]
@@ -1081,6 +1130,7 @@ def send_to_division(actor, discrepancy_id, note_text):
     """(ข) The division that recorded the fact checks it (not a งานย่อย: the case may be closed)."""
     _registry_only(actor)
     d = _locked(discrepancy_id)
+    _registry_only(actor, d)
     if d.status not in (D.Status.OPEN, D.Status.WAITING_REGISTRY):
         raise ValidationError("ส่งให้กองตรวจได้เฉพาะส่วนต่างที่รอตรวจ")
     division_id = (
@@ -1123,6 +1173,7 @@ def wait_for_registry(actor, discrepancy_id, reference, reason):
     """(ค) This system is right; SAP will be corrected. Closes by itself once an export agrees."""
     _registry_only(actor)
     d = _locked(discrepancy_id)
+    _registry_only(actor, d)
     if d.status not in (D.Status.OPEN, D.Status.WITH_DIVISION):
         raise ValidationError("ส่วนต่างนี้ไม่ได้รอตรวจ")
     if d.kind == D.Kind.EVIDENCE:
@@ -1148,6 +1199,7 @@ def accept(actor, discrepancy_id, reason):
     """(ง) Accepted with a reason; not raised again for the same fact and kind."""
     _registry_only(actor)
     d = _locked(discrepancy_id)
+    _registry_only(actor, d)
     if d.status == D.Status.RESOLVED:
         raise ValidationError("ส่วนต่างนี้ปิดแล้ว")
     _close(d, actor, D.Resolution.ACCEPTED, _reason(reason), timezone.now())
@@ -1212,10 +1264,20 @@ def after_scan(attachment):
 
 
 def visible_discrepancies(user):
-    """Registry staff and admins see all; another division sees what was sent to it."""
+    """Registry staff and admins see all; another division sees what was sent to it. Per
+    division (ADR 0008) each division sees every discrepancy of its own facts and cases."""
+    divisions = list(identity.staff_scope(user).division_roles)
+    if per_division() and may_open(user):
+        own = own_divisions(user)
+        if own is None:
+            return D.objects.all()
+        return D.objects.filter(
+            Q(division_id__in=own)
+            | Q(record__division_id__in=own)
+            | Q(case__owner_division_id__in=own)
+        )
     if may_open(user):
         return D.objects.all()
-    divisions = list(identity.staff_scope(user).division_roles)
     return D.objects.filter(status=D.Status.WITH_DIVISION, division_id__in=divisions)
 
 
@@ -1228,10 +1290,13 @@ def counts(user):
     }
 
 
-def report(now=None):
-    """Discrepancy report (acceptance): open by kind, age, and facts not reconciled yet."""
+def report(now=None, user=None):
+    """Discrepancy report (acceptance): open by kind, age, and facts not reconciled yet; per
+    division (ADR 0008) only the user's own."""
     now = now or timezone.now()
-    open_items = D.objects.filter(status__in=OPEN)
+    seen = visible_discrepancies(user) if user is not None else D.objects.all()
+    own = own_divisions(user) if user is not None else None
+    open_items = seen.filter(status__in=OPEN)
     by_kind = {kind: 0 for kind in D.Kind.values}
     for kind in open_items.values_list("kind", flat=True):
         by_kind[kind] += 1
@@ -1245,8 +1310,12 @@ def report(now=None):
         "older_30": open_items.filter(opened_at__lt=now - timedelta(days=30)).count(),
         "waiting_registry": open_items.filter(status=D.Status.WAITING_REGISTRY).count(),
         "with_division": open_items.filter(status=D.Status.WITH_DIVISION).count(),
-        "unreconciled": len(unreconciled(now)),
-        "records": RegistryRecord.objects.count(),
+        "unreconciled": len(unreconciled(now, own)),
+        "records": (
+            RegistryRecord.objects.filter(division_id__in=own)
+            if own is not None
+            else RegistryRecord.objects
+        ).count(),
         "last_export": last["exported"],
         "covered_until": last["until"],
     }

@@ -45,6 +45,7 @@ SUBJECTS = {
     "staff_escalated": "เรื่องถูกยกระดับมาถึงคุณ",
     "staff_hazard": "เรื่องใหม่แจ้งเหตุอันตราย (ฉุกเฉิน)",
     "staff_registry": "พบส่วนต่างทะเบียนใหม่จากไฟล์ SAP",  # M11 Q19: one per import
+    "staff_support": "ผู้ช่วยเหลือระบบทำแทนกองในเรื่องของกอง",  # ADR 0007
 }
 CRITICAL = {"staff_hazard", "staff_escalated", "staff_routing"}
 
@@ -57,9 +58,11 @@ def enabled():
 
 
 def _with_email(users):
+    """Active people, once each; email planning skips those without an address, and staff
+    LINE alerts (ADR 0010) reach those with a linked LINE."""
     seen, people = set(), []
     for user in users:
-        if user.pk not in seen and user.is_active and user.email:
+        if user.pk not in seen and user.is_active:
             seen.add(user.pk)
             people.append(user)
     return people
@@ -89,7 +92,7 @@ def routing_holders(case, now=None):
 
 
 def _assignee_or_owner(case):
-    if case.assignee_id and case.assignee.email and case.assignee.is_active:
+    if case.assignee_id and case.assignee.is_active:
         return [case.assignee]
     return members(case.owner_division_id)
 
@@ -117,13 +120,19 @@ def _text(kind, case, detail=""):
 def plan(kind, key, case, users, detail="", text=None):
     """One email per recipient for one situation; the same key never plans twice. Nothing is
     planned while staff email is off, so the queue holds no mail that will never be sent.
-    `case` is None only for situations about no single case (M11 registry summary)."""
+    `case` is None only for situations about no single case (M11 registry summary). Staff
+    with a linked LINE get the important ones there too (ADR 0010), whether email is on or not."""
+    from operations import staff_line  # local: staff_line reads subjects from this module
+
+    staff_line.plan(kind, key, case, users)
     if not enabled():
         return []
     now = timezone.now()
     text = text or _text(kind, case, detail)
     planned = []
     for user in users:
+        if not user.email:
+            continue
         try:
             with transaction.atomic():
                 delivery = N.objects.create(
@@ -163,10 +172,10 @@ def plan_for_event(event):
         )
         if case is None or floor != "P0":
             return []
-        intake = Division.objects.filter(is_intake=True, is_active=True).first()
-        if intake is None:
-            return []
-        return plan("staff_hazard", f"hazard:{case.pk}", case, members(intake.pk))
+        # The desk that holds new cases: intake, or (ADR 0008) the owner division itself.
+        desk = Division.objects.filter(is_intake=True, is_active=True).first()
+        desk_id = desk.pk if desk else case.owner_division_id
+        return plan("staff_hazard", f"hazard:{case.pk}", case, members(desk_id))
     if event.event_type != orchestration.EVENT_DECISION:
         return []
     decision = (
@@ -176,6 +185,28 @@ def plan_for_event(event):
     )
     if decision is None:
         return []
+    return _plan_support(decision) + _plan_decision(decision)
+
+
+def _plan_support(decision):
+    """ADR 0007: the owner division's supervisors hear of each การทำแทนกอง."""
+    acted = decision.data.get("support") if isinstance(decision.data, dict) else None
+    if not acted:
+        return []
+    case = decision.case
+    from operations.casepage import action_label
+
+    detail = f"ขั้น: {action_label(decision.action)} · เหตุผล: {decision.reason}"
+    return plan(
+        "staff_support",
+        f"support:{decision.action_id}",
+        case,
+        members(case.owner_division_id, [Role.SUPERVISOR]),
+        detail,
+    )
+
+
+def _plan_decision(decision):
     case, key = decision.case, f"decision:{decision.action_id}"
     if decision.action == "request_handoff":
         handoff = Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).first()

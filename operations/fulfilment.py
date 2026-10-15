@@ -17,7 +17,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
 
-from operations import coordination, inventory, policy, registry
+from operations import coordination, identity, inventory, policy, registry
 from operations.contracts import (
     MAX_LINES,
     STAFF_CHANNELS,
@@ -36,7 +36,6 @@ from operations.models import (
     Decision,
     Delivery,
     DeliveryLine,
-    Division,
     FulfilmentEntry,
     IssuedSerial,
     Receipt,
@@ -120,10 +119,7 @@ def _ledger(ctx, case, line, kind, quantity, reason="", serials=(), delivery=Non
 
 
 def _member(ctx, division_id, roles=None):
-    if ctx.scope is None:
-        return False
-    held = ctx.scope.division_roles.get(division_id, frozenset())
-    return bool(held if roles is None else held & set(roles))
+    return identity.holds(ctx.scope, division_id, roles)
 
 
 def covering_grant(user, activity, case, line, quantity=None, now=None):
@@ -158,7 +154,8 @@ def _require_grant(ctx, activity, case, line, quantity=None):
 
 
 def _not_filer(ctx, case):
-    if ctx.user is not None and case.submitted_by_id == ctx.user.pk:
+    # Separation of duties binds everyone but ผู้ช่วยเหลือระบบ (ADR 0007).
+    if ctx.user is not None and identity.separated(ctx) and case.submitted_by_id == ctx.user.pk:
         fail(ErrorCode.FORBIDDEN, "ผู้บันทึกเรื่องแทนผู้แจ้งไม่อนุมัติเรื่องนั้นเอง (Q4)")
 
 
@@ -317,7 +314,7 @@ def _issue_plan(ctx, lines, payload):
         quantity = _quantity(row.get("quantity"), line.item)
         if line.approved_quantity is None or quantity > line.outstanding:
             fail(ErrorCode.VALIDATION_ERROR, f"รายการ {line.line_no} จ่ายเกินส่วนค้างจ่ายตามอนุมัติไม่ได้")
-        if line.approved_by_id == ctx.user.pk:
+        if identity.separated(ctx) and line.approved_by_id == ctx.user.pk:
             fail(ErrorCode.FORBIDDEN, "ผู้อนุมัติรายการไม่บันทึกจ่ายรายการนั้นเอง (Q4)")
         serials = clean_serials(row.get("serials"))
         if line.item.is_serialized:
@@ -381,7 +378,7 @@ def issue(ctx, case, payload, reason, target):
                     ErrorCode.VALIDATION_ERROR,
                     f"{line.item.code} มีไม่พอสำหรับทุกเรื่อง จ่ายได้ตามที่ผู้มีอำนาจจัดสรรให้เรื่องนี้เท่านั้น (Q8)",
                 )
-            if allocation.allocated_by_id == ctx.user.pk:
+            if identity.separated(ctx) and allocation.allocated_by_id == ctx.user.pk:
                 fail(ErrorCode.FORBIDDEN, "ผู้จัดสรรไม่บันทึกจ่ายจากการจัดสรรของตนเอง (Q20)")
             allocations[line.pk] = allocation
     if mode == inventory.FAKE:
@@ -527,15 +524,22 @@ def confirm(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "result is full or mismatch.")
     channel, note, requester, recorded_by = Case.Channel.LINE, "", ctx.requester, None
     if ctx.requester is None:
-        intake = Division.objects.filter(is_intake=True).first()
-        if intake is None or not _member(ctx, intake.pk):
-            fail(ErrorCode.FORBIDDEN, "เจ้าหน้าที่กองรับเรื่องกลางบันทึกการยืนยันรับแทนผู้แจ้งได้ (Q4)")
+        # Intake staff, or (ADR 0008, no intake) the owner division's staff.
+        intake = identity.intake_division()
+        desk = intake.pk if intake else case.owner_division_id
+        if not _member(ctx, desk):
+            fail(
+                ErrorCode.FORBIDDEN,
+                "เจ้าหน้าที่กองรับเรื่องกลางบันทึกการยืนยันรับแทนผู้แจ้งได้ (Q4)"
+                if intake
+                else "เจ้าหน้าที่กองเจ้าภาพบันทึกการยืนยันรับแทนผู้แจ้งได้",
+            )
         channel = payload.get("channel")
         if channel not in STAFF_CHANNELS:
             fail(ErrorCode.VALIDATION_ERROR, "channel must be phone, letter or counter.")
         note = clean_text(payload, "intake_note", True)
         recorded_by = ctx.user
-        if delivery.issued_by_id == ctx.user.pk:
+        if identity.separated(ctx) and delivery.issued_by_id == ctx.user.pk:
             fail(ErrorCode.FORBIDDEN, "ผู้จ่ายไม่ยืนยันรับการส่งมอบของตนเอง (Q4)")
     if delivery.status not in {Delivery.Status.AWAITING, Delivery.Status.MISMATCH}:
         fail(ErrorCode.VALIDATION_ERROR, "การส่งมอบนี้ยืนยันหรือปิดแล้ว")
@@ -589,7 +593,7 @@ def resolve_discrepancy(ctx, case, payload, reason, target):
             fail(ErrorCode.FORBIDDEN, "สมาชิกกองที่รับผิดชอบรายการเป็นผู้บันทึกผลส่วนต่าง")
     if delivery.status != Delivery.Status.MISMATCH:
         fail(ErrorCode.VALIDATION_ERROR, "การส่งมอบนี้ไม่มีส่วนต่างที่รอผล")
-    if delivery.issued_by_id == ctx.user.pk:
+    if identity.separated(ctx) and delivery.issued_by_id == ctx.user.pk:
         fail(ErrorCode.FORBIDDEN, "ผู้จ่ายของการส่งมอบนี้ไม่ปิดส่วนต่างของตนเอง (Q18)")
     kind = payload.get("resolution")
     if kind not in Delivery.Resolution.values:

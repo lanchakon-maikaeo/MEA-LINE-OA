@@ -1,11 +1,14 @@
+import re
 from datetime import datetime
 
+from django.contrib import messages
 from django.contrib.auth import logout
+from django.db import IntegrityError, transaction
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils import timezone
 
-from operations.models import StaffProfile
+from operations.models import FormSubmission, StaffProfile
 
 SESSION_AUTH_AT = "operations.auth_at"
 # Paths a user with a forced password change may still reach.
@@ -71,4 +74,42 @@ class ContentSecurityPolicyMiddleware:
         response = self.get_response(request)
         response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         response.headers.setdefault("Referrer-Policy", "same-origin")
+        return response
+
+
+FORM_KEY = re.compile(r"^[A-Za-z0-9-]{16,64}$")
+FORM_DONE_COOKIE = "faoj_form_done"
+
+
+class FormOnceMiddleware:
+    """ADR 0015 Q21: a staff form posted again with the same `_form_key` (added by app.js) is
+    not applied twice; the person lands where the first submit went. After a submit that went
+    through, a short cookie tells app.js to drop the draft it kept for that form."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        key = request.POST.get("_form_key", "") if request.method == "POST" else ""
+        if not key or not FORM_KEY.match(key) or not request.user.is_authenticated:
+            return self.get_response(request)
+        try:
+            with transaction.atomic():
+                row = FormSubmission.objects.create(
+                    key=key, user=request.user, path=request.path[:300]
+                )
+        except IntegrityError:
+            first = FormSubmission.objects.filter(user=request.user, key=key).first()
+            messages.info(request, "รายการนี้บันทึกไปแล้ว ระบบไม่บันทึกซ้ำ")
+            return redirect((first.location if first else "") or request.path)
+        response = self.get_response(request)
+        if 300 <= response.status_code < 400:
+            FormSubmission.objects.filter(pk=row.pk).update(
+                location=response.get("Location", "")[:500]
+            )
+            response.set_cookie(
+                FORM_DONE_COOKIE, key, max_age=300, samesite="Lax", secure=request.is_secure()
+            )
+        else:  # form errors (200) or a failure: the person may correct it and send again
+            FormSubmission.objects.filter(pk=row.pk).delete()
         return response

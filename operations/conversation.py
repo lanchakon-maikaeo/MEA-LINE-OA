@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Exists, F, OuterRef, Q
+from django.db.models import Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from operations import identity as identity_services
@@ -56,9 +56,30 @@ MAX_LINES = 50
 CASE_NUMBER = re.compile(r"^[WRP]\d{2}-\d{6}$")
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 
-KIND_LABELS = {K.WITHDRAWAL: "เบิก", K.RETURN: "ส่งคืน", K.PROBLEM: "ปัญหาการใช้งาน"}
-KIND_SHORT = {K.WITHDRAWAL: "เบิก", K.RETURN: "คืน", K.PROBLEM: "ปัญหา"}
+KIND_LABELS = {K.WITHDRAWAL: "เบิก", K.RETURN: "ส่งคืน", K.PROBLEM: "แจ้งปัญหา/ข้อเสนอแนะ"}
+KIND_SHORT = {K.WITHDRAWAL: "เบิก", K.RETURN: "คืน", K.PROBLEM: "ปัญหา/ข้อเสนอแนะ"}
 KIND_ORDER = [K.WITHDRAWAL, K.RETURN, K.PROBLEM]
+# หมวดเรื่อง of แจ้งปัญหา/ข้อเสนอแนะ (real structure Q3; 10 Oct 2569 Q1): equipment topics lead to
+# the items, การใช้ไฟฟ้า and ข้อเสนอแนะ straight to the story. A topic shows only while the
+# policy names an owner for it, so the list follows the rules (ADR 0009).
+TOPIC_LABELS = {
+    "meter": "มิเตอร์",
+    "transformer": "หม้อแปลง",
+    "other": "อุปกรณ์อื่น",
+    "usage": "การใช้ไฟฟ้า",
+    "suggestion": "ข้อเสนอแนะ",
+}
+TOPIC_NOTES = {"usage": " (ลักใช้ไฟ ไฟแพง ร้องเรียน)"}
+SUGGESTION_FIELDS = [
+    ("description", "พิมพ์ข้อเสนอแนะได้เลย", True),
+    ("impact", "ถ้ามีรายละเอียดเพิ่ม เช่น สถานที่หรืองานที่เกี่ยวข้อง พิมพ์ต่อได้ หรือกดข้าม", False),
+    ("related_case_number", "เกี่ยวกับเรื่องเดิมไหม เลือกเรื่อง หรือกดข้าม", False),
+]
+USAGE_FIELDS = [
+    ("description", "เล่าเรื่องที่พบ เช่น สถานที่ สิ่งที่เห็น ช่วงเวลา", True),
+    ("impact", "ข้อมูลเพิ่มเติม เช่น เลขผู้ใช้ไฟ (CA) ถ้ามี หรือกดข้าม", False),
+    ("related_case_number", "เกี่ยวกับเรื่องเดิมไหม เลือกเรื่อง หรือกดข้าม", False),
+]
 CATEGORY_LABELS = {
     EquipmentType.Category.METER: "มิเตอร์",
     EquipmentType.Category.TRANSFORMER: "หม้อแปลง",
@@ -77,7 +98,7 @@ FIELDS = {
         ("source_reference", "เลขเอกสารเบิกเดิม (ถ้ามี) หรือกดข้าม", False),
     ],
     K.PROBLEM: [
-        ("description", "อธิบายอาการหรือปัญหาที่พบ", True),
+        ("description", "อธิบายปัญหาที่พบ หรือข้อเสนอแนะ", True),
         ("impact", "ผลกระทบต่อการทำงานหรือผู้ใช้ไฟ (ถ้ามี) หรือกดข้าม", False),
         ("related_case_number", "เกี่ยวกับเรื่องเดิมไหม เลือกเรื่อง หรือกดข้าม", False),
     ],
@@ -88,12 +109,34 @@ FIELD_LABELS = {
     "condition": "สภาพ",
     "reason": "เหตุผล",
     "source_reference": "เอกสารเบิกเดิม",
-    "description": "อาการ/ปัญหา",
+    "description": "ปัญหา/ข้อเสนอแนะ",
     "impact": "ผลกระทบ",
     "related_case_number": "เรื่องที่เกี่ยวข้อง",
 }
+# Story topics ask different questions, so their answers carry their own labels.
+TOPIC_FIELD_LABELS = {
+    "suggestion": {"description": "ข้อเสนอแนะ", "impact": "รายละเอียดเพิ่ม"},
+    "usage": {"description": "เรื่องที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
+}
 MENU = [("ส่งเรื่องใหม่", "m=new"), ("เรื่องของฉัน", "m=mine"), ("ติดตามเรื่อง", "m=track")]
 MENU_WORDS = {label: data for label, data in MENU}
+# What typed text reads as besides an answer to the bot's question (ADR 0012): a question to the
+# bot, or a new request. Question words that also end plain descriptions ("ไม่รู้เป็นอะไร",
+# "ทำไม") are left out on purpose; "ไหม้" (burnt) is not "ไหม".
+_ASK = (
+    r"(?:ไหม|มั้ย|มั๊ย|หรือเปล่า|รึเปล่า|หรือยัง|รึยัง|หรือไม่|ยังไง|อย่างไร|ไง|เมื่อไร|"
+    r"เมื่อไหร่|ไหน|ได้บ้าง|กี่\S*)"
+)
+_TAIL = r"(?:\s*(?:แล้ว|ครับ|ค่ะ|คะ|คับ|ฮะ|จ้ะ|จ้า|นะ|หน่อย|ล่ะ))*\s*[?？]*\s*$"
+# Words that ask wherever they stand ("ต้องรอนานแค่ไหนกว่าจะได้ของ"; found with the live model).
+_ASK_ANYWHERE = (
+    r"[?？]|(?:แค่ไหน|เมื่อไร|เมื่อไหร่|กี่โมง|ถึงไหน|ได้ไหม|ได้มั้ย|หรือยัง|หรือเปล่า|รึเปล่า)"
+    r"(?![\u0e48-\u0e4b])"  # "ได้ไหม้" is burnt, not a question
+)
+QUESTION = re.compile(rf"{_ASK}{_TAIL}|^\s*ขอ\S*.*หน่อย{_TAIL}|{_ASK_ANYWHERE}")
+REQUEST = re.compile(r"^\s*(?:(?:ขอ|อยาก|ต้องการ)\s*(?:เบิก|คืน|ส่งคืน|แจ้ง)|เบิก|ส่งคืน|แจ้งปัญหา|แจ้งเรื่อง)")
+NAME_EXAMPLE = "เช่น สมชาย ใจดี"
+SELF_INTRODUCTION = re.compile(r"^(?:ผม|ดิฉัน|หนู|ฉัน|กระผม)?\s*ชื่อ\s*")  # "ผมชื่อ สมชาย ใจดี"
 
 
 # --- Message building --------------------------------------------------------------------------
@@ -104,7 +147,14 @@ def _fit(label, limit):
     return label if len(label) <= limit else label[: limit - 1] + "…"
 
 
+LOCATION = "@location"  # a quick reply that opens LINE's location picker
+
+
 def _postback(label, data):
+    if data == LOCATION:
+        return {"type": "action", "action": {"type": "location", "label": _fit(label, 20)}}
+    if data.startswith("https://") or data.startswith("http://"):
+        return {"type": "action", "action": {"type": "uri", "label": _fit(label, 20), "uri": data}}
     return {
         "type": "action",
         "action": {
@@ -162,6 +212,8 @@ class Turn:
     now: object
     replies: list = field(default_factory=list)
     requester: Requester | None = None
+    anonymous: bool = False  # ผู้แจ้งไม่ระบุตัวตน (ADR 0010): problems and suggestions only
+    internal: bool = False  # ผู้แจ้งภายใน (Q8): staff reporting in their division's name
 
     def say(self, text, quick=None):
         self.replies.append(text_message(text, quick))
@@ -216,9 +268,18 @@ def _dispatch(inbox):
         return [], True
     if inbox.event_type == "follow":
         ChannelIdentity.objects.filter(pk=identity.pk).update(is_following=True)
-        turn.say("ยินดีต้อนรับสู่ช่องทางรับเรื่องเบิก ส่งคืน และแจ้งปัญหาอุปกรณ์ถึง ฝอจ.")
+        turn.say("ช่องทางนี้รับเรื่องเบิก ส่งคืน แจ้งปัญหา และข้อเสนอแนะถึง ฝอจ.")
+    if _staff_turn(turn):
+        return turn.replies, True
     if identity.status != ChannelIdentity.Status.ACTIVE:
-        _registration(turn)
+        anonymous = _anonymous_requester(turn)
+        if anonymous is None:
+            _registration(turn)
+            return turn.replies, True
+        turn.requester, turn.anonymous = anonymous, True
+        _requester_turn(turn)
+        conversation.updates_seen_at = timezone.now()
+        conversation.save(update_fields=["updates_seen_at", "updated_at"])
         return turn.replies, True
     requester = identity.requester
     if requester.status != Requester.Status.ACTIVE:
@@ -240,6 +301,141 @@ def _event_text(turn):
     if turn.inbox.event_type == "message" and message.get("type") == "text":
         return str(message.get("text", ""))
     return None
+
+
+def _event_location(turn):
+    """(latitude, longitude) of a location message the user chose to send, else None."""
+    message = turn.event.get("message") or {}
+    if turn.inbox.event_type != "message" or message.get("type") != "location":
+        return None
+    try:
+        lat, lng = float(message["latitude"]), float(message["longitude"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    return round(lat, 6), round(lng, 6)
+
+
+STAFF_WORDS = {"งานของกอง", "เจ้าหน้าที่"}
+LINK_CODE = re.compile(r"^เชื่อม\s*([0-9๐-๙]{6})$")
+
+
+def _staff_turn(turn):
+    """เจ้าหน้าที่ใน LINE (ADR 0010): linking, the staff menu and staff buttons. Returns True when
+    this event belonged to the staff side; a LINE that is also a requester keeps that side."""
+    from operations import employees, options, staff_line
+
+    text = _event_text(turn)
+    command = " ".join(text.split()) if text is not None else ""
+    prompt = turn.conversation.prompt
+    match = LINK_CODE.match(command)
+    if match:
+        user, reason = staff_line.link_with_code(
+            turn.identity, match.group(1).translate(THAI_DIGITS)
+        )
+        if user is None:
+            turn.say(
+                "ลองรหัสผิดครบจำนวนของวันนี้แล้ว"
+                if reason == "locked"
+                else "รหัสไม่ถูกต้องหรือหมดอายุ ขอรหัสใหม่จากหน้าเว็บ บัญชีของฉัน"
+            )
+        else:
+            turn.say("เชื่อม LINE กับบัญชีเจ้าหน้าที่แล้ว พิมพ์ 'งานของกอง' เพื่อดูงาน")
+        return True
+    if command == "เชื่อมบัญชีเจ้าหน้าที่":
+        if options.get(options.STAFF_LINK) == "code_or_employee" and employees.has_directory():
+            turn.set_prompt("staff_emp")
+            turn.say("พิมพ์รหัสพนักงานของคุณ หรือพิมพ์ เชื่อม ตามด้วยรหัส 6 หลักจากหน้าเว็บ")
+        else:
+            turn.say("เข้าเว็บ บัญชีของฉัน กด 'เชื่อม LINE' แล้วพิมพ์ เชื่อม ตามด้วยรหัส 6 หลักที่ได้")
+        return True
+    if prompt == "staff_emp" and command:
+        turn.set_prompt("staff_check", employee_id=command[:32])
+        turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
+        return True
+    if prompt == "staff_check" and command:
+        employee_id = turn.conversation.prompt_data.get("employee_id", "")
+        user, reason = staff_line.link_with_employee(turn.identity, employee_id, command)
+        turn.set_prompt()
+        if user is not None:
+            turn.say("เชื่อม LINE กับบัญชีเจ้าหน้าที่แล้ว พิมพ์ 'งานของกอง' เพื่อดูงาน")
+        elif reason == "no_account":
+            turn.say("รหัสพนักงานนี้ยังไม่ได้ผูกกับบัญชีเจ้าหน้าที่ ให้แอดมินใส่รหัสพนักงานในบัญชีก่อน")
+        else:
+            turn.say("ข้อมูลไม่ตรงทะเบียนพนักงาน ใช้รหัส 6 หลักจากหน้าเว็บแทนได้")
+        return True
+    user = staff_line.staff_of(turn.identity)
+    if user is None:
+        return False
+    if command == "เลิกเชื่อมบัญชีเจ้าหน้าที่":
+        staff_line.unlink(turn.identity)
+        turn.say("เลิกเชื่อม LINE กับบัญชีเจ้าหน้าที่แล้ว")
+        return True
+    token, _ = _token(turn)
+    if token is not None and token.action == "staff_menu":
+        staff_line.menu(turn, user)
+        return True
+    if token is not None and token.action == "staff_case":
+        case = staff_line._case_for(user, case_id=token.value.get("case"))
+        if case is None:
+            turn.say("ไม่พบเรื่องนี้ในงานของคุณแล้ว")
+        else:
+            staff_line.case_detail(turn, user, case)
+        return True
+    if token is not None and token.action == "staff_act":
+        case = staff_line._case_for(user, case_id=token.value.get("case"))
+        if case is None:
+            turn.say("ไม่พบเรื่องนี้ในงานของคุณแล้ว")
+        else:
+            staff_line.act(turn, user, case, token.value.get("action", ""))
+        return True
+    if token is not None and token.action == "staff_report":
+        turn.requester = staff_line.internal_requester(turn.identity, user)
+        turn.anonymous = False
+        turn.internal = True
+        draft = _new_draft(turn)
+        _ask(turn, draft)
+        return True
+    if prompt == "staff_info" and command:
+        case = staff_line._case_for(user, case_id=turn.conversation.prompt_data.get("case"))
+        if case is not None:
+            staff_line.act(turn, user, case, "request_info", command[:2000])
+        else:
+            turn.set_prompt()
+            turn.say("ไม่พบเรื่องนี้ในงานของคุณแล้ว")
+        return True
+    if command in STAFF_WORDS:
+        staff_line.menu(turn, user)
+        return True
+    if command and CASE_NUMBER.fullmatch(command.upper()) and turn.identity.requester_id is None:
+        case = staff_line._case_for(user, number=command.upper())
+        if case is not None:
+            staff_line.case_detail(turn, user, case)
+            return True
+    if turn.identity.status != ChannelIdentity.Status.ACTIVE:
+        # A staff-only LINE: everything else shows the staff menu.
+        staff_line.menu(turn, user)
+        return True
+    return False
+
+
+def _anonymous_requester(turn):
+    """The anonymous reporter of this LINE account while ตัวเลือกระบบ allows it (ADR 0010),
+    unless the user is registering or asks to start over (registration offers both again)."""
+    from operations import options
+
+    if options.get(options.ANONYMOUS) != "on":
+        return None
+    requester = Requester.objects.filter(anonymous_identity=turn.identity).first()
+    if requester is None or turn.conversation.prompt.startswith("reg_"):
+        return None
+    token, _ = _token(turn)
+    if token is not None and (token.action.startswith("reg_") or token.action == "anon_start"):
+        return None
+    if (turn.event.get("postback") or {}).get("data") == "m=new":
+        return None
+    return requester
 
 
 def _token(turn):
@@ -267,34 +463,59 @@ def _registration(turn):
             return
         turn.say(
             f"คำขอลงทะเบียนของคุณ ({latest.submitted_name}, "
-            f"{latest.requested_district.name}) รอแอดมินรับรอง\n"
+            f"{latest.requested_district.name}) รอเจ้าหน้าที่รับรอง\n"
             "ระหว่างนี้ยังส่งหรือดูเรื่องไม่ได้",
             [turn.button("ยกเลิกคำขอ", "reg_cancel")],
         )
         return
     prompt = turn.conversation.prompt
+    data = dict(turn.conversation.prompt_data or {})
+    if token is not None and token.action == "anon_start":
+        return _start_anonymous(turn)
     if prompt == "reg_district" and token is not None and token.action == "reg_district":
-        name = turn.conversation.prompt_data.get("name", "")
-        identity_services.submit_registration(LINE, identity.external_id, name, token.value["code"])
-        turn.set_prompt()
-        turn.say("ส่งคำขอลงทะเบียนแล้ว รอแอดมิน ฝอจ. รับรอง\nกด 'เรื่องของฉัน' เพื่อดูสถานะได้ทุกเมื่อ")
+        data["district"] = token.value["code"]
+        return _registration_next(turn, data)
+    if prompt == "reg_district" and token is not None and token.action == "reg_rename":
+        turn.set_prompt("reg_name")
+        turn.say(f"พิมพ์ชื่อและนามสกุลใหม่ เว้นวรรคระหว่างกัน {NAME_EXAMPLE}")
         return
     text = _event_text(turn)
+    if prompt == "reg_district" and text is not None and data.get("name"):
+        return _ask_district(turn, data["name"])  # typed instead of choosing: the list again
+    if prompt == "reg_employee":
+        if token is not None and token.action == "reg_other":
+            return _registration_next(turn, {**data, "checked": True})
+        if text and text.strip():
+            data["employee_id"] = text.strip()[:32]
+            turn.set_prompt("reg_check", **data)
+            from operations import employees
+
+            turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
+            return
+        return _registration_next(turn, data)
+    if prompt == "reg_check":
+        if text and text.strip():
+            return _registration_check(turn, data, text)
+        from operations import employees
+
+        turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
+        return
+    if prompt == "reg_location":
+        location = _event_location(turn)
+        if location is not None:
+            return _registration_next(turn, {**data, "location": list(location)})
+        if token is not None and token.action == "reg_skip_location":
+            return _registration_next(turn, {**data, "location": None})
+        return _registration_next(turn, data)
     if prompt == "reg_name" and text:
         text = " ".join(text.split())
         if not 2 <= len(text) <= 200:
             turn.say("กรุณาพิมพ์ชื่อ-นามสกุล (2-200 ตัวอักษร)")
             return
-        turn.set_prompt("reg_district", name=text)
-        districts = District.objects.filter(is_active=True).order_by("code")
-        turn.say(f"ชื่อ: {text}\nเลือกเขตการไฟฟ้าที่คุณสังกัด")
-        turn.replies.append(
-            button_list(
-                "เลือกเขตการไฟฟ้า",
-                [turn.button(d.name, "reg_district", {"code": d.code}) for d in districts],
-            )
-        )
-        return
+        name = SELF_INTRODUCTION.sub("", text) or text
+        if _not_a_name(turn, name):
+            return
+        return _ask_district(turn, name)
     if problem:
         turn.say(problem)
     lead = "ยังไม่ได้ลงทะเบียนเป็นผู้แจ้ง"
@@ -305,7 +526,137 @@ def _registration(turn):
     elif identity.status == ChannelIdentity.Status.REVOKED:
         lead = "บัญชี LINE นี้ต้องลงทะเบียนและรับรองใหม่"
     turn.set_prompt("reg_name")
-    turn.say(f"{lead}\nกรุณาพิมพ์ชื่อ-นามสกุลเพื่อลงทะเบียน")
+    _ask_name(turn, f"{lead}\nพิมพ์ชื่อ-นามสกุลเพื่อลงทะเบียน")
+
+
+def _ask_name(turn, text):
+    from operations import options
+
+    if options.get(options.ANONYMOUS) == "on":
+        turn.say(
+            f"{text}\nถ้าจะแจ้งปัญหาหรือข้อเสนอแนะโดยไม่ลงทะเบียน กด 'แจ้งแบบไม่ระบุตัวตน'",
+            [turn.button("แจ้งแบบไม่ระบุตัวตน", "anon_start")],
+        )
+        return
+    turn.say(text)
+
+
+def _not_a_name(turn, text):
+    """Typed text that is not a full name (ตัวเลือกระบบ registration_name "full"): a greeting,
+    a question or a request is answered and the name asked again; one word or digits get the
+    example. Returns True when the text was not taken."""
+    from operations import answers, options  # local: answers builds on this module
+
+    if options.get(options.REGISTRATION_NAME) != "full":
+        return False
+    ask = f"พิมพ์เฉพาะชื่อและนามสกุลเพื่อลงทะเบียน เว้นวรรคระหว่างกัน {NAME_EXAMPLE}"
+    shape = reads_as(text)
+    if answers.small_talk(text) or answers.greets(text) or shape == "question":
+        found = answers.match(text) if shape == "question" and answers.mode() != "off" else None
+        if found is not None and found.action in ("text", "hours") and not found.short_only:
+            turn.say(answers.compose(found))
+        _ask_name(turn, f"ยังไม่ได้ลงทะเบียนเป็นผู้แจ้ง\n{ask}")
+        return True
+    if shape == "request":
+        _ask_name(turn, f"ต้องลงทะเบียนก่อนจึงเบิก คืน หรือแจ้งเรื่องได้\n{ask}")
+        return True
+    if re.search(r"[0-9๐-๙]", text) or len(text.split()) < 2:
+        _ask_name(turn, f"พิมพ์ทั้งชื่อและนามสกุล เว้นวรรคระหว่างกัน ไม่มีตัวเลข {NAME_EXAMPLE}")
+        return True
+    return False
+
+
+def _ask_district(turn, name):
+    """The district list, with 'แก้ชื่อ' in case the name was typed wrong."""
+    turn.set_prompt("reg_district", name=name)
+    districts = District.objects.filter(is_active=True).order_by("code")
+    turn.say(f"ชื่อ: {name}\nเลือกเขตการไฟฟ้าที่คุณสังกัด")
+    message = button_list(
+        "เลือกเขตการไฟฟ้า",
+        [turn.button(d.name, "reg_district", {"code": d.code}) for d in districts],
+    )
+    message["quickReply"] = {"items": [_postback(*turn.button("แก้ชื่อ", "reg_rename"))]}
+    turn.replies.append(message)
+
+
+def _registration_next(turn, data):
+    """The next registration step (ADR 0010): an employee check and a location when
+    ตัวเลือกระบบ asks for them, then the request, approved at once when the check allows."""
+    from operations import employees, options
+
+    check = options.get(options.REGISTRATION_CHECK)
+    if check != "approval" and not data.get("checked") and employees.has_directory():
+        turn.set_prompt("reg_employee", **data)
+        turn.say(
+            "ยืนยันตัวตนด้วยรหัสพนักงาน\nพิมพ์รหัสพนักงานของคุณ หรือกด 'ใช้วิธีอื่น' ให้เจ้าหน้าที่ตรวจแทน",
+            [turn.button("ใช้วิธีอื่น", "reg_other")],
+        )
+        return
+    where = options.get(options.REGISTRATION_LOCATION)
+    if where != "off" and "location" not in data:
+        turn.set_prompt("reg_location", **data)
+        quick = [("ส่งตำแหน่ง", LOCATION)]
+        if where == "optional":
+            quick.append(turn.button("ข้าม", "reg_skip_location"))
+        turn.say("ส่งตำแหน่งที่คุณอยู่ตอนนี้ ใช้ประกอบการยืนยันตัวตนเท่านั้น", quick)
+        return
+    from operations.models import Employee
+
+    employee = (
+        Employee.objects.filter(pk=data.get("employee")).first() if data.get("employee") else None
+    )
+    registration = identity_services.submit_registration(
+        LINE,
+        turn.identity.external_id,
+        data.get("name", ""),
+        data.get("district", ""),
+        employee=employee,
+        location=tuple(data["location"]) if data.get("location") else None,
+    )
+    turn.set_prompt()
+    if employee is not None and check == "employee_auto":
+        identity_services.auto_approve_registration(registration)
+        _menu(turn, "ยืนยันตัวตนแล้ว ใช้งานได้เลย กด 'ส่งเรื่องใหม่' เพื่อเริ่ม")
+        return
+    note = "ตรงทะเบียนพนักงานแล้ว " if employee is not None else ""
+    turn.say(f"ส่งคำขอลงทะเบียนแล้ว {note}รอเจ้าหน้าที่ ฝอจ. รับรอง\nกด 'เรื่องของฉัน' เพื่อดูสถานะได้ทุกเมื่อ")
+
+
+def _registration_check(turn, data, proof):
+    from operations import employees
+
+    district = District.objects.filter(code=data.get("district")).first()
+    employee, reason = employees.verify(turn.identity, data.get("employee_id", ""), proof, district)
+    data.pop("employee_id", None)
+    if employee is not None:
+        return _registration_next(turn, {**data, "checked": True, "employee": employee.pk})
+    if reason == "locked":
+        turn.say("ลองครบจำนวนครั้งของวันนี้แล้ว จะส่งให้เจ้าหน้าที่ตรวจแทน")
+        return _registration_next(turn, {**data, "checked": True})
+    left = employees.MAX_FAILED - employees.failed_today(turn.identity)
+    if left <= 0:
+        turn.say("ข้อมูลไม่ตรงทะเบียนพนักงาน จะส่งให้เจ้าหน้าที่ตรวจแทน")
+        return _registration_next(turn, {**data, "checked": True})
+    turn.set_prompt("reg_employee", **data)
+    turn.say(
+        f"ข้อมูลไม่ตรงทะเบียนพนักงาน ลองได้อีก {left} ครั้ง\nพิมพ์รหัสพนักงานใหม่ หรือกด 'ใช้วิธีอื่น'",
+        [turn.button("ใช้วิธีอื่น", "reg_other")],
+    )
+
+
+def _start_anonymous(turn):
+    """แจ้งแบบไม่ระบุตัวตน: a problem or suggestion draft that ends with a location."""
+    from operations import options
+
+    if options.get(options.ANONYMOUS) != "on":
+        turn.say("ตอนนี้ต้องลงทะเบียนก่อนแจ้งเรื่อง")
+        return
+    turn.set_prompt()
+    turn.requester = identity_services.anonymous_requester(turn.identity)
+    turn.anonymous = True
+    draft = _new_draft(turn)
+    turn.say("แจ้งได้โดยไม่ต้องบอกชื่อ เจ้าหน้าที่จะไม่เห็นว่าใครแจ้ง แต่ต้องส่งตำแหน่งที่พบเรื่อง")
+    _ask(turn, draft)
 
 
 # --- Approved requester -----------------------------------------------------------------------
@@ -343,13 +694,28 @@ def _requester_turn(turn):
     if draft is not None and draft.status != D.OPEN:
         draft = None
     text = _event_text(turn)
+    message = None
     if text is not None:
-        ConversationMessage.objects.create(
-            identity=turn.identity, inbox=turn.inbox, draft=draft, text=text
+        message = ConversationMessage.objects.create(
+            identity=turn.identity,
+            requester=turn.requester,
+            inbox=turn.inbox,
+            draft=draft,
+            text=text,
         )
+        from operations import answers  # local: answers builds on this module (ADR 0012)
+
+        answers.emergency(turn, text)  # hazard words: the guidance at once, then carry on
     message_type = (turn.event.get("message") or {}).get("type")
     if turn.inbox.event_type == "message" and message_type in {"image", "file"}:
         return _attachment(turn, draft)
+    location = _event_location(turn)
+    if location is not None:
+        if draft is not None and draft.step == "location":
+            draft.data = dict(draft.data, location=list(location))
+            return _set(turn, draft, "summary")
+        turn.say("ได้รับตำแหน่งแล้ว แต่ตอนนี้ยังไม่ได้ขอ")
+        return _reprompt(turn, draft)
 
     data = (turn.event.get("postback") or {}).get("data", "")
     if turn.inbox.event_type == "postback" and not data.startswith("t="):
@@ -374,16 +740,33 @@ def _requester_turn(turn):
         return problem_chat.on_text(turn, text)
     if command and CASE_NUMBER.fullmatch(command.upper()) and not _expects_text(draft):
         return _case_detail(turn, command.upper())
-    if text is not None and turn.conversation.prompt != "track":
-        from operations import ai_chat  # local: ai_chat builds on this module
+    if text is not None and turn.conversation.prompt in ("", "info_reply"):
+        # "ตอบกลับในแชตนี้ได้เลย": an answer to staff who asked for more, never a new draft.
+        waiting = _awaiting_info(turn, draft)
+        if waiting:
+            return _info_reply(turn, waiting, message, text)
+    return _free_text(turn, draft, text, message)
 
+
+def _free_text(turn, draft, text, message=None):
+    """Typed text that is no command: คลังคำตอบ, then the AI, then the draft's current step."""
+    if text is not None and turn.conversation.prompt != "track":
+        from operations import ai_chat, answers  # local: both build on this module
+
+        found = answers.keyword_answer(turn, draft, text)  # คลังคำตอบ ก (ADR 0012)
+        if found is not None:
+            return answers.respond(turn, draft, found)
         if ai_chat.wants_ai(turn, draft, text):
-            return ai_chat.queue(turn, draft, text)
+            return ai_chat.queue(turn, draft, text, message)
     if draft is not None and text is not None:
         return _draft_text(turn, draft, text)
     if turn.conversation.prompt == "track" and text:
         turn.say("ไม่พบเลขเรื่องในรูปแบบที่ถูกต้อง เช่น W69-000001")
         return
+    if text and draft is None and not turn.conversation.prompt and not _open_drafts(turn).exists():
+        from operations import questions  # local: questions reads answers, which read this module
+
+        questions.record(turn, text)  # คำถามที่บอทตอบไม่ได้ (Q11)
     _reprompt(turn, draft)
 
 
@@ -415,11 +798,161 @@ def _updates(turn):
         turn.say("มีอัปเดตใหม่\n" + "\n".join(lines))
 
 
+def _awaiting_info(turn, draft):
+    """This requester's cases waiting for their information, newest request first. Once they
+    have worked on a draft since the request, typing belongs to the draft instead."""
+    asked = (
+        Decision.objects.filter(case=OuterRef("pk"), action="request_info")
+        .order_by("-created_at")
+        .values("created_at")[:1]
+    )
+    cases = (
+        services.visible_cases(_actor(turn))
+        .filter(status=Case.Status.AWAITING_INFO)
+        .annotate(asked_at=Subquery(asked))
+        .order_by("-asked_at")
+    )
+    if draft is not None:
+        cases = cases.filter(asked_at__gt=draft.updated_at)
+    return list(cases[: MAX_QUICK - 1])
+
+
+def _info_reply(turn, cases, message, text):
+    """Typed text while staff wait for this requester's information (ตัวเลือกระบบ info_reply).
+
+    A greeting or thanks is not information: the bot says what staff wait for. Text that reads
+    as information goes to the one waiting case; a question, a new request, very short text, or
+    every text when the option says so, is offered first, and 'ไม่ใช่ข้อมูลเพิ่ม' handles it like
+    any other message."""
+    from operations import answers, options  # local: answers builds on this module
+
+    if answers.small_talk(text):
+        return _info_waiting(turn, cases)
+    plain = (
+        options.get(options.INFO_REPLY) == "check"
+        and not reads_as(text)
+        and len(answers.rest(text)) >= 4
+    )
+    if len(cases) == 1 and plain:
+        return _attach_reply(turn, cases[0], message)
+    turn.set_prompt("info_reply", message=message.pk)
+    other = turn.button("ไม่ใช่ข้อมูลเพิ่ม", "info_none", {"message": message.pk})
+    if len(cases) == 1:
+        case = cases[0]
+        asked = "" if _shown(turn, case) else f"\nเจ้าหน้าที่ขอ: {_info_asked(case)}"
+        turn.say(
+            f"ข้อความนี้เป็นข้อมูลที่เจ้าหน้าที่ขอสำหรับเรื่อง {case.number} ไหม{asked}",
+            [
+                turn.button(
+                    "ส่งถึงเจ้าหน้าที่", "info_reply", {"case": str(case.pk), "message": message.pk}
+                ),
+                other,
+            ],
+        )
+        return
+    buttons = [
+        turn.button(c.number, "info_reply", {"case": str(c.pk), "message": message.pk})
+        for c in cases
+    ]
+    turn.say(
+        f"มี {len(cases)} เรื่องที่เจ้าหน้าที่ขอข้อมูลเพิ่ม ข้อความนี้เป็นข้อมูลของเรื่องไหน",
+        [*buttons, other],
+    )
+
+
+def _info_asked(case):
+    asked = case.decisions.filter(action="request_info").order_by("-id").first()
+    return asked.reason if asked is not None else ""
+
+
+def _shown(turn, case):
+    """'มีอัปเดตใหม่' of this turn already says what staff asked on this case."""
+    return any(case.number in m.get("text", "") for m in turn.replies)
+
+
+def _info_waiting(turn, cases):
+    lines = [f"{c.number}: {_info_asked(c)}" for c in cases[:3] if not _shown(turn, c)]
+    head = "เจ้าหน้าที่รอข้อมูลเพิ่ม\n" + "\n".join(lines) + "\n" if lines else ""
+    turn.say(f"{head}พิมพ์ตอบในแชตนี้ได้เลย", MENU)
+
+
+def _attach_reply(turn, case, message):
+    ConversationMessage.objects.filter(pk=message.pk, case__isnull=True).update(case=case)
+    identity_services.audit(
+        None,
+        "case.info_replied",
+        case,
+        actor_label=f"requester:{turn.requester.pk}",
+        number=case.number,
+        message=message.pk,
+    )
+    turn.set_prompt()
+    turn.say(
+        f"ส่งข้อมูลถึงเจ้าหน้าที่แล้ว (เรื่อง {case.number})\n"
+        "เจ้าหน้าที่จะตรวจแล้วดำเนินการต่อ มีรูปหรือไฟล์เพิ่มส่งต่อได้เลย",
+        MENU,
+    )
+
+
+def _info_token(turn, token, draft):
+    """The requester chose which waiting case a typed answer (or file) belongs to, or said it
+    is not information: then the message is handled like any other (คลังคำตอบ, AI, draft)."""
+    value = token.value or {}
+    if token.action == "info_none":
+        turn.set_prompt()
+        message = ConversationMessage.objects.filter(
+            pk=value.get("message"), identity=turn.identity, case__isnull=True
+        ).first()
+        if message is None:
+            return _menu(turn, "ข้อความนี้ไม่ได้ส่งถึงเจ้าหน้าที่ เลือกเมนูด้านล่างเพื่อทำต่อ")
+        turn.say("ข้อความนี้ไม่ได้ส่งถึงเจ้าหน้าที่")
+        return _free_text(turn, draft, message.text, message)
+    case = (
+        services.visible_cases(_actor(turn))
+        .filter(pk=value.get("case"), status=Case.Status.AWAITING_INFO)
+        .first()
+    )
+    message = ConversationMessage.objects.filter(
+        pk=value.get("message"), identity=turn.identity, case__isnull=True
+    ).first()
+    if case is None or message is None:
+        turn.set_prompt()
+        turn.say("เรื่องนี้ไม่ได้รอข้อมูลจากคุณแล้ว หรือส่งข้อความนี้ไปแล้ว", MENU)
+        return
+    return _attach_reply(turn, case, message)
+
+
 def _expects_text(draft):
     """Steps whose answer is typed; elsewhere a typed case number means 'show this case'."""
     if draft is None:
         return False
     return draft.step in {"item_search", "quantity", "serials"} or draft.step.startswith("field:")
+
+
+def reads_as(text):
+    """'question', 'request' or '' (an answer) for typed text; see QUESTION and REQUEST."""
+    text = " ".join(str(text or "").split())
+    if QUESTION.search(text):
+        return "question"
+    if REQUEST.search(text):
+        return "request"
+    return ""
+
+
+def off_step(draft, text):
+    """'question' or 'request' for text typed at a step that takes typed answers, when
+    ตัวเลือกระบบ chat_typed_steps asks to check (ADR 0012); '' when the step takes it.
+
+    The caller lets คลังคำตอบ (questions only) and the AI look first; when they find nothing, the
+    step takes the text as before. A count or serial numbers are never a new request."""
+    from operations import options
+
+    if not _expects_text(draft) or options.get(options.CHAT_TYPED) != "check":
+        return ""
+    found = reads_as(text)
+    if found == "request" and draft.step in ("quantity", "serials"):
+        return ""
+    return found
 
 
 def _static_postback(turn, data, draft):
@@ -435,7 +968,10 @@ def _static_postback(turn, data, draft):
 
 
 def _menu(turn, text):
-    turn.say(text, MENU)
+    from operations import staff_line
+
+    extra = [("งานของกอง", "งานของกอง")] if staff_line.staff_of(turn.identity) else []
+    turn.say(text, [*MENU, *[turn.button(label, "staff_menu") for label, _ in extra]])
 
 
 def _reprompt(turn, draft):
@@ -482,9 +1018,9 @@ def _my_cases(turn):
         .order_by("-submitted_at")[:5]
     )
     drafts = _open_drafts(turn).count()
-    lines = [f"{c.number} · {KIND_LABELS[c.kind]} · {_status_label(c)}" for c in cases] or [
-        "ยังไม่มีเรื่องที่เปิดอยู่"
-    ]
+    lines = [
+        f"{c.number} · {_kind_label(c.kind, c.topic)} · {_status_label(c)}" for c in cases
+    ] or ["ยังไม่มีเรื่องที่เปิดอยู่"]
     if drafts:
         lines.append(f"ร่างเรื่องที่ยังไม่ยื่น {drafts} ร่าง (กดส่งเรื่องใหม่เพื่อทำต่อ)")
     turn.set_prompt()
@@ -506,7 +1042,7 @@ def _case_detail(turn, number):
         return
     files = case.attachments.count()
     text = (
-        f"เรื่อง {case.number}\nประเภท: {KIND_LABELS[case.kind]}\n"
+        f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}\n"
         f"สถานะ: {_status_label(case)}\nกองเจ้าภาพ: {case.owner_division.name}\n"
         f"อัปเดตล่าสุด: {_when(case.updated_at)}" + (f"\nไฟล์แนบ: {files} ไฟล์" if files else "")
     )
@@ -555,11 +1091,15 @@ def _activate(turn, draft):
 
 
 def _new_draft(turn):
+    anonymous = turn.anonymous
+    # Anonymous and internal reporters send problems and suggestions only.
+    only_problems = anonymous or turn.internal or getattr(turn.requester, "is_internal", False)
     draft = ConversationDraft.objects.create(
         identity=turn.identity,
         requester=turn.requester,
-        step="kind",
-        data={"lines": [], "fields": {}},
+        kind=K.PROBLEM if only_problems else "",
+        step="topic" if only_problems else "kind",
+        data={"lines": [], "fields": {}, **({"anonymous": True} if anonymous else {})},
         updated_at=turn.now,
     )
     _activate(turn, draft)
@@ -598,6 +1138,8 @@ def _owned_draft(turn, draft_id):
 
 def _token_action(turn, token, draft):
     action = token.action
+    if action in {"info_reply", "info_none"}:
+        return _info_token(turn, token, draft)
     if action.startswith("receipt_"):
         from operations import receipts  # local: receipts builds on this module (M07)
 
@@ -648,8 +1190,17 @@ def _ask(turn, draft):
     if step == "kind":
         turn.say(
             "ต้องการแจ้งเรื่องประเภทใด\n1. เบิก\n2. ส่งคืน\n"
-            "3. ปัญหาการใช้งาน (ของชำรุด/ใช้งานไม่ได้ จำนวนไม่ตรง ส่งล่าช้า)",
+            "3. แจ้งปัญหา/ข้อเสนอแนะ (ของชำรุด ใช้งานไม่ได้ ไฟแพง ลักใช้ไฟ หรือข้อเสนอแนะ)",
             [b(KIND_LABELS[k], "kind", {"kind": k}, draft) for k in KIND_ORDER]
+            + [b("ยกเลิกร่าง", "discard", draft=draft)],
+        )
+    elif step == "topic":
+        topics = _topics()
+        lines = [f"{n}. {TOPIC_LABELS[t]}{TOPIC_NOTES.get(t, '')}" for n, t in enumerate(topics, 1)]
+        turn.say(
+            "เรื่องนี้เกี่ยวกับอะไร\n" + "\n".join(lines),
+            [b(TOPIC_LABELS[t], "topic", {"topic": t}, draft) for t in topics]
+            + [b("ไม่แน่ใจ", "lines_done", draft=draft)]  # the text and the rules decide
             + [b("ยกเลิกร่าง", "discard", draft=draft)],
         )
     elif step == "category":
@@ -663,16 +1214,21 @@ def _ask(turn, draft):
         turn.say("เลือกหมวดของ\n1. มิเตอร์\n2. หม้อแปลง\n3. อุปกรณ์อื่น", buttons)
     elif step == "item":
         items = list(_items(data["line"]["category"]))
-        if len(items) > MAX_QUICK - 1:
+        skip = _skip_model(turn, draft)
+        if len(items) > MAX_QUICK - 1 - len(skip):
             _touch(draft, turn.now, step="item_search")
             return _ask(turn, draft)
         turn.say(
             "เลือกรายการของ",
             [b(i.name, "item", {"code": i.code}, draft) for i in items]
+            + skip
             + [b("ย้อนกลับ", "back_category", draft=draft)],
         )
     elif step == "item_search":
-        turn.say("พิมพ์ชื่อหรือรหัสของบางส่วนเพื่อค้นหา", [b("ย้อนกลับ", "back_category", draft=draft)])
+        turn.say(
+            "พิมพ์ชื่อหรือรหัสของบางส่วนเพื่อค้นหา",
+            _skip_model(turn, draft) + [b("ย้อนกลับ", "back_category", draft=draft)],
+        )
     elif step == "quantity":
         item = EquipmentType.objects.get(code=data["line"]["item_code"])
         turn.say(f"{item.name}\nจำนวนกี่{item.unit}", [b("ย้อนกลับ", "back_category", draft=draft)])
@@ -689,7 +1245,7 @@ def _ask(turn, draft):
         )
     elif step.startswith("field:"):
         name = step.split(":", 1)[1]
-        question, required = next((q, r) for n, q, r in FIELDS[draft.kind] if n == name)
+        question, required = next((q, r) for n, q, r in _fields(draft) if n == name)
         buttons = []
         if name == "related_case_number":
             recent = services.visible_cases(_actor(turn)).order_by("-submitted_at")[:5]
@@ -697,6 +1253,8 @@ def _ask(turn, draft):
         if not required:
             buttons.append(b("ข้าม", "skip_field", draft=draft))
         turn.say(question, buttons or None)
+    elif step == "location":
+        turn.say("กด 'ส่งตำแหน่ง' แล้วเลือกจุดที่พบเรื่องนี้", [("ส่งตำแหน่ง", LOCATION)])
     elif step == "summary":
         turn.say(
             _summary(draft),
@@ -708,9 +1266,17 @@ def _ask(turn, draft):
         )
 
 
+def _skip_model(turn, draft):
+    """A problem may name no model, also when the catalogue is long enough to need a search
+    (found by the dialogue simulator: search mode had dropped this button)."""
+    if draft.kind == K.PROBLEM and not draft.data["lines"]:
+        return [turn.button("ไม่ระบุรุ่น", "lines_done", draft=draft)]
+    return []
+
+
 def _summary(draft):
     data = draft.data
-    lines = [f"สรุปเรื่อง: {KIND_LABELS[draft.kind]}"]
+    lines = [f"สรุปเรื่อง: {_kind_label(draft.kind, data.get('topic'))}"]
     items = {
         i.code: i
         for i in EquipmentType.objects.filter(code__in=[x["item_code"] for x in data["lines"]])
@@ -723,9 +1289,16 @@ def _summary(draft):
         if line.get("serials"):
             text += f" (หมายเลข {', '.join(line['serials'])})"
         lines.append(text)
-    for name, value in data["fields"].items():
-        if value:
-            lines.append(f"{FIELD_LABELS[name]}: {value}")
+    # In the order the questions were asked: the stored JSON does not keep key order.
+    labels = {**FIELD_LABELS, **TOPIC_FIELD_LABELS.get(data.get("topic"), {})}
+    asked = [name for name, _, _ in _fields(draft)]
+    for name in sorted(data["fields"], key=lambda n: asked.index(n) if n in asked else len(asked)):
+        if data["fields"][name]:
+            lines.append(f"{labels[name]}: {data['fields'][name]}")
+    if data.get("location"):
+        lines.append("ตำแหน่ง: ส่งแล้ว")
+    if data.get("anonymous"):
+        lines.append("แจ้งแบบไม่ระบุตัวตน")
     files = list(draft.attachments.all())
     if files:
         waiting = sum(f.scan_status in {"pending_fetch", "pending_scan"} for f in files)
@@ -740,11 +1313,42 @@ def _summary(draft):
     return "\n".join(lines)
 
 
+def _offered(topic):
+    """Whether the policy names an owner for a problem of this topic."""
+    from operations import policy  # local: policy builds on workflow, not on this module
+
+    current = policy.current_policy()
+    rules = current.doc.get("responsibility", []) if current else []
+    return any(r.get("category") == topic and K.PROBLEM in r.get("kinds", []) for r in rules)
+
+
+def _topics():
+    """Equipment topics always (unknown ones go to people), story topics while owned."""
+    return [t for t in TOPIC_LABELS if t in CATEGORY_LABELS or _offered(t)]
+
+
+def _kind_label(kind, topic=""):
+    if topic in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
+        return TOPIC_LABELS[topic]
+    return KIND_LABELS[kind]
+
+
+def _fields(draft):
+    topic = draft.data.get("topic")
+    if topic == Case.Topic.USAGE:
+        return USAGE_FIELDS
+    if topic == Case.Topic.SUGGESTION:
+        return SUGGESTION_FIELDS
+    return FIELDS[draft.kind]
+
+
 def _next_field(draft):
     filled = draft.data["fields"]
-    for name, _, _ in FIELDS[draft.kind]:
+    for name, _, _ in _fields(draft):
         if name not in filled:
             return f"field:{name}"
+    if draft.data.get("anonymous") and not draft.data.get("location"):
+        return "location"
     return "summary"
 
 
@@ -763,15 +1367,35 @@ def _draft_button(turn, draft, action, value):
         turn.conversation.save(update_fields=["active_draft", "updated_at"])
         return _menu(turn, "ยกเลิกร่างแล้ว")
     if action == "restart":
-        _touch(draft, turn.now, kind="", step="kind", data={"lines": [], "fields": {}})
+        if data.get("anonymous") or getattr(draft.requester, "is_internal", False):
+            fresh = {
+                "lines": [],
+                "fields": {},
+                **({"anonymous": True} if data.get("anonymous") else {}),
+            }
+            _touch(draft, turn.now, kind=K.PROBLEM, step="topic", data=fresh)
+        else:
+            _touch(draft, turn.now, kind="", step="kind", data={"lines": [], "fields": {}})
         return _ask(turn, draft)
     if action == "kind":
-        _touch(draft, turn.now, kind=value["kind"], step="category")
+        step = "topic" if value["kind"] == K.PROBLEM else "category"
+        _touch(draft, turn.now, kind=value["kind"], step=step)
         return _ask(turn, draft)
+    if action == "topic":
+        topic = value.get("topic")
+        if topic not in _topics():
+            return _ask(turn, draft)
+        if topic in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
+            keep = {"anonymous": True} if data.get("anonymous") else {}
+            draft.data = {"lines": [], "fields": {}, "topic": topic, **keep}
+            return _set(turn, draft, _next_field(draft))
+        draft.data = dict(data, topic=topic)
+        return _set(turn, draft, "item", line={"category": topic})
     if action == "category":
         return _set(turn, draft, "item", line={"category": value["category"]})
     if action == "back_category":
-        return _set(turn, draft, "category", line={})
+        back = "topic" if draft.kind == K.PROBLEM and not data["lines"] else "category"
+        return _set(turn, draft, back, line={})
     if action == "item":
         return _choose_item(turn, draft, value["code"])
     if action == "skip_serials":
@@ -845,14 +1469,20 @@ def _draft_text(turn, draft, text):
         matches = list(
             EquipmentType.objects.filter(category=data["line"]["category"], is_active=True)
             .filter(Q(name__icontains=query) | Q(code__icontains=query))
-            .order_by("name")[:10]
+            .order_by("name")[:11]
         )
         if not matches:
             turn.say("ไม่พบรายการที่ตรงกัน ลองพิมพ์คำอื่น")
             return _ask(turn, draft)
+        # Ten buttons at most: when more match, say so, so the person narrows the search.
+        more = len(matches) > 10
+        matches = matches[:10]
         turn.say(
-            "เลือกรายการของ",
+            "พบหลายรายการ นี่คือ 10 รายการแรก ถ้าไม่มีที่ต้องการ พิมพ์ชื่อหรือรหัสให้ยาวขึ้น"
+            if more
+            else "เลือกรายการของ",
             [turn.button(i.name, "item", {"code": i.code}, draft) for i in matches]
+            + _skip_model(turn, draft)
             + [turn.button("ย้อนกลับ", "back_category", draft=draft)],
         )
         return
@@ -912,16 +1542,34 @@ def _draft_text(turn, draft, text):
     if step == "kind" and text.translate(THAI_DIGITS) in {"1", "2", "3"}:
         kind = KIND_ORDER[int(text.translate(THAI_DIGITS)) - 1]
         return _draft_button(turn, draft, "kind", {"kind": kind})
+    if step == "topic" and text.translate(THAI_DIGITS).isdigit():
+        topics = _topics()
+        number = int(text.translate(THAI_DIGITS))
+        if 1 <= number <= len(topics):
+            return _draft_button(turn, draft, "topic", {"topic": topics[number - 1]})
     if step == "category" and text.translate(THAI_DIGITS) in {"1", "2", "3"}:
         category = CATEGORY_ORDER[int(text.translate(THAI_DIGITS)) - 1]
         return _draft_button(turn, draft, "category", {"category": category})
-    # Free text where a button is expected: kept as source text, question asked again.
+    # Free text where a button is expected: how to answer, then the question again.
+    turn.say(CHOICE_HINTS.get(step, "เลือกจากปุ่มด้านล่าง"))
     return _ask(turn, draft)
+
+
+CHOICE_HINTS = {
+    "kind": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
+    "topic": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ ถ้าไม่แน่ใจกด 'ไม่แน่ใจ'",
+    "category": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
+    "location": "กด 'ส่งตำแหน่ง' ด้านล่าง",
+}
 
 
 def _payload(draft):
     data = draft.data
     payload = {"kind": draft.kind, "lines": data["lines"]}
+    if data.get("topic"):
+        payload["topic"] = data["topic"]
+    if data.get("location"):
+        payload["latitude"], payload["longitude"] = data["location"]
     for name, value in data["fields"].items():
         if value:
             payload[name] = value
@@ -948,10 +1596,19 @@ def _confirm(turn, draft):
     turn.conversation.active_draft = None
     turn.conversation.save(update_fields=["active_draft", "updated_at"])
     remaining = _open_drafts(turn).count()
-    text = (
-        f"ยื่นเรื่องแล้ว\nเลขเรื่อง: {case.number}\nสถานะ: {case.get_status_display()}\n"
-        "ติดตามได้จากเมนู 'ติดตามเรื่อง'"
-    )
+    numbers = [case.number, *(s["case_number"] for s in result.split)]
+    if len(numbers) > 1:
+        # ADR 0008: one request with items of several divisions becomes one case per division.
+        text = (
+            f"ยื่นเรื่องแล้ว แยกเป็น {len(numbers)} เรื่องตามกองที่ดูแลของ\n"
+            f"เลขเรื่อง: {', '.join(numbers)}\nสถานะ: {case.get_status_display()}\n"
+            "ยืนยันรับของแยกตามเรื่อง ติดตามได้จากเมนู 'ติดตามเรื่อง'"
+        )
+    else:
+        text = (
+            f"ยื่นเรื่องแล้ว\nเลขเรื่อง: {case.number}\nสถานะ: {case.get_status_display()}\n"
+            "ติดตามได้จากเมนู 'ติดตามเรื่อง'"
+        )
     if remaining:
         text += f"\nยังมีร่างที่ยังไม่ยื่น {remaining} ร่าง"
     from operations import policy  # local: policy builds on workflow, not on this module
@@ -985,14 +1642,37 @@ def _attachment(turn, draft):
     if draft is not None and draft.attachments.count() >= settings.ATTACHMENTS_PER_DRAFT:
         turn.say(f"แนบไฟล์ได้ไม่เกิน {settings.ATTACHMENTS_PER_DRAFT} ไฟล์ต่อเรื่อง")
         return
-    Attachment.objects.create(
+    waiting = _awaiting_info(turn, draft)
+    attachment = Attachment.objects.create(
         identity=turn.identity,
         inbox=turn.inbox,
         line_message_id=str(message.get("id", "")),
-        draft=draft,
+        draft=None if waiting else draft,
+        case=waiting[0] if waiting else None,  # a file sent after an information request
         declared_name=str(message.get("fileName", ""))[:200],
     )
     if quiet:
+        return
+    if waiting:
+        case = waiting[0]
+        identity_services.audit(
+            None,
+            "case.info_file_received",
+            case,
+            actor_label=f"requester:{turn.requester.pk}",
+            number=case.number,
+            attachment=str(attachment.pk),
+        )
+        more = (
+            f"\nมี {len(waiting)} เรื่องที่รอข้อมูล ไฟล์นี้แนบกับเรื่องที่เจ้าหน้าที่ขอล่าสุด"
+            if len(waiting) > 1
+            else ""
+        )
+        turn.say(
+            f"ได้รับไฟล์แล้ว แนบกับเรื่อง {case.number}\n"
+            f"เจ้าหน้าที่จะเห็นเมื่อระบบตรวจความปลอดภัยของไฟล์เสร็จ{more}",
+            MENU,
+        )
         return
     if draft is None:
         drafts = list(_open_drafts(turn)[:10])
@@ -1012,15 +1692,23 @@ def _attachment(turn, draft):
 
 
 def _may_send(user_id):
+    from operations import options
+
     if not settings.OUTBOUND_ENABLED or not settings.LINE_CHANNEL_ACCESS_TOKEN:
         return False, "outbound disabled"
-    if settings.APP_ENV != "production" and user_id not in settings.LINE_ALLOWED_RECIPIENTS:
+    if (
+        settings.APP_ENV != "production"
+        and user_id not in settings.LINE_ALLOWED_RECIPIENTS
+        and options.get(options.LINE_AUDIENCE) != "everyone"
+    ):
         return False, "not in allowlist"
     return True, ""
 
 
 def send_reply(inbox_id, messages):
-    """Use the event's reply token once, before its deadline; never falls back to push here."""
+    """Use the event's reply token once, before its deadline. A reply that can no longer go
+    (deadline passed, or LINE refused the token of a redelivered event) is handed to
+    notifications.plan_catch_up (ADR 0015 Q12), which decides whether a push may carry it."""
     if not messages:
         return
     S = WebhookInbox.ReplyStatus
@@ -1037,15 +1725,29 @@ def send_reply(inbox_id, messages):
             inbox.reply_status = S.UNKNOWN
         inbox.reply_used_at = timezone.now()
         inbox.save(update_fields=["reply_used_at", "reply_status", "reply_detail"])
-        if inbox.reply_status != S.UNKNOWN:
-            return
-        token = inbox.reply_token
+        outcome, token = inbox.reply_status, inbox.reply_token
+    if outcome == S.EXPIRED:
+        _catch_up(inbox_id, messages)
+    if outcome != S.UNKNOWN:
+        return
+    token_refused = False
     try:
         line_api.reply(token, messages)
         status, detail = S.SENT, ""
     except line_api.LineApiError as exc:
         status, detail = S.FAILED, f"{exc.status}"
+        token_refused = exc.status == 400 and "reply token" in (exc.detail or "").lower()
     except OSError as exc:
         # Timeout or connection loss: LINE may or may not have delivered it.
         status, detail = S.UNKNOWN, type(exc).__name__
     WebhookInbox.objects.filter(pk=inbox_id).update(reply_status=status, reply_detail=detail)
+    if status == S.FAILED and token_refused:  # the expired token of a redelivered event
+        _catch_up(inbox_id, messages)
+
+
+def _catch_up(inbox_id, messages):
+    from operations import notifications  # local: notifications imports this module's peers
+
+    inbox = WebhookInbox.objects.get(pk=inbox_id)
+    if notifications.plan_catch_up(inbox, messages):
+        WebhookInbox.objects.filter(pk=inbox_id).update(reply_detail="catch-up push planned")

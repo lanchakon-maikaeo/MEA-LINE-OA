@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 from functools import wraps
 
 from django.conf import settings
@@ -9,22 +10,28 @@ from django.contrib.auth.views import PasswordChangeView
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
+from django.db.models import Prefetch, Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
-from django.views.decorators.http import require_POST, require_safe
+from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from operations import (
     ai,
+    ai_chat,
     ai_eval,
+    answers,
     attachments,
+    employees,
     forms,
     identity,
     inventory,
     notifications,
+    options,
     orchestration,
     policy,
+    questions,
     queues,
 )
 from operations.models import (
@@ -34,8 +41,14 @@ from operations.models import (
     AIRun,
     Allocation,
     Attachment,
+    AuditEvent,
     AuthorityGrant,
+    ChannelIdentity,
+    ChatAnswer,
+    ConversationMessage,
+    District,
     Division,
+    Employee,
     EquipmentType,
     FakeStock,
     LineQuotaSnapshot,
@@ -44,9 +57,12 @@ from operations.models import (
     PolicyVersion,
     RegistrationRequest,
     Requester,
+    Role,
     RoleGrant,
+    Section,
     StockMovement,
     StockSnapshot,
+    UnansweredQuestion,
 )
 
 User = get_user_model()
@@ -130,6 +146,19 @@ def admin_required(view):
     return wrapper
 
 
+def registration_required(view):
+    """Admins, or whoever ตัวเลือกระบบ lets approve LINE registrations (ADR 0009)."""
+
+    @login_required
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if not identity.may_decide_registrations(request.user):
+            raise PermissionDenied
+        return view(request, *args, **kwargs)
+
+    return wrapper
+
+
 def _run(request, action, success):
     """Run a service call and report validation errors without leaking internals."""
     try:
@@ -144,8 +173,28 @@ def _run(request, action, success):
 @admin_required
 @require_safe
 def admin_users(request):
-    users = User.objects.select_related("staff_profile").order_by("username")
-    return render(request, "operations/admin_users.html", {"users": users})
+    grants = RoleGrant.objects.filter(revoked_at__isnull=True).select_related("division")
+    users = list(
+        User.objects.select_related("staff_profile")
+        .prefetch_related(Prefetch("role_grants", queryset=grants, to_attr="active_grants"))
+        .order_by("username")
+    )
+    for user in users:
+        codes = sorted({g.division.code for g in user.active_grants if g.division})
+        user.division_codes = codes
+        user.roles_label = ", ".join(sorted({Role(g.role).label for g in user.active_grants}))
+    divisions = sorted({code for u in users for code in u.division_codes})
+    return render(
+        request,
+        "operations/admin_users.html",
+        {
+            "users": users,
+            "user_filters": [
+                ("division", "กอง", [(code, code) for code in divisions]),
+                ("status", "สถานะ", [("active", "ใช้งาน"), ("suspended", "ระงับ")]),
+            ],
+        },
+    )
 
 
 @admin_required
@@ -172,12 +221,19 @@ def admin_user_new(request):
 def admin_user_detail(request, pk):
     target = get_object_or_404(User.objects.select_related("staff_profile"), pk=pk)
     grants = RoleGrant.objects.filter(user=target).select_related("division").order_by("-pk")
+    held = {g.division_id for g in grants if g.revoked_at is None and g.division_id}
     return render(
         request,
         "operations/admin_user_detail.html",
         {
             "target": target,
             "grants": grants,
+            # Q13: a แผนก in a division where this account holds a role.
+            "active_divisions": Division.objects.filter(is_active=True).order_by("kind", "code"),
+            "line": getattr(target, "line_identity", None),
+            "sections": Section.objects.filter(division_id__in=held, is_active=True)
+            .select_related("division")
+            .order_by("division__code", "order"),
             "grant_form": forms.GrantRoleForm(),
             "move_form": forms.ChangeDivisionForm(),
         },
@@ -217,6 +273,47 @@ def admin_user_action(request, pk, action):
             )
         else:
             messages.error(request, "ข้อมูลการย้ายกองไม่ถูกต้อง")
+    elif action == "full-division":
+        # ทำได้ทุกงานในกอง: every role and the division's authority in one step (ADR 0009).
+        value = data.get("division", "")
+        if not value.isdigit():
+            raise Http404
+        division = get_object_or_404(Division, pk=int(value))
+        result = _run(
+            request,
+            lambda: identity.grant_full_division(
+                actor, target, division, reason, data.get("approval_reference", "")
+            ),
+            f"ให้ทำได้ทุกงานใน {division.code} แล้ว",
+        )
+        if result and result == (0, 0):
+            messages.info(request, "บัญชีนี้มีทุกบทบาทและอำนาจของกองนี้อยู่แล้ว")
+    elif action == "employee-id":
+        _run(
+            request,
+            lambda: identity.set_employee_id(actor, target, data.get("employee_id", ""), reason),
+            "บันทึกรหัสพนักงานแล้ว",
+        )
+    elif action == "line-unlink":
+        from operations import staff_line
+        from operations.models import ChannelIdentity
+
+        line = ChannelIdentity.objects.filter(staff_user=target).first()
+        if line is not None:
+            staff_line.unlink(line, actor, reason)
+            messages.success(request, "เลิกเชื่อม LINE ของบัญชีนี้แล้ว")
+    elif action == "section":
+        value = data.get("section", "")
+        section = None
+        if value:
+            if not value.isdigit():
+                raise Http404
+            section = get_object_or_404(Section, pk=int(value))
+        _run(
+            request,
+            lambda: identity.set_section(actor, target, section, reason),
+            "เปลี่ยนแผนกแล้ว",
+        )
     elif action in {"suspend", "activate"}:
         _run(
             request,
@@ -246,28 +343,309 @@ def admin_user_action(request, pk, action):
     return redirect("admin-user-detail", pk=target.pk)
 
 
-@admin_required
+@registration_required
 @require_safe
 def admin_registrations(request):
     pending = RegistrationRequest.objects.filter(
         status=RegistrationRequest.Status.PENDING
-    ).select_related("requested_district", "identity")
+    ).select_related("requested_district", "identity", "employee")
     recent = (
         RegistrationRequest.objects.exclude(status=RegistrationRequest.Status.PENDING)
         .select_related("requested_district", "decided_by")
         .order_by("-decided_at")[:50]
     )
-    requesters = Requester.objects.select_related("district").order_by("-approved_at")[:100]
+    # Anonymous reporters are not approved people, and staff never see who they are (ADR 0010).
+    people = (
+        Requester.objects.filter(is_anonymous=False)
+        .select_related("district", "division", "employee")
+        .order_by("-approved_at")
+    )
+    requesters = _requester_rows(people.exclude(status=Requester.Status.REVOKED)[:100])
+    revoked = _requester_rows(people.filter(status=Requester.Status.REVOKED)[:100])
+    states = [row["state"] for row in requesters]
+    is_admin = identity.staff_scope(request.user).is_admin
     return render(
         request,
         "operations/admin_registrations.html",
         {
+            "layout": "operations/admin_base.html" if is_admin else "operations/base.html",
+            "is_admin": is_admin,
             "pending": pending,
             "recent": recent,
             "requesters": requesters,
+            "revoked": revoked,
+            "to_review": states.count("review"),
+            "to_confirm": states.count("name"),
+            # Who may talk to the bot (user, 14 Oct 2569: "ให้แสดงในหน้ารับรองด้วย").
+            "is_production": settings.APP_ENV == "production",
+            "audience": options.get(options.LINE_AUDIENCE),
+            "audience_option": options.OPTIONS[options.LINE_AUDIENCE],
+            "testers": len(settings.LINE_ALLOWED_RECIPIENTS),
+            "check_label": options.OPTIONS[options.REGISTRATION_CHECK].label_of(
+                options.get(options.REGISTRATION_CHECK)
+            ),
+            "approver_label": options.OPTIONS[options.REGISTRATION].label_of(
+                options.get(options.REGISTRATION)
+            ),
+            "requester_filters": [
+                (
+                    "district",
+                    "เขต",
+                    list(
+                        District.objects.filter(is_active=True)
+                        .order_by("code")
+                        .values_list("code", "name")
+                    ),
+                ),
+                (
+                    "status",
+                    "สถานะ",
+                    [c for c in Requester.Status.choices if c[0] != Requester.Status.REVOKED],
+                ),
+                ("identity", "ตัวตน", employees.IDENTITY_STATES),
+            ],
             "requester_form": forms.RequesterCreateForm(),
         },
     )
+
+
+def _requester_rows(requesters):
+    """What the requester list says about each person (user, 14 Oct 2569): how we know who they
+    are, their position from ทะเบียนพนักงาน, and their role in the system."""
+    requesters = list(requesters)
+    roles = identity.requester_roles(requesters)
+    people = employees.name_index()
+    lines = defaultdict(list)
+    for line in ChannelIdentity.objects.filter(requester__in=requesters):
+        lines[line.requester_id].append(line)
+    link = Requester.EmployeeLink
+    rows = []
+    for requester in requesters:
+        own = lines[requester.pk]
+        if requester.is_internal:
+            channel = "LINE ของเจ้าหน้าที่"
+        elif any(line.status == ChannelIdentity.Status.ACTIVE for line in own):
+            channel = "LINE"
+        elif own:
+            channel = "LINE ถูกถอน"
+        else:
+            channel = "ไม่ใช้ LINE (แอดมินเพิ่มโดยตรง)"
+        employee = requester.employee
+        if employee is None:
+            proof = "ยังไม่ผูกทะเบียนพนักงาน"
+        elif requester.employee_link == link.NAME:
+            proof = f"ชื่อตรงทะเบียน {employee.employee_id} (ยังไม่ได้ยืนยัน)"
+        elif requester.employee_link == link.ADMIN:
+            proof = f"แอดมินผูกรหัสพนักงาน {employee.employee_id}"
+        else:
+            proof = f"ยืนยันรหัสพนักงาน {employee.employee_id}"
+        found = employees.same_name(requester, people)
+        state = employees.identity_state(requester, found)
+        rows.append(
+            {
+                "requester": requester,
+                "state": state,
+                "note": employees.review_note(requester, found) if state == "review" else "",
+                "same_name": found,
+                "proof": proof,
+                "channel": channel,
+                "position": employee.position if employee else "",
+                "role": " · ".join(
+                    ["ผู้แจ้งภายใน" if requester.is_internal else "ผู้แจ้ง", *roles[requester.pk]]
+                ),
+                "where": requester.division.code
+                if requester.is_internal and requester.division_id
+                else requester.district.name,
+            }
+        )
+    return rows
+
+
+REQUESTER_MESSAGES = 300  # newest messages on one page
+REQUESTER_HISTORY = {
+    "registration.approved": "รับรองการลงทะเบียน",
+    "registration.auto_approved": "ระบบรับรองเอง (ตรงทะเบียนพนักงาน)",
+    "requester.created_direct": "แอดมินเพิ่มผู้แจ้งโดยตรง",
+    "requester.internal_created": "เริ่มเป็นผู้แจ้งภายใน",
+    "requester.suspended": "ระงับ",
+    "requester.activated": "เปิดใช้อีกครั้ง",
+    "requester.revoked": "ถอนการรับรอง",
+    "requester.messages_viewed": "เปิดดูข้อความที่พิมพ์มา",
+    "requester.employee_matched": "ระบบผูกทะเบียนพนักงานจากชื่อที่ตรง",
+    "requester.employee_unmatched": "ระบบยกเลิกการผูก เพราะชื่อไม่ตรงพนักงานคนเดียวแล้ว",
+    "requester.employee_linked": "แอดมินผูกทะเบียนพนักงาน",
+    "requester.employee_confirmed": "แอดมินยืนยันว่าเป็นพนักงานที่ชื่อตรง",
+    "requester.employee_unlinked": "แอดมินยกเลิกการผูกทะเบียนพนักงาน",
+    "requester.district_changed": "แอดมินแก้เขต",
+}
+ACTOR_LABELS = {"system": "ระบบ", "line": "LINE", "manage.py": "คำสั่งของผู้ดูแลระบบ"}
+
+
+@admin_required
+@require_safe
+def admin_requester_detail(request, pk):
+    requester = get_object_or_404(
+        Requester.objects.select_related(
+            "district", "division", "employee", "approved_by__staff_profile"
+        ),
+        pk=pk,
+        is_anonymous=False,
+    )
+    events = (
+        AuditEvent.objects.filter(
+            Q(target_type="Requester", target_id=str(requester.pk))
+            | Q(
+                action__in=["registration.approved", "registration.auto_approved"],
+                data__requester_id=requester.pk,
+            )
+        )
+        .select_related("actor__staff_profile")
+        .order_by("-pk")[:50]
+    )
+    row = _requester_rows([requester])[0]
+    # Employees with the same name, for an admin to confirm (user, 14 Oct 2569): while the
+    # link is not proved, whether the system tied one by name or left it to an admin.
+    candidates = [
+        {
+            "employee": e,
+            "place": e.district.name
+            if e.district_id
+            else (e.division.code if e.division_id else ""),
+            "note": _candidate_note(requester, e, row["same_name"]),
+        }
+        for e in (row["same_name"] if row["state"] != "verified" else [])
+    ]
+    history = []
+    for event in events:
+        actor = event.actor
+        data = event.data if event.action.startswith("requester.") else {}
+        detail = f" · รหัสพนักงาน {data['employee']}" if data.get("employee") else ""
+        if data.get("district"):
+            detail = f" · {data.get('previous', '')} → {data['district']}"
+        history.append(
+            {
+                "at": event.created_at,
+                "what": REQUESTER_HISTORY.get(event.action, event.action) + detail,
+                "who": getattr(getattr(actor, "staff_profile", None), "display_name", "")
+                or getattr(actor, "username", "")
+                or ACTOR_LABELS.get(event.actor_label, event.actor_label or "ระบบ"),
+                "why": event.reason,
+            }
+        )
+    return render(
+        request,
+        "operations/admin_requester_detail.html",
+        {
+            "requester": requester,
+            "row": row,
+            "candidates": candidates,
+            "districts": District.objects.filter(is_active=True).order_by("code"),
+            "lines": ChannelIdentity.objects.filter(requester=requester).select_related(
+                "staff_user__staff_profile"
+            ),
+            "history": history,
+            "message_count": ConversationMessage.objects.filter(requester=requester).count(),
+            "case_count": requester.cases.count(),
+            "managed": requester.status != Requester.Status.REVOKED,
+        },
+    )
+
+
+def _candidate_note(requester, employee, found):
+    """Why the system did not tie this employee by itself, for the admin who checks."""
+    if employee.pk == requester.employee_id:
+        return "ผูกจากชื่ออยู่ตอนนี้ ยังไม่ได้ยืนยัน"
+    notes = []
+    if len(found) > 1:
+        notes.append(f"ชื่อนี้มี {len(found)} คนในทะเบียน")
+    if employee.district_id not in (None, requester.district_id):
+        notes.append(f"ทะเบียนระบุ{employee.district.name}")
+    if requester.employee_link == Requester.EmployeeLink.UNLINKED:
+        notes.append("แอดมินเคยยกเลิกการผูก")
+    return " · ".join(notes)
+
+
+@admin_required
+@require_safe
+def admin_requester_messages(request, pk):
+    """What the person typed in LINE as this requester, never what the same LINE account typed
+    while reporting anonymously (ADR 0010). Admins only, and every opening is audited."""
+    requester = get_object_or_404(Requester, pk=pk, is_anonymous=False)
+    rows = ConversationMessage.objects.filter(requester=requester)
+    total = rows.count()
+    shown = list(
+        rows.select_related("case", "draft__case").order_by("-created_at", "-pk")[
+            :REQUESTER_MESSAGES
+        ]
+    )
+    for message in shown:
+        # A case or draft of another requester (an anonymous one of the same LINE account) is
+        # never named here, so this page cannot tell who reported it.
+        draft = message.draft if message.draft and message.draft.requester_id == pk else None
+        if message.case and message.case.requester_id == pk:
+            message.about, message.about_case = "ตอบที่ขอข้อมูลเพิ่มของเรื่อง", message.case
+        elif draft is not None and draft.case is not None:
+            message.about, message.about_case = "ร่างที่ยื่นเป็นเรื่อง", draft.case
+        elif draft is not None:
+            kind = f" {draft.get_kind_display()}" if draft.kind else ""
+            message.about = f"ร่างเรื่อง{kind} ({draft.get_status_display()})"
+            message.about_case = None
+        else:
+            message.about, message.about_case = "ข้อความทั่วไป", None
+    identity.audit(request.user, "requester.messages_viewed", requester, shown=len(shown))
+    return render(
+        request,
+        "operations/admin_requester_messages.html",
+        {"requester": requester, "rows": shown, "total": total},
+    )
+
+
+@admin_required
+@require_POST
+def admin_requester_action(request, pk, action):
+    requester = get_object_or_404(Requester, pk=pk, is_anonymous=False)
+    actor, data = request.user, request.POST
+    reason = data.get("reason", "")
+    if action in {"suspend", "activate"}:
+        _run(
+            request,
+            lambda: identity.set_requester_active(actor, requester, action == "activate", reason),
+            "เปิดใช้ผู้แจ้งแล้ว" if action == "activate" else "ระงับผู้แจ้งแล้ว",
+        )
+    elif action == "revoke":
+        if data.get("confirm") != "1":
+            messages.error(request, "ติ๊กยืนยันก่อนถอนการรับรอง")
+        else:
+            _run(
+                request,
+                lambda: identity.revoke_requester(actor, requester, reason),
+                "ถอนการรับรองแล้ว ถ้าจะใช้ LINE ต่อต้องลงทะเบียนใหม่",
+            )
+    elif action == "link-employee":
+        _run(
+            request,
+            lambda: identity.link_requester_employee(
+                actor, requester, data.get("employee_id", ""), reason
+            ),
+            "ผูกกับทะเบียนพนักงานแล้ว",
+        )
+    elif action == "unlink-employee":
+        _run(
+            request,
+            lambda: identity.unlink_requester_employee(actor, requester, reason),
+            "ยกเลิกการผูกกับทะเบียนพนักงานแล้ว",
+        )
+    elif action == "district":
+        _run(
+            request,
+            lambda: identity.set_requester_district(
+                actor, requester, data.get("district", ""), reason
+            ),
+            "แก้เขตแล้ว เรื่องเดิมยังอยู่เขตเดิม เรื่องใหม่ใช้เขตนี้",
+        )
+    else:
+        raise Http404
+    return redirect("admin-requester-detail", pk=requester.pk)
 
 
 @admin_required
@@ -288,7 +666,7 @@ def admin_requester_new(request):
     return redirect("admin-registrations")
 
 
-@admin_required
+@registration_required
 @require_POST
 def admin_registration_action(request, pk, action):
     registration = get_object_or_404(RegistrationRequest, pk=pk)
@@ -323,7 +701,16 @@ def admin_divisions(request):
             return redirect("admin-divisions")
     divisions = Division.objects.all()
     return render(
-        request, "operations/admin_divisions.html", {"divisions": divisions, "form": form}
+        request,
+        "operations/admin_divisions.html",
+        {
+            "divisions": divisions,
+            "form": form,
+            "division_filters": [
+                ("status", "สถานะ", [("active", "ใช้งาน"), ("closed", "ปิด")]),
+                ("kind", "ประเภท", Division.Kind.choices),
+            ],
+        },
     )
 
 
@@ -337,6 +724,12 @@ def admin_division_action(request, pk, action):
             request,
             lambda: identity.set_intake_division(request.user, division, reason),
             "ตั้งกองรับเรื่องกลางแล้ว",
+        )
+    elif action == "clear-intake":
+        _run(
+            request,
+            lambda: identity.clear_intake_division(request.user, reason),
+            "ยกเลิกกองรับเรื่องกลางแล้ว เรื่องใหม่ส่งตรงถึงกองตามกติกา",
         )
     elif action in {"activate", "deactivate"}:
         _run(
@@ -581,6 +974,11 @@ def admin_ai(request):
     for version in versions:
         version.blocker = ai.activation_blocker(version)
         version.last_job = next(iter(version.eval_jobs.all()), None)
+    # The last 50 messages that went to the AI, with what it did (ADR 0012 review).
+    runs = list(AIRun.objects.select_related("config_version").order_by("-pk")[:50])
+    titles = dict(ChatAnswer.objects.values_list("key", "title"))
+    for run in runs:
+        run.review, run.refused = ai_chat.review(run, titles)
     return render(
         request,
         "operations/admin_ai.html",
@@ -594,11 +992,19 @@ def admin_ai(request):
             "active_triage": next(
                 (v for v in versions if v.status == "active" and v.task == "triage"), None
             ),
+            "active_answer": next(
+                (v for v in versions if v.status == "active" and v.task == "answer"), None
+            ),
             "switchable": [v for v in versions if v.blocker is None],
+            "stoppable": [v for v in versions if v.status == "active"],
             "presets": ai.preset_status(),
             "gate": ai.EVAL_GATE,
             "preset_form": forms.AIPresetForm(),
-            "runs": AIRun.objects.select_related("config_version").order_by("-pk")[:20],
+            "runs": runs,
+            "run_filters": [
+                ("status", "ผล", AIRun.Status.choices),
+                ("refused", "ถ้อยคำของ AI", [("yes", "มีที่ถูกตีกลับ"), ("no", "ไม่มีที่ถูกตีกลับ")]),
+            ],
             "ai_enabled": settings.AI_ENABLED,
             "credential_form": forms.AICredentialForm(),
             "profile_form": forms.AIProfileForm(),
@@ -677,6 +1083,14 @@ def admin_ai_action(request, action, pk=None):
                 return redirect(f"{reverse('admin-ai')}#v{version.number}")
         else:
             messages.error(request, "เลือกรูปแบบการทำงานก่อน")
+    elif action == "stop":
+        task = data.get("task", "")
+        if task not in AIConfigVersion.Task.values:
+            messages.error(request, "เลือกงานที่จะหยุดใช้ AI")
+        else:
+            stopped = _run(request, lambda: ai.stop(actor, task, reason), "หยุดใช้ AI แล้ว")
+            if stopped and stopped[1]:
+                messages.info(request, f"ปิดงานคัดกรองที่รอ AI อยู่ {stopped[1]} เรื่อง")
     elif action == "switch":
         version = AIConfigVersion.objects.filter(pk=data.get("version") or None).first()
         if version is None:
@@ -710,3 +1124,187 @@ def admin_ai_action(request, action, pk=None):
     else:
         raise Http404
     return redirect("admin-ai")
+
+
+@admin_required
+def admin_options(request):
+    """ตัวเลือกระบบ (ADR 0009): choices the organisation changes without code, each with a
+    reason and in the audit trail; the first choice of each is the safe default."""
+    if request.method == "POST":
+        key = request.POST.get("key", "")
+        _run(
+            request,
+            lambda: options.change(
+                request.user, key, request.POST.get("value", ""), request.POST.get("reason", "")
+            ),
+            "บันทึกตัวเลือกแล้ว",
+        )
+        # The requester approval page shows and changes who may talk to the bot as well.
+        return redirect(
+            "admin-registrations"
+            if request.POST.get("next") == "registrations"
+            else "admin-options"
+        )
+    history = (
+        AuditEvent.objects.filter(action="option.changed")
+        .select_related("actor")
+        .order_by("-created_at")[:20]
+    )
+    return render(
+        request,
+        "operations/admin_options.html",
+        {
+            "rows": options.rows(),
+            "history": history,
+            "option_filters": [
+                ("state", "สถานะ", [("changed", "เปลี่ยนจากค่าเริ่มต้น"), ("default", "ค่าเริ่มต้น")])
+            ],
+        },
+    )
+
+
+@admin_required
+def admin_answers(request):
+    """คลังคำตอบ (ADR 0012): what the bot may answer in LINE. People write and approve every
+    answer; the AI only chooses one or writes from them, and only when ตัวเลือกระบบ allows."""
+    if request.method == "POST":
+        data = request.POST
+        key = (data.get("key") or "").strip()
+        if data.get("op") == "retire":
+            _run(
+                request,
+                lambda: answers.retire(request.user, key, data.get("reason", "")),
+                "เลิกใช้คำตอบแล้ว",
+            )
+        else:
+            saved = _run(
+                request,
+                lambda: answers.save(
+                    request.user,
+                    key,
+                    data.get("title", ""),
+                    [w for w in data.get("keywords", "").replace("\r", "").split("\n")],
+                    data.get("text", ""),
+                    data.get("action", ChatAnswer.Action.TEXT),
+                    data.get("reason", ""),
+                    approve=data.get("approve") == "1",
+                    short_only=data.get("short_only") == "1",
+                ),
+                "บันทึกคำตอบแล้ว",
+            )
+            asked = UnansweredQuestion.objects.filter(
+                pk=data.get("question") or 0, status=UnansweredQuestion.Status.OPEN
+            ).first()
+            if saved is not None and asked is not None:
+                # คำถามที่บอทตอบไม่ได้ (Q11): the question now has an answer in the bank.
+                questions.handle(
+                    request.user,
+                    asked,
+                    UnansweredQuestion.Status.ANSWERED,
+                    "เพิ่มเป็นคำตอบในคลัง",
+                    answer_key=key,
+                )
+        return redirect(f"{reverse('admin-answers')}#a-{key}")
+    from operations import ai_answer
+
+    active = ai.active_version(AIConfigVersion.Task.ANSWER)
+    asked = UnansweredQuestion.objects.filter(
+        pk=request.GET.get("question") or 0, status=UnansweredQuestion.Status.OPEN
+    ).first()
+    return render(
+        request,
+        "operations/admin_answers.html",
+        {
+            "answers": ChatAnswer.objects.select_related("updated_by", "approved_by"),
+            "actions": ChatAnswer.Action.choices,
+            "answer_filters": [
+                ("status", "สถานะ", ChatAnswer.Status.choices),
+                ("action", "ต่อท้าย", ChatAnswer.Action.choices),
+            ],
+            "mode": options.OPTIONS[options.CHAT_ANSWERS].label_of(answers.mode()),
+            "active": active,
+            "usable": ai_answer.active_version(),
+            "history": AuditEvent.objects.filter(action__startswith="chat_answer.")
+            .select_related("actor")
+            .order_by("-created_at")[:20],
+            "question": asked,
+        },
+    )
+
+
+@admin_required
+@require_http_methods(["GET", "HEAD", "POST"])
+def admin_questions(request):
+    """คำถามที่บอทตอบไม่ได้ (14 Oct 2569 Q11): what people asked that คลังคำตอบ did not know,
+    masked and without names; an admin adds an answer or marks it not to be answered."""
+    if request.method == "POST":
+        question = get_object_or_404(UnansweredQuestion, pk=request.POST.get("question") or 0)
+        _run(
+            request,
+            lambda: questions.handle(
+                request.user,
+                question,
+                request.POST.get("status", ""),
+                request.POST.get("reason", ""),
+            ),
+            "บันทึกแล้ว",
+        )
+        return redirect("admin-questions")
+    rows = UnansweredQuestion.objects.select_related("handled_by")
+    return render(
+        request,
+        "operations/admin_questions.html",
+        {
+            "waiting": rows.filter(status=UnansweredQuestion.Status.OPEN).order_by(
+                "-count", "-last_at"
+            )[:200],
+            "handled": rows.exclude(status=UnansweredQuestion.Status.OPEN).order_by("-handled_at")[
+                :100
+            ],
+        },
+    )
+
+
+@admin_required
+def admin_employees(request):
+    """ทะเบียนพนักงาน (ADR 0010): the list identity checks compare against; proof values are
+    hashed on import and never shown."""
+    if request.method == "POST":
+        upload = request.FILES.get("file")
+        if upload is None or upload.size > 5 * 1024 * 1024:
+            messages.error(request, "เลือกไฟล์ CSV ขนาดไม่เกิน 5 MB")
+        else:
+            summary = _run(
+                request,
+                lambda: employees.import_csv(
+                    request.user,
+                    upload.read(),
+                    request.POST.get("check_label", ""),
+                    deactivate_missing=request.POST.get("deactivate_missing") == "1",
+                ),
+                "นำเข้าทะเบียนพนักงานแล้ว",
+            )
+            if summary:
+                messages.info(
+                    request,
+                    f"เพิ่ม {summary['created']} แก้ {summary['updated']} "
+                    f"ปิด {summary['closed']} รายการ · ผูกผู้แจ้งจากชื่อ {summary['matched']} "
+                    f"ยกเลิกการผูกที่ชื่อไม่ตรงแล้ว {summary['unmatched']} "
+                    f"ชื่อตรงแต่ต้องให้แอดมินตรวจ {summary['review']} ราย",
+                )
+        return redirect("admin-employees")
+    active = Employee.objects.filter(is_active=True)
+    return render(
+        request,
+        "operations/admin_employees.html",
+        {
+            "active": active.count(),
+            "inactive": Employee.objects.filter(is_active=False).count(),
+            "label": employees.check_label(),
+            "synthetic": active.filter(is_synthetic=True).exists(),
+            "latest": Employee.objects.order_by("-imported_at").first(),
+            "check": options.OPTIONS[options.REGISTRATION_CHECK].label_of(
+                options.get(options.REGISTRATION_CHECK)
+            ),
+        },
+    )

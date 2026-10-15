@@ -1,0 +1,46 @@
+{% extends "operations/admin_base.html" %}
+{% block title %}ตัวเลือกระบบ — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>ตัวเลือกระบบ</h1>
+    <p class="lede">เปลี่ยนวิธีทำงานได้โดยไม่ต้องแก้โปรแกรม ทุกการเปลี่ยนต้องมีเหตุผลและบันทึกในประวัติ ค่าแรกของแต่ละข้อคือค่าที่ปลอดภัยที่สุด</p>
+  </div>
+</div>
+{% include "operations/_list_tools.html" with list="options" placeholder="ค้นหาตัวเลือก เช่น LINE AI ลงทะเบียน" filters=option_filters folds=True %}
+<div data-list-items="options">
+{% for key, option, current, row in rows %}
+<details class="fold" id="opt-{{ key }}" data-item data-state="{% if current == option.default %}default{% else %}changed{% endif %}" data-search="{{ option.label|lower }} {{ option.help|lower }}{% for v, label, help in option.choices %} {{ label|lower }} {{ help|lower }}{% endfor %}">
+  <summary>
+    <span class="fold__title">{{ option.label }}</span>
+    {% if current != option.default %}<span class="tag tag--outline">เปลี่ยนจากค่าเริ่มต้น</span>{% endif %}
+    <span class="fold__sub">ตอนนี้: {% for v, label, help in option.choices %}{% if v == current %}{{ label }}{% endif %}{% endfor %}</span>
+  </summary>
+  <div class="fold__body">
+  {% if option.help %}<p class="muted">{{ option.help }}</p>{% endif %}
+  <form method="post" action="{% url 'admin-options' %}">
+    {% csrf_token %}<input type="hidden" name="key" value="{{ key }}">
+    <fieldset>
+      <legend class="visually-hidden">{{ option.label }}</legend>
+      {% for v, label, help in option.choices %}
+        <label class="choice"><input type="radio" name="value" value="{{ v }}"{% if v == current %} checked{% endif %} required> <span><strong>{{ label }}</strong>{% if forloop.first %} <span class="muted">(ค่าเริ่มต้น)</span>{% endif %}<br><span class="muted">{{ help }}</span></span></label>
+      {% endfor %}
+    </fieldset>
+    <div class="field"><label for="reason-{{ key }}">เหตุผล</label><input id="reason-{{ key }}" name="reason" maxlength="500" required></div>
+    <button class="btn btn--sm" type="submit">บันทึก</button>
+    {% if row and row.updated_by %}<p class="muted mt-8">เปลี่ยนล่าสุดโดย {{ row.updated_by.username }} · {{ row.updated_at|date:"Y-m-d H:i" }} · {{ row.reason }}</p>{% endif %}
+  </form>
+  </div>
+</details>
+{% endfor %}
+</div>
+<p class="list-empty" data-list-empty="options" hidden>ไม่พบตัวเลือกที่ตรงกับการค้นหา</p>
+<section class="section" aria-labelledby="opt-history">
+  <div class="section-head"><h2 id="opt-history">ประวัติการเปลี่ยน</h2></div>
+  <ul>
+    {% for e in history %}<li>{{ e.created_at|date:"Y-m-d H:i" }} · {{ e.actor.username|default:e.actor_label }} · {{ e.data.key }}: {{ e.data.previous }} → {{ e.data.value }} · {{ e.reason }}</li>
+    {% empty %}<li class="muted">ยังไม่มีการเปลี่ยน ทุกข้อใช้ค่าเริ่มต้น</li>{% endfor %}
+  </ul>
+</section>
+{% endblock %}

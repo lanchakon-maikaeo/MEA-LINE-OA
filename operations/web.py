@@ -12,21 +12,25 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.http import Http404, HttpResponse
+from django.db.models import Q
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST, require_safe
+from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from operations import (
     casepage,
+    charts,
     identity,
     queues,
     registry,
     reports,
     services,
+    support,
     uploads,
     web_actions,
+    wording,
     workflow,
 )
 from operations.contracts import Actor, CommandFailed, ErrorCode
@@ -47,7 +51,7 @@ def navigation(request):
         section = "admin"
     elif name in {"account", "password_change"}:
         section = "account"
-    elif name == "reports":
+    elif name in {"reports", "report-cases"}:
         section = "reports"
     elif name and name.startswith("registry"):
         section = "registry"
@@ -64,6 +68,9 @@ def navigation(request):
             or request.session.get("division", ""),
             "name": profile.display_name if profile else user.username,
             "is_intake": _intake_member(scope),
+            "has_intake": identity.intake_division() is not None,
+            # ตัวเลือกระบบ (ADR 0009): a non-admin who may approve LINE registrations.
+            "registrations": not scope.is_admin and identity.may_decide_registrations(user),
             "registry": registry.may_open(user),
         }
     }
@@ -99,7 +106,9 @@ def start(request):
 @login_required
 @require_safe
 def home(request):
-    """ภาพรวม: a card of numbers per division the account works in (every division for admins)."""
+    """ภาพรวม, one page with รายงาน since 10 Oct 2569 (the user): the work of each division the
+    account works in (every division for admins), then the report figures, chart and breakdowns.
+    Every card, number and bar opens the cases behind it."""
     scope = _scope(request)
     if not scope.has_any_access:
         return render(request, "operations/console.html", {"scope": scope, "cards": []})
@@ -118,7 +127,11 @@ def home(request):
                 "overdue": queues.overdue_count(request.user, division, now),
             }
         )
-    return render(request, "operations/console.html", {"scope": scope, "cards": cards})
+    return render(
+        request,
+        "operations/console.html",
+        {"scope": scope, "cards": cards, **_report_context(request)},
+    )
 
 
 def _queue(request, division, admin_all=False):
@@ -156,6 +169,7 @@ def _queue(request, division, admin_all=False):
         "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "รอคัดกรอง")],
         "statuses": Case.Status.choices,
         "districts": District.objects.order_by("name"),
+        "sections": list(division.sections.filter(is_active=True)) if division else [],
     }
     context["registry_count"] = _registry_count(request.user, division, admin_all)
     if _is_htmx(request):
@@ -179,6 +193,12 @@ def _registry_count(user, division, admin_all):
     home = registry.registry_division()
     if admin_all or (division is not None and home is not None and division.pk == home.pk):
         return RD.objects.filter(status=RD.Status.OPEN).count()
+    if division is not None and home is None:
+        # ADR 0008: each division decides the discrepancies of its own facts and cases.
+        mine = RD.objects.filter(status__in=[RD.Status.OPEN, RD.Status.WITH_DIVISION]).filter(
+            Q(division=division) | Q(record__division=division) | Q(case__owner_division=division)
+        )
+        return mine.distinct().count() or None
     if division is None:
         return None
     sent = RD.objects.filter(status=RD.Status.WITH_DIVISION, division=division).count()
@@ -195,10 +215,52 @@ def division_queue(request, code):
 @login_required
 @require_safe
 def all_queue(request):
-    """The admin's every-division view (read-only for divisions they are not in)."""
-    if not _scope(request).is_admin:
+    """The admin's every-division view (read-only for divisions they are not in; ผู้ช่วยเหลือระบบ
+    acts in all of them)."""
+    scope = _scope(request)
+    if not (scope.is_admin or scope.is_support):
         raise PermissionDenied
     return _queue(request, None, admin_all=True)
+
+
+# Queue tabs the tour may take a case from, in order of preference.
+TOUR_TABS = ("host", "incoming", "district", "mine", "closed")
+
+
+@login_required
+@require_safe
+def tour_where(request):
+    """สาธิตการใช้งาน: a queue and a case of one kind this account can open, so the tour shows
+    real screens even when the queue in view has none (e.g. an admin on a quiet division).
+    The division in view comes first; with no queue holding one, the newest visible case."""
+    scope = _scope(request)
+    kind = request.GET.get("kind", "")
+    if kind not in Case.Kind.values:
+        kind = ""
+    divisions = queues.own_divisions(scope) if scope.has_any_access else []
+    current = request.session.get("division", "")
+    divisions.sort(key=lambda d: d.code != current)
+    visible = queues.visible(request.user)
+    if kind:
+        visible = visible.filter(kind=kind)
+    now = timezone.now()
+    for tab in TOUR_TABS:
+        for division in divisions:
+            cases = visible.filter(queues.tab_condition(tab, division, request.user, now))
+            if not cases.exists():
+                continue
+            first = queues.ordered(cases, tab)[0]
+            query = urlencode({"tab": tab, **({"kind": kind} if kind else {})})
+            return JsonResponse(
+                {
+                    "queue": f"{reverse('division-detail', args=[division.code])}?{query}",
+                    "case": reverse("case-detail", args=[first.number]),
+                }
+            )
+    latest = visible.order_by("-submitted_at").first()
+    return JsonResponse(
+        {"queue": None, "case": reverse("case-detail", args=[latest.number]) if latest else None}
+    )
 
 
 def _visible_case(request, number):
@@ -242,7 +304,8 @@ def case_detail(request, number):
             "back_division": back if back in codes else "",
             "offers": offers,
             "primary": next((o for o in offers if o.primary), None),
-            "has_irreversible": any(o.irreversible for o in offers),
+            "irreversible": ", ".join(o.label for o in offers if o.irreversible),
+            "hints": web_actions.hints(st, offers),
             "can_upload": uploads.may_upload(st),
         },
     )
@@ -258,27 +321,15 @@ ERROR_TEXT = {
     ErrorCode.DEPENDENCY_UNAVAILABLE: "ระบบส่วนหลังยังไม่พร้อม ลองใหม่อีกครั้งในอีกสักครู่",
     ErrorCode.EXTERNAL_OUTCOME_UNKNOWN: "ยังไม่ทราบผลจากระบบภายนอก ตรวจสอบก่อนบันทึกซ้ำ",
 }
-# English service messages the staff may meet, in plain Thai.
-MESSAGE_TEXT = {
-    "A reason is required.": "ต้องระบุเหตุผล",
-    "Give facts to confirm or names to clear.": "เลือกข้อเท็จจริงที่จะยืนยันหรือล้างอย่างน้อยหนึ่งข้อ",
-    "Differs from the proposal: choose a reason category and explain briefly.": (
-        "กองที่เลือกต่างจากข้อเสนอ เลือกเหตุผลและอธิบายสั้น ๆ"
-    ),
-    "A handoff is already waiting for an answer.": "มีการส่งต่อที่รอกองปลายทางตอบอยู่แล้ว",
-    "The case already belongs to this division.": "เรื่องนี้อยู่ที่กองนี้อยู่แล้ว",
-    "The route is waiting for a coordinator's decision.": "เรื่องนี้รอผู้ประสานตัดสินอยู่",
-}
 
 
 def _error_text(exc):
-    message = MESSAGE_TEXT.get(exc.message, exc.message)
-    base = ERROR_TEXT.get(exc.code, "")
-    if message and not message.isascii():
-        return f"{base} ({message})" if base and exc.code != ErrorCode.VALIDATION_ERROR else message
-    if exc.code == ErrorCode.VALIDATION_ERROR:
-        return f"ข้อมูลยังไม่ครบหรือไม่ถูกต้อง{f' ({message})' if message else ''}"
-    return base or "บันทึกไม่สำเร็จ"
+    """What a person reads when a step is refused: Thai, with what to do next; never the
+    services' English (wording.py holds the Thai for each)."""
+    text = wording.thai(exc.message)
+    if text is None and exc.message and not exc.message.isascii():
+        text = exc.message  # the service already speaks Thai here
+    return text or ERROR_TEXT.get(exc.code) or "ข้อมูลยังไม่ครบหรือไม่ถูกต้อง ตรวจช่องที่กรอกแล้วลองอีกครั้ง"
 
 
 def _form_page(request, case, form, st, *, errors=None, conflict=None, status=200, demo=False):
@@ -347,12 +398,26 @@ def case_action(request, number, action):
                     request.user, case, evidence, note=f"หลักฐานทะเบียน: {form.label}"
                 )
                 payload["evidence"] = [str(a.pk) for a in stored]
+            key = request.POST.get("idempotency_key", "")
+            priority = payload.pop("priority", None) if action == "complete_triage" else None
+            if priority:
+                # One submit, two decisions: the level, then the end of triage. A key is unique
+                # per action, so the same key makes a double submit replay both.
+                services.perform_action(
+                    Actor.staff(request.user),
+                    case.pk,
+                    "set_priority",
+                    expected_revision=revision,
+                    idempotency_key=key,
+                    payload={"priority": priority, **payload},
+                )
+                revision += 1
             services.perform_action(
                 Actor.staff(request.user),
                 case.pk,
                 action,
                 expected_revision=revision,
-                idempotency_key=request.POST.get("idempotency_key", ""),
+                idempotency_key=key,
                 payload=payload,
             )
     except CommandFailed as exc:
@@ -414,16 +479,39 @@ def case_search(request):
 
 
 @login_required
-@require_safe
+@require_http_methods(["GET", "HEAD", "POST"])
 def account(request):
-    """Round 2 Q10: read-only profile; the email is set by an admin."""
+    """Round 2 Q10: read-only profile; the email is set by an admin. ADR 0010: link or unlink
+    LINE with a one-time code shown once here."""
+    from operations import staff_line
+    from operations.models import ChannelIdentity
+
     scope = _scope(request)
+    code = None
+    if request.method == "POST" and scope.has_any_access:
+        if request.POST.get("action") == "line-code":
+            code = staff_line.issue_code(request.user)
+        elif request.POST.get("action") == "line-unlink":
+            line = ChannelIdentity.objects.filter(staff_user=request.user).first()
+            if line is not None and staff_line.unlink(line, request.user, "เลิกเชื่อมจากหน้าเว็บ"):
+                messages.success(request, "เลิกเชื่อม LINE แล้ว")
+            return redirect("account")
     grants = (
         RoleGrant.objects.filter(user=request.user, revoked_at__isnull=True)
         .select_related("division")
         .order_by("division__code", "role")
     )
-    return render(request, "operations/account.html", {"scope": scope, "grants": grants})
+    return render(
+        request,
+        "operations/account.html",
+        {
+            "scope": scope,
+            "grants": grants,
+            "line": ChannelIdentity.objects.filter(staff_user=request.user).first(),
+            "code": code,
+            "code_minutes": staff_line.CODE_MINUTES,
+        },
+    )
 
 
 @login_required
@@ -497,29 +585,167 @@ def all_export(request):
     return _export(request, None, admin_all=True)
 
 
-@login_required
-@require_safe
-def report(request):
-    """Round 1 Q13: numbers per division; the admin compares every division."""
+def _report_scope(request):
+    """(scope, divisions, chosen division or None for every division, days) of a report page."""
     scope = _scope(request)
     if not scope.has_any_access:
         raise Http404
     divisions = queues.own_divisions(scope)
     code = request.GET.get("division", "")
     chosen = next((d for d in divisions if d.code == code), None)
+    if code and chosen is None:
+        raise Http404
     if chosen is None and not scope.is_admin and divisions:
         chosen = divisions[0]
+    return scope, divisions, chosen, reports.period(request.GET.get("days"))
+
+
+def _report_link(division, days):
+    """URL of the cases behind one report figure (/reports/cases/)."""
+    base = reverse("report-cases")
+
+    def link(metric, value=""):
+        params = {"metric": metric}
+        if value:
+            params["value"] = value
+        if division is not None:
+            params["division"] = division.code
+        if days != reports.WINDOW_DAYS:
+            params["days"] = days
+        return f"{base}?{urlencode(params)}"
+
+    return link
+
+
+def _dashboard(report, link):
+    """The report's figures with the drill-down link of each (M10 report, 9 ตุลาคม 2569)."""
+    total = report["total"] or 1
+    level_steps = {"P0": "o5", "P1": "o4", "P2": "o3", "P3": "o1", "none": "muted"}
+    return {
+        "kpis": [
+            ("เรื่องที่ต้องทำ", report["open"], link("open"), "dark"),
+            (
+                "เกินกรอบเวลา",
+                report["overdue"],
+                link("overdue"),
+                "alert" if report["overdue"] else "",
+            ),
+            (
+                "ถูกยกระดับ",
+                report["escalated"],
+                link("escalated"),
+                "alert" if report["escalated"] else "",
+            ),
+            ("รอเขตตอบ", report["district"], link("district"), ""),
+            ("งานย่อยค้าง", report["children"], link("children"), ""),
+        ],
+        "trend": charts.trend(report["trend"], link),
+        "levels": [
+            (key, n, total, link("level", key), level_steps[key]) for key, n in report["by_level"]
+        ],
+        "kinds": [(label, n, total, link("kind", value)) for value, label, n in report["by_kind"]],
+        "sections": [
+            (label, n, total, link("section", value)) for value, label, n in report["by_section"]
+        ],
+        "statuses": [
+            (label, n, total, link("status", value)) for value, label, n in report["by_status"]
+        ],
+        "ages": [
+            (label, n, total, link("age", key), f"o{i + 1}")
+            for i, (key, label, n) in enumerate(report["aging"])
+        ],
+        "items": [
+            (
+                code,
+                name,
+                n,
+                max(report["items"][0][2], 1) if report["items"] else 1,
+                link("item", code),
+            )
+            for code, name, n in report["items"]
+        ],
+        "times": {
+            "ack": link("ack"),
+            "resolve": link("resolve"),
+            "finish": link("finish"),
+        },
+    }
+
+
+@login_required
+@require_safe
+def report(request):
+    """รายงาน is part of ภาพรวม now; the old address shows the same page so links keep working."""
+    return home(request)
+
+
+def _report_context(request):
+    """Round 1 Q13: numbers per division; the admin compares every division. Every figure links
+    to the cases behind it and the dashboard draws the window (7/30/90 days)."""
+    scope, divisions, chosen, days = _report_scope(request)
     now = timezone.now()
-    main = reports.division_report(request.user, chosen, now)
-    table = (
-        [reports.division_report(request.user, d, now) for d in divisions]
-        if scope.is_admin and chosen is None
-        else []
+    main = reports.division_report(request.user, chosen, now, days)
+    table = []
+    if scope.is_admin and chosen is None:
+        for division in divisions:
+            row = reports.division_report(request.user, division, now, days)
+            row["links"] = {
+                metric: _report_link(division, days)(metric)
+                for metric in ("open", "overdue", "escalated", "district", "children")
+            }
+            row["report_url"] = f"?{urlencode({'division': division.code, 'days': days})}"
+            table.append(row)
+    # ADR 0007: การทำแทนกอง, for every division (admin, ผู้ช่วยเหลือระบบ) or the viewer's own.
+    everywhere = scope.is_admin or scope.is_support
+    acted = support.actions(None if everywhere else scope.division_roles, days=days)[:200]
+    return {
+        "report": main,
+        "dash": _dashboard(main, _report_link(chosen, days)),
+        "divisions": divisions,
+        "chosen": chosen,
+        "days": days,
+        "periods": reports.PERIODS,
+        "table": table,
+        "support_actions": acted,
+    }
+
+
+@login_required
+@require_safe
+def report_cases(request):
+    """The cases behind one report figure, counted the same way as the report."""
+    scope, divisions, chosen, days = _report_scope(request)
+    now = timezone.now()
+    found = reports.drilldown(
+        request.user, chosen, request.GET.get("metric", ""), request.GET.get("value", ""), now, days
     )
+    if found is None:
+        raise Http404
+    title, tab, cases = found
+    try:
+        number = int(request.GET.get("page", "1"))
+    except ValueError:
+        number = 1
+    items, pager = queues.page(queues.prefetch(cases), "host", number)
+    query = {k: v for k, v in request.GET.items() if k != "page"}
+    back = {"division": chosen.code} if chosen else {}
+    if days != reports.WINDOW_DAYS:
+        back["days"] = days
     return render(
         request,
-        "operations/reports.html",
-        {"report": main, "divisions": divisions, "chosen": chosen, "table": table},
+        "operations/report_cases.html",
+        {
+            "title": title,
+            "chosen": chosen,
+            "days": days,
+            "rows": queues.build_rows(items, now),
+            "pager": pager,
+            "query": urlencode(query),
+            "back": f"{reverse('console')}?{urlencode(back)}",
+            "queue": f"{reverse('division-detail', args=[chosen.code])}?tab={tab}"
+            if tab and chosen
+            else "",
+        },
     )
 
 
@@ -534,13 +760,18 @@ KIND_TEXT_FIELDS = {
 
 
 def _intake_member(scope):
-    intake = Division.objects.filter(is_intake=True, is_active=True).first()
-    return intake is not None and intake.pk in scope.division_roles
+    """May file a case for a requester: intake staff, or (ADR 0008, no intake desk) staff of
+    any division; the rules then route the case."""
+    intake = identity.intake_division()
+    if intake is None:
+        return scope.is_support or bool(scope.division_roles)
+    return intake.pk in scope.division_roles or scope.is_support
 
 
 @login_required
 def case_new(request):
-    """Intake staff file a case for an approved requester (phone, letter or counter), no AI."""
+    """Intake staff file a case for an approved requester (phone, letter, counter or the fallback
+    form while the system was down), no AI."""
     scope = _scope(request)
     if not _intake_member(scope):
         raise PermissionDenied
@@ -555,6 +786,8 @@ def case_new(request):
             "channel": data.get("channel", ""),
             "intake_note": data.get("intake_note", "").strip(),
         }
+        if (data.get("reported_at") or "").strip():
+            payload["reported_at"] = data["reported_at"].strip()
         if (data.get("requester_id") or "").isdigit():
             payload["requester_id"] = int(data["requester_id"])
         for name in KIND_TEXT_FIELDS.get(kind, []):
@@ -563,6 +796,8 @@ def case_new(request):
                 payload[name] = value
         if (data.get("related_case_number") or "").strip():
             payload["related_case_number"] = data["related_case_number"].strip().upper()
+        if kind == Case.Kind.PROBLEM and data.get("topic"):
+            payload["topic"] = data["topic"]
         lines = []
         for i in range(NEW_CASE_ROWS):
             code = (data.get(f"row-{i}-item") or "").strip()
@@ -587,16 +822,42 @@ def case_new(request):
         except CommandFailed as exc:
             errors.append(_error_text(exc))
         else:
-            case = Case.objects.get(pk=result.case_id)
-            messages.success(request, f"บันทึกเรื่อง {case.number} แทนผู้แจ้งแล้ว เรื่องเข้าคิวคัดกรอง")
-            return redirect("case-detail", number=case.number)
+            numbers = [result.case_number, *(s["case_number"] for s in result.split)]
+            owners = dict(
+                Case.objects.filter(number__in=numbers).values_list(
+                    "number", "owner_division__code"
+                )
+            )
+            if result.split:
+                # ADR 0008: one request with items of several divisions, one case each.
+                text = f"บันทึกแทนผู้แจ้งแล้ว แยกเป็น {len(numbers)} เรื่องตามกอง: " + ", ".join(
+                    f"{number} ({owners[number]})" for number in numbers
+                )
+            else:
+                text = f"บันทึกเรื่อง {numbers[0]} แทนผู้แจ้งแล้ว เข้าคิวคัดกรองของ {owners[numbers[0]]}"
+            # K15: staff of any division may file, but open only their own division's cases.
+            # Show the first case this account can open; otherwise stay on a new form.
+            visible = set(
+                queues.visible(request.user)
+                .filter(number__in=numbers)
+                .values_list("number", flat=True)
+            )
+            shown = next((number for number in numbers if number in visible), None)
+            if shown is None:
+                where = "เรื่องนี้" if len(numbers) == 1 else "ทุกเรื่อง"
+                messages.success(request, f"{text} {where}อยู่ในคิวของกองอื่น บัญชีนี้จึงเปิดดูไม่ได้")
+                return redirect("case-new")
+            messages.success(request, text)
+            return redirect("case-detail", number=shown)
     return render(
         request,
         "operations/case_new.html",
         {
             "values": data,
             "errors": errors,
-            "requesters": Requester.objects.filter(status=Requester.Status.ACTIVE)
+            "requesters": Requester.objects.filter(
+                status=Requester.Status.ACTIVE, is_anonymous=False
+            )
             .select_related("district")
             .order_by("district__code", "display_name"),
             "items": EquipmentType.objects.filter(is_active=True).order_by("code"),
@@ -610,6 +871,7 @@ def case_new(request):
                 for i in range(NEW_CASE_ROWS)
             ],
             "kinds": Case.Kind.choices,
+            "topics": Case.Topic.choices,
             "channels": web_actions.STAFF_CHANNELS,
             "idempotency_key": data.get("idempotency_key") or uuid.uuid4().hex,
         },

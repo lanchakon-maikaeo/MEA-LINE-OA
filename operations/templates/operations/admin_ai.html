@@ -4,7 +4,8 @@
 <p class="lede mb-24">เฉพาะแอดมินผู้พัฒนา · AI ในแชต: <strong>{{ ai_enabled|yesno:"เปิด,ปิด (AI_ENABLED)" }}</strong> · ทุกการเปลี่ยนแปลงผ่าน ทดสอบ → ประเมิน → เปลี่ยนไปใช้ และบันทึก audit</p>
 
 <h2 id="switch">รุ่นที่ใช้งานอยู่</h2>
-<p>AI มีสองงาน แต่ละงานมีรุ่นที่ใช้งานและเกณฑ์ประเมินแยกกัน: สกัดร่างจากแชต (M05) และเสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06 ไม่เลือกกองหรือระดับเอง ADR 0002)</p>
+<p>AI มีสามงาน แต่ละงานมีรุ่นที่ใช้งานและเกณฑ์ประเมินแยกกัน: สกัดร่างจากแชต (M05), เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06 ไม่เลือกกองหรือระดับเอง ADR 0002) และตอบแชตผู้แจ้งจากคลังคำตอบ (ADR 0012)</p>
+<p>ตอบแชต: {% if active_answer %}<strong>v{{ active_answer.number }}</strong> · {% for e in active_answer.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_answer.activated_at|date:"Y-m-d H:i" }} (<a href="{% url 'admin-answers' %}">คลังคำตอบ</a>){% else %}ยังไม่เปิดใช้ (ตอบจากคำสำคัญเท่านั้น){% endif %}</p>
 <p>คัดกรองเรื่อง: {% if active_triage %}<strong>v{{ active_triage.number }}</strong> · {% for e in active_triage.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_triage.activated_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เปิดใช้ (ข้อเสนอใช้กติกาและธงจากคำเท่านั้น){% endif %}</p>
 <p>สกัดร่างจากแชต:</p>
 {% if active %}
@@ -25,6 +26,17 @@
   {% endif %}
   </fieldset>
 </form>
+{% if stoppable %}
+<form method="post" action="{% url 'admin-ai-action' 'stop' %}">
+  <fieldset><legend>หยุดใช้ AI ของงาน</legend>{% csrf_token %}
+    <p><label>งาน
+      <select name="task" required>{% for v in stoppable %}<option value="{{ v.task }}">{{ v.get_task_display }} (v{{ v.number }})</option>{% endfor %}</select>
+    </label></p>
+    <p><label>เหตุผล <input name="reason" required></label> <button type="submit">หยุดใช้</button></p>
+    <p>ใช้เมื่อ AI ของงานนั้นมีปัญหา หรือยังไม่ได้รับอนุมัติให้ใช้ งานใหม่ทำต่อโดยไม่ใช้ AI: แชตถามทีละช่อง ตอบจากคำสำคัญ หรือเจ้าหน้าที่คัดกรองเอง เรื่องที่รอ AI คัดกรองอยู่จะถูกปิดเป็นไม่ใช้ AI การเปิดกลับใช้เมนูเปลี่ยนรุ่นด้านบน และรุ่นนั้นต้องมีผลประเมินของโค้ดปัจจุบัน</p>
+  </fieldset>
+</form>
+{% endif %}
 
 <h2 id="presets">โมเดลสำเร็จรูป</h2>
 {% for p in presets %}
@@ -89,12 +101,15 @@
   <fieldset><legend>เพิ่มหรือเปลี่ยน key (ชื่อเดิม = หมุน key; ต้องทดสอบรุ่นใหม่ก่อนเปิดใช้)</legend>{% csrf_token %}{{ credential_form.as_p }}<button type="submit">บันทึก</button></fieldset>
 </form>
 
-<h2>การเรียก AI ล่าสุด</h2>
+<h2 id="runs">การเรียก AI ล่าสุด</h2>
+<p class="section-note">ข้อความ LINE 50 ข้อความล่าสุดที่ส่งให้ AI พร้อมสิ่งที่ AI ทำ ใช้ตรวจคำตอบย้อนหลัง (ADR 0012) ข้อความของผู้แจ้งไม่แสดงที่นี่</p>
+{% include "operations/_list_tools.html" with list="runs" placeholder="ค้นหาคำตอบ ถ้อยคำ หรือเหตุผล" filters=run_filters %}
 <div class="table-wrap"><table>
-  <thead><tr><th scope="col">เมื่อ</th><th scope="col">รุ่น</th><th scope="col">ผล</th><th scope="col">โมเดลที่ลอง</th><th scope="col">ผู้แจ้งแก้</th></tr></thead>
-  <tbody>
-  {% for r in runs %}<tr><td>{{ r.created_at|date:"Y-m-d H:i:s" }}</td><td>v{{ r.config_version.number }}</td><td>{{ r.get_status_display }}</td><td>{% for a in r.attempts %}{% if a.step %}{{ a.step }}{% if a.model %} {{ a.model }}{% endif %}{% else %}{{ a.model|default:"-" }}{% endif %}: {{ a.outcome }}{% if a.findings %} (ตัวตรวจ: {{ a.findings|join:", " }}){% endif %}{% if a.latency_ms %} {{ a.latency_ms }} ms{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td><td>{{ r.corrections|default_if_none:"-" }}</td></tr>
-  {% empty %}<tr><td colspan="5">ยังไม่มี</td></tr>{% endfor %}
+  <thead><tr><th scope="col">เมื่อ</th><th scope="col">รุ่น</th><th scope="col">ผล</th><th scope="col">AI ทำอะไร</th><th scope="col">โมเดลที่ลอง</th><th scope="col">ผู้แจ้งแก้</th></tr></thead>
+  <tbody data-list-items="runs">
+  {% for r in runs %}<tr data-item data-status="{{ r.status }}" data-refused="{{ r.refused|yesno:'yes,no' }}" data-search="{{ r.review|join:' '|lower }} {{ r.get_status_display }}"><td>{{ r.created_at|date:"Y-m-d H:i:s" }}</td><td>v{{ r.config_version.number }}</td><td>{{ r.get_status_display }}</td><td>{% for line in r.review %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% empty %}-{% endfor %}</td><td>{% for a in r.attempts %}{% if a.step %}{{ a.step }}{% if a.model %} {{ a.model }}{% endif %}{% else %}{{ a.model|default:"-" }}{% endif %}: {{ a.outcome }}{% if a.findings %} (ตัวตรวจ: {{ a.findings|join:", " }}){% endif %}{% if a.latency_ms %} {{ a.latency_ms }} ms{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td><td>{{ r.corrections|default_if_none:"-" }}</td></tr>
+  {% empty %}<tr><td colspan="6">ยังไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
+<p class="list-empty" data-list-empty="runs" hidden>ไม่พบการเรียก AI ที่ตรงกับการค้นหา</p>
 {% endblock %}

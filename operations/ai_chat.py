@@ -8,6 +8,7 @@ AI_REPLY_FALLBACK_SECONDS the worker's watchdog answers with the field-by-field 
 so every message gets exactly one reply before the LINE deadline and no push is needed.
 """
 
+import time
 import uuid
 from datetime import timedelta
 
@@ -15,10 +16,12 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from operations import ai, ai_grounding, conversation, line_api, orchestration
+from operations import ai, ai_grounding, conversation, line_api, orchestration, policy, questions
 from operations.conversation import FIELDS, KIND_LABELS, D, Turn
 from operations.models import (
+    AIConfigVersion,
     AIRun,
+    Case,
     ChannelIdentity,
     Conversation,
     ConversationDraft,
@@ -33,18 +36,60 @@ R = AIRun.Status
 BUTTON_STEPS = {"kind", "category", "item", "more", "summary"}
 
 
+def private_text(draft, text):
+    """Real structure Q14: การใช้ไฟฟ้า matters often hold a customer's details; never to the AI."""
+    in_usage_draft = draft is not None and draft.data.get("topic") == Case.Topic.USAGE
+    return in_usage_draft or policy.usage_text(text)
+
+
+def version_for_chat():
+    """The version a chat message starts with: extraction, else chat answers (ADR 0012)."""
+    from operations import ai_answer, answers
+
+    version = ai.active_version()
+    if version is None and answers.mode() in ("choose", "write"):
+        version = ai_answer.active_version()
+    return version
+
+
 def wants_ai(turn, draft, text):
     """Free text that the guided flow cannot use as an answer, when AI is configured."""
-    if not settings.AI_ENABLED or len(text.strip()) < 4 or ai.active_version() is None:
+    if not settings.AI_ENABLED or len(text.strip()) < 4 or version_for_chat() is None:
+        return False
+    if private_text(draft, text):
+        return False
+    if getattr(turn, "anonymous", False):
+        # ผู้แจ้งไม่ระบุตัวตน: keyword answers only; the AI path needs a registered requester.
         return False
     if draft is None:
         # Several open drafts and none chosen: the user must pick one first (no guessing).
         return not conversation._open_drafts(turn).exists()
-    return draft.step in BUTTON_STEPS
+    if draft.step in BUTTON_STEPS:
+        return True
+    # At a step that takes typed answers, only a new request, or a question while the AI
+    # answers questions (ADR 0012); anything else is the step's answer at once.
+    shape = conversation.off_step(draft, text)
+    if shape == "question":
+        from operations import ai_answer, answers
+
+        return answers.mode() in ("choose", "write") and ai_answer.active_version() is not None
+    return shape == "request"
 
 
-def queue(turn, draft, text):
-    version = ai.active_version()
+def queue(turn, draft, text, message=None):
+    """`message`: the requester's message to read, when it is not this event's own (the
+    requester said 'ไม่ใช่ข้อมูลเพิ่ม' to a message first offered to staff)."""
+    version = version_for_chat()
+    # Messages already prepared this turn (e.g. "มีอัปเดตใหม่") go out with the AI answer.
+    result = {"prefix": turn.replies[:2]}
+    if message is not None:
+        result["message"] = message.pk
+    shape = conversation.off_step(draft, text)
+    if shape:
+        # Typed at a step that takes typed answers: when the AI finds no request and no
+        # approved answer, the step takes the text as it would without AI. A question goes to
+        # the answer task only (the live model once read "ต้องรอนานแค่ไหน..." as a new problem).
+        result["typed"], result["typed_as"] = draft.step, shape
     run = AIRun.objects.create(
         identity=turn.identity,
         inbox=turn.inbox,
@@ -53,8 +98,7 @@ def queue(turn, draft, text):
         config_version=version,
         prompt_version=ai.prompt_version_for(version),
         schema_version=ai.SCHEMA_VERSION,
-        # Messages already prepared this turn (e.g. "มีอัปเดตใหม่") go out with the AI answer.
-        result={"prefix": turn.replies[:2]},
+        result=result,
     )
     turn.replies.clear()
     OutboxEvent.objects.create(
@@ -174,11 +218,9 @@ def process(run_id):
         if run.status != R.RUNNING:
             return "late"
         status = _blocked(run, turn, usable)
-        message = ConversationMessage.objects.filter(
-            inbox=run.inbox, identity_id=run.identity_id
-        ).first()
-        source_text = conversation._event_text(turn)
-        if message is None or source_text is None:
+        message = _message(run)
+        source_text = message.text if message is not None else None
+        if message is None or not source_text:
             status = R.FAILED
         if status:
             replies = _finish(run, status, [{"outcome": "blocked before provider"}], None, turn)
@@ -186,6 +228,7 @@ def process(run_id):
     if status:
         conversation.send_reply(run.inbox_id, replies[:5])
         return status
+    typed = run.result.get("typed")
     received = run.inbox.received_at
     budget = min(
         settings.AI_TOTAL_BUDGET_SECONDS,
@@ -194,8 +237,19 @@ def process(run_id):
         ).total_seconds(),
     )
     extraction, attempts = (None, [{"outcome": "skipped: no time left"}])
-    if message is not None and budget >= 2:
+    started = time.monotonic()
+    if run.config_version.task == AIConfigVersion.Task.ANSWER:
+        attempts = [{"outcome": "no extraction version: chat answer only"}]
+    elif run.result.get("typed_as") == "question":
+        attempts = [{"outcome": "a question at a typed step: chat answer only"}]
+    elif message is not None and budget >= 2:
         extraction, attempts = ai.extract(source_text, context, run.config_version, budget)
+    chat = None
+    if message is not None and not _proposals(extraction):
+        # Not a request the guided flow can take: maybe a question (คลังคำตอบ ข/ค, ADR 0012).
+        chat = _ask_answer(run, source_text, budget - (time.monotonic() - started))
+        if chat is not None:
+            attempts = attempts + chat["attempts"]
     with transaction.atomic():
         turn, usable = _turn_for(run)
         run = AIRun.objects.select_for_update().get(pk=run_id)
@@ -207,16 +261,165 @@ def process(run_id):
         status = _blocked(run, turn, usable)
         if status:
             extraction = None
+        elif _proposals(extraction):
+            status = R.APPLIED
+            apply(turn, draft, extraction, run)
+        elif chat is not None and chat["key"] and not (typed and chat["key"] == "none"):
+            status = R.ANSWERED
+            run.result = {**run.result, "answer": _answer(turn, draft, chat)}
+            if chat["key"] == "none" and draft is None:
+                questions.record(turn, source_text)  # คำถามที่บอทตอบไม่ได้ (Q11)
+        elif typed:
+            # Neither a request nor an approved answer: the step takes the text, as without AI.
+            status = R.TAKEN
+            run.result = {**run.result, "answer": chat and {"key": chat["key"]}}
+            conversation._draft_text(turn, draft, source_text)
         elif extraction is None:
             status = R.FAILED
             turn.say("ระบบอ่านข้อความไม่สำเร็จ ขอถามทีละข้อ")
             conversation._reprompt(turn, draft)
         else:
             status = R.APPLIED
+            if draft is None and not _proposals(extraction):
+                questions.record(turn, source_text)  # neither a request nor an answer (Q11)
             apply(turn, draft, extraction, run)
         replies = _finish(run, status, attempts, extraction, turn)
+        draft = _current_draft(turn) if status == R.APPLIED and _proposals(extraction) else None
+    if draft is not None:
+        replies = _rephrase(run, draft, replies, started + budget - time.monotonic())
     conversation.send_reply(run.inbox_id, replies[:5])
     return status
+
+
+def _message(run):
+    """The requester's message the run reads: its own event's, or the one named at queueing."""
+    rows = ConversationMessage.objects.filter(identity_id=run.identity_id)
+    if run.result.get("message"):
+        return rows.filter(pk=run.result["message"]).first()
+    return rows.filter(inbox=run.inbox).first()
+
+
+def _rephrase(run, draft, replies, budget):
+    """The AI words the bot's next question with what the requester already said (ตัวเลือก
+    ระบบ chat_followup, ADR 0012). The question itself, its buttons and the step stay the
+    program's; a wording that fails the checks leaves the standard question."""
+    from operations import ai_answer, options
+
+    if options.get(options.CHAT_FOLLOWUP) != "ai" or not replies or budget < 2:
+        return replies
+    version = ai_answer.active_version()
+    step = draft.step.split(":", 1)[1] if draft.step.startswith("field:") else draft.step
+    last = replies[-1]
+    if version is None or step not in ai_answer.FOLLOWUP_HINTS or last.get("type") != "text":
+        return replies
+    result = ai_answer.followup(
+        last["text"], step, ai_answer.followup_context(draft), version, budget
+    )
+    record = {
+        "step": draft.step,
+        "question": result["question"] or "",
+        "by": "model" if result["question"] else "template",
+        "refused": result["refused"],
+        "written": result.get("written", ""),
+    }
+    AIRun.objects.filter(pk=run.pk).update(
+        result={**run.result, "followup": record}, attempts=run.attempts + result["attempts"]
+    )
+    if not result["question"]:
+        return replies
+    return [*replies[:-1], {**last, "text": result["question"]}]
+
+
+def _proposals(extraction):
+    if extraction is None:
+        return []
+    return [p for p in extraction.requests if p.intent in ai.KIND_FOR_INTENT]
+
+
+def _ask_answer(run, text, budget):
+    """The answer AI on this requester's message, when ตัวเลือกระบบ allows it (network; outside
+    transactions). Only the requester's own open cases go with it, never การใช้ไฟฟ้า ones."""
+    from operations import ai_answer, answers
+
+    mode = answers.mode()
+    version = ai_answer.active_version() if mode in ("choose", "write") else None
+    if version is None or budget < 2:
+        return None
+    requester = Requester.objects.filter(pk=run.identity.requester_id).first()
+    own = (
+        list(Case.objects.filter(requester=requester).values_list("number", flat=True))
+        if requester
+        else []
+    )
+    return ai_answer.answer(
+        text,
+        list(answers.approved()),
+        answers.facts(requester),
+        own,
+        version,
+        mode,
+        budget,
+    )
+
+
+def _answer(turn, draft, chat):
+    """Say the chosen answer (the model's checked reply in write mode); "none" gets the
+    approved out-of-scope answer. Returns what is kept on the run for review."""
+    from operations import answers
+
+    key = chat["key"]
+    if key == "none":
+        key = answers.OUT_OF_SCOPE
+    answer = answers.approved().filter(key=key).first()
+    if answer is None:
+        turn.say("ยังไม่เข้าใจข้อความ กรุณาเลือกจากปุ่ม หรือพิมพ์รายละเอียดเพิ่ม")
+        conversation._reprompt(turn, draft)
+        return {"key": chat["key"], "by": "none", "refused": chat["refused"]}
+    written = chat["reply"] if key != answers.OUT_OF_SCOPE else None
+    answers.respond(turn, draft, answer, written)
+    return {
+        "key": chat["key"],
+        "by": "model" if written else "template",
+        "reply": written or "",
+        "refused": chat["refused"],
+    }
+
+
+def review(run, titles):
+    """What the AI did on one chat message, in words for the AI page, so ฝอจ. can read the
+    chat answers back (ADR 0012): the answer chosen, what the AI wrote or why it was not sent,
+    the follow-up wording, and the step a typed message came at. `titles`: answer key → title.
+    Returns (lines, refused)."""
+    result = run.result or {}
+    lines, refused = [], False
+    if result.get("typed"):
+        shape = {"question": "คำถาม", "request": "คำขอ"}.get(result.get("typed_as"), "")
+        lines.append(f"พิมพ์ในขั้น {result['typed']}" + (f" ({shape})" if shape else ""))
+    if result.get("requests"):
+        lines.append(f"เติมร่าง {len(result['requests'])} เรื่อง")
+    answer = result.get("answer") or {}
+    if answer.get("key"):
+        title = titles.get(answer["key"], answer["key"])
+        how = {"model": "AI เขียน", "template": "ข้อความที่รับรอง"}.get(answer.get("by"), "")
+        lines.append(f"คำตอบ: {title}" + (f" ({how})" if how else ""))
+        if answer.get("reply"):
+            lines.append(f"ข้อความที่ส่ง: {answer['reply']}")
+    if answer.get("refused"):
+        refused = True
+        lines.append(f"ไม่ส่งถ้อยคำของ AI เพราะ{answer['refused']}")
+    followup = result.get("followup") or {}
+    if followup:
+        if followup.get("by") == "model":
+            lines.append(f"AI ถามต่อ: {followup.get('question', '')}")
+        else:
+            lines.append("ถามต่อด้วยคำถามมาตรฐาน")
+        if followup.get("refused"):
+            refused = True
+            written = followup.get("written") or ""
+            lines.append(
+                f"ไม่ใช้ถ้อยคำของ AI เพราะ{followup['refused']}" + (f": {written}" if written else "")
+            )
+    return lines, refused
 
 
 def expire_waiting(now=None):
@@ -233,9 +436,21 @@ def expire_waiting(now=None):
             run = AIRun.objects.select_for_update().select_related("inbox").get(pk=run_id)
             if run.status not in (R.PENDING, R.RUNNING):
                 continue
-            if usable:
+            draft = _current_draft(turn) if usable else None
+            typed = run.result.get("typed")
+            message = _message(run) if typed else None
+            if (
+                typed
+                and draft is not None
+                and draft.pk == run.draft_id
+                and draft.revision == run.draft_revision
+                and message is not None
+            ):
+                # Typed at a step that takes typed answers: the step takes it, as without AI.
+                conversation._draft_text(turn, draft, message.text)
+            elif usable:
                 turn.say("ระบบอ่านข้อความไม่ทันเวลา ขอถามทีละข้อ")
-                conversation._reprompt(turn, _current_draft(turn))
+                conversation._reprompt(turn, draft)
             replies = _finish(run, R.FALLBACK, run.attempts, None, turn)
         conversation.send_reply(run.inbox_id, replies[:5])
         handled += 1
@@ -255,7 +470,8 @@ def apply(turn, draft, extraction, run):
     has_content = draft is not None and (draft.data.get("lines") or draft.data.get("fields"))
     if draft is None or (draft.kind and draft.kind != kind and has_content):
         draft = conversation._new_draft(turn)
-    notes = _merge(turn, draft, first, run, extraction.screened_draft_fields)
+    typed = (getattr(run, "result", None) or {}).get("typed")  # the evaluation passes no run
+    notes = _merge(turn, draft, first, run, extraction.screened_draft_fields, typed)
     for proposal in extra:
         other = ConversationDraft.objects.create(
             identity=turn.identity,
@@ -277,11 +493,14 @@ def _format(quantity):
     return format(quantity.normalize(), "f")
 
 
-def _merge(turn, draft, proposal, run, screened=None):
+def _merge(turn, draft, proposal, run, screened=None, typed=None):
     """Merge into the draft; anything missing or unknown is asked by the guided flow next.
 
     `screened`: the draft's text fields with directive segments removed by the harness screen
     ({name: text or None}); the requester's own words in a field survive an appended attack.
+    `typed`: the step that took typed answers when the message came (ADR 0012). A message there
+    that adds items was a new request, not that step's answer, so that field is asked again
+    (the live model once took "เพิ่มอีก" from "ขอเบิกมิเตอร์เพิ่มอีก 2 เครื่อง" as the purpose).
     """
     kind = ai.KIND_FOR_INTENT[proposal.intent]
     if draft.kind and draft.kind != kind:
@@ -340,9 +559,11 @@ def _merge(turn, draft, proposal, run, screened=None):
                 }
             continue
         lines[equipment.code] = line
+    added = set(lines) - {line["item_code"] for line in draft.data.get("lines", [])}
+    asked = typed.split(":", 1)[1] if typed and typed.startswith("field:") else None
     data["lines"] = list(lines.values())
     for name, value in proposal.fields.items():
-        if name in allowed and value:
+        if name in allowed and value and not (name == asked and (added or pending)):
             data["fields"][name] = value
     notes = []
     if proposal.rejected_fields or any(i.rejected for i in proposal.items):

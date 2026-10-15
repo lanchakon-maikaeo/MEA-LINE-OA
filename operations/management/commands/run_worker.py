@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 from pathlib import Path
@@ -8,6 +9,7 @@ from django.utils import timezone
 from operations import (
     ai_chat,
     ai_eval,
+    ai_routing,
     attachments,
     conversation,
     notifications,
@@ -15,9 +17,10 @@ from operations import (
     policy,
     staff_email,
 )
-from operations.models import OutboxEvent, PostbackToken, WebhookInbox
+from operations.models import FormSubmission, OutboxEvent, PostbackToken, WebhookInbox
 
 HEARTBEAT = Path("/tmp/worker-heartbeat")  # noqa: S108 - container-local liveness marker
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -51,9 +54,19 @@ def handle_event(event):
         replies = conversation.handle_inbox(inbox_id)
         conversation.send_reply(inbox_id, replies)
         ai_chat.start_loading(inbox_id)  # only when the message went to AI
+    elif event.event_type == orchestration.EVENT_ROUTING_AI:
+        ai_routing.process(event.payload["ai_routing_run_id"])  # ADR 0013
     else:
         notifications.plan_for_event(event)
         staff_email.plan_for_event(event)  # M10: การแจ้งเตือนเจ้าหน้าที่
+
+
+def _lease_lost(event, error):
+    """The lease ran out while the event was handled: the machine paused (a laptop slept mid
+    test run on 11 Oct 2569; a VM can pause too). The worker goes on, and the event is claimed
+    again later; its handlers are idempotent (a handled inbox is skipped, a planned notification
+    is not planned twice)."""
+    logger.warning("Outbox event %s: %s Claimed again later.", event.event_id, error)
 
 
 def run_once(limit=20):
@@ -63,7 +76,11 @@ def run_once(limit=20):
         try:
             handle_event(event)
         except Exception as exc:  # noqa: BLE001 - one bad event must not stop the queue
-            settled = orchestration.fail(event.event_id, event.lease_token, type(exc).__name__)
+            try:
+                settled = orchestration.fail(event.event_id, event.lease_token, type(exc).__name__)
+            except orchestration.LeaseError as lost:
+                _lease_lost(event, lost)
+                continue
             if (
                 settled.status == OutboxEvent.Status.FAILED
                 and event.event_type == orchestration.EVENT_CONVERSATION
@@ -72,7 +89,10 @@ def run_once(limit=20):
                     status=WebhookInbox.Status.FAILED, error=type(exc).__name__[:200]
                 )
             continue
-        orchestration.complete(event.event_id, event.lease_token)
+        try:
+            orchestration.complete(event.event_id, event.lease_token)
+        except orchestration.LeaseError as lost:
+            _lease_lost(event, lost)
     ai_chat.expire_waiting()
     conversation.expire_drafts()
     policy.sweep_clocks()  # M06: acknowledgement reminders and escalation
@@ -80,5 +100,8 @@ def run_once(limit=20):
     attachments.purge_rejected()
     PostbackToken.objects.filter(
         expires_at__lt=timezone.now() - timezone.timedelta(days=1)
+    ).delete()
+    FormSubmission.objects.filter(  # ADR 0015 Q21: one-time form keys last a day
+        created_at__lt=timezone.now() - timezone.timedelta(days=1)
     ).delete()
     return len(events)

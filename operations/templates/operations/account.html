@@ -18,6 +18,22 @@
     <div><dt>บทบาทระดับระบบ</dt><dd>{% if scope.is_admin %}แอดมินระบบ{% if scope.is_developer_admin %} · แอดมินผู้พัฒนา{% endif %}{% else %}-{% endif %}</dd></div>
   </dl>
 </section>
+{% if scope.has_any_access %}
+<section class="section" aria-labelledby="acc-line">
+  <div class="section-head"><h2 id="acc-line">LINE ของเจ้าหน้าที่</h2></div>
+  {% if line %}
+    <p>เชื่อมแล้วเมื่อ {{ line.staff_linked_at|thai_datetime }} ระบบส่งเรื่องสำคัญของกองถึง LINE นี้ และพิมพ์ 'งานของกอง' ใน LINE เพื่อดูงาน</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="line-unlink"><button class="btn btn--secondary btn--sm" type="submit">เลิกเชื่อม LINE</button></form>
+  {% elif code %}
+    <p>พิมพ์ข้อความนี้ใน LINE OA ภายใน {{ code_minutes }} นาที:</p>
+    <p class="t-strong num">เชื่อม {{ code }}</p>
+    <p class="muted">รหัสใช้ได้ครั้งเดียว อย่าส่งให้คนอื่น</p>
+  {% else %}
+    <p class="muted">ยังไม่ได้เชื่อม เชื่อมแล้วจะได้แจ้งเตือนเรื่องสำคัญของกองทาง LINE และดูหรือทำงานบางขั้นใน LINE ได้</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="line-code"><button class="btn btn--sm" type="submit">เชื่อม LINE</button></form>
+  {% endif %}
+</section>
+{% endif %}
 <section class="section">
   <div class="section-head"><h2>กองและบทบาท</h2></div>
   <div class="table-wrap"><table>

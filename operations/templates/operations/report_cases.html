@@ -1,0 +1,31 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}{{ title }} — ภาพรวมและรายงาน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow"><a href="{{ back }}">ภาพรวมและรายงาน</a> · {% if chosen %}{{ chosen.code }}{% else %}ทุกกอง{% endif %} · {{ days }} วันล่าสุด</span>
+    <h1>{{ title }}</h1>
+    <p class="lede">{{ pager.total }} เรื่อง เป็นชุดเดียวกับที่รายงานนับ เรียงตามความเร่งด่วน วันที่ต้องใช้ และเวลาที่ยื่น</p>
+  </div>
+  <div class="page-head__actions">
+    <a class="btn btn--secondary btn--sm" href="{{ back }}">กลับไปภาพรวม</a>
+    {% if queue %}<a class="btn btn--secondary btn--sm" href="{{ queue }}">เปิดในคิวงาน</a>{% endif %}
+  </div>
+</div>
+
+{% if rows %}
+  <ol class="queue" aria-label="{{ title }}">
+    {% for row in rows %}{% include "operations/_queue_row.html" %}{% endfor %}
+  </ol>
+  {% if pager.pages > 1 %}
+    <nav class="pager" aria-label="หน้า">
+      {% if pager.number > 1 %}<a class="btn btn--secondary btn--sm" href="?{{ query }}&amp;page={{ pager.number|add:'-1' }}">ก่อนหน้า</a>{% else %}<span></span>{% endif %}
+      <span>หน้า {{ pager.number }} / {{ pager.pages }}</span>
+      {% if pager.number < pager.pages %}<a class="btn btn--secondary btn--sm" href="?{{ query }}&amp;page={{ pager.number|add:'1' }}">ถัดไป</a>{% else %}<span></span>{% endif %}
+    </nav>
+  {% endif %}
+{% else %}
+  <div class="empty"><strong>ไม่มีเรื่องในชุดนี้</strong>ตัวเลขในรายงานเป็น 0 หรือเรื่องเปลี่ยนสถานะไปแล้ว</div>
+{% endif %}
+{% endblock %}

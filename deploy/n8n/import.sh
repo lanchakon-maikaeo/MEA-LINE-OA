@@ -9,6 +9,7 @@ printf '[{"id":"faojDjangoToken1","name":"Django internal token","type":"httpHea
   "$ORCHESTRATOR_TOKEN" > "$creds"
 n8n import:credentials --input="$creds"
 n8n import:workflow --separate --input=/workflows
-for id in faojCaseNotify01 faojRecovery0001 faojConvAi000001; do
+# AI triage (faojTriageAi0001) stays unpublished until its activation is decided (M06).
+for id in ${N8N_PUBLISH_IDS:-faojCaseNotify01 faojRecovery0001 faojConvAi000001}; do
   n8n publish:workflow --id="$id"
 done

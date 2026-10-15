@@ -40,6 +40,7 @@ from operations.models import (
     Priority,
     Recommendation,
     RoutingReview,
+    Section,
 )
 
 PRIORITIES = tuple(Priority.values)  # most urgent first
@@ -91,6 +92,37 @@ def digest_of(document):
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+# หมวดเรื่อง: the equipment categories plus การใช้ไฟฟ้า (real structure Q3), which has no items.
+TOPICS = dict(Case.Topic.choices)
+USAGE = Case.Topic.USAGE
+SUGGESTION = Case.Topic.SUGGESTION
+NO_ITEMS = (USAGE, SUGGESTION)  # topics a requester tells as a story, without items
+
+
+def _validate_sections(entries):
+    """Q12: {kinds, category | items, division, section} proposes a แผนก inside the owner."""
+    if not isinstance(entries, list):
+        raise ValidationError("sections is a list.")
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not set(entry.get("kinds", [])) <= set(K.values)
+            or not entry.get("kinds")
+            or bool(entry.get("category")) == bool(entry.get("items"))
+            or (entry.get("category") and entry["category"] not in TOPICS)
+        ):
+            raise ValidationError(
+                "sections entries are {kinds, category | items, division, section}."
+            )
+        found = Section.objects.filter(
+            division__code=entry.get("division"), name=entry.get("section"), is_active=True
+        ).exists()
+        if not found:
+            raise ValidationError(
+                f"Unknown section {entry.get('division')} / {entry.get('section')}."
+            )
+
+
 def validate_document(document):
     """Reject a policy the engine could misread; division codes must exist."""
     if not isinstance(document, dict):
@@ -101,7 +133,10 @@ def validate_document(document):
     _parse_moment(document["effective_from"], "effective_from")
     _parse_moment(document.get("effective_until"), "effective_until")
     units = document["units"]
-    codes = {units.get(name) for name in ("intake", "coordinator", "registry")}
+    if not units.get("coordinator"):
+        raise ValidationError("units.coordinator is required.")
+    # ADR 0008: intake and registry units are optional (the real structure has neither).
+    codes = {units[name] for name in ("intake", "coordinator", "registry") if units.get(name)}
     for entry in document["responsibility"]:
         if entry.get("rule") not in {"R01", "R02", "R03", "R04", "R05"}:
             raise ValidationError("Responsibility entries use R01-R05.")
@@ -109,7 +144,7 @@ def validate_document(document):
             raise ValidationError(f"{entry['rule']}: unknown case kinds.")
         if bool(entry.get("category")) == bool(entry.get("items")):
             raise ValidationError(f"{entry['rule']}: give a category or a list of items.")
-        if entry.get("category") and entry["category"] not in EquipmentType.Category.values:
+        if entry.get("category") and entry["category"] not in TOPICS:
             raise ValidationError(f"{entry['rule']}: unknown category.")
         for name in ("effective_from", "effective_until"):
             _parse_moment(entry.get(name), f"{entry['rule']} {name}")
@@ -131,10 +166,11 @@ def validate_document(document):
         if (
             not isinstance(entry, dict)
             or not str(entry.get("term", "")).strip()
-            or entry.get("category") not in EquipmentType.Category.values
+            or entry.get("category") not in TOPICS
             or not isinstance(entry.get("items", []), list)
         ):
             raise ValidationError("equipment_terms entries are {term, category, items?}.")
+    _validate_sections(document.get("sections", []))
     for name in ("remind_after", "escalate_after"):
         if not isinstance(priority.get(name), int) or priority[name] <= 0:
             raise ValidationError(f"{name} must be a positive whole number.")
@@ -452,6 +488,10 @@ def derive_equipment(data, policy, catalog, ai_equipment=()):
     run the same code."""
     if data["lines"]:
         return {**_fact(_rows((line["category"], line["item"]) for line in data["lines"]), "case")}
+    topic = data.get("topic") or ""
+    if topic in NO_ITEMS:
+        # การใช้ไฟฟ้า and ข้อเสนอแนะ have no items: the requester's topic decides.
+        return _fact(_rows([(topic, None)]), "case")
     catalog_category = {item.code: item.category for item in catalog}
     text = "\n".join(undirected_text(t) for t in data["texts"].values())
     by_serial = {}
@@ -488,6 +528,10 @@ def derive_equipment(data, policy, catalog, ai_equipment=()):
         ("code", [] if code_conflict else code_rows),
         ("related", _rows(related_pairs)),
         (text_source or "terms", [] if code_conflict else text_rows),
+        (
+            "case",
+            _rows([(topic, None)]) if topic else [],
+        ),  # the chosen topic, when nothing names more
     ]
     chosen = next(((source, rows) for source, rows in levels if rows), None)
     notes = []
@@ -601,6 +645,7 @@ def case_data(case):
         ]
     data = {
         "kind": case.kind,
+        "topic": case.topic,
         "lines": lines,
         "texts": case_text(case),
         "needed_by": case.needed_by.isoformat() if case.needed_by else None,
@@ -667,6 +712,15 @@ NEXT_ACTIONS = {
 }
 
 
+# ADR 0008: the same rules where there is no intake desk or registry unit.
+NEXT_ACTIONS_DIRECT = {
+    "R06": "กองเจ้าภาพตรวจเอกสารและบันทึกทะเบียนของตัวเอง ไม่แก้ข้อมูลทางการโดยไม่มีเอกสาร",
+    "R07": "คงเจ้าภาพเดิมจนงานส่งมอบจบ และตรวจทะเบียนของกองตัวเอง",
+    "R09": "กองเจ้าภาพมอบส่วนที่เป็นของกองอื่นเป็นงานย่อย",
+    "R10": "ถามข้อมูลที่จำเป็นและให้ผู้ประสานระดับฝ่ายเลือกกอง ไม่ส่งเข้ากองที่เดาขึ้นเอง",
+}
+
+
 def _match(policy, kind, equipment, now):
     """("ok", rule, owner) or (problem, rule, None) for one piece of equipment."""
     entries = [
@@ -689,8 +743,13 @@ def _match(policy, kind, equipment, now):
     return "ok", live[0]["rule"], owners.pop()
 
 
+def match(policy, kind, item, now):
+    """("ok" | problem, rule, owner code) for one item of a request (ADR 0008 splitting)."""
+    return _match(policy, kind, {"category": item.category, "item": item.code}, now)
+
+
 def _label(equipment):
-    category = dict(EquipmentType.Category.choices).get(equipment.get("category"), "ไม่ทราบหมวด")
+    category = TOPICS.get(equipment.get("category"), "ไม่ทราบหมวด")
     return f"{category} {equipment['item']}" if equipment.get("item") else category
 
 
@@ -706,10 +765,10 @@ def evaluate(policy, facts, current_owner, now):
         missing.append("ผลประเมินของผู้รับผิดชอบว่าอันตรายที่รายงานเกิดจริงหรือไม่")
         notes.append("รายงานอันตรายยังไม่ใช่การยืนยันว่ามีเหตุจริง ไม่สั่งงานภาคสนาม")
     if policy is None or not policy.in_effect(now):
-        intake = policy.units["intake"] if policy else None
+        desk = (policy.units.get("intake") or policy.units.get("coordinator")) if policy else None
         return {
             "rules": ["R10"],
-            "proposed_owner": intake,
+            "proposed_owner": desk,
             "support_units": [],
             "child_work_owners": [],
             "suggested_priority": "P0" if hazard else "",
@@ -720,6 +779,10 @@ def evaluate(policy, facts, current_owner, now):
             "notes": ["ไม่มีกติกาที่มีผล ณ เวลานี้ ทุกเรื่องให้คนตรวจ", *notes],
         }
     units = policy.units
+    # ADR 0008: without a central intake, unclear cases go to the coordinator and nobody is a
+    # registry unit; each division keeps its own registry work.
+    intake, registry = units.get("intake"), units.get("registry")
+    desk = intake or units["coordinator"]
     owners, problems = {}, []
     equipment = facts["equipment"]["value"] or []
     if not equipment:
@@ -742,33 +805,42 @@ def evaluate(policy, facts, current_owner, now):
     support, child = [], []
     notes.extend(facts["equipment"].get("notes", []))
     if problems:
-        rules, proposed = ["R10"], units["intake"]
+        rules, proposed = ["R10"], desk
         notes.extend(problems)
     elif len(owners) > 1:
-        rules, proposed = ["R09"], units["intake"]
-        support = child = sorted(owners)
+        if intake:
+            rules, proposed = ["R09"], intake
+            support = child = sorted(owners)
+        else:
+            # The owner keeps the case and gives the other divisions their part as child work.
+            proposed = current_owner if current_owner in owners else next(iter(owners))
+            rules = ["R09"]
+            support = child = sorted(o for o in owners if o != proposed)
         notes.append(
             "งานย่อยต่อกอง: "
             + ", ".join(f"{o} ({'/'.join(sorted(r))})" for o, r in sorted(owners.items()))
         )
-    elif serial_mismatch and current_owner != units["intake"]:
+    elif serial_mismatch and current_owner != intake:
         rules, proposed = ["R07"], current_owner
-        support = [units["registry"]]
+        support = [registry] if registry else []
         notes.append("ไม่โยนทั้งเรื่องไปกองทะเบียน เจ้าภาพขั้นส่งมอบยังรับผิดชอบ")
+    elif registry_only and registry:
+        rules, proposed = ["R06"], registry
+        support = [o for o in sorted(owners) if o != registry]
     elif registry_only:
-        rules, proposed = ["R06"], units["registry"]
-        support = [o for o in sorted(owners) if o != units["registry"]]
+        ((proposed, _),) = owners.items()  # the division records its own registry facts
+        rules = ["R06"]
     else:
         ((proposed, owner_rules),) = owners.items()
         rules = sorted(owner_rules)
         if kind == K.PROBLEM:
             notes.append("ไม่มีข้อเท็จจริงขอแก้ทะเบียนล้วน จึงไม่เข้า R06")
-    if serial_mismatch and current_owner == units["intake"]:
+    if serial_mismatch and intake and current_owner == intake:
         notes.append("เลขไม่ตรงระหว่างส่งมอบใช้เมื่อมีกองเจ้าภาพขั้นรับ/จ่ายแล้ว (R07)")
     if facts["shortage"]["value"] is True and rules != ["R10"]:
         rules = [*rules, "R08"]
-        if units["registry"] not in support:
-            support = [*support, units["registry"]]
+        if registry and registry not in support:
+            support = [*support, registry]
         notes.append("ของไม่พอไม่ใช่เหตุลดระดับหรือเปลี่ยนเจ้าภาพ ผู้มีอำนาจจัดสรรเป็นผู้ตัดสิน")
     if hazard:
         suggested = "P0"
@@ -788,7 +860,8 @@ def evaluate(policy, facts, current_owner, now):
         notes.append("ข้อมูลยังไม่พอ ระดับเป็นรอคัดกรอง ไม่แทนด้วย P3")
     if any(facts[n]["source"] == "ai" for n in FACT_NAMES if isinstance(facts.get(n), dict)):
         notes.append("มีข้อเท็จจริงจากข้อเสนอของ AI ที่ยังไม่ได้ยืนยัน")
-    next_action = " / ".join(NEXT_ACTIONS[r] for r in rules if r in NEXT_ACTIONS)
+    actions = NEXT_ACTIONS if intake or registry else {**NEXT_ACTIONS, **NEXT_ACTIONS_DIRECT}
+    next_action = " / ".join(actions[r] for r in rules if r in actions)
     if "R08" in rules:
         next_action += " / ให้ผู้มีอำนาจตรวจผลกระทบและพิจารณาแผนจัดสรร"
     return {
@@ -841,6 +914,12 @@ def refresh(case, trigger, now=None):
     ai_run = latest_ai_run(case)
     facts = case_facts(case, state, ai_run, policy)
     result = evaluate(policy, facts, case.owner_division.code, now)
+    learned = policy is not None and policy.units.get("intake") is None
+    if learned:
+        from operations import ai_routing, routing_words  # local: both read this module
+
+        result = routing_words.apply(case, result)  # คำที่ระบบจำ for an R10 case (ADR 0013)
+        result = ai_routing.apply(case, result)  # then the routing AI's proposal (Q15)
     digest = digest_of(
         {
             "revision": case.revision,
@@ -888,7 +967,33 @@ def refresh(case, trigger, now=None):
     state.save()
     reconcile_clocks(case, state, policy, now)
     maybe_request_ai(case, now)
+    if learned:
+        ai_routing.maybe_request(case, result, now)
     return changed
+
+
+def section_for(case, owner_code=None, current=None):
+    """Q12: the แผนก the policy proposes inside the owner division, or None (the division
+    chooses). The first matching entry wins; a named item beats nothing, a category any item."""
+    current = current if current is not None else current_policy()
+    entries = current.doc.get("sections", []) if current else []
+    owner_code = owner_code or case.owner_division.code
+    rows = [
+        {"category": line.item.category, "item": line.item.code}
+        for line in case.lines.select_related("item")
+    ] or ([{"category": case.topic, "item": None}] if case.topic else [])
+    for entry in entries:
+        if entry["division"] != owner_code or case.kind not in entry["kinds"]:
+            continue
+        if any(
+            (row["item"] and row["item"] in entry.get("items", []))
+            or (entry.get("category") and entry["category"] == row["category"])
+            for row in rows
+        ):
+            return Section.objects.filter(
+                division__code=owner_code, name=entry["section"], is_active=True
+            ).first()
+    return None
 
 
 def after_submit(case):
@@ -1321,9 +1426,25 @@ def revoke_authority(actor, grant, reason):
 # --- AI triage requests ----------------------------------------------------------------------
 
 
+def usage_text(text, current=None):
+    """Words of an การใช้ไฟฟ้า matter in free text (Q14: such text never goes to the AI)."""
+    current = current if current is not None else current_policy()
+    if current is None or not text:
+        return False
+    terms = [e["term"] for e in current.doc.get("equipment_terms", []) if e["category"] == USAGE]
+    return any(term.lower() in text.lower() for term in terms)
+
+
+def private_topic(case):
+    """Q14: การใช้ไฟฟ้า cases often hold a customer's details, so the AI never reads them."""
+    if case.topic == USAGE:
+        return True
+    return usage_text("\n".join(case_text(case).values()))
+
+
 def maybe_request_ai(case, now):
     """Ask the active triage version once per case text (Q18); never blocks triage."""
-    if not settings.AI_ENABLED or case.status in workflow.TERMINAL:
+    if not settings.AI_ENABLED or case.status in workflow.TERMINAL or private_topic(case):
         return None
     version = AIConfigVersion.objects.filter(
         task=AIConfigVersion.Task.TRIAGE, status=AIConfigVersion.Status.ACTIVE

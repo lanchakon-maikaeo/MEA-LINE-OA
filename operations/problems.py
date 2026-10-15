@@ -13,17 +13,24 @@ from django.utils import timezone
 
 from operations import coordination, identity, workflow
 from operations.contracts import STAFF_CHANNELS, ErrorCode, clean_text, fail
-from operations.models import Case, Division, ProblemResolution, Role
+from operations.models import Case, ProblemResolution, Role
 
 S = Case.Status
 R = ProblemResolution.Category
 
 
 def _member(ctx, division_id, roles=None):
-    if ctx.scope is None:
-        return False
-    held = ctx.scope.division_roles.get(division_id, frozenset())
-    return bool(held if roles is None else held & set(roles))
+    return identity.holds(ctx.scope, division_id, roles)
+
+
+SUGGESTION_RESULTS = (R.CONSIDERED, R.ADOPTED, R.NOT_FEASIBLE)
+
+
+def categories_for(case):
+    """A suggestion is answered (considered/adopted/not feasible); a problem is resolved."""
+    if case.topic == Case.Topic.SUGGESTION:
+        return list(SUGGESTION_RESULTS)
+    return [c for c in R.values if c not in SUGGESTION_RESULTS]
 
 
 def latest(case):
@@ -35,8 +42,8 @@ def resolve(ctx, case, payload, reason, target):
     if ctx.requester is not None or not _member(ctx, case.owner_division_id, [Role.RESOLVER]):
         fail(ErrorCode.FORBIDDEN, "เฉพาะผู้แก้ปัญหาของกองเจ้าภาพบันทึกผล (Q1)")
     category = payload.get("category")
-    if category not in R.values:
-        fail(ErrorCode.VALIDATION_ERROR, "category is fixed, no_fault, external or needs_case.")
+    if category not in categories_for(case):
+        fail(ErrorCode.VALIDATION_ERROR, "Choose a result category that fits this case.")
     if coordination.blocks_closing(case):
         fail(ErrorCode.VALIDATION_ERROR, "ยังมีงานย่อยค้าง บันทึกผลไม่ได้ (Q1/Q6)")
     resolution = ProblemResolution.objects.create(
@@ -51,17 +58,27 @@ def resolve(ctx, case, payload, reason, target):
 
 
 def _requester_or_intake(ctx, case, payload):
-    """The requester themself, or intake staff recording their answer with channel and note."""
+    """The requester themself, or staff recording their answer with channel and note: intake
+    staff, or (ADR 0008, no intake) the owner division's staff other than who resolved it."""
     if ctx.requester is not None:
         return {"by": "requester"}
-    intake = Division.objects.filter(is_intake=True).first()
-    if intake is None or not _member(ctx, intake.pk):
+    intake = identity.intake_division()
+    if intake is not None and not _member(ctx, intake.pk):
         fail(ErrorCode.FORBIDDEN, "เจ้าหน้าที่กองรับเรื่องกลางบันทึกคำตอบแทนผู้แจ้งได้")
+    if intake is None:
+        if not _member(ctx, case.owner_division_id):
+            fail(ErrorCode.FORBIDDEN, "เจ้าหน้าที่กองเจ้าภาพบันทึกคำตอบแทนผู้แจ้งได้")
+        resolved = case.decisions.filter(action="resolve").order_by("-id").first()
+        if identity.separated(ctx) and resolved and resolved.actor_id == ctx.user.pk:
+            fail(
+                ErrorCode.FORBIDDEN,
+                "ผู้บันทึกผลการแก้ปัญหาบันทึกคำตอบแทนเขตของเรื่องเดียวกันไม่ได้ ให้เจ้าหน้าที่อีกคนในกองบันทึก",
+            )
     channel = payload.get("channel")
     if channel not in STAFF_CHANNELS:
         fail(ErrorCode.VALIDATION_ERROR, "channel must be phone, letter or counter.")
     return {
-        "by": "intake",
+        "by": "intake" if intake else "owner",
         "channel": channel,
         "intake_note": clean_text(payload, "intake_note", True),
     }
@@ -119,7 +136,7 @@ def reopen(ctx, case, payload, reason, target):
     if case.ended_at is None or timezone.now() - case.ended_at > window:
         fail(
             ErrorCode.VALIDATION_ERROR,
-            f"เกิน {workflow.REOPEN_WINDOW_DAYS} วันหลังปิด ให้ยื่นเรื่องแจ้งปัญหาใหม่อ้างเรื่องนี้ (Q4)",
+            f"เกิน {workflow.REOPEN_WINDOW_DAYS} วันหลังปิด ให้ยื่นเรื่องแจ้งปัญหา/ข้อเสนอแนะใหม่อ้างเรื่องนี้ (Q4)",
         )
     count = case.decisions.filter(action="reopen").count() + 1
     case.status, case.assignee, case.ended_at = target, None, None

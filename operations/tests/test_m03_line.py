@@ -78,7 +78,9 @@ def buttons(messages):
     found = {}
     for message in messages:
         for item in message.get("quickReply", {}).get("items", []):
-            found[item["action"]["label"]] = item["action"]["data"]
+            action = item["action"]
+            # Location and link buttons carry no postback data (ADR 0010).
+            found[action["label"]] = action.get("data") or action.get("uri") or action["type"]
         if message["type"] == "flex":
             for bubble in message["contents"]["contents"]:
                 for button in bubble["body"]["contents"]:
@@ -310,7 +312,7 @@ class RegistrationTests(LineTestCase):
 
     def test_following_grants_nothing_and_registration_waits_for_admin(self):
         reply = self.register(ALICE)
-        self.assertIn("รอแอดมิน", texts(reply))
+        self.assertIn("รอเจ้าหน้าที่", texts(reply))
         registration = RegistrationRequest.objects.get()
         self.assertEqual(
             (
@@ -324,7 +326,7 @@ class RegistrationTests(LineTestCase):
         self.assertEqual(identity_row.status, "pending")
         for attempt in (self.postback(ALICE, "m=new"), self.text(ALICE, "W69-000001")):
             reply = self.say(attempt)
-            self.assertIn("รอแอดมินรับรอง", texts(reply))
+            self.assertIn("รอเจ้าหน้าที่รับรอง", texts(reply))
         self.assertFalse(ConversationDraft.objects.exists())
 
         identity.approve_registration(self.admin, registration)
@@ -481,8 +483,8 @@ class DraftConversationTests(LineTestCase):
         other = Case.objects.exclude(pk=own.pk).get()
 
         self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "ปัญหาการใช้งาน")
-        self.press(ALICE, "ข้าม (ไม่ระบุของ)")
+        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        self.press(ALICE, "ไม่แน่ใจ")
         self.type(ALICE, "หม้อแปลงมีเสียงดัง")
         reply = self.press(ALICE, "ข้าม")
         options = buttons(reply)
@@ -593,6 +595,78 @@ class ReplyTests(LineTestCase):
             with self.subTest(status=status), patch.object(line_api, "reply", side_effect=error):
                 conversation.send_reply(inbox_id, [conversation.text_message("x")])
                 self.assertEqual(WebhookInbox.objects.get(pk=inbox_id).reply_status, status)
+
+
+class CatchUpTests(LineTestCase):
+    """ADR 0015 Q12: an answer that missed its reply token goes out once by push."""
+
+    def setUp(self):
+        super().setUp()
+        from operations.models import ChannelIdentity
+
+        for user in (ALICE, BOB):  # people who talked to the bot before the outage
+            ChannelIdentity.objects.get_or_create(
+                channel=ChannelIdentity.Channel.LINE, external_id=user
+            )
+
+    def expired(self, minutes_ago=0, user=ALICE):
+        self.post(self.text(user, "สวัสดี"))
+        inbox = WebhookInbox.objects.latest("id")
+        WebhookInbox.objects.filter(pk=inbox.pk).update(
+            reply_deadline=timezone.now() - timedelta(seconds=1),
+            occurred_at=timezone.now() - timedelta(minutes=minutes_ago),
+        )
+        return inbox.pk
+
+    def planned(self):
+        from operations.models import NotificationDelivery as N
+
+        return list(N.objects.filter(kind="catch_up", status="planned").order_by("id"))
+
+    def test_late_answer_is_planned_as_one_push_with_an_apology_after_ten_minutes(self):
+        conversation.send_reply(self.expired(minutes_ago=12), [conversation.text_message("a")])
+        texts_ = [d.text for d in self.planned()]
+        self.assertEqual(len(texts_), 2)
+        self.assertIn("ขอโทษที่ตอบช้า", texts_[0])
+        self.assertEqual(texts_[1], "a")
+        self.assertEqual(self.sent, [])  # pushed later by n8n, inside the push budget
+
+    def test_newer_answer_replaces_the_waiting_one_and_a_sent_one_is_not_repeated(self):
+        from operations.models import NotificationDelivery as N
+
+        conversation.send_reply(self.expired(), [conversation.text_message("old")])
+        conversation.send_reply(self.expired(), [conversation.text_message("new")])
+        self.assertEqual([d.text for d in self.planned()], ["new"])
+        self.assertEqual(N.objects.filter(kind="catch_up", status="skipped").count(), 1)
+        N.objects.filter(kind="catch_up", status="planned").update(
+            status="sent", sent_at=timezone.now()
+        )
+        conversation.send_reply(self.expired(), [conversation.text_message("again")])
+        self.assertEqual(self.planned(), [])
+
+    def test_refused_reply_token_is_caught_up_but_other_errors_are_not(self):
+        bad = line_api.LineApiError(400, '{"message":"Invalid reply token"}')
+        with patch.object(line_api, "reply", side_effect=bad):
+            conversation.send_reply(self.stored_live(), [conversation.text_message("x")])
+        self.assertEqual(len(self.planned()), 1)
+        with patch.object(line_api, "reply", side_effect=line_api.LineApiError(400, "bad")):
+            conversation.send_reply(self.stored_live(user=BOB), [conversation.text_message("y")])
+        self.assertEqual(len(self.planned()), 1)
+
+    def test_admin_can_turn_it_off(self):
+        from operations import options
+
+        options.change(None, options.CATCH_UP, "off", "ทดสอบปิดคำตอบที่ค้าง")
+        conversation.send_reply(self.expired(minutes_ago=30), [conversation.text_message("a")])
+        self.assertEqual(self.planned(), [])
+
+    def stored_live(self, user=ALICE):
+        self.post(self.text(user, "สวัสดี"))
+        inbox = WebhookInbox.objects.latest("id")
+        WebhookInbox.objects.filter(pk=inbox.pk).update(
+            reply_deadline=timezone.now() + timedelta(seconds=50)
+        )
+        return inbox.pk
 
 
 # --- Attachments ------------------------------------------------------------------------------
@@ -778,3 +852,124 @@ class RichMenuTests(LineTestCase):
         )
         with override_settings(LINE_CHANNEL_ACCESS_TOKEN=""), self.assertRaises(CommandError):
             call_command("setup_line_rich_menu", stdout=StringIO())
+
+
+# --- Answers to "เจ้าหน้าที่ขอข้อมูลเพิ่ม" (found with the LINE mockup, 8 Oct 2569) -----------
+
+
+class InfoCase(LineTestCase):
+    def filed(self, user):
+        self.withdraw(user)
+        self.press(user, "ยืนยันส่งเรื่อง")
+        return Case.objects.filter(requester__channelidentity__external_id=user).latest(
+            "submitted_at"
+        )
+
+    def ask(self, case, reason="ขอทราบตำแหน่งตู้"):
+        from operations import services
+        from operations.contracts import Actor
+        from operations.tests.test_m02_cases import key
+
+        for action, payload in (("start_triage", None), ("request_info", {"reason": reason})):
+            services.perform_action(
+                Actor.staff(self.intake),
+                case.pk,
+                action,
+                expected_revision=Case.objects.get(pk=case.pk).revision,
+                idempotency_key=key(),
+                payload=payload,
+            )
+        return Case.objects.get(pk=case.pk)
+
+
+class InfoReplyTests(InfoCase):
+    """The push says "ตอบกลับในแชตนี้ได้เลย": the answer must reach the case and its staff,
+    not start a new draft or go to AI as a new request."""
+
+    def test_a_typed_answer_goes_to_the_waiting_case_and_staff_see_it(self):
+        self.approve(ALICE)
+        case = self.ask(self.filed(ALICE))
+        reply = self.type(ALICE, "ตู้หมายเลข 12 ปากซอย 3")
+        self.assertIn(f"ส่งข้อมูลถึงเจ้าหน้าที่แล้ว (เรื่อง {case.number})", texts([reply[-1]]))
+        self.assertNotIn("ยังไม่เข้าใจ", texts(reply))
+        message = ConversationMessage.objects.get(text="ตู้หมายเลข 12 ปากซอย 3")
+        self.assertEqual(message.case, case)
+        self.assertFalse(ConversationDraft.objects.filter(status=D.OPEN).exists())
+        staff = Client()
+        staff.force_login(self.intake)
+        page = staff.get(f"/cases/{case.number}/")
+        self.assertContains(page, "ข้อมูลเพิ่มจากผู้แจ้ง (LINE)")
+        self.assertContains(page, "ตู้หมายเลข 12 ปากซอย 3")
+        whats = [e["what"] for e in page.context["page"]["timeline"]]
+        self.assertIn("ผู้แจ้งตอบข้อมูลเพิ่มทาง LINE", whats)
+        queue = staff.get("/divisions/SIM-TRIAGE/", {"tab": "district"})
+        self.assertContains(queue, "ผู้แจ้งตอบข้อมูลแล้ว")
+
+    def test_with_two_waiting_cases_the_requester_chooses(self):
+        self.approve(ALICE)
+        first = self.ask(self.filed(ALICE))
+        second = self.ask(self.filed(ALICE), "ขอรูปมิเตอร์")
+        reply = self.type(ALICE, "ส่งรูปให้ทางอีเมลแล้ว")
+        self.assertIn("ข้อความนี้เป็นข้อมูลของเรื่องไหน", texts(reply))
+        self.press(ALICE, second.number)
+        self.assertEqual(ConversationMessage.objects.get(text="ส่งรูปให้ทางอีเมลแล้ว").case, second)
+        self.assertFalse(ConversationMessage.objects.filter(case=first).exists())
+
+    def test_a_file_sent_after_the_request_is_attached_to_the_case(self):
+        self.approve(ALICE)
+        case = self.ask(self.filed(ALICE))
+        reply = self.say(self.image(ALICE))
+        self.assertIn(f"แนบกับเรื่อง {case.number}", texts(reply))
+        self.assertEqual(Attachment.objects.get(identity__external_id=ALICE).case, case)
+
+    def test_a_draft_started_after_the_request_keeps_its_typing(self):
+        self.approve(ALICE)
+        case = self.ask(self.filed(ALICE))
+        self.say(self.postback(ALICE, "m=new"))
+        self.type(ALICE, "1")  # the kind question of the new draft
+        draft = ConversationDraft.objects.get(status=D.OPEN)
+        self.assertEqual(draft.kind, Case.Kind.WITHDRAWAL)
+        self.assertFalse(ConversationMessage.objects.filter(case=case).exists())
+
+    def test_once_staff_have_the_information_typing_is_a_new_conversation(self):
+        from operations import services
+        from operations.contracts import Actor
+        from operations.tests.test_m02_cases import key
+
+        self.approve(ALICE)
+        case = self.ask(self.filed(ALICE))
+        services.perform_action(
+            Actor.staff(self.intake),
+            case.pk,
+            "info_received",
+            expected_revision=Case.objects.get(pk=case.pk).revision,
+            idempotency_key=key(),
+            payload={"reason": "เขตโทรแจ้งแล้ว"},
+        )
+        reply = self.type(ALICE, "สวัสดีครับ")
+        self.assertNotIn("ส่งข้อมูลถึงเจ้าหน้าที่แล้ว", texts(reply))
+        self.assertFalse(ConversationMessage.objects.filter(case=case).exists())
+
+
+class MissingFileTests(LineTestCase):
+    def test_a_file_that_was_never_stored_is_refused_without_stopping_the_worker(self):
+        from operations import attachments, services
+        from operations.contracts import Actor
+        from operations.tests.test_m02_cases import key, withdrawal
+
+        submitted = services.submit_case(
+            Actor.for_requester(self.approve(ALICE)), idempotency_key=key(), payload=withdrawal()
+        )
+        lost = Attachment.objects.create(
+            uploaded_by=self.intake,
+            case_id=submitted.case_id,
+            declared_name="lost.pdf",
+            content_type="application/pdf",
+            size=1,
+            sha256="0" * 64,
+            storage_name="",
+            scan_status="pending_scan",
+        )
+        attachments.process_pending()
+        lost.refresh_from_db()
+        self.assertEqual((lost.scan_status, lost.scan_detail), ("rejected", "missing"))

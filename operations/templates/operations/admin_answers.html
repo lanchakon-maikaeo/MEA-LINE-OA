@@ -1,0 +1,83 @@
+{% extends "operations/admin_base.html" %}
+{% block title %}คลังคำตอบ — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>คลังคำตอบ</h1>
+    <p class="lede">สิ่งที่บอทตอบได้เมื่อผู้แจ้งถามใน LINE ใช้เฉพาะคำตอบที่รับรองแล้ว แก้ข้อความแล้วต้องรับรองใหม่ทุกครั้ง</p>
+  </div>
+</div>
+<section class="section" aria-labelledby="ans-state">
+  <div class="section-head"><h2 id="ans-state">ตอนนี้บอทตอบอย่างไร</h2></div>
+  <ul>
+    <li>ตัวเลือกระบบ: {{ mode }} (<a href="{% url 'admin-options' %}#opt-chat_answers">เปลี่ยน</a>)</li>
+    <li>รุ่น AI งานตอบแชต: {% if active %}v{{ active.number }} ใช้งานอยู่{% if not usable %} แต่<strong>คลังคำตอบเปลี่ยนหลังประเมิน</strong> ตอนนี้ตอบด้วยคำสำคัญอย่างเดียว ประเมินใหม่ที่ <a href="{% url 'admin-ai' %}">AI</a>{% endif %}{% else %}ยังไม่มี (ตอบด้วยคำสำคัญอย่างเดียว){% endif %}</li>
+    <li class="muted">ข้อความเรื่องการใช้ไฟฟ้าไม่ถูกส่งให้ AI และผู้แจ้งไม่ระบุตัวตนได้คำตอบจากคำสำคัญเท่านั้น</li>
+  </ul>
+</section>
+<section class="section" aria-labelledby="ans-list">
+  <div class="section-head"><h2 id="ans-list">คำตอบในคลัง</h2><span class="muted">กดหัวข้อเพื่อเปิดแก้ไข</span></div>
+  {% include "operations/_list_tools.html" with list="answers" placeholder="ค้นหาหัวข้อ คำสำคัญ หรือข้อความ" filters=answer_filters folds=True %}
+  <div data-list-items="answers">
+  {% for a in answers %}
+  <details class="fold" id="a-{{ a.key }}" data-item data-status="{{ a.status }}" data-action="{{ a.action }}" data-search="{{ a.title|lower }} {{ a.key }} {{ a.keywords|join:' '|lower }} {{ a.text|lower }}">
+    <summary>
+      <span class="fold__title">{{ a.title }}</span>
+      <span class="tag{% if a.status == 'approved' %} tag--closed{% elif a.status == 'retired' %} tag--muted{% else %} tag--outline{% endif %}">{{ a.get_status_display }}</span>
+      {% if a.action != 'text' %}<span class="tag tag--outline">{{ a.get_action_display|truncatechars:40 }}</span>{% endif %}
+      {% if a.is_synthetic %}<span class="tag tag--synthetic">ข้อความจำลอง</span>{% endif %}
+      <span class="fold__sub">{{ a.text|truncatechars:120 }}</span>
+    </summary>
+    <div class="fold__body">
+      <form method="post" action="{% url 'admin-answers' %}">
+        {% csrf_token %}<input type="hidden" name="key" value="{{ a.key }}">
+        <div class="field"><label for="t-{{ a.key }}">หัวข้อ</label><input id="t-{{ a.key }}" name="title" value="{{ a.title }}" maxlength="100" required></div>
+        <div class="field"><label for="x-{{ a.key }}">ข้อความที่บอทตอบ</label><textarea id="x-{{ a.key }}" name="text" rows="4" maxlength="1000" required>{{ a.text }}</textarea></div>
+        <div class="field"><label for="k-{{ a.key }}">คำสำคัญ (บรรทัดละคำ)</label><textarea id="k-{{ a.key }}" name="keywords" rows="3">{{ a.keywords|join:"
+" }}</textarea></div>
+        <div class="field"><label for="c-{{ a.key }}">ต่อท้ายคำตอบด้วย</label><select id="c-{{ a.key }}" name="action">{% for v, label in actions %}<option value="{{ v }}"{% if v == a.action %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <label class="choice"><input type="checkbox" name="short_only" value="1"{% if a.short_only %} checked{% endif %}> <span>ตอบเมื่อข้อความมีแค่คำสำคัญ (เช่น ทักทาย ขอบคุณ)</span></label>
+        <label class="choice"><input type="checkbox" name="approve" value="1"{% if a.status == 'approved' %} checked{% endif %}> <span>รับรองให้ใช้ตอบ</span></label>
+        <div class="field"><label for="r-{{ a.key }}">เหตุผล</label><input id="r-{{ a.key }}" name="reason" maxlength="500" required></div>
+        <button class="btn btn--sm" type="submit">บันทึก</button>
+        {% if a.status != 'retired' %}<button class="btn btn--sm btn--ghost" type="submit" name="op" value="retire">เลิกใช้</button>{% endif %}
+        {% if a.approved_by %}<p class="muted mt-8">รับรองโดย {{ a.approved_by.username }} · {{ a.approved_at|date:"Y-m-d H:i" }} · รหัส {{ a.key }}</p>{% endif %}
+      </form>
+    </div>
+  </details>
+  {% empty %}
+  <p class="muted">ยังไม่มีคำตอบ ใช้คำสั่ง <code>manage.py load_answers</code> เพื่อนำเข้าร่างชุดแรก</p>
+  {% endfor %}
+  </div>
+  <p class="list-empty" data-list-empty="answers" hidden>ไม่พบคำตอบที่ตรงกับการค้นหา</p>
+</section>
+<section class="section" aria-labelledby="ans-new">
+  <details class="fold"{% if question %} open{% endif %}>
+  <summary><span class="fold__title" id="ans-new">เพิ่มคำตอบใหม่</span></summary>
+  <div class="fold__body">
+  {% if question %}<p class="notice">จากคำถามที่บอทตอบไม่ได้ (ถาม {{ question.count }} ครั้ง): <strong>{{ question.text }}</strong><br><span class="muted">บันทึกแล้วคำถามนี้จะถูกทำเครื่องหมายว่าเพิ่มเป็นคำตอบแล้ว</span></p>{% endif %}
+  <form method="post" action="{% url 'admin-answers' %}">
+    {% csrf_token %}
+    {% if question %}<input type="hidden" name="question" value="{{ question.pk }}">{% endif %}
+    <div class="field"><label for="n-key">รหัส (ภาษาอังกฤษตัวเล็ก ไม่เว้นวรรค)</label><input id="n-key" name="key" pattern="[a-z0-9_\-]+" maxlength="40" required></div>
+    <div class="field"><label for="n-title">หัวข้อ</label><input id="n-title" name="title" maxlength="100" required value="{{ question.text|truncatechars:100|default:'' }}"></div>
+    <div class="field"><label for="n-text">ข้อความที่บอทตอบ</label><textarea id="n-text" name="text" rows="4" maxlength="1000" required></textarea></div>
+    <div class="field"><label for="n-kw">คำสำคัญ (บรรทัดละคำ)</label><textarea id="n-kw" name="keywords" rows="3"></textarea></div>
+    <div class="field"><label for="n-act">ต่อท้ายคำตอบด้วย</label><select id="n-act" name="action">{% for v, label in actions %}<option value="{{ v }}">{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="n-reason">เหตุผล</label><input id="n-reason" name="reason" maxlength="500" required></div>
+    <button class="btn btn--sm" type="submit">เพิ่มเป็นร่าง</button>
+  </form>
+  </div>
+  </details>
+</section>
+<section class="section" aria-labelledby="ans-history">
+  <details class="fold">
+  <summary><span class="fold__title" id="ans-history">ประวัติการแก้</span></summary>
+  <div class="fold__body"><ul>
+    {% for e in history %}<li>{{ e.created_at|date:"Y-m-d H:i" }} · {{ e.actor.username|default:e.actor_label }} · {{ e.data.key }} · {{ e.action }} · {{ e.reason }}</li>
+    {% empty %}<li class="muted">ยังไม่มีการแก้</li>{% endfor %}
+  </ul></div>
+  </details>
+</section>
+{% endblock %}

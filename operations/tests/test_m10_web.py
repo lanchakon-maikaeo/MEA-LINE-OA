@@ -6,21 +6,35 @@ are admin-only (GuardTests); the AI/rule proposal is shown apart from people's d
 (CasePageTests); pages carry a strict CSP and serve their own static files (FoundationTests).
 """
 
+import ast
 import tempfile
 import uuid
 from datetime import timedelta
+from pathlib import Path
 
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
+from django.utils import timezone
 
-from operations import attachments, identity, notifications, orchestration, policy, staff_email
+import operations
+from operations import (
+    attachments,
+    casepage,
+    identity,
+    notifications,
+    orchestration,
+    policy,
+    staff_email,
+    wording,
+)
 from operations.models import (
     AckClock,
     Attachment,
     AuditEvent,
     AuthorityGrant,
     Case,
+    ChannelIdentity,
     Handoff,
     NotificationDelivery,
     OutboxEvent,
@@ -29,7 +43,8 @@ from operations.models import (
 )
 from operations.templatetags import ui
 from operations.tests.test_m02_cases import make_staff, withdrawal
-from operations.tests.test_m09_problems import Problems, ProblemTestCase
+from operations.tests.test_m07_fulfilment import fuse
+from operations.tests.test_m09_problems import Problems, ProblemTestCase, faulty
 
 S = Case.Status
 A = AuthorityGrant.Activity
@@ -47,6 +62,18 @@ class WebTestCase(ProblemTestCase):
 
     def at_transformer(self):
         return Problems.triaged(self)
+
+    def post(self, user, case, action, data=None, htmx=False, **extra):
+        case = Case.objects.get(pk=case.pk)
+        form = {"revision": case.revision, "idempotency_key": uuid.uuid4().hex, **(data or {})}
+        headers = {"HTTP_HX_REQUEST": "true"} if htmx else {}
+        return self.client_for(user).post(
+            f"/cases/{case.number}/act/{action}/", form, **headers, **extra
+        )
+
+    def offers(self, user, case):
+        page = self.client_for(user).get(f"/cases/{case.number}/")
+        return [(o.name, o.primary) for o in page.context["offers"]]
 
 
 # --- Scope (round 2 Q1–Q4) -------------------------------------------------------------------
@@ -304,18 +331,6 @@ class CasePageTests(WebTestCase):
 
 
 class ActionTests(WebTestCase):
-    def post(self, user, case, action, data=None, htmx=False, **extra):
-        case = Case.objects.get(pk=case.pk)
-        form = {"revision": case.revision, "idempotency_key": uuid.uuid4().hex, **(data or {})}
-        headers = {"HTTP_HX_REQUEST": "true"} if htmx else {}
-        return self.client_for(user).post(
-            f"/cases/{case.number}/act/{action}/", form, **headers, **extra
-        )
-
-    def offers(self, user, case):
-        page = self.client_for(user).get(f"/cases/{case.number}/")
-        return [(o.name, o.primary) for o in page.context["offers"]]
-
     def test_intake_starts_triage_from_the_page(self):
         case = self.submit()
         self.assertIn(("start_triage", True), self.offers(self.intake, case))
@@ -470,6 +485,33 @@ class ActionTests(WebTestCase):
             404,
         )
 
+    def test_tour_finds_a_case_of_the_kind_beyond_the_queue_in_view(self):
+        meter_case = self.at_meter()
+        eqp_case = self.ready(fuse(2), division="SIM-EQP")
+        admin = self.client_for(self.admin)
+        admin.get("/divisions/SIM-TRF/")  # a division with no withdrawal
+        self.assertEqual(
+            admin.get("/tour/where/?kind=withdrawal").json(),
+            {
+                "queue": "/divisions/SIM-EQP/?tab=host&kind=withdrawal",
+                "case": f"/cases/{eqp_case.number}/",
+            },
+        )
+        # The division in view comes first when it has one.
+        admin.get("/divisions/SIM-MTR/")
+        self.assertEqual(
+            admin.get("/tour/where/?kind=withdrawal").json()["case"],
+            f"/cases/{meter_case.number}/",
+        )
+
+    def test_tour_keeps_the_case_scope(self):
+        self.at_meter()
+        self.assertEqual(
+            self.client_for(self.trf_staff).get("/tour/where/?kind=withdrawal").json(),
+            {"queue": None, "case": None},
+        )
+        self.assertEqual(Client().get("/tour/where/").status_code, 302)
+
     def test_child_division_answers_its_child_work(self):
         case = self.submit()
         self.act(self.intake, case, "start_triage")
@@ -485,6 +527,150 @@ class ActionTests(WebTestCase):
 
 
 # --- Staff email (round 1 Q10, round 2 Q5) -----------------------------------------------------
+
+
+class FriendlyFlowTests(WebTestCase):
+    """User feedback 9 Oct 2569: an English message inside the Thai, and steps that looked
+    possible but were refused. Now a button shows only when its step can succeed, the page says
+    why and when instead, triage ends in one submit with the level, and errors read in Thai."""
+
+    def at_owner(self):
+        """A problem case in triage at SIM-TRF, its level not yet confirmed."""
+        case = self.submit(faulty(impact="ร้านค้า 3 รายไม่มีไฟ"))
+        self.act(self.intake, case, "start_triage")
+        self.act(self.intake, case, "request_handoff", {"to_division": "SIM-TRF"})
+        self.act(self.trf_staff, case, "accept_handoff")
+        return Case.objects.get(pk=case.pk)
+
+    def test_triage_ends_in_one_submit_with_the_level(self):
+        case = self.at_owner()
+        self.assertIn("complete_triage", dict(self.offers(self.trf_staff, case)))
+        form = self.client_for(self.trf_staff).get(f"/cases/{case.number}/act/complete_triage/")
+        self.assertContains(form, 'name="priority"')
+        self.assertContains(form, "ยืนยันระดับความเร่งด่วนไปพร้อมกัน")
+        response = self.post(
+            self.trf_staff, case, "complete_triage", {"priority": "P2", "reason": "ไฟดับบางส่วน"}
+        )
+        self.assertRedirects(response, f"/cases/{case.number}/")
+        case.refresh_from_db()
+        self.assertEqual(case.status, S.IN_PROGRESS)
+        self.assertEqual(
+            list(case.decisions.order_by("id").values_list("action", flat=True))[-2:],
+            ["set_priority", "complete_triage"],
+        )
+        self.assertEqual(policy.state_for(case).confirmed_priority, "P2")
+
+    def test_a_refused_level_keeps_triage_and_explains_in_thai(self):
+        case = self.at_owner()
+        before = case.revision
+        response = self.post(self.trf_staff, case, "complete_triage", {"priority": "P0"})
+        self.assertContains(response, "notice--error", status_code=400)
+        self.assertContains(response, "ข้อเท็จจริงใหม่", status_code=400)
+        self.assertNotContains(response, "Give the new facts", status_code=400)
+        case.refresh_from_db()
+        self.assertEqual((case.status, case.revision), (S.TRIAGE, before))
+        self.assertFalse(case.decisions.filter(action="set_priority").exists())
+
+    def test_once_the_level_is_confirmed_the_form_does_not_ask_again(self):
+        case = self.at_owner()
+        self.act(self.trf_staff, case, "set_priority", {"priority": "P2", "reason": "ทดสอบ"})
+        form = self.client_for(self.trf_staff).get(f"/cases/{case.number}/act/complete_triage/")
+        self.assertNotContains(form, 'name="priority"')
+        self.post(self.trf_staff, case, "complete_triage")
+        self.assertEqual(Case.objects.get(pk=case.pk).status, S.IN_PROGRESS)
+
+    def test_the_intake_desk_is_told_to_hand_the_case_on(self):
+        case = self.submit(faulty(impact="ร้านค้า 3 รายไม่มีไฟ"))
+        self.act(self.intake, case, "start_triage")
+        offers = dict(self.offers(self.intake, case))
+        self.assertNotIn("complete_triage", offers)
+        self.assertIn("request_handoff", offers)
+        page = self.client_for(self.intake).get(f"/cases/{case.number}/")
+        self.assertContains(page, "ส่งต่อให้กองที่รับผิดชอบก่อน")
+
+    def test_close_waits_seven_days_and_the_page_says_from_when(self):
+        case = Problems.resolved(self)
+        offers = dict(self.offers(self.trf_staff, case))
+        self.assertNotIn("close", offers)
+        page = self.client_for(self.trf_staff).get(f"/cases/{case.number}/")
+        self.assertContains(page, "ปิดเรื่องเองได้ตั้งแต่")
+        self.assertContains(page, "ผู้แจ้งไม่ได้ผูก LINE ไว้")
+        self.assertContains(page, "SIM-TRIAGE กด “บันทึกคำตอบแทนเขต”")
+        self.assertIn("confirm", dict(self.offers(self.intake, case)))
+        case.decisions.filter(action="resolve").update(
+            created_at=timezone.now() - timedelta(days=8)
+        )
+        self.assertIn("close", dict(self.offers(self.trf_staff, case)))
+        page = self.client_for(self.trf_staff).get(f"/cases/{case.number}/")
+        self.assertContains(page, "ตัวเลือกที่ย้อนกลับไม่ได้ (ยกเลิกเรื่อง, ปิดเรื่อง)")
+        self.post(
+            self.trf_staff, case, "close", {"reason": "เขตไม่ตอบ", "confirm_irreversible": "1"}
+        )
+        self.assertEqual(Case.objects.get(pk=case.pk).status, S.CLOSED)
+
+    def test_a_requester_with_line_answers_there(self):
+        case = Problems.resolved(self)
+        ChannelIdentity.objects.create(
+            channel=ChannelIdentity.Channel.LINE,
+            external_id="U" + "1" * 32,
+            requester=case.requester,
+            status="active",
+        )
+        for user in (self.trf_staff, self.intake):
+            page = self.client_for(user).get(f"/cases/{case.number}/")
+            self.assertContains(page, "ผู้แจ้งตอบผลใน LINE ได้เอง กด “ยอมรับผล”")
+            self.assertNotContains(page, "ไม่ได้ผูก LINE")
+
+    def test_the_step_tracker_follows_the_case(self):
+        def states(case):
+            return [j["state"] for j in casepage.journey(Case.objects.get(pk=case.pk))]
+
+        case = self.at_owner()
+        self.assertEqual(states(case), ["current", "todo", "todo", "todo"])
+        case = Problems.resolved(self)
+        self.assertEqual(states(case), ["done", "done", "current", "todo"])
+        self.act(self.trf_staff, case, "hold", {"reason": "รอช่าง"})
+        steps = casepage.journey(Case.objects.get(pk=case.pk))
+        self.assertEqual((steps[2]["state"], steps[2]["note"]), ("current", "พักเรื่องไว้"))
+        page = self.client_for(self.trf_staff).get(f"/cases/{case.number}/")
+        self.assertContains(page, 'aria-label="ขั้นของเรื่อง"')
+
+    def test_wording_covers_the_services(self):
+        """Every English message a service can refuse with has Thai for the screen."""
+        missing = []
+        for path in sorted(Path(operations.__file__).parent.glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if not (
+                    isinstance(node, ast.Call)
+                    and getattr(node.func, "id", "") == "fail"
+                    and len(node.args) >= 2
+                ):
+                    continue
+                message = _sample(node.args[1])
+                if message and message.isascii() and wording.thai(message) is None:
+                    missing.append(f"{path.name}:{node.lineno} {message}")
+        self.assertEqual(missing, [])
+
+
+def _sample(node):
+    """A message as a service would raise it: f-string holes filled with a plausible value."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if not isinstance(node, ast.JoinedStr):
+        return None
+    parts = []
+    for part in node.values:
+        if isinstance(part, ast.Constant):
+            parts.append(part.value)
+            continue
+        hole = ast.unparse(part.value).lower()
+        if any(word in hole for word in ("floor", "value", "priority")):
+            parts.append("P2")
+        elif any(word in hole for word in ("max", "limit")):
+            parts.append("50")
+        else:
+            parts.append("x1")
+    return "".join(parts)
 
 
 def with_email(user, address):
@@ -622,6 +808,55 @@ class ExportTests(WebTestCase):
         admin = self.client_for(self.admin).get("/reports/")
         self.assertGreaterEqual(len(admin.context["table"]), 2)
         self.assertGreaterEqual(page.context["report"]["ack_count"], 1)
+
+
+# --- Report drill-down and dashboard (9 ตุลาคม 2569) ----------------------------------------------
+
+
+class ReportDrillDownTests(WebTestCase):
+    def figures(self, dash):
+        links = [(value, href) for _, value, href, _ in dash["kpis"]]
+        links += [(n, href) for _, n, _, href, _ in dash["levels"]]
+        links += [(n, href) for _, n, _, href in dash["kinds"]]
+        links += [(n, href) for _, n, _, href in dash["statuses"]]
+        links += [(n, href) for _, n, _, href, _ in dash["ages"]]
+        links += [(n, href) for _, _, n, _, href in dash["items"]]
+        return links
+
+    def test_every_figure_opens_the_cases_it_counts(self):
+        mine, theirs = self.at_meter(), self.at_transformer()
+        client = self.client_for(self.meter)
+        page = client.get("/reports/")
+        self.assertContains(page, 'class="chart__hit"')
+        self.assertContains(page, "ดูเป็นตาราง")
+        dash = page.context["dash"]
+        self.assertGreaterEqual(sum(value for value, _ in self.figures(dash)), 3)
+        for value, href in self.figures(dash):
+            listed = client.get(href)
+            self.assertEqual(listed.status_code, 200, href)
+            self.assertEqual(listed.context["pager"]["total"], value, href)
+        day = [c for c in dash["trend"]["columns"] if c["new"]][-1]
+        listed = client.get(day["href"])
+        self.assertContains(listed, mine.number)
+        self.assertNotContains(listed, theirs.number)
+
+    def test_drill_down_keeps_the_scope(self):
+        self.at_meter(), self.at_transformer()
+        client = self.client_for(self.meter)
+        self.assertEqual(
+            client.get("/reports/cases/?division=SIM-TRF&metric=open").status_code, 404
+        )
+        self.assertEqual(client.get("/reports/cases/?metric=nothing").status_code, 404)
+        self.assertEqual(client.get("/reports/cases/?metric=level&value=P9").status_code, 404)
+        every = self.client_for(self.admin).get("/reports/cases/?metric=kind&value=withdrawal")
+        self.assertEqual(every.status_code, 200)
+        self.assertEqual(every.context["chosen"], None)
+
+    def test_period_choice(self):
+        client = self.client_for(self.meter)
+        self.assertEqual(client.get("/reports/?days=7").context["days"], 7)
+        self.assertEqual(len(client.get("/reports/?days=7").context["dash"]["trend"]["columns"]), 7)
+        self.assertEqual(client.get("/reports/?days=13").context["days"], 30)
 
 
 # --- Filing for a requester (round 1 Q16) -------------------------------------------------------

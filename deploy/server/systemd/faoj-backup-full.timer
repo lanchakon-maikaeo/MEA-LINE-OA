@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly full database backup (pgBackRest) (timer)
+
+[Timer]
+# UTC on the host; 20:00 UTC is 03:00 in Bangkok, outside service hours.
+OnCalendar=Sun *-*-* 20:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

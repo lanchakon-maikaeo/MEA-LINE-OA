@@ -1,7 +1,17 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from operations import internal_api, line, registry_web, views, web
+from operations import (
+    duties_web,
+    internal_api,
+    line,
+    pii_web,
+    problems_web,
+    registry_web,
+    routing_web,
+    views,
+    web,
+)
 
 urlpatterns = [
     path("", views.index, name="index"),
@@ -36,7 +46,9 @@ urlpatterns = [
     path("divisions/<str:code>/export.csv", web.division_export, name="division-export"),
     path("queue/", web.all_queue, name="queue-all"),
     path("queue/export.csv", web.all_export, name="queue-all-export"),
+    path("tour/where/", web.tour_where, name="tour-where"),
     path("reports/", web.report, name="reports"),
+    path("reports/cases/", web.report_cases, name="report-cases"),
     path("cases/new/", web.case_new, name="case-new"),
     path("cases/", web.case_search, name="case-search"),
     path("cases/<str:number>/", web.case_detail, name="case-detail"),
@@ -44,6 +56,9 @@ urlpatterns = [
     path("cases/<str:number>/act/<slug:action>/", web.case_action, name="case-action"),
     path("cases/<str:number>/files/", web.case_upload, name="case-upload"),
     path("account/", web.account, name="account"),
+    path("console/pii/", pii_web.page, name="pii"),
+    path("routing/words/", routing_web.words, name="routing-words"),
+    path("duties/", duties_web.staff_page, name="duties"),
     path("registry/", registry_web.home, name="registry"),
     path("registry/export.csv", registry_web.export, name="registry-export"),
     path("registry/settings/", registry_web.settings_page, name="registry-settings"),
@@ -63,7 +78,24 @@ urlpatterns = [
         views.admin_registration_action,
         name="admin-registration-action",
     ),
+    path("console/admin/problems/", problems_web.problems, name="admin-problems"),
+    path("console/admin/problems.csv", problems_web.problems_csv, name="admin-problems-csv"),
     path("console/admin/requesters/new/", views.admin_requester_new, name="admin-requester-new"),
+    path(
+        "console/admin/requesters/<int:pk>/",
+        views.admin_requester_detail,
+        name="admin-requester-detail",
+    ),
+    path(
+        "console/admin/requesters/<int:pk>/messages/",
+        views.admin_requester_messages,
+        name="admin-requester-messages",
+    ),
+    path(
+        "console/admin/requesters/<int:pk>/<slug:action>/",
+        views.admin_requester_action,
+        name="admin-requester-action",
+    ),
     path("console/admin/line/", views.admin_line, name="admin-line"),
     path("console/admin/policy/", views.admin_policy, name="admin-policy"),
     path(
@@ -86,6 +118,11 @@ urlpatterns = [
     ),
     path("console/admin/line/requeue/<int:pk>/", views.admin_requeue, name="admin-requeue"),
     path("console/admin/divisions/", views.admin_divisions, name="admin-divisions"),
+    path("console/admin/options/", views.admin_options, name="admin-options"),
+    path("console/admin/employees/", views.admin_employees, name="admin-employees"),
+    path("console/admin/answers/", views.admin_answers, name="admin-answers"),
+    path("console/admin/questions/", views.admin_questions, name="admin-questions"),
+    path("console/admin/duties/", duties_web.admin_page, name="admin-duties"),
     path(
         "console/admin/divisions/<int:pk>/<slug:action>/",
         views.admin_division_action,

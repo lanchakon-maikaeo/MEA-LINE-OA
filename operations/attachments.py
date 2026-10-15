@@ -124,7 +124,11 @@ def fetch(attachment):
 
 
 def scan(attachment):
-    data = (storage_dir() / attachment.storage_name).read_bytes()
+    path = storage_dir() / attachment.storage_name
+    if not attachment.storage_name or not path.is_file():
+        # Nothing stored to scan (lost or never written): refused, never passed unscanned.
+        return _update(attachment, S.PENDING_SCAN, scan_status=S.REJECTED, scan_detail="missing")
+    data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != attachment.sha256:
         return _update(attachment, S.PENDING_SCAN, scan_status=S.REJECTED, scan_detail="changed")
     try:

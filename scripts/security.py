@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,19 @@ with default_settings():
         if filename and filename != "uv.lock" and Path(filename).is_file():
             collection.scan_file(filename)
     report = collection.json()
+# A release record (M13) is made of digests: the commit, image and file sha256s are hex by
+# design, not secrets, and deploy/release_candidate.py refuses to write any secret value or
+# LINE ID into it. Only the hex detector is skipped there; every other detector still runs.
+RECORD = re.compile(r"^Docs/release/[^/]+/release-manifest\.json$")
+report = {
+    path: kept
+    for path, found in report.items()
+    if (
+        kept := [
+            f for f in found if not (RECORD.match(path) and f["type"] == "Hex High Entropy String")
+        ]
+    )
+}
 Path("reports/secrets.json").write_text(json.dumps(report, indent=2))
 if report:
     print("Secret scanner found candidates; inspect reports/secrets.json (values are hashed).")

@@ -1,0 +1,219 @@
+# Release (M12, E.8): after CI passes on main, build the database and application images once for
+# arm64 (OCI A1, native runner) and amd64 (CI, an organisation VM later), push them to OCIR by
+# digest, scan, write SBOMs and the release manifest. Nothing here can reach a host or a
+# database: an operator deploys the printed digest with `faoj deploy` (Q3 a).
+#
+# Needs repository variables OCIR_REGISTRY (e.g. ap-singapore-1.ocir.io) and OCIR_NAMESPACE, and
+# secrets OCIR_USERNAME / OCIR_TOKEN of the faoj-ci user (push to faoj/* only). Until they are
+# set, the workflow skips itself.
+name: Release
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+env:
+  REGISTRY: ${{ vars.OCIR_REGISTRY }}
+  NAMESPACE: ${{ vars.OCIR_NAMESPACE }}
+  COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+  TRIVY_IMAGE: aquasec/trivy@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+  SYFT_IMAGE: anchore/syft@sha256:3eb5379ba7b409c3f4069b686110527af0c47df993fa5c10d13e7cf34f49b1aa
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - id: check
+        env:
+          CONCLUSION: ${{ github.event.workflow_run.conclusion || 'success' }}
+        run: |
+          if [ -z "$REGISTRY" ] || [ -z "$NAMESPACE" ]; then
+            echo "::notice::OCIR_REGISTRY/OCIR_NAMESPACE not set yet; no release built."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          elif [ "$CONCLUSION" != success ]; then
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  db:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
+    strategy:
+      matrix:
+        include:
+          - {platform: linux/amd64, runner: ubuntu-24.04, arch: amd64}
+          - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.COMMIT }}
+          persist-credentials: false
+      - name: Build and push by digest
+        env:
+          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
+          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          echo "$OCIR_TOKEN" | docker login "$REGISTRY" -u "$OCIR_USERNAME" --password-stdin
+          docker buildx create --use --name faoj >/dev/null
+          repo="$REGISTRY/$NAMESPACE/faoj/db"
+          docker buildx build --platform "$PLATFORM" --provenance=false \
+            --output "type=image,name=$repo,push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file meta.json deploy/server/db
+          python3 -c 'import json; print(json.load(open("meta.json"))["containerimage.digest"])' > digest-db-${{ matrix.arch }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digest-db-${{ matrix.arch }}
+          path: digest-db-${{ matrix.arch }}
+          retention-days: 1
+
+  db-index:
+    needs: db
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.index.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digest-db-*
+          merge-multiple: true
+      - id: index
+        env:
+          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
+          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+        run: |
+          echo "$OCIR_TOKEN" | docker login "$REGISTRY" -u "$OCIR_USERNAME" --password-stdin
+          repo="$REGISTRY/$NAMESPACE/faoj/db"
+          docker buildx imagetools create -t "$repo:$COMMIT" "$repo@$(cat digest-db-amd64)" "$repo@$(cat digest-db-arm64)"
+          digest=$(docker buildx imagetools inspect "$repo:$COMMIT" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          echo "image=$repo@$digest" >> "$GITHUB_OUTPUT"
+
+  app:
+    needs: db-index
+    strategy:
+      matrix:
+        include:
+          - {platform: linux/amd64, runner: ubuntu-24.04, arch: amd64}
+          - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.COMMIT }}
+          persist-credentials: false
+      - name: Build and push by digest
+        env:
+          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
+          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+          PLATFORM: ${{ matrix.platform }}
+          DB_IMAGE: ${{ needs.db-index.outputs.image }}
+        run: |
+          echo "$OCIR_TOKEN" | docker login "$REGISTRY" -u "$OCIR_USERNAME" --password-stdin
+          docker buildx create --use --name faoj >/dev/null
+          repo="$REGISTRY/$NAMESPACE/faoj/app"
+          docker buildx build --platform "$PLATFORM" --provenance=false \
+            --build-arg RELEASE_COMMIT="$COMMIT" --build-arg DB_IMAGE="$DB_IMAGE" \
+            --output "type=image,name=$repo,push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file meta.json .
+          python3 -c 'import json; print(json.load(open("meta.json"))["containerimage.digest"])' > digest-app-${{ matrix.arch }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digest-app-${{ matrix.arch }}
+          path: digest-app-${{ matrix.arch }}
+          retention-days: 1
+
+  release:
+    needs: [db-index, app]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digest-app-*
+          merge-multiple: true
+      - name: Index, scan (blocking for our images), SBOM and manifest
+        env:
+          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
+          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+          DB_IMAGE: ${{ needs.db-index.outputs.image }}
+          FROM_MAIN: ${{ github.event_name == 'workflow_run' || github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          echo "$OCIR_TOKEN" | docker login "$REGISTRY" -u "$OCIR_USERNAME" --password-stdin
+          repo="$REGISTRY/$NAMESPACE/faoj/app"
+          docker buildx imagetools create -t "$repo:$COMMIT" "$repo@$(cat digest-app-amd64)" "$repo@$(cat digest-app-arm64)"
+          digest=$(docker buildx imagetools inspect "$repo:$COMMIT" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
+          app="$repo@$digest"
+          mkdir -p release
+          scan() {  # image, platform, blocking
+            docker run --rm -e TRIVY_USERNAME="$OCIR_USERNAME" -e TRIVY_PASSWORD="$OCIR_TOKEN" -v "$PWD/release:/out" \
+              "$TRIVY_IMAGE" image --quiet --platform "$2" --scanners vuln,secret --severity HIGH,CRITICAL \
+              --ignore-unfixed --exit-code "$3" --format json --output "/out/scan-$4.json" "$1"
+          }
+          status=0
+          for p in linux/arm64 linux/amd64; do
+            a=${p#linux/}
+            scan "$app" "$p" 1 "app-$a" || status=1
+            scan "$DB_IMAGE" "$p" 1 "db-$a" || status=1
+          done
+          docker run --rm -e SYFT_REGISTRY_AUTH_AUTHORITY="$REGISTRY" -e SYFT_REGISTRY_AUTH_USERNAME="$OCIR_USERNAME" \
+            -e SYFT_REGISTRY_AUTH_PASSWORD="$OCIR_TOKEN" -v "$PWD/release:/out" "$SYFT_IMAGE" \
+            "registry:$app" --platform linux/arm64 -o "spdx-json=/out/sbom-app.spdx.json"
+          docker run --rm -e SYFT_REGISTRY_AUTH_AUTHORITY="$REGISTRY" -e SYFT_REGISTRY_AUTH_USERNAME="$OCIR_USERNAME" \
+            -e SYFT_REGISTRY_AUTH_PASSWORD="$OCIR_TOKEN" -v "$PWD/release:/out" "$SYFT_IMAGE" \
+            "registry:$DB_IMAGE" --platform linux/arm64 -o "spdx-json=/out/sbom-db.spdx.json"
+          # Third-party images are pinned in the bundle; their findings are reported, not blocking.
+          docker create --platform linux/amd64 --name bundle "$app" >/dev/null
+          docker cp bundle:/app/release.json release/release.json; docker rm bundle >/dev/null
+          for img in $(python3 -c 'import json; m=json.load(open("release/release.json")); print(" ".join(m[k] for k in ("n8n_image","clamav_image","caddy_image","backup_image")))'); do
+            name=$(echo "$img" | cut -d@ -f1 | tr '/:' '__')
+            docker run --rm -v "$PWD/release:/out" "$TRIVY_IMAGE" image --quiet --platform linux/arm64 \
+              --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --format json \
+              --output "/out/scan-thirdparty-$name.json" "$img" || true
+          done
+          python3 - "$app" "$status" <<'PY'
+          import glob, json, os, sys
+          app, status = sys.argv[1], int(sys.argv[2])
+          m = json.load(open("release/release.json"))
+          def count(path):
+              data = json.load(open(path))
+              return sum(len(r.get("Vulnerabilities") or []) + len(r.get("Secrets") or []) for r in data.get("Results", []))
+          m["app_image"] = app
+          m["scans"] = {os.path.basename(p)[5:-5]: count(p) for p in sorted(glob.glob("release/scan-*.json"))}
+          m["release_ok"] = status == 0
+          json.dump(m, open("release/release.json", "w"), indent=2)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write(f"## Release {m['commit'][:12]}\n\n")
+              out.write("Blocking scans: " + ("passed" if status == 0 else "**FAILED — do not deploy**") + "\n\n")
+              out.write(f"```\nsudo faoj deploy {app}\n```\n\n")
+              if status == 0 and os.environ["FROM_MAIN"] == "true":
+                  out.write("Tagged `main`: staging deploys it within 5 minutes if `faoj auto-deploy` is on; "
+                            "production takes it with `sudo faoj promote --approval \"…\"` after staging passes.\n\n")
+              out.write("| scan | findings |\n|---|---|\n")
+              for name, n in m["scans"].items():
+                  out.write(f"| {name} | {n} |\n")
+          PY
+          # Option ข: staging follows this tag (faoj auto-deploy). Only a release from main whose
+          # blocking scans passed moves it; a dispatch from another branch never does.
+          if [ "$status" = 0 ] && [ "$FROM_MAIN" = true ]; then
+            docker buildx imagetools create -t "$repo:main" "$app"
+          fi
+          exit "$status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-${{ env.COMMIT }}
+          path: release/
+          retention-days: 90

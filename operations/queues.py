@@ -147,12 +147,20 @@ class Filters:
     priority: str = ""
     status: str = ""
     district: str = ""
+    section: str = ""  # a แผนก pk, or "none" for cases without one (real structure Q12)
     overdue: bool = False
     preset: bool = False
 
     @property
     def active(self):
-        return bool(self.kind or self.priority or self.status or self.district or self.overdue)
+        return bool(
+            self.kind
+            or self.priority
+            or self.status
+            or self.district
+            or self.section
+            or self.overdue
+        )
 
     def query(self, **extra):
         params = {
@@ -160,6 +168,7 @@ class Filters:
             "priority": self.priority,
             "status": self.status,
             "district": self.district,
+            "section": self.section,
             "overdue": "1" if self.overdue else "",
             **extra,
         }
@@ -168,7 +177,7 @@ class Filters:
 
 def read_filters(params, roles):
     """Filters from the query string; a lone duty role presets them on a bare visit."""
-    keys = ("kind", "priority", "status", "district", "overdue", "tab", "page")
+    keys = ("kind", "priority", "status", "district", "section", "overdue", "tab", "page")
     if not any(params.get(k) for k in keys) and not params.get("clear"):
         duties = set(roles) - {Role.STAFF, Role.SUPERVISOR}
         if len(roles) == 1 and len(duties) == 1:
@@ -176,11 +185,13 @@ def read_filters(params, roles):
             if preset:
                 return Filters(**preset, preset=True)
     priority = params.get("priority", "")
+    section = params.get("section") or ""
     return Filters(
         kind=params.get("kind", "") if params.get("kind") in K.values else "",
         priority=priority if priority in [*Priority.values, "none"] else "",
         status=params.get("status", "") if params.get("status") in S.values else "",
         district=params.get("district", "") if (params.get("district") or "").isdigit() else "",
+        section=section if section == "none" or section.isdigit() else "",
         overdue=params.get("overdue") == "1",
     )
 
@@ -192,6 +203,10 @@ def apply_filters(cases, filters):
         cases = cases.filter(status=filters.status)
     if filters.district:
         cases = cases.filter(district_id=int(filters.district))
+    if filters.section == "none":
+        cases = cases.filter(section__isnull=True)
+    elif filters.section:
+        cases = cases.filter(section_id=int(filters.section))
     if filters.priority == "none":
         cases = cases.filter(
             Q(triage__isnull=True) | Q(triage__effective_priority="", triage__suggested_priority="")
@@ -300,6 +315,26 @@ def calendar_now():
     return current.calendar if current else Calendar()
 
 
+def _answered_after_request(ids):
+    """Cases waiting for information whose requester answered in LINE after the last request."""
+    if not ids:
+        return set()
+    from operations.models import ConversationMessage, Decision
+
+    asked = {}
+    for case_id, at in Decision.objects.filter(case_id__in=ids, action="request_info").values_list(
+        "case_id", "created_at"
+    ):
+        asked[case_id] = max(at, asked.get(case_id, at))
+    answered = set()
+    for case_id, at in ConversationMessage.objects.filter(case_id__in=ids).values_list(
+        "case_id", "created_at"
+    ):
+        if case_id in asked and at > asked[case_id]:
+            answered.add(case_id)
+    return answered
+
+
 def build_rows(cases, now):
     """Queue rows for a page of cases (a few queries for the whole page)."""
     cases = list(cases)
@@ -335,6 +370,9 @@ def build_rows(cases, now):
         "division"
     ):
         children.setdefault(work.case_id, []).append(work)
+    answered = _answered_after_request(
+        [c.pk for c in cases if c.status == Case.Status.AWAITING_INFO]
+    )
     calendar = calendar_now()
     rows = []
     for case in cases:
@@ -359,6 +397,8 @@ def build_rows(cases, now):
             row.flags.append(("alert", "ยกระดับแล้ว"))
         elif row.overdue:
             row.flags.append(("alert", "เกินกรอบเวลา"))
+        if case.pk in answered:
+            row.flags.append(("info", "ผู้แจ้งตอบข้อมูลแล้ว"))
         if case.pk in handoffs:
             row.handoff = handoffs[case.pk]
             row.flags.append(("", f"รอ {row.handoff['to']} ตอบรับ"))
@@ -405,13 +445,13 @@ def page(cases, tab, number):
 
 def prefetch(cases):
     return cases.select_related(
-        "district", "owner_division", "assignee__staff_profile"
+        "district", "owner_division", "section", "assignee__staff_profile"
     ).prefetch_related("lines__item")
 
 
 def own_divisions(scope):
     """Divisions a user may open a queue for: their own, or every active one for an admin."""
     divisions = Division.objects.filter(is_active=True).order_by("code")
-    if scope.is_admin:
+    if scope.is_admin or scope.is_support:
         return list(divisions)
     return list(divisions.filter(pk__in=list(scope.division_roles)))

@@ -1,0 +1,10 @@
+[Unit]
+Description=Production takes a minor release tagged main in its window after the soak (faoj auto-promote, ADR 0015 Q6/Q20)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=FAOJ_ROOT=@FAOJ_ROOT@
+ExecStart=/usr/local/sbin/faoj auto-promote check
+Nice=10

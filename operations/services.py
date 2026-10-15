@@ -8,10 +8,12 @@ M06 adds routing decisions (operations/routing.py) and a fresh proposal after ev
 (operations/fulfilment.py) and the inventory seam (operations/inventory.py).
 """
 
+import dataclasses
 import hashlib
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import timedelta
 from functools import wraps
 
 from django.contrib.auth import get_user_model
@@ -28,6 +30,8 @@ from operations import (
     registry,
     returns,
     routing,
+    routing_words,
+    support,
     workflow,
 )
 from operations.contracts import (
@@ -175,11 +179,9 @@ def _can_view(ctx, case):
 
 
 def _is_member(ctx, division_id, roles=None):
-    """Holds a role in the division itself; admin rights alone do not make someone a member."""
-    if ctx.scope is None:
-        return False
-    held = ctx.scope.division_roles.get(division_id, frozenset())
-    return bool(held if roles is None else held & set(roles))
+    """Holds a role in the division itself (or is ผู้ช่วยเหลือระบบ, ADR 0007); admin rights
+    alone do not make someone a member."""
+    return identity.holds(ctx.scope, division_id, roles)
 
 
 def visible_cases(actor):
@@ -188,7 +190,7 @@ def visible_cases(actor):
     cases = Case.objects.select_related("district", "owner_division", "requester")
     if ctx.requester is not None:
         return identity.filter_by_requester(cases, ctx.requester)
-    if ctx.scope.is_admin:
+    if ctx.scope.is_admin or ctx.scope.is_support:
         return cases
     return cases.filter(_staff_condition(ctx))
 
@@ -261,6 +263,7 @@ def _record(ctx, case, action, from_status, reason, data, event_type, key, reque
         from_status=from_status,
         to_status=case.status,
         revision=case.revision,
+        **({"support": data["support"]} if isinstance(data, dict) and "support" in data else {}),
     )
     OutboxEvent.objects.create(
         event_type=event_type,
@@ -286,6 +289,12 @@ def _record(ctx, case, action, from_status, reason, data, event_type, key, reque
         status=case.status,
         action_id=str(decision.action_id),
     )
+    if key is not None:
+        _receipt(ctx, action, key, request_hash, case, result)
+    return result
+
+
+def _receipt(ctx, action, key, request_hash, case, result):
     ActionReceipt.objects.create(
         actor_key=ctx.label,
         action=action,
@@ -294,7 +303,6 @@ def _record(ctx, case, action, from_status, reason, data, event_type, key, reque
         case=case,
         result=result.to_dict(),
     )
-    return result
 
 
 # --- Submission ------------------------------------------------------------------------------
@@ -339,17 +347,81 @@ def _build_lines(submission):
 def _submission_requester(ctx, submission, intake):
     if ctx.requester is not None:
         return ctx.requester
-    # Filing on behalf of a requester is a duty of intake staff (not of admin rights alone).
-    if not _is_member(ctx, intake.pk):
+    # Filing on behalf of a requester is a duty of intake staff (not of admin rights alone);
+    # without an intake desk (ADR 0008) any division's staff file, and the rules route the case.
+    if intake is not None and not _is_member(ctx, intake.pk):
         fail(ErrorCode.FORBIDDEN, "Only intake staff can file a case for a requester.")
+    if intake is None and not (ctx.scope and (ctx.scope.is_support or ctx.scope.division_roles)):
+        fail(ErrorCode.FORBIDDEN, "Only division staff can file a case for a requester.")
     requester = (
         Requester.objects.select_related("district")
-        .filter(pk=submission.requester_id, status=Requester.Status.ACTIVE)
+        .filter(pk=submission.requester_id, status=Requester.Status.ACTIVE, is_anonymous=False)
         .first()
     )
     if requester is None:
         fail(ErrorCode.VALIDATION_ERROR, "Requester must be approved and active.")
     return requester
+
+
+def _check_anonymous(requester, submission):
+    """ADR 0010: while ตัวเลือกระบบ allows it, an unregistered LINE user reports a problem or a
+    suggestion only, always with a location, and only a few a day."""
+    from operations import options
+
+    if options.get(options.ANONYMOUS) != "on":
+        fail(ErrorCode.FORBIDDEN, "Anonymous reports are turned off.")
+    if submission.kind != Case.Kind.PROBLEM:
+        fail(ErrorCode.FORBIDDEN, "Withdrawals and returns need a registered requester.")
+    if submission.fields.get("latitude") is None:
+        fail(ErrorCode.VALIDATION_ERROR, "An anonymous report needs a location.")
+    limit = int(options.get(options.ANONYMOUS_LIMIT))
+    since = timezone.now() - timedelta(days=1)
+    if Case.objects.filter(requester=requester, submitted_at__gte=since).count() >= limit:
+        fail(ErrorCode.VALIDATION_ERROR, "Daily limit of anonymous reports reached.")
+
+
+def _coordinator():
+    current = policy.current_policy()
+    code = current.units.get("coordinator") if current else None
+    division = Division.objects.filter(code=code, is_active=True).first() if code else None
+    if division is None:
+        fail(ErrorCode.DEPENDENCY_UNAVAILABLE, "No intake division or coordinator is configured.")
+    return division
+
+
+def _route(kind, lines, intake, now):
+    """[(owner, lines)]: everything to the intake desk when there is one; otherwise (ADR 0008)
+    one group per division the rules name for a withdrawal or return, unmatched lines together
+    (owner None: the full proposal decides), and a problem whole."""
+    current = policy.current_policy()
+    if intake is not None or kind == Case.Kind.PROBLEM or not lines or current is None:
+        return [(None, lines)]
+    if not current.in_effect(now):
+        return [(None, lines)]
+    groups = {}
+    for line in lines:
+        found, _, code = policy.match(current, kind, line.item, now)
+        groups.setdefault(code if found == "ok" else None, []).append(line)
+    owners = {
+        d.code: d
+        for d in Division.objects.filter(code__in=[c for c in groups if c], is_active=True)
+    }
+    routed = {}
+    for code, group in groups.items():
+        routed.setdefault(owners.get(code), []).extend(group)
+    return list(routed.items())
+
+
+def _proposed_owner(case, coordinator, now):
+    """The owner the rules propose for this case, or the coordinator when they cannot tell;
+    such a case may go where คำที่ระบบจำ send it (ADR 0013)."""
+    current = policy.current_policy()
+    facts = policy.build_facts(policy.case_data(case), {}, {}, current, policy.active_catalog())
+    result = policy.evaluate(current, facts, coordinator.code, now)
+    proposed = Division.objects.filter(code=result["proposed_owner"], is_active=True).first()
+    if proposed is None or proposed == coordinator:
+        return routing_words.place(case, result, coordinator) or coordinator
+    return proposed
 
 
 @_dependency_guard
@@ -364,11 +436,16 @@ def submit_case(actor, *, idempotency_key, payload):
         if replayed is not None:
             return replayed
         submission = parse_submission(payload, on_behalf=ctx.requester is None)
-        intake = Division.objects.filter(is_intake=True, is_active=True).first()
-        if intake is None:
-            fail(ErrorCode.DEPENDENCY_UNAVAILABLE, "No active intake division is configured.")
+        intake = identity.intake_division()
+        coordinator = None if intake else _coordinator()
         requester = _submission_requester(ctx, submission, intake)
-        if not requester.district.is_active:
+        if requester.is_anonymous:
+            _check_anonymous(requester, submission)
+        elif requester.is_internal:
+            # ผู้แจ้งภายใน (Q8): staff report problems and suggestions in their division's name.
+            if submission.kind != Case.Kind.PROBLEM:
+                fail(ErrorCode.FORBIDDEN, "Withdrawals and returns need a registered requester.")
+        elif not requester.district.is_active:
             fail(ErrorCode.VALIDATION_ERROR, "Requester district is not active.")
         lines = _build_lines(submission)
         related = None
@@ -382,27 +459,53 @@ def submit_case(actor, *, idempotency_key, payload):
         if "reason" in fields:
             fields["return_reason"] = fields.pop("reason")
         now = timezone.now()
-        case = Case.objects.create(
-            number=_next_number(submission.kind, now),
-            kind=submission.kind,
-            requester=requester,
-            district=requester.district,
-            owner_division=intake,
-            submitted_by=ctx.user,
-            channel=submission.channel,
-            intake_note=submission.intake_note,
-            related_case=related,
-            submitted_at=now,
-            updated_at=now,
-            **fields,
+        cases = []
+        for owner, group in _route(submission.kind, lines, intake, now):
+            case = Case.objects.create(
+                number=_next_number(submission.kind, now),
+                kind=submission.kind,
+                requester=requester,
+                district=requester.district,
+                owner_division=intake or owner or coordinator,
+                submitted_by=ctx.user,
+                channel=submission.channel,
+                intake_note=submission.intake_note,
+                reported_at=submission.reported_at,
+                related_case=related or (cases[0] if cases else None),
+                submitted_at=now,
+                updated_at=now,
+                **fields,
+            )
+            for number, line in enumerate(group, start=1):
+                line.case, line.line_no = case, number
+            CaseLine.objects.bulk_create(group)
+            if intake is None:
+                # ADR 0008: straight to the division the rules name; unclear → coordinator.
+                case.owner_division = owner or _proposed_owner(case, coordinator, now)
+                case.section = policy.section_for(case)
+                case.save(update_fields=["owner_division", "section"])
+            cases.append(case)
+        numbers = [c.number for c in cases]
+        results = []
+        for case in cases:
+            data = {"channel": case.channel, "on_behalf": ctx.requester is None}
+            if len(cases) > 1:
+                data["split"] = numbers  # one request, one case per division
+            acting_for = support.acting_for(ctx.scope, case, case.owner_division)
+            if acting_for is not None:
+                data["support"] = acting_for
+            if case.reported_at:
+                data["reported_at"] = case.reported_at.isoformat()
+            results.append(
+                _record(ctx, case, "submit", "", "", data, EVENT_CASE_SUBMITTED, None, None)
+            )
+            policy.after_submit(case)
+        first = dataclasses.replace(
+            results[0],
+            split=[{"case_id": r.case_id, "case_number": r.case_number} for r in results[1:]],
         )
-        for line in lines:
-            line.case = case
-        CaseLine.objects.bulk_create(lines)
-        data = {"channel": case.channel, "on_behalf": ctx.requester is None}
-        result = _record(ctx, case, "submit", "", "", data, EVENT_CASE_SUBMITTED, key, request_hash)
-        policy.after_submit(case)
-        return result
+        _receipt(ctx, "submit", key, request_hash, cases[0], first)
+        return first
 
 
 # --- Transitions -----------------------------------------------------------------------------
@@ -425,6 +528,47 @@ def _take(ctx, case, payload, reason, target):
     case.assignee = ctx.user
     case.status = target
     return {"assignee_id": ctx.user.pk}
+
+
+def route_by_ai(case_id, run):
+    """ตัวเลือกระบบ routing_ai "direct" (ADR 0013): an unclear case that waits with ส่วนกลาง and
+    that the routing AI placed by a registered duty goes to that division. The system records
+    the move; no person acted. Anything that moved meanwhile leaves only the proposal."""
+    with transaction.atomic():
+        case = Case.objects.select_for_update().select_related("owner_division").get(pk=case_id)
+        coordinator = routing_words.coordinator_division()
+        waiting = (
+            coordinator is not None
+            and case.owner_division_id == coordinator.pk
+            and case.status == Case.Status.SUBMITTED
+            and run.division.is_active
+            and not Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).exists()
+            and not RoutingReview.objects.filter(
+                case=case, status=RoutingReview.Status.OPEN
+            ).exists()
+        )
+        if not waiting:
+            policy.refresh(case, "routing_ai")
+            return None
+        from_status = case.status
+        data = {
+            "owner_from": routing._move_owner(case, run.division),
+            "owner_to": run.division.code,
+            "entry": run.entry.title if run.entry else "",
+            "quote": run.quote,
+            "routing_run": run.pk,
+        }
+        case.section = policy.section_for(case)
+        case.revision += 1
+        case.updated_at = timezone.now()
+        case.save()
+        type(run).objects.filter(pk=run.pk).update(applied=True)
+        context = _Context(label="AI ส่งกองตามหน้าที่")
+        _record(
+            context, case, "route_by_ai", from_status, "", data, EVENT_DECISION_RECORDED, None, None
+        )
+        policy.after_decision(case, "route_by_ai", actor_is_staff=False)
+        return case
 
 
 def _assign(ctx, case, payload, reason, target):
@@ -550,7 +694,9 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         if not spec.enabled_for(case.kind):
             fail(ErrorCode.ACTION_NOT_ENABLED, f"{action} arrives with {spec.module}.")
         payload = parse_action_payload(action, payload)
-        reason = clean_reason(payload, spec.reason_required)
+        acting_for = support.acting_for(ctx.scope, case)
+        # ADR 0007: every การทำแทนกอง by ผู้ช่วยเหลือระบบ carries a reason.
+        reason = clean_reason(payload, spec.reason_required or acting_for is not None)
         if expected_revision != case.revision:
             fail(ErrorCode.REVISION_CONFLICT, "The case changed; reload and try again.")
         targets = spec.targets(case.kind, case.status)
@@ -559,8 +705,12 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         # One target, or (M07) several the handler chooses from by the line counters; RESUME is
         # resolved by the handler.
         target = next(iter(targets)) if len(targets) == 1 else targets
-        from_status = case.status
+        from_status, from_owner = case.status, case.owner_division_id
         data = _handler(action, case)(ctx, case, payload, reason, target)
+        if case.owner_division_id != from_owner:
+            case.section = policy.section_for(case)  # Q12: the new owner's own แผนก, if any
+        if acting_for is not None:
+            data = {**(data or {}), "support": acting_for}
         if len(targets) > 1 and case.status not in targets:
             raise RuntimeError(f"{action} chose {case.status}, outside the matrix.")
         coordination.after_action(case)  # M09: R09 child work ends with its lines or the case

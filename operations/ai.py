@@ -24,7 +24,7 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from operations import identity
+from operations import identity, pii
 from operations.contracts import CommandFailed, ErrorCode, check_quantity_for_item, parse_quantity
 from operations.models import (
     AIConfigEntry,
@@ -271,6 +271,7 @@ def create_version(
     return version
 
 
+@pii.counted_as("eval")
 def test_version(actor, version):
     """Connection + schema test of every model in the chain (network; outside transactions)."""
     identity.require_developer_admin(actor)
@@ -278,6 +279,14 @@ def test_version(actor, version):
         from operations import ai_triage
 
         return ai_triage.test_version(actor, version)
+    if version.task == AIConfigVersion.Task.ANSWER:
+        from operations import ai_answer
+
+        return ai_answer.test_version(actor, version)
+    if version.task == AIConfigVersion.Task.ROUTING:
+        from operations import ai_routing
+
+        return ai_routing.test_version(actor, version)
     results = []
     for profile in version.chain():
         started = time.monotonic()
@@ -310,10 +319,14 @@ def test_version(actor, version):
 
 def record_eval(version, report):
     """Store an evaluation report; the primary must meet all thresholds, fallbacks safety ones."""
-    from operations import ai_eval, ai_triage
+    from operations import ai_answer, ai_eval, ai_routing, ai_triage
 
     if version.task == AIConfigVersion.Task.TRIAGE:
         passed = ai_triage.gate_passed(report, version)
+    elif version.task == AIConfigVersion.Task.ANSWER:
+        passed = ai_answer.gate_passed(report, version)
+    elif version.task == AIConfigVersion.Task.ROUTING:
+        passed = ai_routing.gate_passed(report, version)
     else:
         passed = ai_eval.gate_passed(report, version)
     AIConfigVersion.objects.filter(pk=version.pk).update(eval_passed=passed, eval_result=report)
@@ -344,6 +357,18 @@ def activation_blocker(version):
 
         if not ai_triage.gate_passed(version.eval_result, version):
             return "Triage evidence is missing, stale or failed; evaluate again."
+        return None
+    if version.task == AIConfigVersion.Task.ANSWER:
+        from operations import ai_answer
+
+        if not ai_answer.gate_passed(version.eval_result, version):
+            return "Answer evidence is missing, stale or failed, or the answer bank changed."
+        return None
+    if version.task == AIConfigVersion.Task.ROUTING:
+        from operations import ai_routing
+
+        if not ai_routing.gate_passed(version.eval_result, version):
+            return "Routing evidence is missing, stale or failed, or the duties changed."
         return None
     if version.eval_result.get("gate") != EVAL_GATE:
         return "The evaluation predates the current application/security gate; evaluate again."
@@ -400,6 +425,50 @@ def reject(actor, version, reason):
     identity.audit(actor, "ai.version_rejected", version, reason, number=version.number)
 
 
+@transaction.atomic
+def stop(actor, task, reason):
+    """Turn one AI task off from the web or `manage.py stop_ai` (RB02). The active version
+    retires, so new work runs without AI; triage still waiting for its turn is closed. Turning
+    the task on again is a switch to an evaluated version, so it needs evidence for this code."""
+    identity.require_developer_admin(actor)
+    reason = identity._require_reason(reason)
+    version = (
+        AIConfigVersion.objects.select_for_update()
+        .filter(status=AIConfigVersion.Status.ACTIVE, task=task)
+        .first()
+    )
+    if version is None:
+        raise ValidationError("This AI task is already off.")
+    version.status = AIConfigVersion.Status.RETIRED
+    version.save(update_fields=["status"])
+    closed = _close_waiting_triage(version) if task == AIConfigVersion.Task.TRIAGE else 0
+    identity.audit(
+        actor, "ai.task_stopped", version, reason, number=version.number, task=task, closed=closed
+    )
+    return version, closed
+
+
+def _close_waiting_triage(version):
+    """Runs no worker has picked up never reach the model; their events are settled as done.
+    A run already calling the model finishes with this version, like a switch."""
+    from operations import orchestration
+    from operations.models import AITriageRun, OutboxEvent
+
+    now = timezone.now()
+    runs = AITriageRun.objects.select_for_update().filter(
+        config_version=version, status=AITriageRun.Status.PENDING
+    )
+    ids = [str(pk) for pk in runs.values_list("pk", flat=True)]
+    runs.update(status=AITriageRun.Status.CANCELLED, finished_at=now)
+    OutboxEvent.objects.filter(
+        event_type=orchestration.EVENT_TRIAGE_AI,
+        subject_type="ai_triage_run",
+        subject_id__in=ids,
+        status=OutboxEvent.Status.PENDING,
+    ).update(status=OutboxEvent.Status.DONE, completed_at=now)
+    return len(ids)
+
+
 def active_version(task=AIConfigVersion.Task.EXTRACT):
     return AIConfigVersion.objects.filter(status=AIConfigVersion.Status.ACTIVE, task=task).first()
 
@@ -418,6 +487,15 @@ class SchemaError(Exception):
 class _NoProviderRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise AIError("Provider redirects are not allowed.")
+
+
+def post(url, api_key, body, timeout, task):
+    """_post with personal data masked out of what people typed and put back into the answer
+    (ADR 0014). Only the dialogue simulator, whose requesters are synthetic, calls _post."""
+    masker = pii.Masker.for_ai()
+    sent = masker.mask_body(body)
+    pii.record(task, masker.counts)
+    return masker.restore_response(_post(url, api_key, sent, timeout))
 
 
 def _post(url, api_key, body, timeout):
@@ -790,7 +868,8 @@ def call_model(profile, messages, catalog, timeout):
             "json_schema": {"name": "extraction", "strict": True, "schema": schema},
         }
     started = time.monotonic()
-    data = _post(f"{credential.base_url}/chat/completions", decrypt_key(credential), body, timeout)
+    url = f"{credential.base_url}/chat/completions"
+    data = post(url, decrypt_key(credential), body, timeout, "extract")
     return _content(data), data.get("usage") or {}, int((time.monotonic() - started) * 1000)
 
 

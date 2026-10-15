@@ -1,0 +1,6 @@
+﻿topic,setting,value
+มิเตอร์ (กคว.),FALLBACK_PHONE_METER,
+หม้อแปลงและอุปกรณ์อื่น (กองอุปกรณ์การจำหน่าย),FALLBACK_PHONE_EQUIPMENT,
+การใช้ไฟฟ้า: ลักใช้ไฟ ไฟแพง ร้องเรียน (กตฟ.),FALLBACK_PHONE_USAGE,
+เรื่องอื่นหรือไม่แน่ใจ,FALLBACK_PHONE,
+ลิงก์แบบฟอร์มสำรอง,FALLBACK_FORM_URL,

@@ -26,7 +26,7 @@ from django.db import IntegrityError, close_old_connections, transaction
 from django.utils import timezone
 
 from config.environment import require_demo_database
-from operations import ai, ai_chat, ai_grounding, ai_harness, conversation, identity
+from operations import ai, ai_chat, ai_grounding, ai_harness, conversation, identity, pii
 from operations.models import (
     AIConfigVersion,
     AIEvalJob,
@@ -612,6 +612,7 @@ def _passes(metrics, names):
     return all(checks[name](metrics[name]) for name in names)
 
 
+@pii.counted_as("eval")
 def run(version, limit=None, path=DATASET, primary_only=False, ablate=()):
     dataset, catalog, cases = load(path)
     cases = cases[:limit] if limit else cases
@@ -664,6 +665,7 @@ def _names(row):
     return THRESHOLDS
 
 
+@pii.counted_as("eval")
 def run_gate(version):
     """Security checks plus candidate application quality and a fresh v4 red-team comparison.
 
@@ -757,6 +759,7 @@ def readiness_passed(report):
     return True
 
 
+@pii.counted_as("eval")
 def run_readiness(version, repeats=3):
     """Frozen independent set, repeated real application replay, never activates a model."""
     if not 3 <= repeats <= 5:
@@ -917,6 +920,14 @@ def run_next_job():
             from operations import ai_triage
 
             report = ai_triage.run_gate(job.version)
+        elif job.version.task == AIConfigVersion.Task.ANSWER:
+            from operations import ai_answer
+
+            report = ai_answer.run_gate(job.version)
+        elif job.version.task == AIConfigVersion.Task.ROUTING:
+            from operations import ai_routing
+
+            report = ai_routing.run_gate(job.version)
         else:
             report = run_gate(job.version)
         version = ai.record_eval(job.version, report)

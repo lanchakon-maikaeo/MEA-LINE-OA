@@ -13,13 +13,16 @@ from django.conf import settings
 from django.utils import timezone
 
 from operations import (
+    ai_routing,
     coordination,
     identity,
     inventory,
     policy,
+    problems,
     queues,
     registry,
     returns,
+    routing_words,
     workflow,
 )
 from operations.fulfilment import CANCEL_RESOLUTIONS
@@ -27,6 +30,7 @@ from operations.models import (
     AuthorityGrant,
     Case,
     CaseTriage,
+    ChannelIdentity,
     ChildWork,
     Delivery,
     Division,
@@ -34,6 +38,7 @@ from operations.models import (
     ReturnUnit,
     Role,
     RoleGrant,
+    Section,
 )
 
 S = Case.Status
@@ -59,6 +64,7 @@ BUTTON_LABELS = {
     "request_routing_decision": "ขอให้ผู้ประสานตัดสิน",
     "decide_routing": "ตัดสินว่ากองใดรับ",
     "set_priority": "ยืนยันระดับความเร่งด่วน",
+    "set_section": "ระบุแผนก",
     "record_facts": "แก้ข้อเท็จจริง",
     "approve": "อนุมัติ",
     "deny_approval": "ไม่อนุมัติ",
@@ -126,6 +132,7 @@ STAFF_CHANNELS = [
     ("phone", "โทรศัพท์"),
     ("letter", "หนังสือ"),
     ("counter", "หน้าเคาน์เตอร์"),
+    ("fallback_form", "แบบฟอร์มสำรอง"),
 ]
 
 
@@ -149,14 +156,47 @@ class Situation:
     units: list
     intake_id: int | None
     now: object = field(default_factory=timezone.now)
+    support: bool = False  # ผู้ช่วยเหลือระบบ (ADR 0007)
+    separation: bool = True  # ตัวเลือกระบบ: consecutive steps by different people (ADR 0009)
+    # What a step needs before it can work, so a button is offered only when it can succeed.
+    priority_confirmed: bool = False
+    r09: bool = False
+    close_from: object = None  # when ปิดเรื่อง becomes allowed (no answer for 7 days)
+    line: bool = False  # the requester has LINE, so answers there by themselves
+    resolver_id: int | None = None  # who recorded the latest ผลการแก้ปัญหา
+    sections: list = field(default_factory=list)  # the owner division's active แผนก
 
     def member(self, division_id, roles=None):
+        if self.support:
+            return True
         held = self.roles.get(division_id, frozenset())
         return bool(held if roles is None else held & set(roles))
+
+    def other(self, user_id):
+        """Someone else did the earlier step, or the separation of duties does not bind."""
+        return self.support or not self.separation or user_id != self.user.pk
 
     @property
     def owner(self):
         return self.case.owner_division_id
+
+    @property
+    def desk(self):
+        """Who records a district's answer: the intake desk, or (ADR 0008) the owner."""
+        return self.intake_id if self.intake_id is not None else self.owner
+
+    def answers_for_district(self):
+        """Mirrors problems/fulfilment: without intake, not the person who resolved it."""
+        if not self.member(self.desk):
+            return False
+        if self.intake_id is None and self.case.kind == K.PROBLEM and self.resolver_id:
+            return self.other(self.resolver_id)
+        return True
+
+    @property
+    def with_intake(self):
+        """Still at the intake desk: triage ends in the division that takes it (unless R09)."""
+        return self.intake_id is not None and self.owner == self.intake_id and not self.r09
 
     def grant(self, activity):
         return any(
@@ -194,7 +234,48 @@ def situation(user, case):
             U.objects.filter(case=case).select_related("item", "arrival", "line").order_by("seq")
         ),
         intake_id=intake.pk if intake else None,
+        support=scope.is_support,
+        separation=identity.separated(scope),
+        **_readiness(case, lines),
     )
+
+
+def _readiness(case, lines):
+    """Read-only (never policy.state_for, which locks): the level, R09 and the close date."""
+    triage = CaseTriage.objects.filter(case=case).select_related("current_recommendation").first()
+    resolved = (
+        case.decisions.filter(action="resolve").order_by("-id").first()
+        if case.kind == K.PROBLEM
+        else None
+    )
+    recommendation = triage.current_recommendation if triage else None
+    wait = timezone.timedelta(days=settings.RECEIPT_NO_RESPONSE_DAYS)
+    close_from = None
+    if case.status == Case.Status.AWAITING_CONFIRMATION and case.kind == K.PROBLEM:
+        close_from = resolved.created_at + wait if resolved else None
+    elif case.kind == K.WITHDRAWAL and not any(line.outstanding > 0 for line in lines):
+        deliveries = list(Delivery.objects.filter(case=case))
+        waiting = [d.issued_at for d in deliveries if d.status == Delivery.Status.AWAITING]
+        if not any(d.status == Delivery.Status.MISMATCH for d in deliveries):
+            close_from = max(waiting) + wait if waiting else timezone.now()
+    return {
+        "priority_confirmed": bool(
+            triage
+            and triage.confirmed_priority
+            and triage.confirmed_division_id == case.owner_division_id
+        ),
+        "r09": bool(recommendation and "R09" in (recommendation.rules or [])),
+        "close_from": close_from,
+        "resolver_id": resolved.actor_id if resolved else None,
+        "sections": list(
+            Section.objects.filter(division_id=case.owner_division_id, is_active=True)
+        ),
+        "line": ChannelIdentity.objects.filter(
+            requester_id=case.requester_id,
+            channel=ChannelIdentity.Channel.LINE,
+            status="active",
+        ).exists(),
+    }
 
 
 def _delivery_divisions(delivery):
@@ -221,7 +302,9 @@ RULES = {
         )
     ),
     "decline": lambda st: st.member(st.owner),
-    "complete_triage": lambda st: st.member(st.owner) and st.handoff is None,
+    "complete_triage": lambda st: (
+        st.member(st.owner) and st.handoff is None and not st.review_open and not st.with_intake
+    ),
     "request_handoff": lambda st: st.member(st.owner) and st.handoff is None and not st.review_open,
     "accept_handoff": lambda st: st.handoff is not None and st.member(st.handoff.to_division_id),
     "decline_handoff": lambda st: st.handoff is not None and st.member(st.handoff.to_division_id),
@@ -236,7 +319,7 @@ RULES = {
     "record_facts": lambda st: st.member(st.owner),
     "approve": lambda st: (
         st.case.kind == K.WITHDRAWAL
-        and st.case.submitted_by_id != st.user.pk
+        and st.other(st.case.submitted_by_id)
         and st.grant(A.WITHDRAWAL_APPROVAL)
         and any(line.approved_quantity is None for line in st.lines)
     ),
@@ -253,25 +336,28 @@ RULES = {
     ),
     "resolve_discrepancy": lambda st: any(
         d.status == Delivery.Status.MISMATCH
-        and d.issued_by_id != st.user.pk
+        and st.other(d.issued_by_id)
         and all(st.member(div) for div in _delivery_divisions(d))
         for d in st.deliveries
     ),
     "confirm": lambda st: (
-        st.intake_id is not None
-        and st.member(st.intake_id)
+        st.answers_for_district()
         and (
             st.case.kind == K.PROBLEM
             or any(
-                d.status == Delivery.Status.AWAITING and d.issued_by_id != st.user.pk
+                d.status == Delivery.Status.AWAITING and st.other(d.issued_by_id)
                 for d in st.deliveries
             )
         )
     ),
-    "dispute_resolution": lambda st: (
-        st.case.kind == K.PROBLEM and st.intake_id is not None and st.member(st.intake_id)
+    "dispute_resolution": lambda st: st.case.kind == K.PROBLEM and st.answers_for_district(),
+    "set_section": lambda st: bool(st.sections) and st.member(st.owner),
+    "close": lambda st: (
+        st.case.kind in (K.WITHDRAWAL, K.PROBLEM)
+        and st.member(st.owner)
+        and st.close_from is not None
+        and st.close_from <= st.now
     ),
-    "close": lambda st: st.case.kind in (K.WITHDRAWAL, K.PROBLEM) and st.member(st.owner),
     "reopen": lambda st: (
         st.case.kind == K.PROBLEM
         and st.member(st.owner)
@@ -287,7 +373,7 @@ RULES = {
         u.status in (U.Status.AWAITING, U.Status.FINAL)
         and u.line_id
         and not u.open_discrepancy
-        and u.arrival.received_by_id != st.user.pk
+        and st.other(u.arrival.received_by_id)
         and st.member(_unit_division(st, u), [Role.INSPECTOR])
         for u in st.units
     ),
@@ -296,7 +382,7 @@ RULES = {
     ),
     "resolve_return_discrepancy": lambda st: any(
         u.open_discrepancy
-        and u.arrival.received_by_id != st.user.pk
+        and st.other(u.arrival.received_by_id)
         and st.member(_unit_division(st, u))
         for u in st.units
     ),
@@ -365,6 +451,69 @@ def available(user, case, st=None):
     return sorted(offers, key=lambda o: (not o.primary, o.irreversible, names.index(o.name)))
 
 
+@dataclass
+class Hint:
+    text: str
+    at: object = None  # a date the step becomes possible, shown after the text
+
+
+def hints(st, offers):
+    """Why a step the viewer expects is not offered yet, and when it will be."""
+    case, names = st.case, {o.name for o in offers}
+    out = []
+    if case.status == S.TRIAGE and st.with_intake and st.member(st.owner):
+        out.append(Hint("เรื่องยังอยู่ที่กองรับเรื่อง ส่งต่อให้กองที่รับผิดชอบก่อน แล้วกองนั้นจะกด “คัดกรองเสร็จ”"))
+    waiting = (case.kind == K.PROBLEM and case.status == S.AWAITING_CONFIRMATION) or (
+        case.kind == K.WITHDRAWAL
+        and any(d.status == Delivery.Status.AWAITING for d in st.deliveries)
+    )
+    if waiting and (st.member(st.owner) or "confirm" in names):
+        # Who answers: the requester in LINE, or staff on their behalf when there is no LINE.
+        who = _who(st, names)
+        answer = "ตอบผล" if case.kind == K.PROBLEM else "ยืนยันรับของ"
+        if st.line:
+            out.append(
+                Hint(
+                    f"ผู้แจ้ง{answer}ใน LINE ได้เอง"
+                    + (" กด “ยอมรับผล” แล้วเรื่องจะปิดเอง" if case.kind == K.PROBLEM else "")
+                )
+            )
+        else:
+            out.append(
+                Hint(
+                    f"ผู้แจ้งไม่ได้ผูก LINE ไว้ จึง{answer}ใน LINE ไม่ได้ "
+                    f"ติดต่อเขตทางอื่น แล้ว{who}กด “บันทึกคำตอบแทนเขต”"
+                )
+            )
+    close = workflow.ACTIONS["close"]
+    if (
+        "close" not in names
+        and close.enabled_for(case.kind)
+        and close.targets(case.kind, case.status)
+        and st.member(st.owner)
+        and st.close_from is not None
+    ):
+        if case.kind == K.PROBLEM:
+            out.append(Hint("ถ้าเขตยังไม่ตอบผล ปิดเรื่องเองได้ตั้งแต่", st.close_from))
+            if st.line:
+                who = _who(st, names)
+                out.append(Hint(f"ถ้าเขตแจ้งทางอื่นว่าเรียบร้อยแล้ว {who}กด “บันทึกคำตอบแทนเขต” เรื่องจะปิดทันที"))
+        else:
+            out.append(Hint("ถ้าเขตยังไม่ยืนยันรับ ปิดเรื่องเองได้ตั้งแต่", st.close_from))
+    return out
+
+
+def _who(st, names):
+    """Who should press “บันทึกคำตอบแทนเขต” when this viewer cannot."""
+    if "confirm" in names:
+        return ""
+    return f"ให้ {_intake_code(st)} " if st.intake_id is not None else "ให้เจ้าหน้าที่อีกคนในกอง "
+
+
+def _intake_code(st):
+    return Division.objects.values_list("code", flat=True).get(pk=st.intake_id)
+
+
 def _primary(case, names):
     if "request_handoff" in names and "complete_triage" in names:
         # A read: never policy.state_for, which locks the row for writers.
@@ -403,6 +552,26 @@ class ActionForm:
     intro: str = ""
     irreversible: bool = False
     picker: list = field(default_factory=list)  # (value, label, url-query) to switch the subject
+
+
+def _priority_field(case):
+    proposal = policy.card(case)
+    suggested = proposal["priority"]["suggested"] if proposal else ""
+    floor = proposal["priority"]["floor"] if proposal else ""
+    return Field(
+        "priority",
+        "ระดับความเร่งด่วน",
+        "select",
+        True,
+        [(p, label) for p, label in _levels()],
+        suggested,
+        help=(
+            f"ระบบเสนอ: {queues.level_name(suggested)}"
+            if suggested
+            else "ระบบยังไม่ได้เสนอระดับ เลือกเองและบอกเหตุผล"
+        )
+        + (f" · ห้ามต่ำกว่า {queues.level_name(floor)}" if floor else ""),
+    )
 
 
 def _reason(required=False, label="เหตุผล", help_text=""):
@@ -497,6 +666,9 @@ def build_form(action, st, params, demo=False):
                 True,
                 _divisions(case.owner_division_id),
                 initial if initial != case.owner_division.code else "",
+                help="ดูว่าแต่ละกองดูแลอะไรได้ที่เมนู 'หน้าที่ของกอง'"
+                if routing_words.teachable(case)
+                else "",
             )
         )
         add(
@@ -509,26 +681,44 @@ def build_form(action, st, params, demo=False):
             )
         )
         add(_reason(False, help_text="จำเป็นเมื่อเลือกกองต่างจากข้อเสนอ"))
+        if routing_words.teachable(case):
+            add(
+                Field(
+                    "keywords",
+                    "คำสำคัญให้ระบบจำ",
+                    initial=ai_routing.keyword_for(case),
+                    help=routing_words.KEYWORDS_HELP,
+                )
+            )
     elif action == "decide_routing":
         add(Field("division", "กองที่รับเรื่อง", "select", True, _divisions()))
         add(_reason(True))
-    elif action == "set_priority":
-        proposal = policy.card(case)
-        suggested = proposal["priority"]["suggested"] if proposal else ""
-        floor = proposal["priority"]["floor"] if proposal else ""
+        if routing_words.teachable(case):
+            add(Field("keywords", "คำสำคัญให้ระบบจำ", help=routing_words.KEYWORDS_HELP))
+    elif action == "set_section":
         add(
             Field(
-                "priority",
-                "ระดับความเร่งด่วน",
+                "section",
+                "แผนกที่ดูแล",
                 "select",
-                True,
-                [(p, label) for p, label in _levels()],
-                suggested,
-                help=f"ระบบเสนอ: {queues.level_name(suggested)}"
-                + (f" · ห้ามต่ำกว่า {queues.level_name(floor)}" if floor else ""),
+                False,
+                [("", "— ไม่ระบุแผนก —"), *[(str(x.pk), x.name) for x in st.sections]],
+                str(case.section_id or ""),
+                help="ใช้แยกคิวและรายงานในกอง สิทธิ์และกรอบเวลายังเป็นของกอง",
             )
         )
+        add(_reason())
+    elif action == "set_priority":
+        add(_priority_field(case))
         add(_reason(help_text="จำเป็นเมื่อต่างจากที่ระบบเสนอ"))
+    elif action == "complete_triage" and not st.priority_confirmed:
+        # One step instead of two: the level is confirmed with the end of triage.
+        level = _priority_field(case)
+        form.intro = "ขั้นนี้ยืนยันระดับความเร่งด่วนไปพร้อมกัน " + (
+            "ระบบเลือกระดับที่เสนอไว้ให้แล้ว" if level.initial else "เลือกระดับแล้วบอกเหตุผล"
+        )
+        add(level)
+        add(_reason(help_text="จำเป็นเมื่อระดับต่างจากที่ระบบเสนอ"))
     elif action == "record_facts":
         for name, title in FACT_FIELDS:
             add(Field(f"fact-{name}", title, "select", False, FACT_CHOICES))
@@ -766,7 +956,7 @@ def build_form(action, st, params, demo=False):
                 if u.status in (U.Status.AWAITING, U.Status.FINAL)
                 and u.line_id
                 and not u.open_discrepancy
-                and u.arrival.received_by_id != st.user.pk
+                and st.other(u.arrival.received_by_id)
             ]
         else:
             units = [u for u in st.units if u.status == U.Status.CONFLICT]
@@ -809,9 +999,7 @@ def build_form(action, st, params, demo=False):
             add(Field("reference", "เลขเอกสารผลตรวจจากระบบทะเบียน", required=True))
         add(_reason(action == "decide_inspection", help_text="จำเป็นเมื่อผลเป็น ดำเนินการอื่นตามระเบียบ"))
     elif action == "resolve_return_discrepancy":
-        units = [
-            u for u in st.units if u.open_discrepancy and u.arrival.received_by_id != st.user.pk
-        ]
+        units = [u for u in st.units if u.open_discrepancy and st.other(u.arrival.received_by_id)]
         unit = _pick(units, params.get("unit"), "seq")
         form.picker = [
             (u.seq, f"หน่วย {u.seq} · {u.get_discrepancy_display()}", f"unit={u.seq}") for u in units
@@ -847,7 +1035,19 @@ def build_form(action, st, params, demo=False):
         add(Field("reference", "เลขเอกสารทะเบียน", help="จำเป็นเมื่อสูญหาย"))
         add(_reason(True))
     elif action == "resolve":
-        add(Field("category", "ผลที่ได้", "radio", True, ProblemResolution.Category.choices))
+        suggestion = case.topic == Case.Topic.SUGGESTION
+        if suggestion:
+            form.intro = "ตอบข้อเสนอแนะ ผู้แจ้งจะได้ผลทาง LINE และกดรับทราบได้"
+        results = dict(ProblemResolution.Category.choices)
+        add(
+            Field(
+                "category",
+                "ผลการพิจารณา" if suggestion else "ผลที่ได้",
+                "radio",
+                True,
+                [(c, results[c]) for c in problems.categories_for(case)],
+            )
+        )
         add(Field("message", "ข้อความถึงผู้แจ้ง", "textarea", True, help="ผู้แจ้งเห็นข้อความนี้ใน LINE"))
         add(Field("internal_note", "บันทึกภายใน (ผู้แจ้งไม่เห็น)", "textarea"))
         add(Field("files", "แนบไฟล์ (JPG, PNG, PDF)", "file", help="ไม่เกิน 5 ไฟล์ ไฟล์ละไม่เกิน 10 MB"))
@@ -940,6 +1140,14 @@ def build_form(action, st, params, demo=False):
                 + (" (จำเป็นเมื่อใส่เลขเอกสาร)" if optional else ""),
             )
         )
+    if st.support and not demo:
+        # ADR 0007: every การทำแทนกอง by ผู้ช่วยเหลือระบบ carries a reason.
+        reason = next((f for f in form.fields if f.name == "reason"), None)
+        if reason is None:
+            add(_reason(True, "เหตุผลที่ทำแทนกอง", "ผู้ช่วยเหลือระบบต้องบอกเหตุผลทุกครั้ง"))
+        elif not reason.required:
+            reason.required = True
+            reason.help = "ผู้ช่วยเหลือระบบต้องบอกเหตุผลทุกครั้ง (บันทึกว่าทำแทนกอง)"
     if form.irreversible:
         form.fields.append(
             Field(

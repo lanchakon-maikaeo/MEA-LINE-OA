@@ -1,0 +1,424 @@
+{
+  "schema": 1,
+  "name": "m13-rc1",
+  "created_at": "2026-10-12T10:35:52+00:00",
+  "commit": "9c0a4c39205d984a95b3d54d17717f55775d81db",
+  "dirty": false,
+  "app_image": "localhost:5001/faoj/app@sha256:8dc6a2f001cc7a1d6a694278150e1d95a4465d8696456c041bd57eeb25f6b3b6",
+  "image_release": {
+    "schema": 1,
+    "commit": "9c0a4c3",
+    "built_at": "2026-10-12T07:34:27+00:00",
+    "db_image": "localhost:5001/faoj/db@sha256:1952313e72ec850d0aad4cdeffafca80b682e7fc9b6beb6d1366d3b3482c9f06",
+    "n8n_image": "n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b",
+    "clamav_image": "clamav/clamav-debian:1.4@sha256:6d0680780fd29855cb7018f68272cb520821f614259e2066f8ec669069ac91b3",
+    "caddy_image": "caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d",
+    "backup_image": "restic/restic:0.18.1@sha256:39d9072fb5651c80d75c7a811612eb60b4c06b32ffe87c2e9f3c7222e1797e76",
+    "workflows_sha256": "1709dab2db5697e1826f3882ca30a17906693eb0df1debebfa6f382a8fe0ac02",
+    "migrations": [
+      "0001_m01_identity",
+      "0002_m02_cases",
+      "0003_m03_line",
+      "0004_m04_orchestration",
+      "0005_m05_ai",
+      "0006_m05_ai_examples",
+      "0007_m05_ai_harness",
+      "0008_m05_ai_screen",
+      "0009_m06_policy",
+      "0010_m07_fulfilment",
+      "0011_m08_returns",
+      "0012_m09_problems_child_work",
+      "0013_m10_staff_uploads_and_email",
+      "0014_handoff_ends_with_case",
+      "0015_m11_registry_reconciliation",
+      "0016_line_info_replies",
+      "0017_fallback_intake",
+      "0018_system_support",
+      "0019_real_structure",
+      "0020_system_options",
+      "0021_problem_or_suggestion",
+      "0022_suggestions",
+      "0023_identity_and_staff_line",
+      "0024_staff_link_and_internal",
+      "0025_chat_answers",
+      "0026_ai_run_taken",
+      "0027_ai_triage_cancelled"
+    ]
+  },
+  "source_digest": "0b3b49fb8aff97472e39d8c8609693386e3545686c054a1b072c4894aab031a3",
+  "ai": {
+    "extract": {
+      "active": 11,
+      "pipeline": "harness",
+      "models": [
+        "typhoon-v2.5-30b-a3b-instruct",
+        "typhoon-s-thaillm-8b-instruct",
+        "OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2"
+      ],
+      "prompt": "extract-v4-grounded",
+      "gate": "application-v3+heldout-v4+redteam-v1+redteam-v2",
+      "config_digest": "40606acbe08d2d6eb7b6c012cc1f34738995a200ce62208a19d3eca349d4adca",
+      "evaluated_source": "0b3b49fb8aff97472e39d8c8609693386e3545686c054a1b072c4894aab031a3",
+      "evidence_current": true
+    },
+    "triage": {
+      "active": null,
+      "stopped": {
+        "version": 13,
+        "at": "2026-10-12T06:59:22+00:00",
+        "reason": "M13 release candidate ไม่รวม AI คัดกรอง (ผู้ใช้ตัดสิน 12 ต.ค. 2569) เจ้าหน้าที่คัดกรองเอง เปิดใช้ภายหลังต้องประเมินใหม่"
+      }
+    },
+    "answer": {
+      "active": 14,
+      "pipeline": "single",
+      "models": [
+        "typhoon-v2.5-30b-a3b-instruct"
+      ],
+      "prompt": "answer-v2",
+      "gate": "answer-heldout-v1+redteam-v1+followup-v1+security",
+      "config_digest": "ff5a12d09ac9c60c792451ed59e22fb550df83d97fd0dd85ca16c3fdf49a1e46",
+      "evaluated_source": "0b3b49fb8aff97472e39d8c8609693386e3545686c054a1b072c4894aab031a3",
+      "evidence_current": true
+    }
+  },
+  "policy": {
+    "code": "FAJO-2",
+    "digest": "a9c02e9bd2be7bb006ea4d5ef39a0425e9f2038fa953308239b9a16ace4c8508",
+    "synthetic": false,
+    "approval_reference": "LOCAL-DEMO"
+  },
+  "options": {
+    "separation_of_duties": "off",
+    "registration_approver": "admin",
+    "registration_check": "employee_auto",
+    "registration_location": "optional",
+    "registration_name": "full",
+    "anonymous_reports": "on",
+    "anonymous_daily_limit": "3",
+    "staff_line_budget": "220",
+    "staff_line_link": "code_or_employee",
+    "staff_line_actions": "act",
+    "chat_answers": "write",
+    "chat_followup": "ai",
+    "chat_typed_steps": "check",
+    "info_reply": "check"
+  },
+  "answer_bank": {
+    "digest": "a1490ab1aaa9a647150e1d7b49e0d458674965f347867e4e04026115c5721879",
+    "approved": 14
+  },
+  "divisions": [
+    "กคว.",
+    "กตฟ.",
+    "กองอุปกรณ์ฯ",
+    "กองเครื่องมือฯ",
+    "บท.",
+    "ฝอจ.",
+    "ศอค."
+  ],
+  "evidence": {
+    "ci": {
+      "status": "pass",
+      "detail": {
+        "migrate": 0,
+        "check": 0,
+        "test": 0,
+        "test-e2e": 0,
+        "security": 0
+      },
+      "files": [
+        {
+          "path": "ci.json",
+          "sha256": "05ed2257b1321c45ad04fb841eb1197b3460744da16375203431808553035128"
+        },
+        {
+          "path": "migrate.log",
+          "sha256": "14b0c6097093d4cb94b2bf121d13a5be9579f3f505c9239e7f6f60c53d3f2843"
+        },
+        {
+          "path": "check.log",
+          "sha256": "79c9f6a51576a66ce0842595228f9ef1b355cddead7825ac06fe993043b77fdd"
+        },
+        {
+          "path": "test.log",
+          "sha256": "c9fc42c56ca7172f4861b19c54ddb589e400098038a04f79612f3b1d87decb7b"
+        },
+        {
+          "path": "test-e2e.log",
+          "sha256": "4beedab7fa07c77d12b50c94b93782b7c721ebd7291ad1840c5ed55272929732"
+        },
+        {
+          "path": "security.log",
+          "sha256": "baf6b1aecd393d08708b023cd6b16434338765db2f83cf1e6095f0f3dc5341b0"
+        }
+      ]
+    },
+    "tests": {
+      "status": "pass",
+      "detail": {
+        "tests": 676
+      },
+      "files": [
+        {
+          "path": "test.log",
+          "sha256": "c9fc42c56ca7172f4861b19c54ddb589e400098038a04f79612f3b1d87decb7b"
+        }
+      ]
+    },
+    "acceptance-tests": {
+      "status": "pass",
+      "detail": {
+        "pass": 66,
+        "fail": 0,
+        "missing": 0
+      },
+      "files": [
+        {
+          "path": "acceptance-tests.log",
+          "sha256": "a8fbf04ff2e25dc1ce4e7a9206ac175fe21d66224d6e9a2eeeff0d8d824fa96f"
+        }
+      ]
+    },
+    "simulate-line": {
+      "status": "pass",
+      "detail": [
+        {
+          "seed": 1,
+          "dialogues": 200,
+          "failed": 0,
+          "coverage": 1.0
+        },
+        {
+          "seed": 7,
+          "dialogues": 200,
+          "failed": 0,
+          "coverage": 0.981
+        }
+      ],
+      "files": [
+        {
+          "path": "sim-seed1.json",
+          "sha256": "e29f0faa70de34749c98e9ba482c068fe7a71326ba7fc5afb4de268a848a6247"
+        },
+        {
+          "path": "sim-seed7.json",
+          "sha256": "6a6199343540b1fdc143f92dece63eeff6878cc53e68abbd119588cb68e00cf4"
+        }
+      ]
+    },
+    "ai-extract": {
+      "status": "pass",
+      "detail": {
+        "active": 11,
+        "pipeline": "harness",
+        "models": [
+          "typhoon-v2.5-30b-a3b-instruct",
+          "typhoon-s-thaillm-8b-instruct",
+          "OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2"
+        ],
+        "prompt": "extract-v4-grounded",
+        "gate": "application-v3+heldout-v4+redteam-v1+redteam-v2",
+        "config_digest": "40606acbe08d2d6eb7b6c012cc1f34738995a200ce62208a19d3eca349d4adca",
+        "evaluated_source": "0b3b49fb8aff97472e39d8c8609693386e3545686c054a1b072c4894aab031a3",
+        "evidence_current": true
+      },
+      "files": [
+        {
+          "path": "ai-extract.json",
+          "sha256": "a8f0a7a0f4bfeae18ee995ae6382e018896732d3ed667ab6070f3cb694559d0e"
+        }
+      ]
+    },
+    "ai-answer": {
+      "status": "pass",
+      "detail": {
+        "active": 14,
+        "pipeline": "single",
+        "models": [
+          "typhoon-v2.5-30b-a3b-instruct"
+        ],
+        "prompt": "answer-v2",
+        "gate": "answer-heldout-v1+redteam-v1+followup-v1+security",
+        "config_digest": "ff5a12d09ac9c60c792451ed59e22fb550df83d97fd0dd85ca16c3fdf49a1e46",
+        "evaluated_source": "0b3b49fb8aff97472e39d8c8609693386e3545686c054a1b072c4894aab031a3",
+        "evidence_current": true
+      },
+      "files": [
+        {
+          "path": "ai-answer.json",
+          "sha256": "f0f8654a917daa113dcf627a177e42e1b505a57bd0e2021db271356f82d6ca6f"
+        }
+      ]
+    },
+    "image-scan": {
+      "status": "pass",
+      "detail": {
+        "app": 0,
+        "db": 0
+      },
+      "files": [
+        {
+          "path": "image-scan.json",
+          "sha256": "84033244c5513fe0d3d684df605e2b40a7c37557f7eddfd410477c6a429aff2c"
+        },
+        {
+          "path": "trivy-app.log",
+          "sha256": "9a52a41c19aec2db766c10441a223283788f645956fc46ab62227255372c7bcf"
+        },
+        {
+          "path": "trivy-db.log",
+          "sha256": "55afe0a149395d0a35ef0e11fd63e13f77b325b685ca69a0341294db5b532461"
+        }
+      ]
+    },
+    "rehearsal-deploy": {
+      "status": "pass",
+      "detail": {
+        "deploys": 2
+      },
+      "files": [
+        {
+          "path": "history.jsonl",
+          "sha256": "1051eb0d07f5412d27db8fb4cedde42fa6dd8e84b9475ca2a060d4a702b18b13"
+        }
+      ]
+    },
+    "rollback-rehearsal": {
+      "status": "pass",
+      "detail": {
+        "rollbacks": 1
+      },
+      "files": [
+        {
+          "path": "history.jsonl",
+          "sha256": "1051eb0d07f5412d27db8fb4cedde42fa6dd8e84b9475ca2a060d4a702b18b13"
+        }
+      ]
+    },
+    "restore-drill": {
+      "status": "pass",
+      "detail": {
+        "rpo_seconds": 338,
+        "rto_seconds": 24,
+        "attachments_missing": 0,
+        "attachments_mismatched": 0
+      },
+      "files": [
+        {
+          "path": "restore-drill.json",
+          "sha256": "eba00d0a9168879c218a8a035c73165df05144ae03dcb5bb7cf9b6f9a85127bb"
+        }
+      ]
+    },
+    "load-rehearsal": {
+      "status": "pass",
+      "detail": {
+        "profile": "design",
+        "passed": true,
+        "inside": {
+          "stored": 6596,
+          "turn_seconds": {
+            "p50": 0.523,
+            "p95": 0.977,
+            "p99": 1.018,
+            "max": 1.039
+          }
+        }
+      },
+      "files": [
+        {
+          "path": "load/k6-summary.json",
+          "sha256": "b301d894b1fa0c32ed25c72007eb51264bc13d8ec592f848e59879c388af6ef5"
+        },
+        {
+          "path": "load/inside.json",
+          "sha256": "d2aacb091c6add4ba5c9e8a9a1bd0bc1f7d69ba1798cb55558189ada54b4de0b"
+        }
+      ]
+    },
+    "line-usage": {
+      "status": "pass",
+      "detail": {
+        "plan": "free",
+        "reasons": [
+          "ยังอยู่ในโควตาฟรีตามเกณฑ์ C.2.3"
+        ],
+        "budget": 300
+      },
+      "files": [
+        {
+          "path": "line-usage.json",
+          "sha256": "11ca3a67f1d08fc7bb3f13138baa1b60a3a42345620aa289fdfc1db72285f26d"
+        }
+      ]
+    },
+    "live-line": {
+      "status": "pass",
+      "detail": {
+        "webhook_events": 25,
+        "events_by_type": {
+          "message": 10,
+          "postback": 15
+        },
+        "replies": {
+          "sent": 25
+        },
+        "ai_runs": {
+          "applied": 3
+        },
+        "ai_models": [
+          "typhoon-v2.5-30b-a3b-instruct"
+        ],
+        "ai_turns_via_n8n": 3,
+        "cases": 3,
+        "kinds": [
+          "problem",
+          "return",
+          "withdrawal"
+        ],
+        "complete": 3
+      },
+      "files": [
+        {
+          "path": "live-line.json",
+          "sha256": "e2ea7a44af0939d3df7294fd01bafb110b85d79d4326d335ec066878b575bbcd"
+        }
+      ]
+    }
+  },
+  "gates": {
+    "G01": "external",
+    "G02": "external",
+    "G03": "external",
+    "G04": "external",
+    "G05": "external",
+    "G06": "external",
+    "G07": "external",
+    "G08": "external",
+    "G09": "external",
+    "G10": "external"
+  },
+  "m13": {
+    "A01": "external",
+    "A02": "pass",
+    "A03": "pass",
+    "A04": "pass",
+    "A05": "pass",
+    "A06": "pass",
+    "A07": "pass",
+    "A08": "pass",
+    "A09": "pass",
+    "A10": "pass",
+    "A11": "pass",
+    "A12": "pass",
+    "A13": "pass",
+    "A14": "external",
+    "A15": "external",
+    "A16": "pass",
+    "A17": "external"
+  },
+  "verdict": "not-ready",
+  "documents_at": "ec2cd68d586bcaaf9e9621e6fd5c6c6659fecb83",
+  "matrix_sha256": "87b69ef127154649fabda227a32d7ba033000db53c74effcec7bc8b063b24f8a"
+}

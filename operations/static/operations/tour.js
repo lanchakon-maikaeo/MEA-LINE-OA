@@ -88,13 +88,13 @@
       ]
     },
     problem: {
-      title: "เรื่องแจ้งปัญหา",
+      title: "เรื่องแจ้งปัญหา/ข้อเสนอแนะ",
       summary: "คัดกรอง → แก้ไข → เขตยอมรับหรือโต้แย้ง",
       stages: ["ยื่นเรื่อง", "คัดกรอง", "แก้ไข", "บันทึกผล", "เขตตอบผล", "ปิดเรื่อง"],
       steps: [
-        { page: "any", stage: 0, title: "เรื่องแจ้งปัญหาเดินอย่างไร",
+        { page: "any", stage: 0, title: "เรื่องแจ้งปัญหา/ข้อเสนอแนะเดินอย่างไร",
           body: "เขตแจ้งปัญหา → คัดกรองและขอข้อมูลเพิ่มถ้าจำเป็น → ส่งให้กองเจ้าของอุปกรณ์ → ผู้แก้ปัญหาบันทึกผล → เขตยอมรับหรือโต้แย้ง → ปิดเรื่อง (เปิดใหม่ได้ใน 30 วัน)" },
-        { page: "queue", kind: "problem", query: "tab=host", target: ".qrow[data-kind=problem]", stage: 0, title: "1. เรื่องแจ้งปัญหาในคิว",
+        { page: "queue", kind: "problem", query: "tab=host", target: ".qrow[data-kind=problem]", stage: 0, title: "1. เรื่องแจ้งปัญหา/ข้อเสนอแนะในคิว",
           body: "แถบสีแดงทางซ้ายคือเรื่องแจ้งเหตุอันตราย ต้องดูก่อน กดถัดไปเพื่อเปิดเรื่อง" },
         { page: "case", kind: "problem", target: "[data-tour=hazard] || [data-tour=case-head]", stage: 1, title: "2. เหตุอันตรายต้องรู้ทันที",
           body: "ถ้าข้อความมีคำที่บ่งชี้อันตราย ระบบตั้งระดับฉุกเฉินและแสดงคำแนะนำเร่งด่วนทันที ไม่ต้องรอ AI" },
@@ -172,47 +172,60 @@
     return node;
   }
 
-  // Bring the page to the step: the queue with the step's tab/filter, or a case of its kind.
+  function rows(want) {
+    return document.querySelector(".qrow" + (want ? "[data-kind=" + want + "]" : ""));
+  }
+
+  // A queue and a case of this kind the account can open, from the server: the queue in view
+  // may have none (an admin on a quiet division, a division that never handles this kind).
+  function where(want) {
+    var url = "/tour/where/" + (want ? "?kind=" + encodeURIComponent(want) : "");
+    return fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (response) { return response.ok ? response.json() : {}; })
+      .catch(function () { return {}; });
+  }
+
+  function leave(url) {
+    window.location.href = url;
+    return false;
+  }
+
+  // Bring the page to the step: a queue showing cases of the step's kind (with its tab and
+  // filter), or a case of that kind. Resolves false while the browser moves to another page.
   function arrive(step, state) {
     var here = page();
-    if (step.page === "any") return true;
     if (step.page === "queue") {
       var params = wanted(step);
-      if (here === "queue" && hasQuery(params)) return true;
-      if (state.tried === "queue") return true; // cannot get there: explain in place
+      var want = params.get("kind") || "";
+      if (here === "queue" && hasQuery(params) && rows(want)) return Promise.resolve(true);
+      if (state.tried === "queue") return Promise.resolve(true); // cannot: explain in place
       state.tried = "queue";
       save(state);
-      var query = params.toString();
-      window.location.href = queueUrl() + (query ? "?" + query : "");
-      return false;
+      return where(want).then(function (place) {
+        if (place.queue) {
+          var current = window.location.pathname + window.location.search;
+          return place.queue === current ? true : leave(place.queue);
+        }
+        if (here === "queue" && hasQuery(params)) return true;
+        var query = params.toString();
+        return leave(queueUrl() + (query ? "?" + query : ""));
+      });
     }
     if (step.page === "case") {
-      if (here === "case" && (!step.kind || kind() === step.kind)) return true;
-      if (here === "queue") {
-        var link = document.querySelector(
-          ".qrow" + (step.kind ? "[data-kind=" + step.kind + "]" : "") + " .qrow__link"
-        );
-        if (link) {
-          window.location.href = link.getAttribute("href");
-          return false;
-        }
-        if (step.kind && !hasQuery(wanted({ kind: step.kind })) && state.tried !== "case") {
-          state.tried = "case";
-          save(state);
-          window.location.href = queueUrl() + "?kind=" + step.kind;
-          return false;
-        }
-        return true; // nothing of this kind in the queue: explain without an example
-      }
-      if (state.tried !== "case") {
-        state.tried = "case";
-        save(state);
-        window.location.href = queueUrl() + (step.kind ? "?kind=" + step.kind : "");
-        return false;
-      }
-      return true;
+      if (here === "case" && (!step.kind || kind() === step.kind)) return Promise.resolve(true);
+      var link = here === "queue" && document.querySelector(
+        ".qrow" + (step.kind ? "[data-kind=" + step.kind + "]" : "") + " .qrow__link"
+      );
+      if (link) return Promise.resolve(leave(link.getAttribute("href")));
+      if (state.tried === "case") return Promise.resolve(true);
+      state.tried = "case";
+      save(state);
+      // Nothing of this kind in view: explain without an example if the account sees none.
+      return where(step.kind || "").then(function (place) {
+        return place.case ? leave(place.case) : true;
+      });
     }
-    return true;
+    return Promise.resolve(true);
   }
 
   // Change the screen for the step: open sections, focus a field, or show an example form.
@@ -290,10 +303,12 @@
     var step = tour.steps[state.step];
     if (!step) { close(); return; }
     save(state); // the step survives the page change arrive() may start
-    if (!arrive(step, state)) return;
-    state.tried = "";
-    save(state);
-    prepare(step).then(function () { draw(tour, step, state); });
+    arrive(step, state).then(function (arrived) {
+      if (!arrived) return;
+      state.tried = "";
+      save(state);
+      prepare(step).then(function () { draw(tour, step, state); });
+    });
   }
 
   function draw(tour, step, state) {

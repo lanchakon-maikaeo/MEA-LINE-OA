@@ -24,7 +24,10 @@ class StaffCreateForm(forms.Form):
 
 
 class GrantRoleForm(forms.Form):
-    role = forms.ChoiceField(label="บทบาท", choices=Role.choices)
+    # ผู้ช่วยเหลือระบบ is granted on the host only (ADR 0007).
+    role = forms.ChoiceField(
+        label="บทบาท", choices=[c for c in Role.choices if c[0] != Role.SYSTEM_SUPPORT]
+    )
     division = forms.ModelChoiceField(
         label="กอง (เว้นว่างสำหรับบทบาทระดับระบบ)",
         queryset=Division.objects.filter(is_active=True),

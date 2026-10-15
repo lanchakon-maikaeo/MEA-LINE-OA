@@ -30,6 +30,7 @@ ICONS = {
     "info": '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/>',
     "refresh": '<path d="M19 8a7.5 7.5 0 10.9 6"/><path d="M19.5 3.5V8H15"/>',
     "grid": '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+    "lock": '<rect x="5" y="11" width="14" height="9" rx="1"/><path d="M8 11V8a4 4 0 018 0v3"/>',
     "pause": '<path d="M9 6v12M15 6v12"/>',
     "spark": (
         '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18'
@@ -157,3 +158,11 @@ def lookup(mapping, key):
         return mapping.get(key, "")
     except AttributeError:
         return ""
+
+
+@register.filter
+def action_label(action):
+    """Thai name of a case action (the report of การทำแทนกอง)."""
+    from operations.casepage import action_label as label
+
+    return label(action)

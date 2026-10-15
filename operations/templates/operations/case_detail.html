@@ -17,15 +17,23 @@
     {% status_tag case %}
   </div>
   <dl class="facts">
-    <div><dt>กองเจ้าภาพ</dt><dd>{{ case.owner_division.code }} {{ case.owner_division.name }}</dd></div>
+    <div><dt>กองเจ้าภาพ</dt><dd>{{ case.owner_division.code }} {{ case.owner_division.name }}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>
+    {% if case.topic == "usage" %}<div><dt>หัวข้อ</dt><dd>การใช้ไฟฟ้า <span class="muted">(ไม่ส่งให้ AI)</span></dd></div>{% endif %}
     <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
     <div><dt>เขต</dt><dd>{{ case.district.name }}</dd></div>
-    <div><dt>ผู้แจ้ง</dt><dd>{{ case.requester.display_name }}</dd></div>
+    <div><dt>ผู้แจ้ง</dt><dd>{% if case.requester.is_anonymous %}<span class="tag">ไม่ระบุตัวตน</span>{% else %}{{ case.requester.display_name }}{% endif %}</dd></div>
+    {% if case.latitude %}<div><dt>ตำแหน่งที่แจ้ง</dt><dd><a href="https://www.google.com/maps?q={{ case.latitude }},{{ case.longitude }}" target="_blank" rel="noopener">เปิดแผนที่</a></dd></div>{% endif %}
     <div><dt>ยื่นเมื่อ</dt><dd class="num">{{ case.submitted_at|thai_datetime }}</dd></div>
+    {% if case.reported_at %}<div><dt>เวลาแจ้งจริง</dt><dd class="num">{{ case.reported_at|thai_datetime }}</dd></div>{% endif %}
     {% if case.needed_by %}<div><dt>ต้องการภายใน</dt><dd class="num">{{ case.needed_by|thai_date }}</dd></div>{% endif %}
     {% if page.update_due %}<div><dt>กำหนดอัปเดตที่ผู้แจ้งเห็น</dt><dd class="num">{{ page.update_due|thai_datetime }}</dd></div>{% endif %}
     {% if case.ended_at %}<div><dt>ปิดเมื่อ</dt><dd class="num">{{ case.ended_at|thai_datetime }}</dd></div>{% endif %}
   </dl>
+  {% if page.journey %}
+  <ol class="journey" aria-label="ขั้นของเรื่อง">
+    {% for j in page.journey %}<li class="journey__step is-{{ j.state }}"{% if j.state == "current" or j.state == "stopped" %} aria-current="step"{% endif %}>{{ j.label }}{% if j.note %}<span class="journey__note">{{ j.note }}</span>{% endif %}</li>{% endfor %}
+  </ol>
+  {% endif %}
 </div>
 
 {% if page.hazard %}
@@ -40,6 +48,16 @@
 <div class="detail">
   <div class="detail__main">
     <div id="action-slot" aria-live="polite"></div>
+
+    {% if page.info_replies %}
+    <section class="section" aria-labelledby="s-replies">
+      <div class="section-head"><h2 id="s-replies">ข้อมูลเพิ่มจากผู้แจ้ง (LINE)</h2><span class="muted">{{ page.info_replies|length }} ข้อความ</span></div>
+      {% for r in page.info_replies %}
+        <div class="labelled"><p class="labelled__label">{{ r.created_at|thai_datetime }}</p><div class="prose-block">{{ r.text }}</div></div>
+      {% endfor %}
+      {% if case.status == "awaiting_info" %}<p class="helptext">ถ้าข้อมูลครบแล้ว กด "ได้ข้อมูลครบแล้ว" ในสิ่งที่ทำได้ เพื่อให้เรื่องเดินต่อ</p>{% endif %}
+    </section>
+    {% endif %}
 
     {% if page.texts %}
     <section class="section" aria-labelledby="s-request">
@@ -230,7 +248,7 @@
               <li class="{% if e.system %}timeline__system{% endif %}">
                 <time datetime="{{ e.at|date:'c' }}">{{ e.at|thai_datetime }}</time>
                 <div>
-                  <div class="timeline__what">{{ e.what }}</div>
+                  <div class="timeline__what">{{ e.what }}{% if e.support %} <span class="tag tag--outline">ผู้ช่วยเหลือระบบทำแทน {{ e.support }}</span>{% endif %}</div>
                   <div class="timeline__who">{{ e.who }}{% if e.status %} · {{ e.status }}{% endif %}</div>
                   {% if e.why %}<p class="timeline__why">{{ e.why }}</p>{% endif %}
                 </div>
@@ -269,15 +287,16 @@
         </div>
       {% endif %}{% endwith %}
       {% if page.review %}<p class="flag mb-8">เรื่องนี้รอผู้ประสานตัดสิน</p>{% endif %}
+      {% for h in hints %}<p class="hint">{{ h.text }}{% if h.at %} <span class="num">{{ h.at|thai_datetime }}</span>{% endif %}</p>{% endfor %}
       {% if offers %}
         <div class="action-list">
           {% for o in offers %}{% if not o.irreversible %}
             <a class="btn {% if o.primary %}btn--block{% else %}btn--secondary btn--sm{% endif %}" href="{% url 'case-action' case.number o.name %}" hx-get="{% url 'case-action' case.number o.name %}" hx-target="#action-slot" hx-swap="innerHTML show:#action-slot:top"{% if o.primary %} data-tour="primary-action"{% endif %}>{{ o.label }}</a>
           {% endif %}{% endfor %}
         </div>
-        {% if has_irreversible %}
+        {% if irreversible %}
         <details class="more mt-18">
-          <summary class="muted">ตัวเลือกที่ย้อนกลับไม่ได้ (ยกเลิก ไม่อนุมัติ ยุติ)</summary>
+          <summary class="muted">ตัวเลือกที่ย้อนกลับไม่ได้ ({{ irreversible }})</summary>
           <div class="action-list mt-8">
             {% for o in offers %}{% if o.irreversible %}
               <a class="btn btn--outline btn--sm" href="{% url 'case-action' case.number o.name %}" hx-get="{% url 'case-action' case.number o.name %}" hx-target="#action-slot" hx-swap="innerHTML show:#action-slot:top">{{ o.label }}</a>

@@ -10,7 +10,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 APP_ENV, SECRET_KEY, DATABASE_URL, ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS = read_environment(
     os.environ
 )
-DEBUG = APP_ENV == "local"
+# DJANGO_DEBUG=false hides the debug pages on a local stack the internet can reach (the Mac
+# staging behind ngrok, 14 Oct 2569) while evaluations and the simulator keep the local mode.
+DEBUG = APP_ENV == "local" and os.environ.get("DJANGO_DEBUG", "").lower() != "false"
 SECURE_ENVIRONMENT = APP_ENV in {"staging", "production"}
 DATABASES = {
     "default": dj_database_url.parse(DATABASE_URL, conn_max_age=0, disable_server_side_cursors=True)
@@ -40,6 +42,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "operations.middleware.StaffSessionMiddleware",
+    "operations.middleware.FormOnceMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 ROOT_URLCONF = "config.urls"
@@ -95,6 +98,10 @@ SECURE_REDIRECT_EXEMPT = [
     # n8n calls Django over the internal Compose network; the proxy must not expose /internal/.
     r"^internal/v1/",
 ]
+# M12: Caddy terminates TLS on the host and is the only way in, so its X-Forwarded-Proto is
+# trusted there; never set this where clients can reach Gunicorn directly.
+if os.environ.get("BEHIND_TLS_PROXY", "").lower() == "true":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_HSTS_SECONDS = 31536000 if SECURE_ENVIRONMENT else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_ENVIRONMENT
 SECURE_HSTS_PRELOAD = SECURE_ENVIRONMENT
@@ -108,7 +115,8 @@ SESSION_COOKIE_AGE = 10 * 60 * 60
 # --- LINE intake (M03) ------------------------------------------------------------------------
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-# Outside production, replies go only to these LINE user IDs (one OA serves all environments).
+# Outside production, replies go only to these LINE user IDs (one OA serves all environments)
+# unless ตัวเลือกระบบ line_audience opens the bot to everyone.
 LINE_ALLOWED_RECIPIENTS = frozenset(
     r.strip() for r in os.environ.get("LINE_ALLOWED_RECIPIENTS", "").split(",") if r.strip()
 )

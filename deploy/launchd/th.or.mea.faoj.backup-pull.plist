@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- make backup-pull every Monday 09:00 while this Mac is on (M12 Q13 a). Install with
+     make backup-pull-schedule; remove with launchctl bootout gui/$(id -u)/th.or.mea.faoj.backup-pull -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>th.or.mea.faoj.backup-pull</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@BIN@/backup-pull.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+  <key>StandardOutPath</key><string>@HOME@/Library/Logs/faoj-backup-pull.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/Library/Logs/faoj-backup-pull.log</string>
+</dict>
+</plist>

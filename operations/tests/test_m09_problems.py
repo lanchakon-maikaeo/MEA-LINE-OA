@@ -319,7 +319,7 @@ class ProblemTests(ProblemTestCase):
         error = self.assertFails(
             ErrorCode.VALIDATION_ERROR, self.act, self.trf_staff, case, "reopen", {"reason": "x"}
         )
-        self.assertIn("ยื่นเรื่องแจ้งปัญหาใหม่", error.message)
+        self.assertIn("ยื่นเรื่องแจ้งปัญหา/ข้อเสนอแนะใหม่", error.message)
 
     def test_a_problem_creates_nothing_but_withdrawals_may_refer_to_it(self):
         case = self.resolved()

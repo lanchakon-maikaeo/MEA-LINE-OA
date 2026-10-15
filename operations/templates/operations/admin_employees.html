@@ -1,0 +1,29 @@
+{% extends "operations/admin_base.html" %}
+{% block title %}ทะเบียนพนักงาน — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>ทะเบียนพนักงาน</h1>
+    <p class="lede">ใช้ยืนยันตัวตนตอนลงทะเบียนทาง LINE และตอนเจ้าหน้าที่เชื่อม LINE ระบบเก็บข้อมูลยืนยันแบบเข้ารหัสทางเดียว ไม่มีใครเปิดดูค่าจริงได้</p>
+  </div>
+</div>
+<dl class="facts">
+  <div><dt>ใช้งานอยู่</dt><dd class="num">{{ active }} คน{% if synthetic %} <span class="muted">(มีข้อมูลจำลอง)</span>{% endif %}</dd></div>
+  <div><dt>ปิดแล้ว</dt><dd class="num">{{ inactive }} คน</dd></div>
+  <div><dt>ข้อมูลที่ถามเพื่อยืนยัน</dt><dd>{{ label }}</dd></div>
+  <div><dt>นำเข้าล่าสุด</dt><dd class="num">{% if latest %}{{ latest.imported_at|date:"Y-m-d H:i" }}{% else %}ยังไม่มี{% endif %}</dd></div>
+  <div><dt>การยืนยันตัวตนตอนลงทะเบียน</dt><dd>{{ check }} <a href="{% url 'admin-options' %}">เปลี่ยนในตัวเลือกระบบ</a></dd></div>
+</dl>
+<section class="section" aria-labelledby="emp-import">
+  <div class="section-head"><h2 id="emp-import">นำเข้าไฟล์ CSV</h2></div>
+  <p class="muted">หัวคอลัมน์: <code>employee_id,name,district_code,division_code,position,check</code> โดย <code>check</code> คือข้อมูลที่ใช้ยืนยัน เช่น วันเกิด รหัสเขตเป็น D01–D18 รหัสกองตามระบบ (เว้นว่างได้) ไฟล์ UTF-8 ไม่เกิน 5 MB</p>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="field"><label for="emp-file">ไฟล์</label><input id="emp-file" type="file" name="file" accept=".csv,text/csv" required></div>
+    <div class="field"><label for="emp-label">ชื่อข้อมูลยืนยันที่ถามใน LINE</label><input id="emp-label" name="check_label" maxlength="100" required placeholder="วันเกิด (วว/ดด/ปปปป)"></div>
+    <label class="choice"><input type="checkbox" name="deactivate_missing" value="1"> <span>ปิดคนที่ไม่อยู่ในไฟล์นี้ (ใช้เมื่อไฟล์เป็นรายชื่อทั้งหมด)</span></label>
+    <button class="btn btn--sm" type="submit">นำเข้า</button>
+  </form>
+</section>
+{% endblock %}

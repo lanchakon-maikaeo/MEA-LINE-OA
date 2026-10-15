@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from datetime import timedelta
 from decimal import Decimal
@@ -13,7 +14,7 @@ from django.core.management.base import CommandError
 from django.test import Client, override_settings
 from django.utils import timezone
 
-from operations import ai, ai_eval, ai_harness, ai_screen, line_api
+from operations import ai, ai_eval, ai_harness, ai_screen, line_api, pii
 from operations.management.commands.run_worker import run_once
 from operations.models import (
     AIConfigVersion,
@@ -384,6 +385,26 @@ class AdapterTests(AITestCase):
         with self.assertRaises(ai.SchemaError):
             ai.validate('{"requests": [{"intent": "approve"}]}', "x", catalog)
 
+    def test_a_short_field_that_only_repeats_the_request_is_dropped(self):
+        # The live model returned "เพิ่มอีก" as the purpose (11 Oct 2569).
+        catalog = ai._catalog()
+        for text, purpose, kept in (
+            ("ขอเบิกมิเตอร์เพิ่มอีก 2 เครื่อง", "เพิ่มอีก", None),
+            ("ขอเบิกมิเตอร์ 2 เครื่องด่วน ใช้ติดตั้งบ้านใหม่", "ใช้ติดตั้งบ้านใหม่", "ใช้ติดตั้งบ้านใหม่"),
+            ("ขอเบิกมิเตอร์ 2 เครื่อง สำรอง", "สำรอง", "สำรอง"),
+        ):
+            with self.subTest(text=text):
+                raw = json.dumps(
+                    {
+                        "requests": [
+                            request("withdrawal", ("MTR_SYN_A", 2, "มิเตอร์"), purpose=purpose)
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                fields = ai.validate(raw, text, catalog).requests[0].fields
+                self.assertEqual(fields.get("purpose"), kept)
+
     def test_model_sees_text_draft_and_catalog_only(self):
         ai.extract("ขอเบิกฟิวส์ 2 ชิ้น", {"intent": "withdrawal", "items": []}, self.version)
         body = self.llm.calls[-1]["body"]
@@ -641,11 +662,15 @@ class EvaluationTests(AITestCase):
 
     def perfect(self, body):
         payload = json.loads(body["messages"][1]["content"])
+        # The message arrives with personal data masked (ADR 0014): a label stands for any text.
+        sent = re.compile(
+            re.escape(pii.LABEL.sub("PIILABEL", payload["message"])).replace("PIILABEL", ".+?")
+        )
         case = next(
             c
             for name in ("v1", "v4", "redteam", "redteam2")
             for c in ai_eval.load(ai_eval.DATASETS[name])[2]
-            if payload["message"] in (c["text"], ai_harness.minimize(c["text"])[0])
+            if any(sent.fullmatch(t) for t in (c["text"], ai_harness.minimize(c["text"])[0]))
         )
         requests = [
             request(r["intent"], *[(code, qty, code) for code, qty in r["items"]])

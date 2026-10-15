@@ -14,7 +14,7 @@
     {% endif %}
   </div>
   <div class="page-head__actions">
-    {% if nav.is_intake and division.is_intake %}<a class="btn" href="{% url 'case-new' %}" data-tour="new-case-button">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
+    {% if nav.is_intake and division.is_intake or nav.is_intake and not nav.has_intake %}<a class="btn" href="{% url 'case-new' %}" data-tour="new-case-button">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
     <a class="btn btn--secondary" href="{% if division %}{% url 'division-export' division.code %}{% else %}{% url 'queue-all-export' %}{% endif %}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}" data-tour="export">ดาวน์โหลด CSV</a>
   </div>
 </div>
@@ -42,6 +42,14 @@
       <option value="">ทุกเขต</option>
       {% for d in districts %}<option value="{{ d.pk }}"{% if filters.district == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.name }}</option>{% endfor %}
     </select>
+    {% if sections %}
+    <label class="visually-hidden" for="f-section">แผนก</label>
+    <select id="f-section" name="section" class="pill-select{% if filters.section %} is-set{% endif %}">
+      <option value="">ทุกแผนก</option>
+      {% for s in sections %}<option value="{{ s.pk }}"{% if filters.section == s.pk|stringformat:"s" %} selected{% endif %}>{{ s.name }}</option>{% endfor %}
+      <option value="none"{% if filters.section == "none" %} selected{% endif %}>ยังไม่ระบุแผนก</option>
+    </select>
+    {% endif %}
     <label class="check-pill"><input type="checkbox" name="overdue" value="1"{% if filters.overdue %} checked{% endif %}> เกินกรอบเวลา</label>
     <button class="btn btn--sm filters__apply" type="submit">ใช้ตัวกรอง</button>
     {% if filters.active %}<a class="btn btn--ghost btn--sm" href="?tab={{ tab }}&amp;clear=1">ล้างตัวกรอง</a>{% endif %}
