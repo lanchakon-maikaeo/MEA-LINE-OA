@@ -12,6 +12,7 @@ from operations import (
     ai_routing,
     attachments,
     conversation,
+    monitoring,
     notifications,
     orchestration,
     policy,
@@ -96,6 +97,7 @@ def run_once(limit=20):
     ai_chat.expire_waiting()
     conversation.expire_drafts()
     policy.sweep_clocks()  # M06: acknowledgement reminders and escalation
+    monitoring.maybe_run()  # 15 ต.ค. 2569 Q43: yesterday's numbers after the set hour
     attachments.process_pending()
     attachments.purge_rejected()
     PostbackToken.objects.filter(

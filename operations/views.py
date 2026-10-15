@@ -11,7 +11,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models import Prefetch, Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -28,6 +28,7 @@ from operations import (
     forms,
     identity,
     inventory,
+    monitoring,
     notifications,
     options,
     orchestration,
@@ -1029,6 +1030,61 @@ def admin_ai(request):
             "version_form": forms.AIVersionForm(),
         },
     )
+
+
+@admin_required
+def admin_monitoring(request):
+    """Monitoring (15 ต.ค. 2569 Q40–Q47): every admin looks; computing now follows the AI right."""
+    if request.method == "POST":
+        if not identity.may_change_ai(request.user):
+            raise PermissionDenied
+        _run(request, lambda: monitoring.refresh(request.user), "คำนวณตัวเลขล่าสุดแล้ว")
+        return redirect("admin-monitoring")
+    try:
+        days = max(7, min(int(request.GET.get("days", 14)), 90))
+    except ValueError:
+        days = 14
+    view = monitoring.dashboard(days)
+    keys = (
+        options.MONITOR_ERROR,
+        options.MONITOR_P95,
+        options.MONITOR_UNANSWERED,
+        options.MONITOR_EMAIL,
+        options.MONITOR_TIME,
+    )
+    view.update(
+        {
+            "days": days,
+            "periods": (7, 14, 30, 90),
+            "can_change": identity.may_change_ai(request.user),
+            "thresholds": [
+                (options.OPTIONS[k].label, options.OPTIONS[k].label_of(options.get(k)))
+                for k in keys
+            ],
+        }
+    )
+    return render(request, "operations/admin_monitoring.html", view)
+
+
+EVIDENTLY_CSP = (
+    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'unsafe-inline'; img-src data: blob:; font-src data:"
+)
+
+
+@admin_required
+@require_safe
+def admin_monitoring_report(request):
+    """Evidently's own report, alone on its page: its scripts run sandboxed (no cookies, no
+    calls out), the only page with a looser policy (Q40)."""
+    html = monitoring.full_report_html()
+    if html is None:
+        messages.info(request, "ข้อความยังน้อยเกินไปสำหรับรายงานเต็ม (ต้องมีอย่างน้อย 20 ข้อความทั้งสองช่วง)")
+        return redirect("admin-monitoring")
+    response = HttpResponse(html)
+    response["Content-Security-Policy"] = EVIDENTLY_CSP
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @ai_editor_required

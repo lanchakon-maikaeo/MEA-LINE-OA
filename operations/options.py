@@ -55,6 +55,14 @@ EMAIL_TYPED = "employee_email_typed"
 CODE_MINUTES = "email_code_minutes"
 CODE_TRIES = "email_code_tries"
 CODE_PER_DAY = "email_code_per_day"
+MONITOR_TIME = "monitoring_time"
+MONITOR_KEEP = "monitoring_keep_days"
+MONITOR_ERROR = "monitoring_error_rate"
+MONITOR_P95 = "monitoring_p95_ms"
+MONITOR_UNANSWERED = "monitoring_unanswered_times"
+MONITOR_EMAIL = "monitoring_email"
+# Monitoring thresholds follow the right to change AI settings (15 ต.ค. 2569 Q45).
+AI_RIGHT = {MONITOR_ERROR, MONITOR_P95, MONITOR_UNANSWERED, MONITOR_EMAIL}
 
 OPTIONS = {
     SEPARATION: Option(
@@ -405,6 +413,48 @@ OPTIONS = {
         ),
         "นับรวมกับการยืนยันผิดวันละ 3 ครั้งต่อบัญชี LINE ที่มีอยู่แล้ว",
     ),
+    MONITOR_TIME: Option(
+        "Monitoring: เวลาที่คำนวณตัวเลขของเมื่อวาน",
+        (
+            ("02:00", "ตี 2", "ค่าที่ตกลงไว้ (15 ต.ค. 2569)"),
+            ("00:30", "เที่ยงคืนครึ่ง", ""),
+            ("05:00", "ตี 5", ""),
+        ),
+    ),
+    MONITOR_KEEP: Option(
+        "Monitoring: เก็บตัวเลขรายวันไว้นาน",
+        (("365", "1 ปี", "ค่าที่ตกลงไว้ (15 ต.ค. 2569)"), ("180", "6 เดือน", ""), ("730", "2 ปี", "")),
+        "เก็บเฉพาะตัวเลขรวม ไม่มีข้อความของใคร",
+    ),
+    MONITOR_ERROR: Option(
+        "Monitoring: แจ้งเตือนเมื่อ AI ผิดพลาดเกิน",
+        (
+            ("0.10", "10% ของการเรียกในวันนั้น", "ค่าที่ตกลงไว้ (15 ต.ค. 2569)"),
+            ("0.05", "5%", ""),
+            ("0.20", "20%", ""),
+        ),
+        "นับเมื่อวันนั้นเรียก AI อย่างน้อย 5 ครั้ง",
+    ),
+    MONITOR_P95: Option(
+        "Monitoring: แจ้งเตือนเมื่อ AI ตอบช้า (p95) เกิน",
+        (
+            ("12000", "12 วินาที", "เท่ากับเกณฑ์ประเมินตอบแชต"),
+            ("8000", "8 วินาที", ""),
+            ("20000", "20 วินาที", ""),
+        ),
+    ),
+    MONITOR_UNANSWERED: Option(
+        "Monitoring: แจ้งเตือนเมื่อคำถามที่บอทตอบไม่ได้สูงกว่าค่าเฉลี่ย 7 วัน",
+        (("2", "2 เท่า", "ค่าที่ตกลงไว้ (15 ต.ค. 2569)"), ("1.5", "1.5 เท่า", ""), ("3", "3 เท่า", "")),
+        "นับเมื่อวันนั้นมีอย่างน้อย 3 ครั้ง",
+    ),
+    MONITOR_EMAIL: Option(
+        "Monitoring: ส่งอีเมลหาแอดมินเมื่อมีเรื่องที่ควรดู",
+        (
+            ("off", "ไม่ส่ง แสดงในหน้าแอดมินอย่างเดียว", "ค่าที่ตกลงไว้ (15 ต.ค. 2569)"),
+            ("on", "ส่งอีเมลหาแอดมินที่มีอีเมล", "ส่งวันละครั้งหลังคำนวณเสร็จ"),
+        ),
+    ),
 }
 
 
@@ -422,6 +472,8 @@ def change(actor, key, value, reason):
 
     if actor is not None:
         identity.require_admin(actor)
+        if key in AI_RIGHT:
+            identity.require_ai_editor(actor)
     if key not in OPTIONS:
         raise ValidationError("ไม่รู้จักตัวเลือกนี้")
     option = OPTIONS[key]

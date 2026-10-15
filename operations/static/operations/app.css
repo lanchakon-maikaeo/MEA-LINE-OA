@@ -1064,13 +1064,13 @@ a.viz-bar:hover, a.viz-bar:focus-visible { background: var(--cloud); color: var(
 .admin-side {
   position: sticky; top: var(--nav-h);
   max-height: calc(100vh - var(--nav-h)); overflow-y: auto; scrollbar-width: thin;
-  padding: var(--s-30) var(--s-4) var(--s-30) 0;
+  padding: var(--s-18) var(--s-4) var(--s-18) 0;
 }
 .admin-side__home,
 .admin-side__list a {
   display: flex; align-items: center; gap: var(--s-8);
-  min-height: 40px; padding: 0 var(--s-12); border-radius: var(--r-field);
-  color: var(--charcoal); font-size: 15px; font-weight: 500; text-decoration: none;
+  min-height: 34px; padding: 0 var(--s-12); border-radius: var(--r-field);
+  color: var(--charcoal); font-size: 14px; font-weight: 500; text-decoration: none;
 }
 .admin-side__home > span:not(.chip__count),
 .admin-side__list a > span:first-child { flex: 1; }
@@ -1079,7 +1079,7 @@ a.viz-bar:hover, a.viz-bar:focus-visible { background: var(--cloud); color: var(
 .admin-side__home[aria-current="page"],
 .admin-side__list a[aria-current="page"] { background: var(--ink); color: var(--on-primary); }
 .admin-side__group {
-  margin: var(--s-24) 0 var(--s-4); padding: 0 var(--s-12);
+  margin: var(--s-12) 0 var(--s-2); padding: 0 var(--s-12);
   font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--mute);
 }
 .admin-side__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }

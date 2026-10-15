@@ -198,6 +198,7 @@ def _attention(user, scope, report, link):
     if scope.is_admin:
         add("การแจ้งเตือนที่ส่งไม่สำเร็จ", waiting["line"], reverse("admin-line"), alert=True)
         add("คำถามที่บอทตอบไม่ได้", waiting["questions"], reverse("admin-questions"))
+        add("Monitoring มีเรื่องที่ควรดู", waiting["monitoring"], reverse("admin-monitoring"), True)
     return items
 
 

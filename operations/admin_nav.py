@@ -87,6 +87,13 @@ GROUPS = (
                 "รุ่น AI การประเมิน และการเปิดใช้",
                 ("admin-ai-action", "admin-ai-version-action"),
             ),
+            Page(
+                "admin-monitoring",
+                "Monitoring",
+                "ตัวเลขรายวันของ AI คลังคำตอบ และระบบ",
+                ("admin-monitoring-report",),
+                badge="monitoring",
+            ),
         ),
     ),
     Group(
@@ -117,7 +124,9 @@ URL_NAMES = frozenset(
 
 
 def badges():
-    """What waits for an admin: registrations to decide, questions to answer, sends that failed."""
+    """What waits for an admin: registrations to decide, questions to answer, sends that failed,
+    and Monitoring's alerts of the latest day."""
+    from operations import monitoring
     from operations.models import (
         NotificationDelivery,
         OutboxEvent,
@@ -134,6 +143,7 @@ def badges():
         ).count(),
         "line": NotificationDelivery.objects.filter(status__in=["unknown", "failed"]).count()
         + OutboxEvent.objects.filter(status=OutboxEvent.Status.FAILED).count(),
+        "monitoring": monitoring.latest_alerts(),
     }
 
 

@@ -1050,10 +1050,10 @@ class AIConfigVersion(models.Model):
     """Primary model plus ordered fallbacks; one version per AI task is active at a time."""
 
     class Task(models.TextChoices):
-        EXTRACT = "extract", "สกัดร่างจากแชต (M05)"
-        TRIAGE = "triage", "เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06)"
-        ANSWER = "answer", "ตอบแชตผู้แจ้งจากคลังคำตอบ (ADR 0012)"
-        ROUTING = "routing", "เสนอกองจากหน้าที่ของกอง (ADR 0013)"
+        EXTRACT = "extract", "สกัดร่างจากแชต"
+        TRIAGE = "triage", "เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง"
+        ANSWER = "answer", "ตอบแชตผู้ใช้ LINE OA จากคลังคำตอบ"
+        ROUTING = "routing", "เสนอกองจากหน้าที่ของกอง"
 
     class Status(models.TextChoices):
         CANDIDATE = "candidate", "รอทดสอบ/ประเมิน"
@@ -2168,6 +2168,19 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} {self.name}"
+
+
+class MonitoringDay(models.Model):
+    """One day of Monitoring (15 ต.ค. 2569 Q40–Q47): counts and rates only, never text or a
+    person; computed by operations/monitoring.py."""
+
+    day = models.DateField(unique=True)
+    metrics = models.JSONField(default=dict)
+    alerts = models.JSONField(default=list)
+    computed_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-day"]
 
 
 class RosterUpload(models.Model):

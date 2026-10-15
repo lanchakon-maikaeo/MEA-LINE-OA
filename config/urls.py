@@ -111,6 +111,12 @@ urlpatterns = [
         name="admin-inventory-action",
     ),
     path("console/admin/ai/", views.admin_ai, name="admin-ai"),
+    path("console/admin/monitoring/", views.admin_monitoring, name="admin-monitoring"),
+    path(
+        "console/admin/monitoring/report/",
+        views.admin_monitoring_report,
+        name="admin-monitoring-report",
+    ),
     path("console/admin/ai/<slug:action>/", views.admin_ai_action, name="admin-ai-action"),
     path(
         "console/admin/ai/<slug:action>/<int:pk>/",

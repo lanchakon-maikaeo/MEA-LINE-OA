@@ -1,0 +1,133 @@
+{% extends "operations/admin_base.html" %}
+{% load ui %}
+{% block title %}Monitoring · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>Monitoring</h1>
+    <p class="lede">ตัวเลขรายวันของ AI คลังคำตอบ และระบบ เก็บเฉพาะตัวเลขรวม ไม่มีข้อความของใคร Evidently ทำงานในระบบนี้เอง ไม่ส่งข้อมูลออกไปข้างนอก{% if latest %} · คำนวณล่าสุด {{ latest.computed_at|thai_datetime }}{% endif %}</p>
+  </div>
+  <div class="page-head__actions cluster">
+    {% if can_change %}<form method="post">{% csrf_token %}<button class="btn btn--sm" type="submit">คำนวณตอนนี้</button></form>{% endif %}
+    <a class="btn btn--secondary btn--sm" href="{% url 'admin-monitoring-report' %}">เปิดรายงานเต็มของ Evidently</a>
+  </div>
+</div>
+
+<form class="report-filters mb-24" method="get" data-autosubmit aria-label="ช่วงเวลา">
+  <label class="visually-hidden" for="mon-days">ช่วงเวลา</label>
+  <select id="mon-days" name="days" class="pill-select is-set">{% for p in periods %}<option value="{{ p }}"{% if p == days %} selected{% endif %}>{{ p }} วันล่าสุด</option>{% endfor %}</select>
+  <button class="btn btn--sm filters__apply" type="submit">ดู</button>
+</form>
+
+{% if not latest %}
+<div class="notice notice--info" role="status"><div class="notice__body">ยังไม่มีตัวเลข ระบบคำนวณเองทุกคืน{% if can_change %} หรือกด "คำนวณตอนนี้" เพื่อคำนวณย้อนหลัง 30 วันและวันนี้{% endif %}</div></div>
+{% else %}
+
+{% if latest.alerts %}
+<div class="notice notice--warning mb-24" role="status"><div class="notice__body"><strong>เรื่องที่ควรดู ({{ latest.day|thai_date }})</strong><ul class="mt-8">{% for a in latest.alerts %}<li>{{ a }}</li>{% endfor %}</ul></div></div>
+{% else %}
+<div class="notice notice--success mb-24" role="status"><div class="notice__body">{% icon "check" %} {{ latest.day|thai_date }} ไม่มีค่าที่เกินเกณฑ์</div></div>
+{% endif %}
+
+<div class="ov-grid">
+  <section class="panel viz" aria-labelledby="mon-calls">
+    <div class="panel__head"><h2 id="mon-calls">การเรียก AI ต่อวัน</h2><span class="muted">รวมทุกงาน</span></div>
+    <div class="viz-bars">
+      {% for d in daily %}<div class="viz-bar"><span>{{ d.day|thai_date }}{% if d.error %} · ผิดพลาด {{ d.error }}%{% endif %}</span><progress max="{{ most_calls }}" value="{{ d.calls }}" aria-label="{{ d.day|thai_date }} {{ d.calls }} ครั้ง">{{ d.calls }}</progress><span class="num">{{ d.calls }}</span></div>{% endfor %}
+    </div>
+  </section>
+  <section class="panel viz" aria-labelledby="mon-unanswered">
+    <div class="panel__head"><h2 id="mon-unanswered">คำถามที่บอทตอบไม่ได้ต่อวัน</h2><a class="muted" href="{% url 'admin-questions' %}">ดูคำถาม</a></div>
+    <div class="viz-bars">
+      {% for d in daily %}<div class="viz-bar"><span>{{ d.day|thai_date }}</span><progress max="{{ most_unanswered }}" value="{{ d.unanswered }}" aria-label="{{ d.day|thai_date }} {{ d.unanswered }} ครั้ง">{{ d.unanswered }}</progress><span class="num">{{ d.unanswered }}</span></div>{% endfor %}
+    </div>
+  </section>
+</div>
+
+<section class="section" aria-labelledby="mon-ai">
+  <div class="section-head"><h2 id="mon-ai">การเรียก AI</h2><span class="muted">สำเร็จ ใช้โมเดลสำรอง ผิดพลาดหรือหมดเวลา และเวลาตอบ</span></div>
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">วันที่</th><th scope="col">งาน</th><th scope="col" class="num">ครั้ง</th><th scope="col" class="num">สำเร็จ</th><th scope="col" class="num">ใช้สำรอง</th><th scope="col" class="num">ผิดพลาด</th><th scope="col" class="num">p50</th><th scope="col" class="num">p95</th></tr></thead>
+    <tbody>
+    {% for r in ai_rows reversed %}
+      <tr><td>{{ r.day|thai_date }}</td><td class="cell--wide" data-label="งาน">{{ r.task }}</td><td class="num" data-label="ครั้ง">{{ r.calls }}</td><td class="num" data-label="สำเร็จ">{{ r.ok|default_if_none:"-" }}%</td><td class="num" data-label="ใช้สำรอง">{{ r.fallback|default_if_none:"-" }}%</td><td class="num{% if r.error %} t-alert{% endif %}" data-label="ผิดพลาด">{{ r.error|default_if_none:"-" }}%</td><td class="num" data-label="p50">{% if r.p50 %}{{ r.p50 }} ms{% else %}-{% endif %}</td><td class="num" data-label="p95">{% if r.p95 %}{{ r.p95 }} ms{% else %}-{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="8">ยังไม่มีการเรียก AI ในช่วงนี้</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="section" aria-labelledby="mon-rag">
+  <div class="section-head"><h2 id="mon-rag">ตอบแชตจากคลังคำตอบ (RAG)</h2><a class="muted" href="{% url 'admin-answers' %}">คลังคำตอบ</a></div>
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">ตอบได้</th><th scope="col" class="num">AI เขียนตอบ</th><th scope="col" class="num">ตอบไม่ได้</th><th scope="col" class="num">คำถามใหม่</th><th scope="col" class="num">ถ้อยคำถูกตีกลับ</th><th scope="col" class="num">ถามซ้ำใน 10 นาที</th></tr></thead>
+    <tbody>
+    {% for r in rag_rows reversed %}
+      <tr><td>{{ r.day|thai_date }}</td><td class="num" data-label="ตอบได้">{{ r.answered|default:0 }}</td><td class="num" data-label="AI เขียนตอบ">{{ r.written|default:0 }}</td><td class="num" data-label="ตอบไม่ได้">{{ r.unanswered|default:0 }}</td><td class="num" data-label="คำถามใหม่">{{ r.new_questions|default:0 }}</td><td class="num" data-label="ถ้อยคำถูกตีกลับ">{{ r.refused|default:0 }}</td><td class="num" data-label="ถามซ้ำใน 10 นาที">{{ r.repeats|default:0 }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if top_keys %}<p class="muted">คำตอบที่ใช้บ่อยในช่วงนี้: {% for key, n in top_keys %}{{ key }} {{ n }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+</section>
+
+<section class="section" aria-labelledby="mon-quality">
+  <div class="section-head"><h2 id="mon-quality">คุณภาพการสกัดร่างและการส่งกอง</h2></div>
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">ร่างที่ AI เติม</th><th scope="col" class="num">แก้รูปแบบเฉลี่ย</th><th scope="col" class="num">AI คัดกรอง</th><th scope="col" class="num">AI เสนอกอง</th><th scope="col" class="num">ส่งตามข้อเสนอ</th><th scope="col" class="num">คำที่จำใหม่</th><th scope="col" class="num">ส่งผิดกอง</th></tr></thead>
+    <tbody>
+    {% for r in quality_rows reversed %}
+      <tr><td>{{ r.day|thai_date }}</td><td class="num" data-label="ร่างที่ AI เติม">{{ r.extract_runs|default:0 }}</td><td class="num" data-label="แก้รูปแบบเฉลี่ย">{{ r.corrections_avg|default_if_none:"-" }}</td><td class="num" data-label="AI คัดกรอง">{{ r.triage_runs|default:0 }}</td><td class="num" data-label="AI เสนอกอง">{{ r.routing_runs|default:0 }}</td><td class="num" data-label="ส่งตามข้อเสนอ">{{ r.routing_applied|default:0 }}</td><td class="num" data-label="คำที่จำใหม่">{{ r.words_learned|default:0 }}{% if r.words_by_ai %} <span class="muted">(AI {{ r.words_by_ai }})</span>{% endif %}</td><td class="num" data-label="ส่งผิดกอง">{{ r.wrong_division|default:0 }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="section" aria-labelledby="mon-inputs">
+  <div class="section-head"><h2 id="mon-inputs">ข้อความที่เข้ามา</h2><span class="muted">วัดจากข้อความที่ปิดข้อมูลส่วนบุคคลแล้ว ไม่นับเรื่องการใช้ไฟฟ้า</span></div>
+  <p>Evidently เทียบ 7 วันล่าสุดกับ 28 วันก่อนหน้า:
+    {% if drift.status == "ok" %}เปลี่ยนไป {{ drifted }} จาก {{ drift_rows|length }} ด้าน จากข้อความ {{ drift.current }} และ {{ drift.reference }} ข้อความ
+    {% elif drift.status == "few" %}<span class="muted">ข้อความยังน้อย ({{ drift.current }} และ {{ drift.reference }} ข้อความ ต้องมีอย่างน้อยช่วงละ 20)</span>
+    {% elif drift.status == "error" %}<span class="t-alert">คำนวณไม่สำเร็จ ({{ drift.error }})</span>
+    {% else %}<span class="muted">ยังไม่ได้คำนวณ</span>{% endif %}</p>
+  {% if drift_rows %}
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">ด้าน</th><th scope="col" class="num">p-value</th><th scope="col">ผล</th></tr></thead>
+    <tbody>{% for r in drift_rows %}<tr><td>{{ r.name }}</td><td class="num" data-label="p-value">{{ r.p_value|default_if_none:"-" }}</td><td class="cell--end">{% if r.drifted %}<span class="tag tag--alert">เปลี่ยนไป</span>{% else %}<span class="tag tag--closed">คงเดิม</span>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">ข้อความ</th><th scope="col" class="num">ยาวเฉลี่ย</th><th scope="col" class="num">ยาว p95</th><th scope="col">ข้อมูลที่ถูกปิด</th></tr></thead>
+    <tbody>
+    {% for r in input_rows reversed %}
+      <tr><td>{{ r.day|thai_date }}</td><td class="num" data-label="ข้อความ">{{ r.messages|default:0 }}</td><td class="num" data-label="ยาวเฉลี่ย">{{ r.avg_length|default_if_none:"-" }}</td><td class="num" data-label="ยาว p95">{{ r.p95_length|default_if_none:"-" }}</td><td class="cell--wide" data-label="ข้อมูลที่ถูกปิด">{% for kind, n in r.masked.items %}{{ kind }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}-{% endfor %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="section" aria-labelledby="mon-evals">
+  <div class="section-head"><h2 id="mon-evals">ประวัติการประเมิน AI</h2><a class="muted" href="{% url 'admin-ai' %}">หน้า AI</a></div>
+  {% if evals %}
+  <ul>{% for e in evals reversed %}<li>{{ e.day|thai_date }} · v{{ e.version }} · {{ e.task }} · {% if e.passed %}<span class="tag tag--closed">ผ่าน</span>{% elif e.passed is None %}{{ e.status }}{% else %}<span class="tag tag--alert">ไม่ผ่าน</span>{% endif %}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">ไม่มีการประเมินในช่วงนี้</p>{% endif %}
+</section>
+
+<section class="section" aria-labelledby="mon-system">
+  <div class="section-head"><h2 id="mon-system">ระบบ</h2><span class="muted">ณ {{ latest.computed_at|thai_datetime }}</span></div>
+  <dl class="facts">
+    <div><dt>ข้อความแจ้งเตือน LINE เดือนนี้</dt><dd class="num">{{ system.push_used|default:0 }} / {{ system.push_budget|default:0 }}</dd></div>
+    <div><dt>แจ้งเตือนที่ส่งไม่ได้ (วันนั้น)</dt><dd class="num">{{ system.failed_sends|default:0 }}</dd></div>
+    <div><dt>งานรอทำ</dt><dd class="num">{{ system.outbox_pending|default:0 }}{% if system.oldest_pending_s %} <span class="muted">(รอนานสุด {{ system.oldest_pending_s }} วินาที)</span>{% endif %}</dd></div>
+    <div><dt>งานที่ส่งไม่สำเร็จ</dt><dd class="num">{{ system.outbox_failed|default:0 }} <a href="{% url 'admin-line' %}">ดู</a></dd></div>
+    <div><dt>เวลารับข้อความ LINE จนทำเสร็จ (p95)</dt><dd class="num">{% if system.webhook_p95_s is not None %}{{ system.webhook_p95_s }} วินาที{% else %}-{% endif %}</dd></div>
+    <div><dt>worker ทำงานล่าสุด</dt><dd>{{ system.worker_seen|default:"-"|slice:":16"|cut:"T" }}</dd></div>
+  </dl>
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="mon-rules">
+  <div class="section-head"><h2 id="mon-rules">เกณฑ์แจ้งเตือน</h2>{% if can_change %}<a class="muted" href="{% url 'admin-options' %}">เปลี่ยนในตัวเลือกระบบ</a>{% endif %}</div>
+  <dl class="facts">{% for label, value in thresholds %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl>
+  {% if not can_change %}<p class="muted">เปลี่ยนเกณฑ์และกดคำนวณได้เฉพาะผู้มีสิทธิ์แก้การตั้งค่า AI</p>{% endif %}
+</section>
+{% endblock %}
