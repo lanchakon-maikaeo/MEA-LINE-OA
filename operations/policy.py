@@ -916,7 +916,7 @@ def refresh(case, trigger, now=None):
     result = evaluate(policy, facts, case.owner_division.code, now)
     learned = policy is not None and policy.units.get("intake") is None
     if learned:
-        from operations import ai_routing, routing_words  # local: both read this module
+        from operations import ai_keywords, ai_routing, routing_words  # local: they read this
 
         result = routing_words.apply(case, result)  # คำที่ระบบจำ for an R10 case (ADR 0013)
         result = ai_routing.apply(case, result)  # then the routing AI's proposal (Q15)
@@ -969,6 +969,7 @@ def refresh(case, trigger, now=None):
     maybe_request_ai(case, now)
     if learned:
         ai_routing.maybe_request(case, result, now)
+        ai_keywords.maybe_request(case, result, now)  # 15 ต.ค. 2569 Q9: words for the handoff
     return changed
 
 

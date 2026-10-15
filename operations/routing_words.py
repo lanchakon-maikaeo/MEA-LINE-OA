@@ -123,16 +123,31 @@ def clean(case, values):
     text, terms = case_text(case), policy_terms()
     masker = pii.Masker.for_ai() if words else None
     for word in words:
-        lowered = word.lower()
-        if not MIN_LENGTH <= len(word) <= MAX_LENGTH:
+        problem = word_problem(word, text, terms, masker)
+        if problem == "length":
             raise ValidationError(f"คำสำคัญ '{word}' ต้องยาว {MIN_LENGTH} ถึง {MAX_LENGTH} ตัวอักษร")
-        if lowered not in text:
+        if problem == "not_in_text":
             raise ValidationError(f"'{word}' ไม่อยู่ในข้อความของเรื่อง")
-        if any(term == lowered or term in lowered for term in terms):
+        if problem == "rule_word":
             raise ValidationError(f"'{word}' มีคำในกติกาอยู่แล้ว กติกาจะเป็นผู้เลือกกอง")
-        if masker.mask(word) != word:
+        if problem == "personal":
             raise ValidationError(f"'{word}' เป็นข้อมูลส่วนบุคคล ระบบไม่จำ")
     return words
+
+
+def word_problem(word, text, terms, masker):
+    """Why a word cannot be remembered, or "": its length, not in the (lower-case) text, a word
+    the rules already know, or personal data. Shared by people and the keyword AI (Q34)."""
+    lowered = word.lower()
+    if not MIN_LENGTH <= len(word) <= MAX_LENGTH:
+        return "length"
+    if lowered not in text:
+        return "not_in_text"
+    if any(term == lowered or term in lowered for term in terms):
+        return "rule_word"
+    if masker.mask(word) != word:
+        return "personal"
+    return ""
 
 
 def learn(case, words, division, source, taught_by=None, accepted_by=None):

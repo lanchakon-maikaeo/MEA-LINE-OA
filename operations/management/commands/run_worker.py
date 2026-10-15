@@ -9,6 +9,7 @@ from django.utils import timezone
 from operations import (
     ai_chat,
     ai_eval,
+    ai_keywords,
     ai_routing,
     attachments,
     conversation,
@@ -57,6 +58,8 @@ def handle_event(event):
         ai_chat.start_loading(inbox_id)  # only when the message went to AI
     elif event.event_type == orchestration.EVENT_ROUTING_AI:
         ai_routing.process(event.payload["ai_routing_run_id"])  # ADR 0013
+    elif event.event_type == orchestration.EVENT_KEYWORDS_AI:
+        ai_keywords.process(event.payload["ai_keyword_run_id"])  # 15 ต.ค. 2569 Q9
     else:
         notifications.plan_for_event(event)
         staff_email.plan_for_event(event)  # M10: การแจ้งเตือนเจ้าหน้าที่

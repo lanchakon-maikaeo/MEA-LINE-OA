@@ -287,6 +287,10 @@ def test_version(actor, version):
         from operations import ai_routing
 
         return ai_routing.test_version(actor, version)
+    if version.task == AIConfigVersion.Task.KEYWORDS:
+        from operations import ai_keywords
+
+        return ai_keywords.test_version(actor, version)
     results = []
     for profile in version.chain():
         started = time.monotonic()
@@ -319,9 +323,11 @@ def test_version(actor, version):
 
 def record_eval(version, report):
     """Store an evaluation report; the primary must meet all thresholds, fallbacks safety ones."""
-    from operations import ai_answer, ai_eval, ai_routing, ai_triage
+    from operations import ai_answer, ai_eval, ai_keywords, ai_routing, ai_triage
 
-    if version.task == AIConfigVersion.Task.TRIAGE:
+    if version.task == AIConfigVersion.Task.KEYWORDS:
+        passed = ai_keywords.gate_passed(report, version)
+    elif version.task == AIConfigVersion.Task.TRIAGE:
         passed = ai_triage.gate_passed(report, version)
     elif version.task == AIConfigVersion.Task.ANSWER:
         passed = ai_answer.gate_passed(report, version)
@@ -369,6 +375,12 @@ def activation_blocker(version):
 
         if not ai_routing.gate_passed(version.eval_result, version):
             return "Routing evidence is missing, stale or failed, or the duties changed."
+        return None
+    if version.task == AIConfigVersion.Task.KEYWORDS:
+        from operations import ai_keywords
+
+        if not ai_keywords.gate_passed(version.eval_result, version):
+            return "Keyword evidence is missing, stale or failed; evaluate again."
         return None
     if version.eval_result.get("gate") != EVAL_GATE:
         return "The evaluation predates the current application/security gate; evaluate again."

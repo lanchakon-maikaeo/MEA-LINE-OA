@@ -28,6 +28,7 @@ from django.utils import timezone
 from operations import identity, notifications, options, pii
 from operations.models import (
     AIEvalJob,
+    AIKeywordRun,
     AIRoutingRun,
     AIRun,
     AITriageRun,
@@ -53,6 +54,7 @@ TASKS = {
     "chat": "แชต LINE (สกัดร่างและตอบแชต)",
     "triage": "คัดกรองเรื่อง",
     "routing": "เสนอกองและคำสำคัญ",
+    "keywords": "ยกคำสำคัญ",
 }
 FEATURES = {
     "length": "ความยาวข้อความ",
@@ -89,6 +91,7 @@ def _calls(day):
         (AIRun.objects.filter(created_at__gte=start, created_at__lt=end), "chat"),
         (AITriageRun.objects.filter(created_at__gte=start, created_at__lt=end), "triage"),
         (AIRoutingRun.objects.filter(created_at__gte=start, created_at__lt=end), "routing"),
+        (AIKeywordRun.objects.filter(created_at__gte=start, created_at__lt=end), "keywords"),
     ]
     for queryset, kind in sources:
         for run in queryset.only("attempts"):

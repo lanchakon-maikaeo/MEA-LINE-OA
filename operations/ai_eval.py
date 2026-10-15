@@ -928,6 +928,10 @@ def run_next_job():
             from operations import ai_routing
 
             report = ai_routing.run_gate(job.version)
+        elif job.version.task == AIConfigVersion.Task.KEYWORDS:
+            from operations import ai_keywords
+
+            report = ai_keywords.run_gate(job.version)
         else:
             report = run_gate(job.version)
         version = ai.record_eval(job.version, report)

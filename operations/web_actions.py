@@ -13,6 +13,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from operations import (
+    ai_keywords,
     ai_routing,
     coordination,
     identity,
@@ -686,7 +687,7 @@ def build_form(action, st, params, demo=False):
                 Field(
                     "keywords",
                     "คำสำคัญให้ระบบจำ",
-                    initial=ai_routing.keyword_for(case),
+                    initial=ai_routing.keyword_for(case) or ai_keywords.keywords_for(case),
                     help=routing_words.KEYWORDS_HELP,
                 )
             )

@@ -1059,6 +1059,7 @@ class AIConfigVersion(models.Model):
         TRIAGE = "triage", "เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง"
         ANSWER = "answer", "ตอบแชตผู้ใช้ LINE OA จากคลังคำตอบ"
         ROUTING = "routing", "เสนอกองจากหน้าที่ของกอง"
+        KEYWORDS = "keywords", "ยกคำสำคัญให้ระบบจำ"
 
     class Status(models.TextChoices):
         CANDIDATE = "candidate", "รอทดสอบ/ประเมิน"
@@ -2173,6 +2174,26 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} {self.name}"
+
+
+class AIKeywordRun(models.Model):
+    """AI ยกคำสำคัญ (15 ต.ค. 2569 Q9, Q34): up to three words from an unplaced case's masked
+    text, offered in ฝอจ.'s handoff form; the AI never chooses the division."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอ"
+        DONE = "done", "ได้คำ"
+        NONE = "none", "ไม่มีคำที่ใช้ได้"
+        FAILED = "failed", "AI ใช้ไม่ได้"
+        SKIPPED = "skipped", "ไม่ต้องถามแล้ว"
+
+    case = models.OneToOneField("Case", on_delete=models.PROTECT, related_name="+")
+    config_version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="+")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    keywords = models.JSONField(default=list, blank=True)
+    attempts = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
 
 
 class LineMenuItem(models.Model):
