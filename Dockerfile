@@ -1,11 +1,11 @@
 # Build stage: uv resolves the locked environment; neither uv nor pip reaches the runtime image.
-FROM python:3.13-slim-bookworm@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803a5c4247979ac7655f4d641 AS build
+FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS build
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN pip install --no-cache-dir uv==0.10.11 && uv sync --locked --no-dev
 
-FROM python:3.13-slim-bookworm@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803a5c4247979ac7655f4d641
+FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # OS security updates at build time; the base image's own pip is not needed at runtime (M12 scan).
 RUN apt-get update \
