@@ -57,7 +57,13 @@ class PeopleTestCase(LineTestCase):
         )
 
     def register(self, user, name="พนักงานจำลอง หนึ่ง"):
+        """As an employee when the check asks for one (15 ต.ค. 2569 Q12), else name and เขต."""
         self.say(self.event(user, "follow"))
+        if "พนักงาน กฟน." in buttons(self.sent[-1]):
+            return self.press(user, "พนักงาน กฟน.")
+        return self.as_other(user, name)
+
+    def as_other(self, user, name="พนักงานจำลอง หนึ่ง"):
         self.type(user, name)
         return self.press(user, District.objects.get(code="D01").name)
 
@@ -92,13 +98,16 @@ class RegistrationTests(PeopleTestCase):
         self.type(ALICE, "SYN10001")
         reply = self.type(ALICE, "31/12/2500")
         self.assertIn("ส่งให้เจ้าหน้าที่ตรวจแทน", texts(reply))
+        self.assertIn("พิมพ์ชื่อ-นามสกุล", texts(reply))  # a person checks: the name and เขต
+        self.as_other(ALICE)
         registration = RegistrationRequest.objects.get(identity__external_id=ALICE)
         self.assertEqual((registration.status, registration.employee), ("pending", None))
 
     def test_another_way_is_always_offered(self):
         options.change(None, options.REGISTRATION_CHECK, "employee_review", "ทดสอบ")
         self.register(ALICE)
-        reply = self.press(ALICE, "ใช้วิธีอื่น")
+        self.assertIn("พิมพ์ชื่อ-นามสกุล", texts(self.press(ALICE, "ใช้วิธีอื่น")))
+        reply = self.as_other(ALICE)
         self.assertIn("รอเจ้าหน้าที่", texts(reply))
         self.assertEqual(RegistrationRequest.objects.get().status, "pending")
 

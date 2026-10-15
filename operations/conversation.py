@@ -472,6 +472,17 @@ def _registration(turn):
     data = dict(turn.conversation.prompt_data or {})
     if token is not None and token.action == "anon_start":
         return _start_anonymous(turn)
+    if token is not None and token.action == "reg_as":
+        if token.value.get("who") == "employee":
+            return _ask_employee_id(turn, {})
+        return _other_path(turn, {})
+    if prompt in ("reg_employee", "reg_method", "reg_code", "reg_email") and token is not None:
+        if token.action == "reg_other":
+            return _other_path(turn, data)
+        if token.action == "reg_otp":
+            return _send_code(turn, data)
+        if token.action == "reg_typed":
+            return _ask_email(turn, data)
     if prompt == "reg_district" and token is not None and token.action == "reg_district":
         data["district"] = token.value["code"]
         return _registration_next(turn, data)
@@ -483,16 +494,17 @@ def _registration(turn):
     if prompt == "reg_district" and text is not None and data.get("name"):
         return _ask_district(turn, data["name"])  # typed instead of choosing: the list again
     if prompt == "reg_employee":
-        if token is not None and token.action == "reg_other":
-            return _registration_next(turn, {**data, "checked": True})
         if text and text.strip():
-            data["employee_id"] = text.strip()[:32]
-            turn.set_prompt("reg_check", **data)
-            from operations import employees
-
-            turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
-            return
-        return _registration_next(turn, data)
+            return _employee_id(turn, data, text.strip()[:32])
+        return _ask_employee_id(turn, data)
+    if prompt == "reg_code" and text and text.strip():
+        return _check_code(turn, data, text)
+    if prompt == "reg_email" and text and text.strip():
+        return _check_email(turn, data, text)
+    if prompt in ("reg_method", "reg_code", "reg_email"):
+        return _ways(turn, data, "เลือกวิธียืนยันจากปุ่มด้านล่าง")
+    if prompt == "reg_kind":
+        return _ask_kind(turn, "ยังไม่ได้ลงทะเบียน")
     if prompt == "reg_check":
         if text and text.strip():
             return _registration_check(turn, data, text)
@@ -515,7 +527,7 @@ def _registration(turn):
         name = SELF_INTRODUCTION.sub("", text) or text
         if _not_a_name(turn, name):
             return
-        return _ask_district(turn, name)
+        return _ask_district(turn, name, **{k: v for k, v in data.items() if k == "checked"})
     if problem:
         turn.say(problem)
     lead = "ยังไม่ได้ลงทะเบียนเป็นผู้แจ้ง"
@@ -525,8 +537,205 @@ def _registration(turn):
             lead += f" ({latest.decision_reason})"
     elif identity.status == ChannelIdentity.Status.REVOKED:
         lead = "บัญชี LINE นี้ต้องลงทะเบียนและรับรองใหม่"
+    if _employee_path_on():
+        return _ask_kind(turn, lead)
     turn.set_prompt("reg_name")
     _ask_name(turn, f"{lead}\nพิมพ์ชื่อ-นามสกุลเพื่อลงทะเบียน")
+
+
+def _employee_path_on():
+    """15 ต.ค. 2569 Q12: พนักงาน / อื่น ๆ / ไม่ระบุตัวตน when ตัวเลือกระบบ asks for an employee
+    check and a roster is in; otherwise registration starts with the name as before."""
+    from operations import employees, options
+
+    return options.get(options.REGISTRATION_CHECK) != "approval" and employees.has_directory()
+
+
+def _ask_kind(turn, lead):
+    from operations import options
+
+    turn.set_prompt("reg_kind")
+    auto = options.get(options.REGISTRATION_CHECK) == "employee_auto"
+    lines = [
+        lead,
+        "ลงทะเบียนในฐานะ",
+        "• พนักงาน กฟน.: ยืนยันด้วยรหัสพนักงาน" + (" ใช้งานได้ทันที" if auto else ""),
+        "• อื่น ๆ: พิมพ์ชื่อแล้วรอเจ้าหน้าที่รับรอง",
+    ]
+    buttons = [
+        turn.button("พนักงาน กฟน.", "reg_as", {"who": "employee"}),
+        turn.button("อื่น ๆ", "reg_as", {"who": "other"}),
+    ]
+    if options.get(options.ANONYMOUS) == "on":
+        lines.append("• ไม่ระบุตัวตน: แจ้งปัญหาหรือข้อเสนอแนะได้อย่างเดียว")
+        buttons.append(turn.button("ไม่ระบุตัวตน", "anon_start"))
+    turn.say("\n".join(lines), buttons)
+
+
+def _other_path(turn, data):
+    """อื่น ๆ or ใช้วิธีอื่น: the name (when not given yet) and the เขต, for a person to approve."""
+    data = {k: v for k, v in data.items() if k in ("name", "district", "location")}
+    if data.get("name") and data.get("district"):
+        return _registration_next(turn, {**data, "checked": True})
+    turn.set_prompt("reg_name", checked=True)
+    _ask_name(turn, f"พิมพ์ชื่อ-นามสกุลเพื่อลงทะเบียน {NAME_EXAMPLE}")
+
+
+def _ask_employee_id(turn, data):
+    turn.set_prompt("reg_employee", **data)
+    turn.say(
+        "พิมพ์รหัสพนักงานของคุณ หรือกด 'ใช้วิธีอื่น' ให้เจ้าหน้าที่ตรวจแทน",
+        [turn.button("ใช้วิธีอื่น", "reg_other")],
+    )
+
+
+def _trying(data):
+    from operations.models import Employee
+
+    pk = data.get("employee_try")
+    return Employee.objects.filter(pk=pk, is_active=True).first() if pk else None
+
+
+def _employee_id(turn, data, typed):
+    """The roster has this ID: offer the ways to prove it (15 ต.ค. 2569 Q24). The name is never
+    shown before that, so typing someone's ID tells nothing about them."""
+    from operations import email_codes, employees
+
+    employee, reason = employees.lookup(turn.identity, typed)
+    if employee is None:
+        return _failed(turn, data, reason, "ไม่พบรหัสพนักงานนี้ในทะเบียน", _ask_employee_id)
+    data = {**data, "employee_try": employee.pk}
+    ways = email_codes.methods(employee)
+    if not ways and employee.check_hash:  # an older list: its proof value
+        turn.set_prompt("reg_check", **data, employee_id=typed)
+        turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
+        return
+    if ways == ["otp"]:
+        return _send_code(turn, data)
+    if ways == ["email"]:
+        return _ask_email(turn, data)
+    if not ways:
+        turn.say("รหัสนี้ยังยืนยันทาง LINE ไม่ได้ จะให้เจ้าหน้าที่ตรวจแทน")
+        return _other_path(turn, data)
+    _ways(turn, data, "ยืนยันว่าเป็นคุณ: รับรหัส 6 หลักทางอีเมลในทะเบียนพนักงาน หรือพิมพ์อีเมลของคุณเอง")
+
+
+def _ways(turn, data, text):
+    from operations import email_codes
+
+    employee = _trying(data)
+    if employee is None:
+        return _other_path(turn, data)
+    turn.set_prompt("reg_method", **data)
+    buttons = []
+    if "otp" in email_codes.methods(employee):
+        buttons.append(turn.button("ส่งรหัสทางอีเมล", "reg_otp"))
+    if "email" in email_codes.methods(employee):
+        buttons.append(turn.button("พิมพ์อีเมลเอง", "reg_typed"))
+    buttons.append(turn.button("ใช้วิธีอื่น", "reg_other"))
+    turn.say(text, buttons)
+
+
+def _send_code(turn, data):
+    from operations import email_codes, options
+
+    employee = _trying(data)
+    if employee is None:
+        return _other_path(turn, data)
+    reason = email_codes.issue(turn.identity, employee)
+    if reason == "limit":
+        return _ways(turn, data, "ขอรหัสทางอีเมลครบจำนวนของวันนี้แล้ว เลือกวิธีอื่น")
+    if reason:
+        return _ways(turn, data, "ตอนนี้ส่งรหัสทางอีเมลไม่ได้ เลือกวิธีอื่น")
+    turn.set_prompt("reg_code", **data)
+    buttons = [turn.button("ส่งรหัสใหม่", "reg_otp")]
+    if "email" in email_codes.methods(employee):
+        buttons.append(turn.button("พิมพ์อีเมลเอง", "reg_typed"))
+    buttons.append(turn.button("ใช้วิธีอื่น", "reg_other"))
+    turn.say(
+        "ส่งรหัส 6 หลักไปที่อีเมลของคุณในทะเบียนพนักงานแล้ว "
+        f"ใช้ได้ {options.get(options.CODE_MINUTES)} นาที\nพิมพ์รหัสที่นี่",
+        buttons,
+    )
+
+
+def _check_code(turn, data, text):
+    from operations import email_codes, employees
+
+    employee = _trying(data)
+    if employee is None:
+        return _other_path(turn, data)
+    ok, reason, left = email_codes.check(turn.identity, employee, text)
+    if ok:
+        return _employee_proved(turn, data, employee, "otp")
+    if employees.failed_today(turn.identity) >= employees.MAX_FAILED:
+        turn.say("ลองครบจำนวนครั้งของวันนี้แล้ว จะให้เจ้าหน้าที่ตรวจแทน")
+        return _other_path(turn, data)
+    if reason == "wrong":
+        turn.say(f"รหัสไม่ถูก ลองได้อีก {left} ครั้ง")
+        return
+    _ways(turn, data, "รหัสนี้ใช้ไม่ได้แล้ว ขอรหัสใหม่หรือเลือกวิธีอื่น")
+
+
+def _ask_email(turn, data):
+    from operations import email_codes
+
+    employee = _trying(data)
+    if employee is None or "email" not in email_codes.methods(employee):
+        return _ways(turn, data, "เลือกวิธียืนยันจากปุ่มด้านล่าง")
+    turn.set_prompt("reg_email", **data)
+    buttons = []
+    if "otp" in email_codes.methods(employee):
+        buttons.append(turn.button("ส่งรหัสทางอีเมล", "reg_otp"))
+    buttons.append(turn.button("ใช้วิธีอื่น", "reg_other"))
+    turn.say("พิมพ์อีเมลของคุณที่อยู่ในทะเบียนพนักงาน", buttons)
+
+
+def _check_email(turn, data, text):
+    import hmac
+
+    from operations import roster
+
+    employee = _trying(data)
+    if employee is None:
+        return _other_path(turn, data)
+    if employee.email_hash and hmac.compare_digest(employee.email_hash, roster.email_digest(text)):
+        identity_services.audit(
+            None,
+            "identity.employee_check_passed",
+            turn.identity,
+            actor_label="line",
+            employee=employee.employee_id,
+            method="email",
+        )
+        return _employee_proved(turn, data, employee, "email")
+    identity_services.audit(
+        None, "identity.employee_check_failed", turn.identity, actor_label="line"
+    )
+    return _failed(turn, data, "", "อีเมลไม่ตรงทะเบียนพนักงาน", _ask_email)
+
+
+def _failed(turn, data, reason, message, again):
+    from operations import employees
+
+    left = employees.MAX_FAILED - employees.failed_today(turn.identity)
+    if reason == "locked" or left <= 0:
+        turn.say("ลองครบจำนวนครั้งของวันนี้แล้ว จะให้เจ้าหน้าที่ตรวจแทน")
+        return _other_path(turn, data)
+    turn.say(f"{message} ลองได้อีก {left} ครั้ง")
+    again(turn, data)
+
+
+def _employee_proved(turn, data, employee, method):
+    """The name and เขต (ฝ่าย, Q13) come from the roster; the เขต is asked only when the roster
+    gives none."""
+    data = {k: v for k, v in data.items() if k not in ("employee_try", "employee_id", "name")}
+    data.update(checked=True, employee=employee.pk, method=method)
+    if employee.district_id and employee.district.is_active:
+        return _registration_next(
+            turn, {**data, "name": employee.name, "district": employee.district.code}
+        )
+    return _ask_district(turn, employee.name, **data)
 
 
 def _ask_name(turn, text):
@@ -566,9 +775,9 @@ def _not_a_name(turn, text):
     return False
 
 
-def _ask_district(turn, name):
+def _ask_district(turn, name, **data):
     """The district list, with 'แก้ชื่อ' in case the name was typed wrong."""
-    turn.set_prompt("reg_district", name=name)
+    turn.set_prompt("reg_district", **data, name=name)
     districts = District.objects.filter(is_active=True).order_by("code")
     turn.say(f"ชื่อ: {name}\nเลือกเขตการไฟฟ้าที่คุณสังกัด")
     message = button_list(
@@ -605,6 +814,7 @@ def _registration_next(turn, data):
     employee = (
         Employee.objects.filter(pk=data.get("employee")).first() if data.get("employee") else None
     )
+    method = data.get("method", "proof" if employee is not None else "")
     registration = identity_services.submit_registration(
         LINE,
         turn.identity.external_id,
@@ -612,9 +822,11 @@ def _registration_next(turn, data):
         data.get("district", ""),
         employee=employee,
         location=tuple(data["location"]) if data.get("location") else None,
+        verified_by=method,
     )
     turn.set_prompt()
-    if employee is not None and check == "employee_auto":
+    typed_ok = method != "email" or options.get(options.EMAIL_TYPED) == "auto"
+    if employee is not None and check == "employee_auto" and typed_ok:
         identity_services.auto_approve_registration(registration)
         _menu(turn, "ยืนยันตัวตนแล้ว ใช้งานได้เลย กด 'ส่งเรื่องใหม่' เพื่อเริ่ม")
         return
@@ -628,15 +840,19 @@ def _registration_check(turn, data, proof):
     district = District.objects.filter(code=data.get("district")).first()
     employee, reason = employees.verify(turn.identity, data.get("employee_id", ""), proof, district)
     data.pop("employee_id", None)
+    if employee is not None and not data.get("name"):
+        return _employee_proved(turn, data, employee, "proof")
     if employee is not None:
-        return _registration_next(turn, {**data, "checked": True, "employee": employee.pk})
+        return _registration_next(
+            turn, {**data, "checked": True, "employee": employee.pk, "method": "proof"}
+        )
     if reason == "locked":
         turn.say("ลองครบจำนวนครั้งของวันนี้แล้ว จะส่งให้เจ้าหน้าที่ตรวจแทน")
-        return _registration_next(turn, {**data, "checked": True})
+        return _other_path(turn, data)
     left = employees.MAX_FAILED - employees.failed_today(turn.identity)
     if left <= 0:
         turn.say("ข้อมูลไม่ตรงทะเบียนพนักงาน จะส่งให้เจ้าหน้าที่ตรวจแทน")
-        return _registration_next(turn, {**data, "checked": True})
+        return _other_path(turn, data)
     turn.set_prompt("reg_employee", **data)
     turn.say(
         f"ข้อมูลไม่ตรงทะเบียนพนักงาน ลองได้อีก {left} ครั้ง\nพิมพ์รหัสพนักงานใหม่ หรือกด 'ใช้วิธีอื่น'",

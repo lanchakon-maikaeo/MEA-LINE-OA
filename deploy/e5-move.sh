@@ -22,6 +22,9 @@
 #                                  taking writes, the Mac data is restored on E5, move_manifest
 #                                  must match, then ngrok starts on E5. A mismatch stops here.
 #   deploy/e5-move.sh back-to-mac  undo a cutover (E5 writes after it are NOT carried back)
+#   deploy/e5-move.sh pii-key      PII_SECRET_KEY on E5 (made there if missing, never shown), a copy
+#                                  for the Mac standby and on the clipboard for the password manager
+#   deploy/e5-move.sh mail         the Gmail sender for OTP mail: address typed, app password hidden
 #   deploy/e5-move.sh purge-demo [--keep N1,N2 --apply --username U --reason R]
 #                                  remove the demo data (15 Oct 2026): a dry run that lists what
 #                                  would go unless --apply, which takes a fresh backup first
@@ -444,6 +447,77 @@ EOF
   say "cutover done: LINE → ngrok → E5; staff web https://$PUBLIC_HOST/ . The Mac stack is stopped and keeps its data for 7 days (Q17)."
 }
 
+pii_key() {  # 15 Oct 2026 Q16/Q36: the key that seals roster e-mails lives on the server
+  local standby="$HOME/faoj-standby/env/app.secret.env"
+  cat <<'EOF' | as_root
+set -euo pipefail
+f=/srv/faoj/env/app.secret.env
+if ! grep -q '^PII_SECRET_KEY=.' "$f"; then
+  key=$(openssl rand -base64 32 | tr '+/' '-_')
+  sed -i '/^PII_SECRET_KEY=/d' "$f"
+  printf 'PII_SECRET_KEY=%s\n' "$key" >> "$f"
+  echo "made a new PII_SECRET_KEY on E5 (not shown)"
+else
+  echo "E5 already has a PII_SECRET_KEY (kept)"
+fi
+EOF
+  if [ -f "$standby" ]; then
+    on_e5 "sudo grep '^PII_SECRET_KEY=' /srv/faoj/env/app.secret.env" | python3 -c '
+import os, re, sys
+line, path = sys.stdin.read().strip(), sys.argv[1]
+text = open(path).read()
+text, n = re.subn(r"^PII_SECRET_KEY=.*$", lambda m: line, text, flags=re.M)
+text = text if n else text.rstrip("\n") + "\n" + line + "\n"
+open(path, "w").write(text)
+os.chmod(path, 0o600)' "$standby"
+    say "the Mac standby has the same key ($standby)"
+  else
+    say "no Mac standby settings yet: run deploy/standby.sh setup later, it copies the key"
+  fi
+  on_e5 "sudo grep '^PII_SECRET_KEY=' /srv/faoj/env/app.secret.env" | cut -d= -f2- | tr -d '\n' | pbcopy
+  say "the key is on the clipboard: paste it into your password manager as 'FAOJ PII_SECRET_KEY'"
+  read -r -p "Enter when saved (the clipboard is then cleared) " _ </dev/tty
+  printf '' | pbcopy
+  say "clipboard cleared; deploy again (deploy/e5-move.sh deploy) so the app reads the key"
+}
+
+mail_setup() {  # 15 Oct 2026 Q25: OTP mail from a Gmail account made for sending only
+  local json
+  json=$(python3 - <<'PY'
+import getpass, json, re, sys
+with open("/dev/tty") as tty:
+    sys.stderr.write("Gmail address that sends the codes: ")
+    sys.stderr.flush()
+    address = tty.readline().strip()
+if not re.fullmatch(r"[^@\s]+@gmail\.com", address):
+    sys.exit("that is not a Gmail address")
+password = getpass.getpass("App password, 16 letters (typed text is hidden, then Enter): ")
+password = password.replace(" ", "")
+if not re.fullmatch(r"[a-z]{16}", password):
+    sys.exit("an app password is 16 letters (Google account > Security > App passwords)")
+print(json.dumps({"django.env": {"EMAIL_HOST": "smtp.gmail.com", "EMAIL_PORT": "587",
+  "EMAIL_USE_TLS": "true", "EMAIL_HOST_USER": address, "DEFAULT_FROM_EMAIL": address},
+  "app.secret.env": {"EMAIL_HOST_PASSWORD": password}}))
+PY
+) || die "nothing written"
+  printf '%s\n' "$json" | on_e5 'sudo python3 -c "
+import json, os, re, sys
+for name, kv in json.load(sys.stdin).items():
+    path = \"/srv/faoj/env/\" + name
+    text = open(path).read()
+    for key, value in kv.items():
+        line = key + \"=\" + value
+        text, n = re.subn(\"^\" + re.escape(key) + \"=.*$\", lambda m: line, text, flags=re.M)
+        if not n:
+            text = text.rstrip(chr(10)) + chr(10) + line + chr(10)
+        print(\"set\", name, key)
+    mode = os.stat(path).st_mode
+    open(path, \"w\").write(text)
+    os.chmod(path, mode)
+"'
+  say "mail settings written; deploy again (deploy/e5-move.sh deploy) so the app reads them"
+}
+
 purge_demo() {
   local arg apply=0
   for arg in "$@"; do [ "$arg" = --apply ] && apply=1; done
@@ -481,6 +555,8 @@ case "${1:-}" in
   cutover) cutover;;
   back-to-mac) back_to_mac;;
   purge-demo) shift; purge_demo "$@";;
+  pii-key) pii_key;;
+  mail) mail_setup;;
   ssh) shift; on_e5 "$@";;
-  *) sed -n '2,31p' "$0"; exit 2;;
+  *) sed -n '2,34p' "$0"; exit 2;;
 esac

@@ -82,7 +82,17 @@ K = Case.Kind
 ACTORS = {"registered", "anonymous", "newcomer", "staff"}
 TERMINAL = {"submitted", "discarded", "reg_pending", "staff_done", "info_sent"}
 # Steps where the bot asks for a choice: its reply must carry buttons.
-CHOICE_STEPS = {"kind", "topic", "category", "item", "more", "summary", "location", "reg_district"}
+CHOICE_STEPS = {
+    "kind",
+    "topic",
+    "category",
+    "item",
+    "more",
+    "summary",
+    "location",
+    "reg_district",
+    "reg_kind",
+}
 EQUIPMENT = ("meter", "transformer", "other")
 STORY_TOPICS = (Case.Topic.USAGE, Case.Topic.SUGGESTION)
 TO_THAI = str.maketrans("0123456789", "๐๑๒๓๔๕๖๗๘๙")
@@ -1205,6 +1215,23 @@ def _field(d):
 
 def i_follow(d):
     return Move("follow", d.event("follow"), "[เพิ่มเพื่อน]")
+
+
+def i_press_as_employee(d):
+    """ลงทะเบียนในฐานะ (15 ต.ค. 2569 Q12): an employee, or one who will pick another way there."""
+    if d.goal.actor != "newcomer" or d.goal.registration not in ("employee", "other_way"):
+        return None
+    return d.press("press_as_employee", "พนักงาน กฟน.")
+
+
+def i_press_as_other(d):
+    if d.goal.actor != "newcomer" or d.goal.registration in ("employee", "other_way"):
+        return None
+    return d.press("press_as_other", "อื่น ๆ")
+
+
+def i_press_anonymous_kind(d):
+    return d.press("press_anonymous_kind", "ไม่ระบุตัวตน") if d.goal.actor == "anonymous" else None
 
 
 def i_type_name(d):

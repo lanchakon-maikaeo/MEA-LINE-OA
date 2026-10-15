@@ -23,6 +23,7 @@ from operations import (
     ai_eval,
     answers,
     attachments,
+    email_codes,
     employees,
     forms,
     identity,
@@ -33,6 +34,8 @@ from operations import (
     policy,
     questions,
     queues,
+    roster,
+    sealing,
 )
 from operations.models import (
     AIConfigVersion,
@@ -59,6 +62,7 @@ from operations.models import (
     Requester,
     Role,
     RoleGrant,
+    RosterUpload,
     Section,
     StockMovement,
     StockSnapshot,
@@ -457,7 +461,9 @@ def _requester_rows(requesters):
                 "same_name": found,
                 "proof": proof,
                 "channel": channel,
-                "position": employee.position if employee else "",
+                # ตำแหน่ง · ฝ่าย (15 ต.ค. 2569 Q15); a closed roster row is flagged (Q29).
+                "position": roster.employee_unit(employee) if employee else "",
+                "stale": employee is not None and not employee.is_active,
                 "role": " · ".join(
                     [
                         "ผู้ใช้ LINE OA (ภายใน)" if requester.is_internal else "ผู้ใช้ LINE OA",
@@ -1277,34 +1283,78 @@ def admin_questions(request):
     )
 
 
+def _staged(value):
+    try:
+        return RosterUpload.objects.filter(pk=value).first() if value else None
+    except ValidationError:  # not a UUID
+        return None
+
+
 @admin_required
 def admin_employees(request):
-    """ทะเบียนพนักงาน (ADR 0010): the list identity checks compare against; proof values are
-    hashed on import and never shown."""
+    """ทะเบียนพนักงาน (15 ต.ค. 2569 Q10, Q27–Q29): the owner uploads the organisation's roster
+    (.xlsx or .csv); a preview shows which column is which field and which เขต/หน่วยงาน each ฝ่าย
+    is, then the import. Names and e-mails never leave this page; no AI reads the file."""
+    upload, columns = None, None
     if request.method == "POST":
-        upload = request.FILES.get("file")
-        if upload is None or upload.size > 5 * 1024 * 1024:
-            messages.error(request, "เลือกไฟล์ CSV ขนาดไม่เกิน 5 MB")
-        else:
+        action = request.POST.get("action")
+        if action == "upload":
+            file = request.FILES.get("file")
+            if file is None or file.size > roster.MAX_BYTES:
+                messages.error(request, "เลือกไฟล์ .xlsx หรือ .csv ขนาดไม่เกิน 10 MB")
+                return redirect("admin-employees")
+            staged = _run(
+                request,
+                lambda: roster.stage(request.user, file.name, file.read()),
+                "อ่านไฟล์แล้ว ตรวจการจับคู่ด้านล่างก่อนนำเข้า",
+            )
+            if staged is None:
+                return redirect("admin-employees")
+            return redirect(f"{reverse('admin-employees')}?upload={staged.pk}")
+        upload = _staged(request.POST.get("upload"))
+        if upload is None:
+            messages.error(request, "ไม่พบไฟล์ที่ตรวจไว้ อัปโหลดใหม่")
+            return redirect("admin-employees")
+        columns = {field: request.POST.get(f"col_{field}", "") for field in roster.FIELDS}
+        if action == "import":
+            keys = request.POST.getlist("unit_key")
+            choices = dict(zip(keys, request.POST.getlist("unit_choice"), strict=False))
             summary = _run(
                 request,
-                lambda: employees.import_csv(
+                lambda: roster.import_upload(
                     request.user,
-                    upload.read(),
-                    request.POST.get("check_label", ""),
-                    deactivate_missing=request.POST.get("deactivate_missing") == "1",
+                    upload,
+                    columns,
+                    choices,
+                    request.POST.get("deactivate_missing") == "1",
+                    request.POST.get("reason", ""),
                 ),
                 "นำเข้าทะเบียนพนักงานแล้ว",
             )
             if summary:
                 messages.info(
                     request,
-                    f"เพิ่ม {summary['created']} แก้ {summary['updated']} "
-                    f"ปิด {summary['closed']} รายการ · ผูกผู้แจ้งจากชื่อ {summary['matched']} "
-                    f"ยกเลิกการผูกที่ชื่อไม่ตรงแล้ว {summary['unmatched']} "
+                    f"เพิ่ม {summary['created']} แก้ {summary['updated']} ปิด {summary['closed']} คน · "
+                    f"มีอีเมล {summary['emails']} คน · ผูกผู้ใช้ LINE จากชื่อ {summary['matched']} · "
                     f"ชื่อตรงแต่ต้องให้แอดมินตรวจ {summary['review']} ราย",
                 )
-        return redirect("admin-employees")
+                return redirect("admin-employees")
+    elif request.GET.get("upload"):
+        upload = _staged(request.GET["upload"])
+    preview = None
+    if upload is not None:
+        try:
+            headers, rows = roster.opened(upload)
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+            upload.delete()
+            return redirect("admin-employees")
+        columns = columns or roster.guess_columns(headers)
+        preview = roster.preview(headers, rows, columns)
+        preview["headers"] = headers
+        preview["fields"] = [
+            (field, label, columns.get(field, "")) for field, (label, _) in roster.FIELDS.items()
+        ]
     active = Employee.objects.filter(is_active=True)
     return render(
         request,
@@ -1312,11 +1362,20 @@ def admin_employees(request):
         {
             "active": active.count(),
             "inactive": Employee.objects.filter(is_active=False).count(),
-            "label": employees.check_label(),
+            "with_email": active.exclude(email_hash="").count(),
             "synthetic": active.filter(is_synthetic=True).exists(),
             "latest": Employee.objects.order_by("-imported_at").first(),
+            "sealing": sealing.available(),
+            "mail": email_codes.sending_ready(),
             "check": options.OPTIONS[options.REGISTRATION_CHECK].label_of(
                 options.get(options.REGISTRATION_CHECK)
             ),
+            "methods": options.OPTIONS[options.EMAIL_METHODS].label_of(
+                options.get(options.EMAIL_METHODS)
+            ),
+            "upload": upload,
+            "preview": preview,
+            "districts": District.objects.filter(is_active=True).order_by("code"),
+            "new_unit": roster.NEW_UNIT,
         },
     )

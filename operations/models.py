@@ -294,6 +294,12 @@ class RegistrationRequest(models.Model):
     )
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    # How the employee proved who they are (15 ต.ค. 2569 Q24): shown to approvers and audited.
+    verified_by = models.CharField(
+        max_length=16,
+        blank=True,
+        choices=[("otp", "รหัส OTP ทางอีเมล"), ("email", "พิมพ์อีเมลตรงทะเบียน"), ("proof", "ข้อมูลยืนยัน")],
+    )
 
     class Meta:
         ordering = ["created_at"]
@@ -2132,13 +2138,25 @@ class StaffLinkCode(models.Model):
 
 class Employee(models.Model):
     """ทะเบียนพนักงาน for identity checks (10 Oct 2569 Q1, Q3), imported by an admin. The
-    proof value (e.g. a birth date) is kept only as a keyed hash, never in plain text."""
+    proof value (e.g. a birth date) is kept only as a keyed hash, never in plain text.
+
+    15 ต.ค. 2569 (Q10, Q16): the organisation's roster columns. `district` is the ฝ่าย as a
+    เขต/หน่วยงาน (Q13); the e-mail is kept twice and never in plain text: a keyed hash to compare
+    what someone types, and sealed with the server's PII key to send a one-time code. Phone
+    columns are never read."""
 
     employee_id = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=200)
     district = models.ForeignKey(District, null=True, blank=True, on_delete=models.PROTECT)
     division = models.ForeignKey(Division, null=True, blank=True, on_delete=models.PROTECT)
     position = models.CharField(max_length=200, blank=True)
+    line_of_work = models.CharField(max_length=200, blank=True)  # สายงาน
+    department = models.CharField(max_length=200, blank=True)  # ฝ่าย as the file says it
+    division_name = models.CharField(max_length=200, blank=True)  # กอง
+    section_name = models.CharField(max_length=200, blank=True)  # แผนก
+    work_group = models.CharField(max_length=200, blank=True)  # กลุ่มงาน
+    email_hash = models.CharField(max_length=64, blank=True)
+    email_sealed = models.TextField(blank=True)
     check_label = models.CharField(max_length=100, blank=True)
     check_hash = models.CharField(max_length=128, blank=True)
     is_active = models.BooleanField(default=True)
@@ -2150,6 +2168,48 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} {self.name}"
+
+
+class RosterUpload(models.Model):
+    """A roster file between its preview and the import (15 ต.ค. 2569 Q27, Q28): the rows sealed
+    with the server's PII key, removed by the import or after an hour."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    filename = models.CharField(max_length=200)
+    rows = models.PositiveIntegerField(default=0)
+    sealed = models.TextField()
+
+
+class RosterSetting(models.Model):
+    """What the last roster import chose, offered again next time (Q27, Q28): which file column
+    is which field, and which เขต/หน่วยงาน each ฝ่าย is."""
+
+    columns = models.JSONField(default=dict)  # field → header as the file wrote it
+    units = models.JSONField(default=dict)  # ฝ่าย key → district code, or "" for none
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class EmailCode(models.Model):
+    """A one-time code sent to an employee's roster e-mail during LINE registration (Q24–Q26).
+    Only a keyed hash of the code is kept."""
+
+    identity = models.ForeignKey("ChannelIdentity", on_delete=models.PROTECT, related_name="+")
+    employee = models.ForeignKey(Employee, on_delete=models.PROTECT, related_name="+")
+    code_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    tries = models.PositiveSmallIntegerField(default=0)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 
 class SystemOption(models.Model):

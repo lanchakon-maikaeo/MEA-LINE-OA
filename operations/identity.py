@@ -629,7 +629,13 @@ def clear_intake_division(actor, reason):
 
 @transaction.atomic
 def submit_registration(
-    channel, external_id, submitted_name, district_code, employee=None, location=None
+    channel,
+    external_id,
+    submitted_name,
+    district_code,
+    employee=None,
+    location=None,
+    verified_by="",
 ):
     """Record a registration request. Choosing a district is a claim, never a permission; a
     matched employee and a shared location (10 Oct 2569 Q1, Q3) are evidence for the decider."""
@@ -660,6 +666,7 @@ def submit_registration(
         employee=employee,
         latitude=latitude,
         longitude=longitude,
+        verified_by=verified_by if employee is not None else "",
     )
 
 
@@ -688,10 +695,11 @@ def auto_approve_registration(registration):
     registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
     if options.get(options.REGISTRATION_CHECK) != "employee_auto" or registration.employee is None:
         raise ValidationError("Automatic approval is not enabled for this request.")
+    how = registration.get_verified_by_display() if registration.verified_by else "ข้อมูลยืนยัน"
     return _approve(
         system_user(),
         registration,
-        f"ตรงทะเบียนพนักงาน {registration.employee.employee_id}",
+        f"ตรงทะเบียนพนักงาน {registration.employee.employee_id} ยืนยันด้วย{how}",
         automatic=True,
     )
 

@@ -146,6 +146,10 @@ LINE_PUSH_DEBOUNCE_MINUTES = int(os.environ.get("LINE_PUSH_DEBOUNCE_MINUTES") or
 AI_ENABLED = os.environ.get("AI_ENABLED", "false").lower() == "true"
 # Fernet key for API keys stored in the DB; kept outside the database.
 AI_SECRET_KEY = os.environ.get("AI_SECRET_KEY", "")
+# Fernet key that seals roster e-mails and staged roster files (15 ต.ค. 2569 Q16, Q36); kept on
+# the server, its standby and the owner's password manager, never in the database. Local and CI
+# derive one from SECRET_KEY (operations/sealing.py) so demos work without it.
+PII_SECRET_KEY = os.environ.get("PII_SECRET_KEY", "")
 AI_ALLOWED_HOSTS = frozenset(
     h.strip().lower()
     for h in os.environ.get("AI_ALLOWED_HOSTS", "thaillm.or.th,api.opentyphoon.ai").split(",")

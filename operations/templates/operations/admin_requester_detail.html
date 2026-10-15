@@ -13,7 +13,7 @@
 
 <dl class="facts">
   <div><dt>ตัวตน</dt><dd>{{ row.proof }}</dd></div>
-  <div><dt>ตำแหน่งงาน</dt><dd>{{ row.position|default:"—" }}</dd></div>
+  <div><dt>ตำแหน่ง · ฝ่าย</dt><dd>{{ row.position|default:"—" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</dd></div>
   <div><dt>บทบาทในระบบ</dt><dd>{{ row.role }}</dd></div>
   <div><dt>ช่องทาง</dt><dd>{{ row.channel }}</dd></div>
   <div><dt>รับรองโดย</dt><dd>{{ requester.approved_by.staff_profile.display_name|default:requester.approved_by.username }} · {{ requester.approved_at|thai_datetime }}</dd></div>
