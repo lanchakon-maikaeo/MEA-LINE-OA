@@ -5,7 +5,7 @@ import secrets
 from django.conf import settings
 from django.db import migrations, models
 
-ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # pragma: allowlist secret
 
 
 def backfill(apps, schema_editor):

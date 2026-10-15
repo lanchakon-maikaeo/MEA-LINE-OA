@@ -788,7 +788,7 @@ def _approve(actor, registration, reason="", automatic=False):
 
 
 UNKNOWN_DISTRICT = "D00"
-ALIAS_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # no 0/O, 1/I/L
+ALIAS_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # no 0/O, 1/I/L  # pragma: allowlist secret
 
 
 def new_alias():
