@@ -20,7 +20,8 @@ namespace=$(oci os ns get --query data --raw-output)
 user=$(oci iam user list --compartment-id "$tenancy" --all \
   --query 'data[?starts_with(name, `faoj-ci`)] | [0]' --output json)
 if [ "$user" = null ] || [ -z "$user" ]; then
-  read -r -p "E-mail for the new OCI user faoj-ci (e.g. you+ci@…): " email
+  # OCI mails an activation link to this address: it must be one the owner reads.
+  read -r -p "E-mail YOU own for the new OCI user faoj-ci (e.g. yourname+ci@gmail.com): " email
   [ -n "$email" ] || die "an e-mail is needed for a user in the Default identity domain"
   say "creating OCI user faoj-ci"
   user=$(oci iam user create --compartment-id "$tenancy" --name faoj-ci --email "$email" \
@@ -29,6 +30,13 @@ if [ "$user" = null ] || [ -z "$user" ]; then
 fi
 user_id=$(printf '%s' "$user" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 user_name=$(printf '%s' "$user" | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')
+
+# CI needs an auth token only: no console password, API keys or other keys, so an activation
+# link that reaches the wrong person opens nothing (15 Oct 2026).
+oci iam user update-user-capabilities --user-id "$user_id" --can-use-auth-tokens true \
+  --can-use-console-password false --can-use-api-keys false --can-use-customer-secret-keys false \
+  --can-use-smtp-credentials false --can-use-db-credentials false \
+  --can-use-o-auth2-client-credentials false >/dev/null
 
 group_id=$(oci iam group list --compartment-id "$tenancy" --all --query 'data[?name==`faoj-ci`].id | [0]' --raw-output)
 [ -n "$group_id" ] && [ "$group_id" != null ] || die "group faoj-ci is missing (Terraform iam.tf)"
