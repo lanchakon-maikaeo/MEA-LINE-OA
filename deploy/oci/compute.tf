@@ -30,10 +30,11 @@ locals {
   ad        = data.oci_identity_availability_domains.ads.availability_domains[0].name
   image     = var.ubuntu_image_ocid != "" ? var.ubuntu_image_ocid : data.oci_core_images.ubuntu.images[0].id
   image_amd = data.oci_core_images.ubuntu_amd.images[0].id
-  data      = { for name, h in var.hosts : name => h if h.data_gb > 0 }
-  # Only hosts with instance = true get a VM; a parked host keeps its data volume (ADR 0015).
-  vms      = { for name, h in var.hosts : name => h if h.instance }
-  attached = { for name, h in local.data : name => h if h.instance }
+  # Only hosts with instance = true get a VM (ADR 0015). Their data volumes are protected from
+  # destroy; a parked host's volume holds no data and is not, so data_gb = 0 removes it.
+  vms    = { for name, h in var.hosts : name => h if h.instance }
+  data   = { for name, h in var.hosts : name => h if h.data_gb > 0 && h.instance }
+  parked = { for name, h in var.hosts : name => h if h.data_gb > 0 && !h.instance }
 }
 
 resource "oci_core_instance" "host" {
@@ -93,8 +94,24 @@ resource "oci_core_volume" "data" {
   }
 }
 
+resource "oci_core_volume" "parked" {
+  for_each            = local.parked
+  compartment_id      = oci_identity_compartment.faoj.id
+  availability_domain = local.ad
+  display_name        = "${each.key}-data"
+  size_in_gbs         = each.value.data_gb
+}
+
+# 15 Oct 2026: faoj-prod (A1) is parked and its never-used 70 GB volume pushed block storage
+# past the 200 GB Always Free (owner chose to remove it). Moving it out of the protected set
+# first lets data_gb = 0 destroy it; the E5 volume stays protected.
+moved {
+  from = oci_core_volume.data["faoj-prod"]
+  to   = oci_core_volume.parked["faoj-prod"]
+}
+
 resource "oci_core_volume_attachment" "data" {
-  for_each        = local.attached
+  for_each        = local.data
   attachment_type = "paravirtualized"
   instance_id     = oci_core_instance.host[each.key].id
   volume_id       = oci_core_volume.data[each.key].id

@@ -1,5 +1,5 @@
 {
-  "_comment": "OCI Always Free budget of E.2.1 (checked 8 Oct 2026; staging boot-only 12 Oct 2026, OCI volumes are at least 50 GB). Changing it needs a review; Terraform defaults in deploy/oci must match (test_m12). ADR 0015 (14 Oct 2026): faoj-prod-e5 runs on the SGD 400 trial credit until credit.until; the account is never upgraded.",
+  "_comment": "OCI Always Free budget of E.2.1 (checked 8 Oct 2026; staging boot-only 12 Oct 2026, OCI volumes are at least 50 GB). Changing it needs a review; Terraform defaults in deploy/oci must match (test_m12). ADR 0015 (14 Oct 2026): faoj-prod-e5 runs on the SGD 400 trial credit until credit.until; the account is never upgraded. 15 Oct 2026: the parked A1 faoj-prod has no data volume (set data_gb back to 70 when A1 is created).",
   "allowed_shapes": [
     "VM.Standard.A1.Flex"
   ],
@@ -16,7 +16,7 @@
       "ocpus": 1,
       "memory_gb": 8,
       "boot_gb": 50,
-      "data_gb": 70
+      "data_gb": 0
     },
     "faoj-staging": {
       "ocpus": 1,
