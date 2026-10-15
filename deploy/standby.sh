@@ -6,6 +6,8 @@
 #
 #   deploy/standby.sh setup      copy production's settings from E5 (needs the e5-move tunnel),
 #                                then the owner types the backup-reader secret key
+#   deploy/standby.sh rotate-reader-key   new reader key made by OCI, secret written to the
+#                                settings unseen, old keys deleted, standby restarted
 #   deploy/standby.sh build      build the arm64 db + app images here and unpack the release
 #   deploy/standby.sh start      first time: restore the newest backup as a standby; then start
 #   deploy/standby.sh status     in recovery? how far behind production? last files copy
@@ -107,6 +109,59 @@ reader_key() {
       "DEST=$HOME/Library/CloudStorage/OneDrive-MetropolitanElectricityAuthority/faoj-backup-offsite" > "$pull" )
   chmod 600 "$pull"
   say "standby settings ready in $ROOT/env and $pull (reader key ...${access: -6})"
+}
+
+# A new backup-reader key without the console: OCI makes it, its secret goes straight into the
+# standby and backup-pull settings (never shown), the old keys are deleted, the standby picks
+# the new one up. For a key that leaked (15 Oct 2026) or a routine change.
+rotate_reader_key() {
+  local tenancy user
+  oci session refresh --profile faoj >/dev/null 2>&1 || die "OCI session expired: oci session authenticate …"
+  tenancy=$(oci iam compartment get --compartment-id "${E5_COMPARTMENT:-ocid1.compartment.oc1..aaaaaaaairylkjofkqqwzysmo2ies2ptax4qlmsotny2cwwxg2yitpg6g4lq}" \
+    --query 'data."compartment-id"' --raw-output)
+  user=$(oci iam user list --compartment-id "$tenancy" --all \
+    --query 'data[?starts_with(name, `faoj-backup-reader`)].id | [0]' --raw-output)
+  [ -n "$user" ] && [ "$user" != null ] || die "no faoj-backup-reader user"
+  local old count
+  old=$(oci iam customer-secret-key list --user-id "$user" --query 'data[].id' --raw-output | tr -d '[]", ' | grep -v '^$' || true)
+  count=$(printf '%s\n' "$old" | grep -c . || true)
+  [ "$count" -lt 2 ] || die "faoj-backup-reader already has 2 keys (OCI's limit): delete one first"
+  say "creating a new Customer Secret Key (its secret is written to the settings, not shown)"
+  oci iam customer-secret-key create --user-id "$user" --display-name "faoj-standby-$(date +%Y%m%d-%H%M)" --output json \
+    | ROOT="$ROOT" python3 -c '
+import json, os, re, sys
+data = json.load(sys.stdin)["data"]
+access, secret = data["id"], data["key"]
+assert re.fullmatch(r"[0-9a-f]{40}", access) and re.fullmatch(r"[A-Za-z0-9+/]{43}=", secret)
+root = os.environ["ROOT"]
+home = os.path.expanduser("~")
+targets = {
+    f"{root}/env/db.secret.env": {"PGBACKREST_REPO1_S3_KEY": access, "PGBACKREST_REPO1_S3_KEY_SECRET": secret},
+    f"{root}/env/backup.secret.env": {"AWS_ACCESS_KEY_ID": access, "AWS_SECRET_ACCESS_KEY": secret},
+    f"{home}/.config/faoj/backup-pull.env": {"S3_KEY": access, "S3_SECRET": secret},
+}
+for path, values in targets.items():
+    if not os.path.exists(path):
+        continue
+    text = open(path).read()
+    for key, value in values.items():
+        line = f"{key}={value}"
+        text, n = re.subn(rf"^{re.escape(key)}=.*$", lambda m: line, text, flags=re.M)
+        if not n:
+            text = text.rstrip("\n") + "\n" + line + "\n"
+    mode = os.stat(path).st_mode
+    open(path, "w").write(text)
+    os.chmod(path, mode)
+print(f"new key ...{access[-6:]} written to the standby and backup-pull settings")
+'
+  for id in $old; do
+    oci iam customer-secret-key delete --user-id "$user" --customer-secret-key-id "$id" --force >/dev/null
+    say "deleted the old key ...${id: -6}"
+  done
+  if [ -e "$ROOT/run/standby-restored" ]; then
+    dc up -d db >/dev/null  # recreated with the new key in its environment
+    say "standby restarted with the new key; OCI may take ~5 minutes to accept it (WAL replay resumes by itself)"
+  fi
 }
 
 build() {
@@ -220,11 +275,12 @@ mkdir -p "$ROOT/run"
 case "${1:-}" in
   setup) setup;;
   reader-key) reader_key;;
+  rotate-reader-key) rotate_reader_key;;
   build) build;;
   start) start;;
   status) status;;
   files) files;;
   check) check;;
   failover) failover;;
-  *) sed -n '2,21p' "$0"; exit 2;;
+  *) sed -n '2,23p' "$0"; exit 2;;
 esac
