@@ -1,4 +1,5 @@
 {% extends "operations/admin_base.html" %}
+{% load ui %}
 {% block title %}คลังคำตอบ — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -34,8 +35,7 @@
         {% csrf_token %}<input type="hidden" name="key" value="{{ a.key }}">
         <div class="field"><label for="t-{{ a.key }}">หัวข้อ</label><input id="t-{{ a.key }}" name="title" value="{{ a.title }}" maxlength="100" required></div>
         <div class="field"><label for="x-{{ a.key }}">ข้อความที่บอทตอบ</label><textarea id="x-{{ a.key }}" name="text" rows="4" maxlength="1000" required>{{ a.text }}</textarea></div>
-        <div class="field"><label for="k-{{ a.key }}">คำสำคัญ (บรรทัดละคำ)</label><textarea id="k-{{ a.key }}" name="keywords" rows="3">{{ a.keywords|join:"
-" }}</textarea></div>
+        <div class="field"><label for="k-{{ a.key }}">คำสำคัญ (บรรทัดละคำ)</label><textarea id="k-{{ a.key }}" name="keywords" rows="3">{{ a.keywords|lines }}</textarea></div>
         <div class="field"><label for="c-{{ a.key }}">ต่อท้ายคำตอบด้วย</label><select id="c-{{ a.key }}" name="action">{% for v, label in actions %}<option value="{{ v }}"{% if v == a.action %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
         <label class="choice"><input type="checkbox" name="short_only" value="1"{% if a.short_only %} checked{% endif %}> <span>ตอบเมื่อข้อความมีแค่คำสำคัญ (เช่น ทักทาย ขอบคุณ)</span></label>
         <label class="choice"><input type="checkbox" name="approve" value="1"{% if a.status == 'approved' %} checked{% endif %}> <span>รับรองให้ใช้ตอบ</span></label>

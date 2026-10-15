@@ -1,20 +1,34 @@
 {% extends "operations/admin_base.html" %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>LINE งบข้อความ และงานค้าง</h1></div></div>
-<h2>งบการแจ้งเตือน (push) เดือนนี้</h2>
-<div class="stats mt-18 mb-24">
-  <div class="stat stat--dark"><span class="stat__label">ใช้แล้ว / งบ</span><span class="stat__value">{{ state.used }}<small class="muted"> / {{ state.budget }}</small></span></div>
-  <div class="stat"><span class="stat__label">คาดการณ์สิ้นเดือน</span><span class="stat__value">{{ state.forecast }}</span></div>
-  <div class="stat"><span class="stat__label">tier</span><span class="stat__value">{{ state.tier }}</span></div>
-</div>
-<progress class="{% if state.percent >= 80 %}is-alert{% endif %}" max="100" value="{{ state.percent }}" aria-label="ใช้งบไปแล้ว {{ state.percent }}%">{{ state.percent }}%</progress>
-<ul class="stack-sm mt-18">
-  <li>ใช้แล้ว <strong>{{ state.used }}</strong> จากงบ {{ state.budget }} ({{ state.percent }}%) · tier {{ state.tier }}{% if state.limit_reached %} · LINE แจ้งว่าโควตาเต็ม{% endif %}</li>
-  <li>คาดการณ์สิ้นเดือน {{ state.forecast }} ข้อความ</li>
-  <li>ส่ง push: {{ push_enabled|yesno:"เปิด,ปิด (นอก production หรือยังไม่ตั้งค่า)" }}</li>
-  <li>ยอดจาก LINE ล่าสุด: {% if snapshot.checked_at %}{{ snapshot.usage }} / {{ snapshot.quota|default:"ไม่จำกัด" }} เมื่อ {{ snapshot.checked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เคยตรวจ{% endif %}{% if snapshot.alerted_levels %} · แจ้งเตือนแล้ว: {{ snapshot.alerted_levels|join:", " }}{% endif %}</li>
-</ul>
-<h2>การแจ้งเตือนที่ไม่ได้ส่งหรือไม่ทราบผล</h2>
+<section class="section" aria-labelledby="line-budget">
+  <div class="section-head"><h2 id="line-budget">งบการแจ้งเตือน (push) เดือนนี้</h2><span class="muted">ใช้ไป {{ state.percent }}%</span></div>
+  <div class="kpis kpis--3">
+    <div class="kpi kpi--dark">
+      <span class="kpi__label">ใช้แล้ว</span>
+      <span class="kpi__value">{{ state.used }}<small class="kpi__of"> / {{ state.budget }}</small></span>
+      <progress class="{% if state.percent >= 80 %}is-alert{% endif %}" max="100" value="{{ state.percent }}" aria-label="ใช้งบไปแล้ว {{ state.percent }}%">{{ state.percent }}%</progress>
+    </div>
+    <div class="kpi">
+      <span class="kpi__label">คาดการณ์สิ้นเดือน</span>
+      <span class="kpi__value">{{ state.forecast }}</span>
+      <span class="kpi__note">ข้อความ ตามอัตราที่ใช้อยู่</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi__label">ระดับงบ</span>
+      <span class="kpi__value kpi__value--text">{% if state.tier == 0 %}ปกติ{% elif state.tier == 1 %}ชะลอ{% elif state.tier == 2 %}เฉพาะเรื่องสำคัญ{% else %}หยุดส่ง{% endif %}</span>
+      <span class="kpi__note">{% if state.tier == 0 %}ส่งได้ตามปกติ{% elif state.tier == 1 %}ใช้เกิน 60% แจ้งเตือนทั่วไปรวมส่งทุก 60 นาที{% elif state.tier == 2 %}ใช้เกิน 80% ส่งเฉพาะเรื่องสำคัญ{% else %}งบเต็ม ไม่ส่งจนถึงเดือนหน้า{% endif %}</span>
+    </div>
+  </div>
+  <dl class="facts mt-18">
+    <div><dt>ส่ง push</dt><dd>{{ push_enabled|yesno:"เปิด,ปิด (นอก production หรือยังไม่ตั้งค่า)" }}</dd></div>
+    <div><dt>ยอดจาก LINE ล่าสุด</dt><dd>{% if snapshot.checked_at %}{{ snapshot.usage }} / {{ snapshot.quota|default:"ไม่จำกัด" }} เมื่อ {{ snapshot.checked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เคยตรวจ{% endif %}{% if state.limit_reached %} · LINE แจ้งว่าโควตาเต็ม{% endif %}</dd></div>
+    {% if snapshot.alerted_levels %}<div><dt>แจ้งเตือนแล้ว</dt><dd>{{ snapshot.alerted_levels|join:", " }}</dd></div>{% endif %}
+  </dl>
+</section>
+
+<section class="section" aria-labelledby="line-held">
+<div class="section-head"><h2 id="line-held">การแจ้งเตือนที่ไม่ได้ส่งหรือไม่ทราบผล</h2><span class="muted">{{ held|length }} รายการ</span></div>
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">เมื่อ</th><th scope="col">เรื่อง</th><th scope="col">ชนิด</th><th scope="col">สถานะ</th><th scope="col">รายละเอียด</th></tr></thead>
   <tbody>
@@ -23,8 +37,11 @@
   {% empty %}<tr><td colspan="5">ไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
-<h2>งานค้างและ dead-letter</h2>
-<p>รออยู่นานสุดต่อชนิดงาน (วินาที): {% for type, age in health.oldest_pending_seconds.items %}{{ type }} {{ age }}{% if not forloop.last %}, {% endif %}{% empty %}ไม่มีงานค้าง{% endfor %}</p>
+</section>
+
+<section class="section" aria-labelledby="line-dead">
+<div class="section-head"><h2 id="line-dead">งานค้างและ dead-letter</h2></div>
+<p class="section-note">รออยู่นานสุดต่อชนิดงาน: {% for type, age in health.oldest_pending_seconds.items %}<span class="tag tag--outline">{{ type }} {{ age }} วินาที</span> {% empty %}ไม่มีงานค้าง{% endfor %}</p>
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">#</th><th scope="col">ชนิด</th><th scope="col">ครั้งที่ลอง</th><th scope="col">ข้อผิดพลาดล่าสุด</th><th scope="col">ลองใหม่</th></tr></thead>
   <tbody>
@@ -34,4 +51,5 @@
   {% empty %}<tr><td colspan="5">ไม่มีงานใน dead-letter</td></tr>{% endfor %}
   </tbody>
 </table></div>
+</section>
 {% endblock %}

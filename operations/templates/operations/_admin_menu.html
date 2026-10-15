@@ -1,0 +1,24 @@
+{% load ui %}{% with m=nav.admin %}
+{% comment %}เมนูแอดมิน (15 ต.ค. 2569): every settings page in four groups, one tap away. Desktop: a side list; narrow screens: one "เมนูแอดมิน" button that opens the same list.{% endcomment %}
+<aside class="admin-side" aria-label="เมนูแอดมิน">
+  <a class="admin-side__home" href="{% url 'admin-home' %}"{% if m.home %} aria-current="page"{% endif %}>{% icon "grid" "sm" %}<span>หน้าแรกแอดมิน</span>{% if m.waiting %}<span class="chip__count chip__count--alert" title="รอจัดการ">{{ m.waiting }}</span>{% endif %}</a>
+  {% for g in m.groups %}
+    <p class="admin-side__group">{{ g.label }}</p>
+    <ul class="admin-side__list">
+      {% for p in g.pages %}<li><a href="{{ p.url }}"{% if p.current %} aria-current="page"{% endif %}><span>{{ p.label }}</span>{% if p.badge %}<span class="chip__count chip__count--alert" title="รอจัดการ {{ p.badge }} รายการ">{{ p.badge }}</span>{% endif %}</a></li>{% endfor %}
+    </ul>
+  {% endfor %}
+</aside>
+<details class="admin-pick">
+  <summary class="admin-pick__summary"><span class="muted">แอดมิน</span> <strong>{% if m.current %}{{ m.current.label }}{% else %}หน้าแรกแอดมิน{% endif %}</strong>{% if m.waiting %}<span class="admin-pick__waiting">รอจัดการ <span class="chip__count chip__count--alert">{{ m.waiting }}</span></span>{% endif %}{% icon "grid" "sm" %}</summary>
+  <nav class="admin-pick__panel" aria-label="เมนูแอดมิน (มือถือ)">
+    <a class="admin-side__home" href="{% url 'admin-home' %}"{% if m.home %} aria-current="page"{% endif %}><span>หน้าแรกแอดมิน</span></a>
+    {% for g in m.groups %}
+      <p class="admin-side__group">{{ g.label }}</p>
+      <ul class="admin-side__list">
+        {% for p in g.pages %}<li><a href="{{ p.url }}"{% if p.current %} aria-current="page"{% endif %}><span>{{ p.label }}</span>{% if p.badge %}<span class="chip__count chip__count--alert">{{ p.badge }}</span>{% endif %}</a></li>{% endfor %}
+      </ul>
+    {% endfor %}
+  </nav>
+</details>
+{% endwith %}

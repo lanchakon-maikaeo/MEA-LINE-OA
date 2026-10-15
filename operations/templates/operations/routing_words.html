@@ -16,19 +16,19 @@
 </section>
 <section class="section" aria-labelledby="rw-list">
   <div class="section-head"><h2 id="rw-list">คำทั้งหมด</h2><span class="muted">{{ rows|length }} คำ</span></div>
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="table--cards">
     <thead><tr><th scope="col">คำ</th><th scope="col">ประเภทเรื่อง</th><th scope="col">ส่งไปกอง</th><th scope="col">ที่มา</th><th scope="col">สอนจากเรื่อง</th><th scope="col" class="num">ส่งเรื่องแล้ว</th>{% if manage %}<th scope="col">แก้ไข</th>{% endif %}</tr></thead>
     <tbody>
     {% for item in rows %}{% with w=item.row %}
       <tr>
         <td><strong>{{ w.word }}</strong>{% if item.often %} <span class="tag tag--outline">ย้ายบ่อย</span>{% endif %}{% if item.in_rules %} <span class="tag tag--muted">ซ้ำกับกติกา</span>{% endif %}</td>
-        <td>{{ w.get_kind_display }}</td>
-        <td>{{ w.division.code }}</td>
-        <td>{{ w.get_source_display }}{% if w.taught_by %}<br><span class="muted">โดย {{ w.taught_by.staff_profile.display_name|default:w.taught_by.username }}</span>{% endif %}</td>
-        <td class="nowrap"><a href="{% url 'case-detail' w.learned_from.number %}">{{ w.learned_from.number }}</a><br><span class="muted">{{ w.updated_at|thai_datetime }}</span></td>
-        <td class="num">{{ w.uses }}</td>
+        <td data-label="ประเภทเรื่อง">{{ w.get_kind_display }}</td>
+        <td class="cell--end" data-label="ส่งไปกอง">{{ w.division.code }}</td>
+        <td data-label="ที่มา">{{ w.get_source_display }}{% if w.taught_by %}<br><span class="muted">โดย {{ w.taught_by.staff_profile.display_name|default:w.taught_by.username }}</span>{% endif %}</td>
+        <td class="nowrap" data-label="สอนจากเรื่อง"><a href="{% url 'case-detail' w.learned_from.number %}">{{ w.learned_from.number }}</a><br><span class="muted">{{ w.updated_at|thai_datetime }}</span></td>
+        <td class="num" data-label="ส่งเรื่องแล้ว">{{ w.uses }}</td>
         {% if manage %}
-        <td>
+        <td class="cell--wide">
           <form method="post" class="stack-sm">
             {% csrf_token %}<input type="hidden" name="word_id" value="{{ w.pk }}">
             <label class="visually-hidden" for="rw-div-{{ w.pk }}">ย้ายไปกอง</label>

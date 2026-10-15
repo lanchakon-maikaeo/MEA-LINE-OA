@@ -129,7 +129,10 @@ class _Sets:
         return cases
 
     def day(self, field, value):
-        """Cases whose `field` (submitted_at or ended_at) falls on a Bangkok date."""
+        """Cases whose `field` (submitted_at or ended_at) falls on a Bangkok date; the value
+        "window" is the whole period (the overview's เรื่องเข้า/เรื่องจบ totals)."""
+        if value == "window":
+            return self.owned.filter(**{f"{field}__gte": self.since})
         try:
             day = date.fromisoformat(value)
         except (TypeError, ValueError):
@@ -199,7 +202,7 @@ def drilldown(user, division, metric, value, now=None, days=WINDOW_DAYS):
         cases = sets.owned_open.filter(lines__item__code=value).distinct()
     elif metric in ("new", "ended"):
         cases = sets.day("submitted_at" if metric == "new" else "ended_at", value)
-        shown = _thai_day(value)
+        shown = f"{sets.days} วันล่าสุด" if value == "window" else _thai_day(value)
     elif metric == "ack":
         cases = sets.visible.filter(pk__in=sets.ack_clocks().values("case"))
     elif metric == "resolve":

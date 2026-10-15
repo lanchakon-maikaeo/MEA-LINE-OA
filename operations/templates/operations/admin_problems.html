@@ -18,25 +18,27 @@
       {% for value, text in choices %}<option value="{{ value }}"{% for k, v in chosen.items %}{% if k == key and v == value %} selected{% endif %}{% endfor %}>{{ text }}</option>{% endfor %}
     </select>
   {% endfor %}
-  <label for="p-from">ตั้งแต่</label> <input id="p-from" type="date" name="from" value="{{ chosen.from|default:'' }}">
-  <label for="p-to">ถึง</label> <input id="p-to" type="date" name="to" value="{{ chosen.to|default:'' }}">
+  <span class="date-range">
+    <label for="p-from">ตั้งแต่</label><input id="p-from" type="date" name="from" value="{{ chosen.from|default:'' }}">
+    <label for="p-to">ถึง</label><input id="p-to" type="date" name="to" value="{{ chosen.to|default:'' }}">
+  </span>
   <button class="btn btn--sm" type="submit">กรอง</button>
   {% if chosen %}<a class="btn btn--sm btn--ghost" href="{% url 'admin-problems' %}">ล้างตัวกรอง</a>{% endif %}
 </form>
 <p class="muted">{{ page.paginator.count }} เรื่อง · ไฟล์ CSV ใช้ตัวกรองเดียวกัน ไม่มีชื่อ รหัสแทนตัว ข้อความที่แจ้ง พิกัด หรือชื่อเจ้าหน้าที่ และทุกการดาวน์โหลดถูกบันทึก</p>
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">เลขเรื่อง</th><th scope="col">หัวข้อ</th><th scope="col">ข้อความที่แจ้ง</th><th scope="col">ผู้แจ้ง</th><th scope="col">ช่องทาง</th><th scope="col">วันเวลาแจ้ง</th><th scope="col">กองเจ้าภาพ</th><th scope="col">สถานะ</th></tr></thead>
   <tbody>
   {% for row in rows %}{% with case=row.case %}
     <tr>
       <td class="nowrap"><a href="{% url 'case-detail' case.number %}">{{ case.number }}</a></td>
-      <td>{{ row.topic }}</td>
-      <td>{{ case.description|truncatechars:120 }}</td>
-      <td>{% if row.reporter_link %}<a href="{{ row.reporter_link }}">{{ row.reporter }}</a>{% else %}{{ row.reporter }}{% endif %}</td>
-      <td>{{ case.get_channel_display }}{% if row.on_behalf %}<br><span class="muted">บันทึกแทนโดย {{ row.on_behalf }}</span>{% endif %}</td>
-      <td class="nowrap">{{ row.reported|thai_datetime }}{% if row.recorded %}<br><span class="muted">บันทึก {{ row.recorded|thai_datetime }}</span>{% endif %}</td>
-      <td>{{ case.owner_division.code }}</td>
-      <td>{{ case.get_status_display }}</td>
+      <td class="cell--wide" data-label="หัวข้อ">{{ row.topic }}</td>
+      <td class="cell--wide" data-label="ข้อความที่แจ้ง">{{ case.description|truncatechars:120 }}</td>
+      <td class="cell--wide" data-label="ผู้แจ้ง">{% if row.reporter_link %}<a href="{{ row.reporter_link }}">{{ row.reporter }}</a>{% else %}{{ row.reporter }}{% endif %}</td>
+      <td data-label="ช่องทาง">{{ case.get_channel_display }}{% if row.on_behalf %}<br><span class="muted">บันทึกแทนโดย {{ row.on_behalf }}</span>{% endif %}</td>
+      <td class="nowrap" data-label="วันเวลาแจ้ง">{{ row.reported|thai_datetime }}{% if row.recorded %}<br><span class="muted">บันทึก {{ row.recorded|thai_datetime }}</span>{% endif %}</td>
+      <td class="nowrap" data-label="กองเจ้าภาพ">{{ case.owner_division.code }}</td>
+      <td class="nowrap cell--end">{{ case.get_status_display }}</td>
     </tr>
   {% endwith %}{% empty %}
     <tr><td colspan="8">ไม่มีเรื่องที่ตรงกับตัวกรอง</td></tr>

@@ -11,15 +11,15 @@
 </div>
 <section class="section" aria-labelledby="q-open">
   <div class="section-head"><h2 id="q-open">รอแอดมิน</h2><span class="muted">{{ waiting|length }} คำถาม เรียงจากถามบ่อยที่สุด</span></div>
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="table--cards">
     <thead><tr><th scope="col">ข้อความ</th><th scope="col" class="num">ถาม</th><th scope="col">ล่าสุด</th><th scope="col">ทำอะไรต่อ</th></tr></thead>
     <tbody>
     {% for q in waiting %}
       <tr>
         <td>{{ q.text }}</td>
-        <td class="num">{{ q.count }}</td>
-        <td class="nowrap">{{ q.last_at|thai_datetime }}</td>
-        <td>
+        <td class="num cell--end" data-label="ถาม">{{ q.count }}</td>
+        <td class="nowrap cell--wide" data-label="ล่าสุด">{{ q.last_at|thai_datetime }}</td>
+        <td class="cell--wide">
           <a class="btn btn--sm" href="{% url 'admin-answers' %}?question={{ q.pk }}#ans-new">เพิ่มเป็นคำตอบในคลัง</a>
           <form method="post" class="inline">
             {% csrf_token %}<input type="hidden" name="question" value="{{ q.pk }}"><input type="hidden" name="status" value="ignored">
@@ -37,16 +37,16 @@
   <details class="fold">
   <summary><span class="fold__title" id="q-done">จัดการแล้ว</span></summary>
   <div class="fold__body">
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="table--cards">
     <thead><tr><th scope="col">ข้อความ</th><th scope="col" class="num">ถาม</th><th scope="col">ผล</th><th scope="col">โดย</th><th scope="col"></th></tr></thead>
     <tbody>
     {% for q in handled %}
       <tr>
         <td>{{ q.text }}</td>
-        <td class="num">{{ q.count }}</td>
-        <td>{{ q.get_status_display }}{% if q.answer_key %} ({{ q.answer_key }}){% endif %}</td>
-        <td>{{ q.handled_by.username }} · {{ q.handled_at|thai_datetime }}</td>
-        <td>
+        <td class="num cell--end" data-label="ถาม">{{ q.count }}</td>
+        <td class="cell--wide" data-label="ผล">{{ q.get_status_display }}{% if q.answer_key %} ({{ q.answer_key }}){% endif %}</td>
+        <td class="cell--wide" data-label="โดย">{{ q.handled_by.username }} · {{ q.handled_at|thai_datetime }}</td>
+        <td class="cell--wide">
           <form method="post" class="inline">
             {% csrf_token %}<input type="hidden" name="question" value="{{ q.pk }}"><input type="hidden" name="status" value="open">
             <button class="btn btn--sm btn--ghost" type="submit">ส่งกลับไปรอ</button>

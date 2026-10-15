@@ -4,16 +4,16 @@
 <p>กติกาการส่งเข้ากองและระดับความเร่งด่วนนำเข้าด้วยคำสั่ง <code>manage.py import_policy</code> แก้ไม่ได้หลังนำเข้า เจ้าของกติกาเป็นผู้รับรอง แอดมินเป็นผู้เปิดใช้ ข้อมูลจำลองไม่ใช่ผังองค์กร ระเบียบ หรือ SLA ทางการ</p>
 
 <h2>รุ่นกติกา</h2>
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">รหัส</th><th scope="col">สถานะ</th><th scope="col">มีผล</th><th scope="col">ผู้รับรอง</th><th scope="col">จัดการ</th></tr></thead>
   <tbody>
   {% for v in versions %}
     <tr>
       <td>{{ v.code }}{% if v.is_synthetic %} (จำลอง){% endif %}<br><code>{{ v.digest|slice:":12" }}</code></td>
-      <td>{{ v.get_status_display }}{% if v.activated_at %}<br>{{ v.activated_at|date:"Y-m-d H:i" }}{% endif %}</td>
-      <td>{{ v.effective_from|date:"Y-m-d H:i" }} – {% if v.effective_until %}{{ v.effective_until|date:"Y-m-d H:i" }}{% else %}ไม่กำหนด{% endif %}</td>
-      <td>{{ v.approved_by_name|default:"-" }}{% if v.approval_reference %}<br>{{ v.approval_reference }}{% endif %}</td>
-      <td>{% if v.status != "active" %}<form method="post" action="{% url 'admin-policy-action' 'activate' v.pk %}">{% csrf_token %}{{ activate_form.as_p }}<button type="submit">เปิดใช้รุ่นนี้</button><p>เรื่องที่เปิดอยู่จะได้ข้อเสนอใหม่ กองเจ้าภาพและระดับที่คนยืนยันไม่เปลี่ยน เรื่องที่ข้อเสนอเปลี่ยนจะติดธง "กติกาเปลี่ยน"</p></form>{% endif %}</td>
+      <td class="cell--end" data-label="สถานะ">{{ v.get_status_display }}{% if v.activated_at %}<br>{{ v.activated_at|date:"Y-m-d H:i" }}{% endif %}</td>
+      <td class="cell--wide" data-label="มีผล">{{ v.effective_from|date:"Y-m-d H:i" }} – {% if v.effective_until %}{{ v.effective_until|date:"Y-m-d H:i" }}{% else %}ไม่กำหนด{% endif %}</td>
+      <td class="cell--wide" data-label="ผู้รับรอง">{{ v.approved_by_name|default:"-" }}{% if v.approval_reference %}<br>{{ v.approval_reference }}{% endif %}</td>
+      <td class="cell--wide">{% if v.status != "active" %}<form method="post" action="{% url 'admin-policy-action' 'activate' v.pk %}">{% csrf_token %}{{ activate_form.as_p }}<button type="submit">เปิดใช้รุ่นนี้</button><p>เรื่องที่เปิดอยู่จะได้ข้อเสนอใหม่ กองเจ้าภาพและระดับที่คนยืนยันไม่เปลี่ยน เรื่องที่ข้อเสนอเปลี่ยนจะติดธง "กติกาเปลี่ยน"</p></form>{% endif %}</td>
     </tr>
   {% empty %}<tr><td colspan="5">ยังไม่มีกติกา ทุกเรื่องจะไปคิวคนตรวจ (R10)</td></tr>{% endfor %}
   </tbody>
@@ -21,17 +21,17 @@
 
 <h2>อำนาจ (AuthorityGrant)</h2>
 <p>บทบาทในกองไม่ใช่อำนาจ อำนาจบันทึกแยกตามกิจกรรม ขอบเขต และวันมีผล พร้อมผู้รับรอง แอดมินให้อำนาจแก่ตัวเองไม่ได้ อำนาจอนุมัติเบิกและจัดสรรของขาดจำกัดหมวด/รายการได้ จำนวนสูงสุดเทียบกับจำนวนอนุมัติต่อรายการและต้องระบุรายการของ</p>
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">ผู้ได้รับ</th><th scope="col">กิจกรรม</th><th scope="col">ขอบเขต</th><th scope="col">มีผล</th><th scope="col">อ้างอิง</th><th scope="col">สถานะ</th></tr></thead>
   <tbody>
   {% for g in grants %}
     <tr>
       <td>{{ g.user.staff_profile.display_name|default:g.user.username }}</td>
-      <td>{{ g.get_activity_display }}</td>
-      <td>{% if g.division %}{{ g.division.code }}{% else %}ทุกกอง{% endif %}{% if g.item %}<br>{{ g.item.code }}{% elif g.category %}<br>{{ g.get_category_display }}{% endif %}{% if g.max_quantity %}<br>ไม่เกิน {{ g.max_quantity }} ต่อรายการ{% endif %}</td>
-      <td>{{ g.valid_from|date:"Y-m-d H:i" }} – {% if g.valid_until %}{{ g.valid_until|date:"Y-m-d H:i" }}{% else %}ไม่กำหนด{% endif %}</td>
-      <td>{{ g.approval_reference }}{% if g.is_synthetic %} (จำลอง){% endif %}<br>ให้โดย {{ g.granted_by.username|default:"seed" }}</td>
-      <td>{% if g.revoked_at %}ถอนแล้ว {{ g.revoked_at|date:"Y-m-d H:i" }}<br>{{ g.revoke_reason }}{% elif g.valid_until and g.valid_until <= now %}หมดอายุ{% else %}
+      <td class="cell--end" data-label="กิจกรรม">{{ g.get_activity_display }}</td>
+      <td data-label="ขอบเขต">{% if g.division %}{{ g.division.code }}{% else %}ทุกกอง{% endif %}{% if g.item %}<br>{{ g.item.code }}{% elif g.category %}<br>{{ g.get_category_display }}{% endif %}{% if g.max_quantity %}<br>ไม่เกิน {{ g.max_quantity }} ต่อรายการ{% endif %}</td>
+      <td class="cell--two" data-label="มีผล">{{ g.valid_from|date:"Y-m-d H:i" }} – {% if g.valid_until %}{{ g.valid_until|date:"Y-m-d H:i" }}{% else %}ไม่กำหนด{% endif %}</td>
+      <td class="cell--wide" data-label="อ้างอิง">{{ g.approval_reference }}{% if g.is_synthetic %} (จำลอง){% endif %}<br>ให้โดย {{ g.granted_by.username|default:"seed" }}</td>
+      <td class="cell--wide" data-label="สถานะ">{% if g.revoked_at %}ถอนแล้ว {{ g.revoked_at|date:"Y-m-d H:i" }}<br>{{ g.revoke_reason }}{% elif g.valid_until and g.valid_until <= now %}หมดอายุ{% else %}
         <form class="inline" method="post" action="{% url 'admin-policy-action' 'revoke' g.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ถอน</button></form>{% endif %}</td>
     </tr>
   {% empty %}<tr><td colspan="6">ยังไม่มี</td></tr>{% endfor %}

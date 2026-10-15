@@ -35,8 +35,7 @@
       <form method="post">
         {% csrf_token %}<input type="hidden" name="action" value="overview"><input type="hidden" name="division" value="{{ d.code }}">
         <div class="field"><label for="ov-{{ d.pk }}">กองนี้ทำอะไร ดูแลอะไร</label><textarea id="ov-{{ d.pk }}" name="overview" rows="4" maxlength="2000">{{ d.duty_overview }}</textarea></div>
-        <div class="field"><label for="ovx-{{ d.pk }}">ตัวอย่างข้อความที่เป็นของกองนี้แต่ไม่เข้ารายการใด (ไม่บังคับ บรรทัดละข้อ)</label><textarea id="ovx-{{ d.pk }}" name="examples" rows="3">{{ d.duty_examples|join:"
-" }}</textarea></div>
+        <div class="field"><label for="ovx-{{ d.pk }}">ตัวอย่างข้อความที่เป็นของกองนี้แต่ไม่เข้ารายการใด (ไม่บังคับ บรรทัดละข้อ)</label><textarea id="ovx-{{ d.pk }}" name="examples" rows="3">{{ d.duty_examples|lines }}</textarea></div>
         <div class="field"><label for="ovr-{{ d.pk }}">เหตุผล</label><input id="ovr-{{ d.pk }}" name="reason" maxlength="500" required></div>
         <button class="btn btn--sm" type="submit">บันทึกภาพรวม</button>
       </form>
@@ -50,8 +49,7 @@
         {% csrf_token %}<input type="hidden" name="entry" value="{{ e.pk }}">
         <div class="field"><label for="t-{{ e.pk }}">หัวข้องาน</label><input id="t-{{ e.pk }}" name="title" value="{{ e.title }}" maxlength="100" required></div>
         <div class="field"><label for="d-{{ e.pk }}">คำอธิบาย</label><textarea id="d-{{ e.pk }}" name="description" rows="3" maxlength="1000" required>{{ e.description }}</textarea></div>
-        <div class="field"><label for="x-{{ e.pk }}">ตัวอย่างข้อความ (อย่างน้อย {{ min_examples }} ข้อ บรรทัดละข้อ)</label><textarea id="x-{{ e.pk }}" name="examples" rows="3" required>{{ e.examples|join:"
-" }}</textarea></div>
+        <div class="field"><label for="x-{{ e.pk }}">ตัวอย่างข้อความ (อย่างน้อย {{ min_examples }} ข้อ บรรทัดละข้อ)</label><textarea id="x-{{ e.pk }}" name="examples" rows="3" required>{{ e.examples|lines }}</textarea></div>
         <div class="field"><label for="r-{{ e.pk }}">เหตุผล</label><input id="r-{{ e.pk }}" name="reason" maxlength="500" required></div>
         <button class="btn btn--sm" type="submit" name="action" value="change">บันทึก</button>
         <button class="btn btn--sm btn--ghost" type="submit" name="action" value="retire">เลิกใช้รายการนี้</button>

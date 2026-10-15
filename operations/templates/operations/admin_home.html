@@ -1,0 +1,49 @@
+{% extends "operations/admin_base.html" %}
+{% load ui %}
+{% block title %}แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+{% with m=nav.admin %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>ตั้งค่าระบบ</h1>
+    <p class="lede">ทุกหน้าตั้งค่าอยู่ในสี่กลุ่มด้านล่าง กดชื่อหน้าเพื่อเปิด ตัวเลขสีแดงคือสิ่งที่รอคุณ</p>
+  </div>
+</div>
+
+<section class="section" aria-labelledby="ah-waiting">
+  <div class="section-head"><h2 id="ah-waiting">รอจัดการ</h2></div>
+  {% if m.waiting %}
+    <div class="attention">
+      {% for g in m.groups %}{% for p in g.pages %}{% if p.badge %}
+        <a class="attention__item attention__item--alert" href="{{ p.url }}">
+          <span class="attention__value">{{ p.badge }}</span>
+          <span class="attention__label">{{ p.label }}</span>
+          <span class="attention__go" aria-hidden="true">→</span>
+        </a>
+      {% endif %}{% endfor %}{% endfor %}
+    </div>
+  {% else %}
+    <div class="attention attention--calm" role="status">{% icon "check" %} ไม่มีคำขอ คำถาม หรือการแจ้งเตือนที่ค้างอยู่</div>
+  {% endif %}
+</section>
+
+<div class="admin-groups">
+  {% for g in m.groups %}
+    <section class="admin-group" aria-labelledby="ag-{{ forloop.counter }}">
+      <h2 id="ag-{{ forloop.counter }}">{{ g.label }}</h2>
+      <p class="muted">{{ g.hint }}</p>
+      <ul class="admin-group__list">
+        {% for p in g.pages %}
+          <li><a class="admin-link" href="{{ p.url }}">
+            <span class="admin-link__text"><strong>{{ p.label }}</strong><span class="muted">{{ p.hint }}</span></span>
+            {% if p.badge %}<span class="chip__count chip__count--alert" title="รอจัดการ {{ p.badge }} รายการ">{{ p.badge }}</span>{% endif %}
+            <span class="admin-link__go" aria-hidden="true">→</span>
+          </a></li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endfor %}
+</div>
+{% endwith %}
+{% endblock %}

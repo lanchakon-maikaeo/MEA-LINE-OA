@@ -20,6 +20,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from operations import (
+    admin_nav,
     casepage,
     charts,
     identity,
@@ -37,6 +38,7 @@ from operations.contracts import Actor, CommandFailed, ErrorCode
 from operations.models import Case, District, Division, Priority, Role, RoleGrant
 
 ADMIN_URLS = ("admin-",)
+REFERENCE_URLS = {"pii", "routing-words", "duties"}
 
 
 def navigation(request):
@@ -47,8 +49,15 @@ def navigation(request):
     scope = identity.staff_scope(user)
     match = getattr(request, "resolver_match", None)
     name = match.url_name if match else ""
-    if name and name.startswith(ADMIN_URLS):
+    # An admin on a settings page gets the grouped admin menu (15 ต.ค. 2569); staff opening the
+    # pages they share (คำที่ระบบจำ, ปิดข้อมูลก่อนส่ง AI, หน้าที่ของกอง) are on a reference page.
+    admin_menu = (
+        admin_nav.menu(scope, name) if scope.is_admin and name in admin_nav.URL_NAMES else None
+    )
+    if admin_menu or (name and name.startswith(ADMIN_URLS)):
         section = "admin"
+    elif name in REFERENCE_URLS:
+        section = "reference"
     elif name in {"account", "password_change"}:
         section = "account"
     elif name in {"reports", "report-cases"}:
@@ -72,6 +81,7 @@ def navigation(request):
             # ตัวเลือกระบบ (ADR 0009): a non-admin who may approve LINE registrations.
             "registrations": not scope.is_admin and identity.may_decide_registrations(user),
             "registry": registry.may_open(user),
+            "admin": admin_menu,
         }
     }
 
@@ -106,32 +116,73 @@ def start(request):
 @login_required
 @require_safe
 def home(request):
-    """ภาพรวม, one page with รายงาน since 10 Oct 2569 (the user): the work of each division the
-    account works in (every division for admins), then the report figures, chart and breakdowns.
-    Every card, number and bar opens the cases behind it."""
+    """ภาพรวม (redesigned 15 ต.ค. 2569, the user: modern, easy, nothing twice): what needs
+    attention now, four headline figures, the daily trend, each division's work in one table,
+    and where the open cases sit. Every figure still opens the cases behind it."""
     scope = _scope(request)
     if not scope.has_any_access:
         return render(request, "operations/console.html", {"scope": scope, "cards": []})
-    divisions = queues.own_divisions(scope)
+    context = _report_context(request)
+    link = _report_link(context["chosen"], context["days"])
+    compared = {row["division"].code: row for row in context["table"]}
     now = timezone.now()
     cards = []
-    for division in divisions:
+    for division in queues.own_divisions(scope):
         tally = queues.counts(request.user, division, now, ["host", "mine"])
-        roles = sorted(Role(r).label for r in scope.division_roles.get(division.pk, ()))
+        row = compared.get(division.code, {})
         cards.append(
             {
                 "division": division,
-                "roles": roles,
+                "roles": sorted(Role(r).label for r in scope.division_roles.get(division.pk, ())),
                 "open": tally["host"],
                 "mine": tally["mine"],
                 "overdue": queues.overdue_count(request.user, division, now),
+                "escalated": row.get("escalated"),
+                "avg_ack": row.get("avg_ack"),
+                "report_url": row.get("report_url")
+                or f"?{urlencode({'division': division.code, 'days': context['days']})}",
+                "escalated_url": row.get("links", {}).get("escalated", ""),
             }
         )
-    return render(
-        request,
-        "operations/console.html",
-        {"scope": scope, "cards": cards, **_report_context(request)},
+    busy = [c for c in cards if c["open"] or c["mine"] or c["overdue"] or c["escalated"]]
+    context.update(
+        scope=scope,
+        cards=cards,
+        busy_cards=sorted(busy, key=lambda c: (-c["overdue"], -c["open"])),
+        quiet_cards=[c for c in cards if c not in busy],
+        attention=_attention(request.user, scope, context["report"], link),
+        open_link=link("open"),
+        new_link=link("new", "window"),
+        ended_link=link("ended", "window"),
+        today=now,
     )
+    return render(request, "operations/console.html", context)
+
+
+def _attention(user, scope, report, link):
+    """Only what is waiting now, most urgent first; nothing at zero (no wall of zeros)."""
+    items = []
+
+    def add(label, value, href, alert=False):
+        if value:
+            items.append({"label": label, "value": value, "href": href, "alert": alert})
+
+    approver = scope.is_admin or identity.may_decide_registrations(user)
+    waiting = admin_nav.badges() if approver else {}
+    add("เรื่องเกินกรอบเวลา", report["overdue"], link("overdue"), alert=True)
+    add("เรื่องถูกยกระดับ", report["escalated"], link("escalated"), alert=True)
+    if approver:
+        add("ผู้แจ้งรอรับรอง", waiting["registrations"], reverse("admin-registrations"), True)
+    submitted = next(
+        (n for value, _, n in report["by_status"] if value == Case.Status.SUBMITTED), 0
+    )
+    add("เรื่องใหม่รอคัดกรอง", submitted, link("status", Case.Status.SUBMITTED))
+    add("รอเขตตอบ", report["district"], link("district"))
+    add("งานย่อยค้าง", report["children"], link("children"))
+    if scope.is_admin:
+        add("การแจ้งเตือนที่ส่งไม่สำเร็จ", waiting["line"], reverse("admin-line"), alert=True)
+        add("คำถามที่บอทตอบไม่ได้", waiting["questions"], reverse("admin-questions"))
+    return items
 
 
 def _queue(request, division, admin_all=False):

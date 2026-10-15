@@ -64,6 +64,7 @@ urlpatterns = [
     path("registry/settings/", registry_web.settings_page, name="registry-settings"),
     path("registry/import/<slug:kind>/", registry_web.upload, name="registry-upload"),
     path("registry/<int:pk>/", registry_web.discrepancy, name="registry-discrepancy"),
+    path("console/admin/", views.admin_home, name="admin-home"),
     path("console/admin/users/", views.admin_users, name="admin-users"),
     path("console/admin/users/new/", views.admin_user_new, name="admin-user-new"),
     path("console/admin/users/<int:pk>/", views.admin_user_detail, name="admin-user-detail"),

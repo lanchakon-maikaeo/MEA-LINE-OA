@@ -1,20 +1,29 @@
 {% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}ภาพรวมและรายงาน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}ภาพรวม — ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
-<div class="page-head">
+<div class="page-head ov-head">
   <div class="page-head__text">
-    <span class="eyebrow">ภาพรวมและรายงาน</span>
+    <span class="eyebrow">ภาพรวม{% if today %} · {{ today|thai_date }}{% endif %}</span>
     <h1>สวัสดี {{ user.staff_profile.display_name|default:user.username }}</h1>
-    {% if scope.has_any_access %}<p class="lede">งานที่รออยู่ด้านบน ตัวเลขและกราฟด้านล่าง กดการ์ด ตัวเลข หรือแถบใดก็ได้เพื่อเปิดรายการเรื่องที่นับ</p>{% endif %}
-    {% if scope.is_admin %}<p class="muted">แอดมินระบบ{% if scope.is_developer_admin %} · แอดมินผู้พัฒนา{% endif %} · ดูคิวได้ทุกกอง (อ่านอย่างเดียว) ส่วนการบันทึกทำได้เฉพาะกองที่คุณมีบทบาท</p>{% endif %}
+    {% if scope.has_any_access %}<p class="lede">{% if scope.is_admin %}ดูได้ทุกกอง บันทึกได้เฉพาะกองที่มีบทบาท{% else %}งานของกองที่คุณมีบทบาท{% endif %} · กดตัวเลขเพื่อเปิดรายการเรื่อง</p>{% endif %}
   </div>
-  {% if scope.has_any_access %}<div class="page-head__actions">
-    {% if scope.is_admin %}<a class="btn" href="{% url 'queue-all' %}">คิวทุกกอง</a>{% endif %}
-    <a class="btn btn--secondary" href="{% url 'duties' %}">หน้าที่ของกอง</a>
-    <a class="btn btn--secondary" href="{% url 'routing-words' %}">คำที่ระบบจำ</a>
-    <a class="btn btn--secondary" href="{% url 'pii' %}">{% icon "lock" "sm" %} ปิดข้อมูลก่อนส่ง AI</a>
-  </div>{% endif %}
+  {% if scope.has_any_access %}
+  <form class="report-filters ov-filters" method="get" data-autosubmit aria-label="ช่วงเวลาและกอง">
+    <label class="visually-hidden" for="r-days">ช่วงเวลา</label>
+    <select id="r-days" name="days" class="pill-select is-set">
+      {% for p in periods %}<option value="{{ p }}"{% if p == days %} selected{% endif %}>{{ p }} วันล่าสุด</option>{% endfor %}
+    </select>
+    {% if divisions|length > 1 %}
+      <label class="visually-hidden" for="r-division">เลือกกอง</label>
+      <select id="r-division" name="division" class="pill-select is-set">
+        {% if scope.is_admin %}<option value="">ทุกกอง</option>{% endif %}
+        {% for d in divisions %}<option value="{{ d.code }}"{% if chosen and chosen.code == d.code %} selected{% endif %}>{{ d.code }}</option>{% endfor %}
+      </select>
+    {% elif chosen %}<input type="hidden" name="division" value="{{ chosen.code }}">{% endif %}
+    <button class="btn btn--sm filters__apply" type="submit">ดู</button>
+  </form>
+  {% endif %}
 </div>
 
 {% if not scope.has_any_access %}
@@ -24,99 +33,146 @@
   </div>
 {% else %}
 
-<section class="section" aria-labelledby="ov-work">
-  <div class="section-head"><h2 id="ov-work">{% if scope.is_admin %}งานของทุกกองตอนนี้{% else %}งานที่รอคุณ{% endif %}</h2><span class="muted">กดชื่อกองหรือตัวเลขเพื่อเปิดคิวงาน</span></div>
-  <div class="division-cards">
-    {% for card in cards %}
-      <section class="division-card" aria-labelledby="div-{{ card.division.code }}">
-        <div class="division-card__head">
-          <h3 id="div-{{ card.division.code }}"><a href="{% url 'division-detail' card.division.code %}">{{ card.division.code }} <span aria-hidden="true">→</span></a></h3>
-          <span class="muted">{{ card.division.name }}</span>
-        </div>
-        <div class="stats">
-          <a class="stat" href="{% url 'division-detail' card.division.code %}?tab=host"><span class="stat__label">ต้องทำ</span><span class="stat__value">{{ card.open }}</span></a>
-          <a class="stat{% if card.overdue %} stat--alert{% endif %}" href="{% url 'division-detail' card.division.code %}?tab=host&amp;overdue=1"><span class="stat__label">เกินเวลา</span><span class="stat__value">{{ card.overdue }}</span></a>
-          <a class="stat" href="{% url 'division-detail' card.division.code %}?tab=mine"><span class="stat__label">ของฉัน</span><span class="stat__value">{{ card.mine }}</span></a>
-        </div>
-        {% if card.roles %}<p class="muted mt-8">บทบาท: {{ card.roles|join:", " }}</p>{% endif %}
-      </section>
-    {% empty %}
-      <div class="empty"><strong>ยังไม่มีกองที่ใช้งาน</strong></div>
-    {% endfor %}
+<section class="section" aria-labelledby="ov-attention">
+  <div class="section-head">
+    <h2 id="ov-attention">ต้องดูตอนนี้{% if chosen %} · {{ chosen.code }}{% endif %}</h2>
+    {% if scope.is_admin %}<a class="section-head__link" href="{% url 'queue-all' %}">เปิดคิวทุกกอง →</a>{% endif %}
   </div>
+  {% if attention %}
+    <div class="attention" data-tour="report-stats">
+      {% for a in attention %}
+        <a class="attention__item{% if a.alert %} attention__item--alert{% endif %}" href="{{ a.href }}">
+          <span class="attention__value">{{ a.value }}</span>
+          <span class="attention__label">{{ a.label }}</span>
+          <span class="attention__go" aria-hidden="true">→</span>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="attention attention--calm" role="status" data-tour="report-stats">{% icon "check" %} ไม่มีเรื่องเกินเวลา ถูกยกระดับ หรือรอคัดกรอง</div>
+  {% endif %}
 </section>
 
-<section class="section" aria-labelledby="ov-numbers">
-  <div class="section-head section-head--tools">
-    <h2 id="ov-numbers">รายงาน{% if chosen %} {{ chosen.code }}{% else %}ทุกกอง{% endif %}</h2>
-    <form class="report-filters" method="get" data-autosubmit aria-label="ช่วงเวลาและกอง">
-      <label class="visually-hidden" for="r-days">ช่วงเวลา</label>
-      <select id="r-days" name="days" class="pill-select is-set">
-        {% for p in periods %}<option value="{{ p }}"{% if p == days %} selected{% endif %}>{{ p }} วันล่าสุด</option>{% endfor %}
-      </select>
-      {% if divisions|length > 1 %}
-        <label class="visually-hidden" for="r-division">เลือกกอง</label>
-        <select id="r-division" name="division" class="pill-select is-set">
-          {% if nav.scope.is_admin %}<option value="">ทุกกอง</option>{% endif %}
-          {% for d in divisions %}<option value="{{ d.code }}"{% if chosen and chosen.code == d.code %} selected{% endif %}>{{ d.code }}</option>{% endfor %}
-        </select>
-      {% elif chosen %}<input type="hidden" name="division" value="{{ chosen.code }}">{% endif %}
-      <button class="btn btn--sm filters__apply" type="submit">ดู</button>
-    </form>
-  </div>
-  <p class="muted section-note">นับเฉพาะเรื่องที่บัญชีนี้เห็น เวลาเป็นเวลาทำการตามปฏิทินบริการ (เรื่องฉุกเฉินนับต่อเนื่อง) ตัวเลขทั้งหมดมาจากข้อมูลจำลอง</p>
-  <div class="stats" data-tour="report-stats">
-    {% for label, value, href, tone in dash.kpis %}
-      <a class="stat{% if tone %} stat--{{ tone }}{% endif %}" href="{{ href }}"><span class="stat__label">{{ label }}</span><span class="stat__value">{{ value }}</span></a>
-    {% endfor %}
+<section class="section" aria-labelledby="ov-kpi">
+  <h2 id="ov-kpi" class="visually-hidden">ตัวเลขหลัก {{ days }} วันล่าสุด</h2>
+  <div class="kpis">
+    <a class="kpi kpi--dark" href="{{ open_link }}">
+      <span class="kpi__label">ต้องทำตอนนี้</span>
+      <span class="kpi__value">{{ report.open }}</span>
+      <span class="kpi__note">เปิดอยู่ทั้งหมด {{ report.total }} เรื่อง</span>
+    </a>
+    <a class="kpi" href="{{ new_link }}">
+      <span class="kpi__label">เรื่องเข้า</span>
+      <span class="kpi__value">{{ dash.trend.total_new }}</span>
+      <span class="kpi__note">{{ days }} วันล่าสุด</span>
+    </a>
+    <a class="kpi" href="{{ ended_link }}">
+      <span class="kpi__label">เรื่องจบ</span>
+      <span class="kpi__value">{{ dash.trend.total_ended }}</span>
+      <span class="kpi__note">ปิด ยกเลิก หรือไม่รับ</span>
+    </a>
+    <a class="kpi" href="{{ dash.times.ack }}">
+      <span class="kpi__label">ตอบรับเฉลี่ย</span>
+      <span class="kpi__value kpi__value--text">{{ report.avg_ack|duration }}</span>
+      <span class="kpi__note">จาก {{ report.ack_count }} ครั้ง ({{ days }} วัน)</span>
+    </a>
   </div>
 </section>
 
 {% with t=dash.trend %}
-<section class="section viz" aria-labelledby="r-trend">
-  <div class="section-head"><h2 id="r-trend">เรื่องเข้าและเรื่องจบรายวัน</h2><span class="muted">{{ days }} วันล่าสุด · เข้า {{ t.total_new }} · จบ {{ t.total_ended }}</span></div>
-  <ul class="legend" aria-label="คำอธิบายสี">
-    <li><span class="legend__key legend__key--new" aria-hidden="true"></span>เรื่องเข้า (ยื่นหรือบันทึกแทน)</li>
-    <li><span class="legend__key legend__key--ended" aria-hidden="true"></span>เรื่องจบ (ปิด ยกเลิก หรือไม่รับ)</li>
-  </ul>
-  <div class="chart" data-chart>
-    <svg viewBox="0 0 {{ t.width }} {{ t.height }}" role="img" aria-labelledby="r-trend r-trend-desc">
-      <desc id="r-trend-desc">กราฟเส้นจำนวนเรื่องเข้าและเรื่องจบต่อวัน ตัวเลขทุกวันอยู่ในตารางใต้กราฟ</desc>
-      {% for tick in t.ticks %}
-        <line class="chart__grid" x1="{{ t.left }}" x2="{{ t.right }}" y1="{{ tick.y }}" y2="{{ tick.y }}"/>
-        <text class="chart__tick" x="{{ t.tick_x }}" y="{{ tick.y }}" text-anchor="end" dominant-baseline="middle">{{ tick.label }}</text>
-      {% endfor %}
-      <line class="chart__base" x1="{{ t.left }}" x2="{{ t.right }}" y1="{{ t.bottom }}" y2="{{ t.bottom }}"/>
-      {% for label in t.labels %}<text class="chart__tick" x="{{ label.x }}" y="{{ t.label_y }}" text-anchor="middle">{{ label.label }}</text>{% endfor %}
-      <line class="chart__cross" x1="0" x2="0" y1="{{ t.top }}" y2="{{ t.bottom }}" visibility="hidden" data-cross/>
-      <path class="chart__line chart__line--ended" d="{{ t.ended_path }}"/>
-      <path class="chart__line chart__line--new" d="{{ t.new_path }}"/>
-      {% for end in t.ends %}<circle class="chart__dot chart__dot--{{ end.series }}" cx="{{ end.x }}" cy="{{ end.y }}" r="4"/>{% endfor %}
-      {% for c in t.columns %}
-        <a class="chart__hit" href="{{ c.href }}" data-x="{{ c.center }}" data-day="{{ c.day }}" data-new="{{ c.new }}" data-ended="{{ c.ended }}" aria-label="{{ c.day }}: เข้า {{ c.new }} เรื่อง จบ {{ c.ended }} เรื่อง เปิดรายการเรื่องเข้า"><rect x="{{ c.x }}" y="{{ t.top }}" width="{{ c.width }}" height="{{ t.plot_h }}"/></a>
-      {% endfor %}
-    </svg>
-    <div class="chart-tip" hidden data-tip></div>
-  </div>
-  <details class="disclosure">
-    <summary>ดูเป็นตาราง</summary>
-    <div class="disclosure__body table-wrap"><table>
-      <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">เรื่องเข้า</th><th scope="col" class="num">เรื่องจบ</th></tr></thead>
+<div class="ov-grid">
+  <section class="panel viz ov-trend" aria-labelledby="r-trend">
+    <div class="panel__head"><h3 id="r-trend">เรื่องเข้าและเรื่องจบรายวัน</h3><span class="muted">{{ days }} วันล่าสุด</span></div>
+    <ul class="legend" aria-label="คำอธิบายสี">
+      <li><span class="legend__key legend__key--new" aria-hidden="true"></span>เรื่องเข้า {{ t.total_new }}</li>
+      <li><span class="legend__key legend__key--ended" aria-hidden="true"></span>เรื่องจบ {{ t.total_ended }}</li>
+    </ul>
+    <div class="chart" data-chart>
+      <svg viewBox="0 0 {{ t.width }} {{ t.height }}" role="img" aria-labelledby="r-trend r-trend-desc">
+        <desc id="r-trend-desc">กราฟเส้นจำนวนเรื่องเข้าและเรื่องจบต่อวัน ตัวเลขทุกวันอยู่ในตารางใต้กราฟ</desc>
+        {% for tick in t.ticks %}
+          <line class="chart__grid" x1="{{ t.left }}" x2="{{ t.right }}" y1="{{ tick.y }}" y2="{{ tick.y }}"/>
+          <text class="chart__tick" x="{{ t.tick_x }}" y="{{ tick.y }}" text-anchor="end" dominant-baseline="middle">{{ tick.label }}</text>
+        {% endfor %}
+        <line class="chart__base" x1="{{ t.left }}" x2="{{ t.right }}" y1="{{ t.bottom }}" y2="{{ t.bottom }}"/>
+        {% for label in t.labels %}<text class="chart__tick" x="{{ label.x }}" y="{{ t.label_y }}" text-anchor="middle">{{ label.label }}</text>{% endfor %}
+        <line class="chart__cross" x1="0" x2="0" y1="{{ t.top }}" y2="{{ t.bottom }}" visibility="hidden" data-cross/>
+        <path class="chart__line chart__line--ended" d="{{ t.ended_path }}"/>
+        <path class="chart__line chart__line--new" d="{{ t.new_path }}"/>
+        {% for end in t.ends %}<circle class="chart__dot chart__dot--{{ end.series }}" cx="{{ end.x }}" cy="{{ end.y }}" r="4"/>{% endfor %}
+        {% for c in t.columns %}
+          <a class="chart__hit" href="{{ c.href }}" data-x="{{ c.center }}" data-day="{{ c.day }}" data-new="{{ c.new }}" data-ended="{{ c.ended }}" aria-label="{{ c.day }}: เข้า {{ c.new }} เรื่อง จบ {{ c.ended }} เรื่อง เปิดรายการเรื่องเข้า"><rect x="{{ c.x }}" y="{{ t.top }}" width="{{ c.width }}" height="{{ t.plot_h }}"/></a>
+        {% endfor %}
+      </svg>
+      <div class="chart-tip" hidden data-tip></div>
+    </div>
+    <details class="disclosure">
+      <summary>ดูเป็นตาราง</summary>
+      <div class="disclosure__body table-wrap"><table>
+        <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">เรื่องเข้า</th><th scope="col" class="num">เรื่องจบ</th></tr></thead>
+        <tbody>
+          {% for c in t.columns reversed %}
+            <tr><td>{{ c.day }}</td><td class="num">{% if c.new %}<a href="{{ c.href }}">{{ c.new }}</a>{% else %}0{% endif %}</td><td class="num">{% if c.ended %}<a href="{{ c.ended_href }}">{{ c.ended }}</a>{% else %}0{% endif %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+    </details>
+  </section>
+
+  <section class="panel viz" aria-labelledby="r-status">
+    <div class="panel__head"><h3 id="r-status">เรื่องที่เปิดอยู่ตามสถานะ</h3><span class="muted">{{ report.total }} เรื่อง</span></div>
+    <div class="viz-bars">
+      {% for label, n, total, href in dash.statuses %}
+        <a class="viz-bar" href="{{ href }}"><span>{{ label }}</span><progress max="{{ total }}" value="{{ n }}" aria-label="{{ label }} {{ n }} เรื่อง">{{ n }}</progress><span class="num">{{ n }}</span></a>
+      {% empty %}<p class="muted">ไม่มีเรื่องที่เปิดอยู่</p>{% endfor %}
+    </div>
+  </section>
+</div>
+{% endwith %}
+
+<section class="section" aria-labelledby="ov-divisions">
+  <div class="section-head"><h2 id="ov-divisions">งานแต่ละกอง</h2><span class="muted">กดชื่อกองเพื่อเปิดคิว กดตัวเลขเพื่อเปิดเรื่อง</span></div>
+  {% if busy_cards %}
+    <div class="table-wrap"><table class="ov-table table--cards">
+      <thead><tr>
+        <th scope="col">กอง</th>
+        <th scope="col" class="num">ต้องทำ</th>
+        <th scope="col" class="num">ของฉัน</th>
+        <th scope="col" class="num">เกินเวลา</th>
+        {% if scope.is_admin and not chosen %}<th scope="col" class="num">ยกระดับ</th><th scope="col" class="num">ตอบรับเฉลี่ย</th>{% endif %}
+        <th scope="col"><span class="visually-hidden">รายงานของกอง</span></th>
+      </tr></thead>
       <tbody>
-        {% for c in t.columns reversed %}
-          <tr><td>{{ c.day }}</td><td class="num">{% if c.new %}<a href="{{ c.href }}">{{ c.new }}</a>{% else %}0{% endif %}</td><td class="num">{% if c.ended %}<a href="{{ c.ended_href }}">{{ c.ended }}</a>{% else %}0{% endif %}</td></tr>
+        {% for c in busy_cards %}
+          <tr>
+            <th scope="row"><a class="ov-table__division" href="{% url 'division-detail' c.division.code %}"><strong>{{ c.division.code }}</strong><span class="muted">{{ c.division.name }}</span></a></th>
+            <td class="num" data-label="ต้องทำ"><a href="{% url 'division-detail' c.division.code %}?tab=host">{{ c.open }}</a></td>
+            <td class="num" data-label="ของฉัน"><a href="{% url 'division-detail' c.division.code %}?tab=mine">{{ c.mine }}</a></td>
+            <td class="num{% if c.overdue %} t-alert{% endif %}" data-label="เกินเวลา"><a href="{% url 'division-detail' c.division.code %}?tab=host&amp;overdue=1">{{ c.overdue }}</a></td>
+            {% if scope.is_admin and not chosen %}
+              <td class="num{% if c.escalated %} t-alert{% endif %}" data-label="ยกระดับ">{% if c.escalated_url %}<a href="{{ c.escalated_url }}">{{ c.escalated }}</a>{% else %}—{% endif %}</td>
+              <td class="num" data-label="ตอบรับเฉลี่ย">{% if c.avg_ack is not None %}{{ c.avg_ack|duration }}{% else %}—{% endif %}</td>
+            {% endif %}
+            <td class="ov-table__more cell--end"><a href="{{ c.report_url }}">รายงาน <span aria-hidden="true">→</span></a></td>
+          </tr>
         {% endfor %}
       </tbody>
     </table></div>
-  </details>
+  {% else %}
+    <div class="attention attention--calm" role="status">{% icon "check" %} ไม่มีงานค้างในกองใด</div>
+  {% endif %}
+  {% if quiet_cards %}
+    <p class="muted ov-quiet">ไม่มีงานค้าง:
+      {% for c in quiet_cards %}<a href="{% url 'division-detail' c.division.code %}">{{ c.division.code }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}
+    </p>
+  {% endif %}
 </section>
-{% endwith %}
 
 <section class="section" aria-labelledby="ov-breakdown">
-  <div class="section-head"><h2 id="ov-breakdown">แยกให้เห็นว่าเรื่องอยู่ตรงไหน</h2><span class="muted">กดแถบเพื่อเปิดเรื่องในกลุ่มนั้น</span></div>
+  <div class="section-head"><h2 id="ov-breakdown">เรื่องที่เปิดอยู่อยู่ตรงไหน</h2><span class="muted">กดแถบเพื่อเปิดเรื่องในกลุ่มนั้น</span></div>
   <div class="panel-grid viz">
     <section class="panel" aria-labelledby="r-level">
-      <div class="panel__head"><h3 id="r-level">ระดับความด่วน</h3><span class="muted">เปิดอยู่ {{ report.total }} เรื่อง</span></div>
+      <div class="panel__head"><h3 id="r-level">ระดับความด่วน</h3></div>
       <div class="viz-bars">
         {% for key, n, total, href, step in dash.levels %}
           <a class="viz-bar viz-bar--{{ step }}" href="{{ href }}"><span>{% prio key %}</span><progress max="{{ total }}" value="{{ n }}" aria-label="{% if key == 'none' %}รอคัดกรอง{% else %}{{ key|level_name }}{% endif %} {{ n }} เรื่อง">{{ n }}</progress><span class="num">{{ n }}</span></a>
@@ -142,18 +198,18 @@
       </div>
     </section>
 
-    <section class="panel" aria-labelledby="r-status">
-      <div class="panel__head"><h3 id="r-status">สถานะ</h3></div>
+    <section class="panel" aria-labelledby="r-items">
+      <div class="panel__head"><h3 id="r-items">ของที่ถูกขอมากที่สุด</h3><span class="muted">สูงสุด 6 รายการ</span></div>
       <div class="viz-bars">
-        {% for label, n, total, href in dash.statuses %}
-          <a class="viz-bar" href="{{ href }}"><span>{{ label }}</span><progress max="{{ total }}" value="{{ n }}" aria-label="{{ label }} {{ n }} เรื่อง">{{ n }}</progress><span class="num">{{ n }}</span></a>
-        {% empty %}<p class="muted">ไม่มีเรื่องที่เปิดอยู่</p>{% endfor %}
+        {% for code, name, n, top, href in dash.items %}
+          <a class="viz-bar" href="{{ href }}"><span title="{{ name }}">{{ code }}</span><progress max="{{ top }}" value="{{ n }}" aria-label="{{ code }} {{ name }} {{ n }} เรื่อง">{{ n }}</progress><span class="num">{{ n }}</span></a>
+        {% empty %}<p class="muted">ไม่มีรายการของในเรื่องที่เปิดอยู่</p>{% endfor %}
       </div>
     </section>
 
     {% if dash.sections %}
     <section class="panel" aria-labelledby="r-section">
-      <div class="panel__head"><h3 id="r-section">แผนก</h3><span class="muted">เรื่องที่เปิดอยู่</span></div>
+      <div class="panel__head"><h3 id="r-section">แผนก</h3></div>
       <div class="viz-bars">
         {% for label, n, total, href in dash.sections %}
           <a class="viz-bar" href="{{ href }}"><span>{{ label }}</span><progress max="{{ total }}" value="{{ n }}" aria-label="{{ label }} {{ n }} เรื่อง">{{ n }}</progress><span class="num">{{ n }}</span></a>
@@ -162,64 +218,15 @@
     </section>
     {% endif %}
 
-    <section class="panel" aria-labelledby="r-items">
-      <div class="panel__head"><h3 id="r-items">รายการของที่ถูกขอมากที่สุด</h3><span class="muted">สูงสุด 6 รายการ</span></div>
-      <div class="viz-bars">
-        {% for code, name, n, top, href in dash.items %}
-          <a class="viz-bar" href="{{ href }}"><span title="{{ name }}">{{ code }}</span><progress max="{{ top }}" value="{{ n }}" aria-label="{{ code }} {{ name }} {{ n }} เรื่อง">{{ n }}</progress><span class="num">{{ n }}</span></a>
-        {% empty %}<p class="muted">ไม่มีรายการของในเรื่องที่เปิดอยู่</p>{% endfor %}
-      </div>
-    </section>
-
     <section class="panel" aria-labelledby="r-time">
-      <div class="panel__head"><h3 id="r-time">เวลาเฉลี่ย</h3><span class="muted">{{ days }} วันล่าสุด</span></div>
+      <div class="panel__head"><h3 id="r-time">เวลาทำงานเฉลี่ย</h3><span class="muted">{{ days }} วันล่าสุด</span></div>
       <dl class="kv">
-        <div><dt>ตอบรับเรื่อง</dt><dd><span class="strong">{{ report.avg_ack|duration }}</span> <a href="{{ dash.times.ack }}">จาก {{ report.ack_count }} ครั้ง</a> <span class="muted">(ยื่น → เริ่มคัดกรอง, ส่งต่อ → ตอบรับ)</span></dd></div>
-        <div><dt>แก้ปัญหา</dt><dd><span class="strong">{{ report.avg_resolve|duration }}</span> <a href="{{ dash.times.resolve }}">จาก {{ report.resolve_count }} เรื่อง</a> <span class="muted">(คัดกรองเสร็จ → บันทึกผล)</span></dd></div>
-        <div><dt>เบิก/คืนจนปิด</dt><dd><span class="strong">{{ report.avg_finish|duration }}</span> <a href="{{ dash.times.finish }}">จาก {{ report.finish_count }} เรื่อง</a> <span class="muted">(คัดกรองเสร็จ → ปิด)</span></dd></div>
+        <div><dt>แก้ปัญหา</dt><dd>{% if report.resolve_count %}<span class="strong">{{ report.avg_resolve|duration }}</span> <a href="{{ dash.times.resolve }}">จาก {{ report.resolve_count }} เรื่อง</a>{% else %}<span class="muted">ยังไม่มีเรื่องที่ทำเสร็จ</span>{% endif %} <span class="muted">(คัดกรองเสร็จ → บันทึกผล)</span></dd></div>
+        <div><dt>เบิก/คืนจนปิด</dt><dd>{% if report.finish_count %}<span class="strong">{{ report.avg_finish|duration }}</span> <a href="{{ dash.times.finish }}">จาก {{ report.finish_count }} เรื่อง</a>{% else %}<span class="muted">ยังไม่มีเรื่องที่ทำเสร็จ</span>{% endif %} <span class="muted">(คัดกรองเสร็จ → ปิด)</span></dd></div>
       </dl>
     </section>
   </div>
 </section>
-
-{% if table %}
-<section class="section" aria-labelledby="r-compare">
-  <div class="section-head"><h2 id="r-compare">เทียบทุกกอง</h2><span class="muted">กดการ์ดเพื่อดูรายงานของกองนั้น</span></div>
-  <div class="link-cards">
-    {% for r in table %}
-      <a class="link-card" href="{{ r.report_url }}">
-        <span class="link-card__head"><strong>{{ r.division.code }}</strong><span class="muted">{{ r.division.name }}</span></span>
-        <span class="link-card__figures">
-          <span><span class="link-card__value">{{ r.open }}</span>ต้องทำ</span>
-          <span{% if r.overdue %} class="t-alert"{% endif %}><span class="link-card__value">{{ r.overdue }}</span>เกินเวลา</span>
-          <span{% if r.escalated %} class="t-alert"{% endif %}><span class="link-card__value">{{ r.escalated }}</span>ยกระดับ</span>
-        </span>
-        <span class="link-card__more">ดูรายงานกองนี้ <span aria-hidden="true">→</span></span>
-      </a>
-    {% endfor %}
-  </div>
-  <details class="disclosure">
-    <summary>ดูเป็นตาราง (กดตัวเลขเพื่อเปิดเรื่อง)</summary>
-    <div class="disclosure__body table-wrap"><table>
-      <thead><tr><th scope="col">กอง</th><th scope="col" class="num">ต้องทำ</th><th scope="col" class="num">เกินเวลา</th><th scope="col" class="num">ยกระดับ</th><th scope="col" class="num">รอเขต</th><th scope="col" class="num">งานย่อยค้าง</th><th scope="col" class="num">ตอบรับเฉลี่ย</th><th scope="col" class="num">แก้ปัญหาเฉลี่ย</th></tr></thead>
-      <tbody>
-        {% for r in table %}
-          <tr>
-            <td><a href="{{ r.report_url }}">{{ r.division.code }}</a></td>
-            <td class="num"><a href="{{ r.links.open }}">{{ r.open }}</a></td>
-            <td class="num{% if r.overdue %} t-alert{% endif %}"><a href="{{ r.links.overdue }}">{{ r.overdue }}</a></td>
-            <td class="num{% if r.escalated %} t-alert{% endif %}"><a href="{{ r.links.escalated }}">{{ r.escalated }}</a></td>
-            <td class="num"><a href="{{ r.links.district }}">{{ r.district }}</a></td>
-            <td class="num"><a href="{{ r.links.children }}">{{ r.children }}</a></td>
-            <td class="num">{{ r.avg_ack|duration }}</td>
-            <td class="num">{{ r.avg_resolve|duration }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table></div>
-  </details>
-</section>
-{% endif %}
 
 {% if support_actions %}
 <section class="section" aria-labelledby="r-support">
@@ -236,5 +243,15 @@
   </details>
 </section>
 {% endif %}
+
+<section class="section ov-reference" aria-labelledby="ov-reference">
+  <h2 id="ov-reference" class="visually-hidden">ข้อมูลประกอบงาน</h2>
+  <div class="cluster">
+    <span class="muted">ข้อมูลประกอบงาน:</span>
+    <a class="btn btn--secondary" href="{% url 'duties' %}">หน้าที่ของกอง</a>
+    <a class="btn btn--secondary" href="{% url 'routing-words' %}">คำที่ระบบจำ</a>
+    <a class="btn btn--secondary" href="{% url 'pii' %}">{% icon "lock" "sm" %} ปิดข้อมูลก่อนส่ง AI</a>
+  </div>
+</section>
 {% endif %}
 {% endblock %}

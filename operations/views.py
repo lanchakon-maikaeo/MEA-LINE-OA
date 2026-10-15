@@ -172,6 +172,14 @@ def _run(request, action, success):
 
 @admin_required
 @require_safe
+def admin_home(request):
+    """หน้าแรกแอดมิน (15 ต.ค. 2569): what waits for an admin, then every settings page by
+    group. The groups, hints and badges come from admin_nav through the navigation context."""
+    return render(request, "operations/admin_home.html")
+
+
+@admin_required
+@require_safe
 def admin_users(request):
     grants = RoleGrant.objects.filter(revoked_at__isnull=True).select_related("division")
     users = list(
