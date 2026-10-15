@@ -112,6 +112,7 @@ urlpatterns = [
     ),
     path("console/admin/ai/", views.admin_ai, name="admin-ai"),
     path("console/admin/monitoring/", views.admin_monitoring, name="admin-monitoring"),
+    path("console/admin/line-menu/", views.admin_line_menu, name="admin-line-menu"),
     path(
         "console/admin/monitoring/report/",
         views.admin_monitoring_report,

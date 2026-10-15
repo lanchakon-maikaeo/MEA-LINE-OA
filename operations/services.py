@@ -460,7 +460,14 @@ def submit_case(actor, *, idempotency_key, payload):
             fields["return_reason"] = fields.pop("reason")
         now = timezone.now()
         cases = []
-        for owner, group in _route(submission.kind, lines, intake, now):
+        # เมนู LINE (15 ต.ค. 2569 Q20): the division chosen in the menu takes the whole request.
+        chosen = (
+            Division.objects.filter(code=submission.division_code, is_active=True).first()
+            if submission.division_code
+            else None
+        )
+        routes = [(chosen, lines)] if chosen and intake is None else None
+        for owner, group in routes or _route(submission.kind, lines, intake, now):
             case = Case.objects.create(
                 number=_next_number(submission.kind, now),
                 kind=submission.kind,
@@ -472,6 +479,7 @@ def submit_case(actor, *, idempotency_key, payload):
                 intake_note=submission.intake_note,
                 reported_at=submission.reported_at,
                 related_case=related or (cases[0] if cases else None),
+                menu_label=submission.menu_label,
                 submitted_at=now,
                 updated_at=now,
                 **fields,

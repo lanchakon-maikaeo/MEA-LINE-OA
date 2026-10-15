@@ -38,6 +38,7 @@ from operations.models import (
     Decision,
     District,
     EquipmentType,
+    LineMenuItem,
     PostbackToken,
     RegistrationRequest,
     Requester,
@@ -80,6 +81,15 @@ USAGE_FIELDS = [
     ("impact", "ข้อมูลเพิ่มเติม เช่น เลขผู้ใช้ไฟ (CA) ถ้ามี หรือกดข้าม", False),
     ("related_case_number", "เกี่ยวกับเรื่องเดิมไหม เลือกเรื่อง หรือกดข้าม", False),
 ]
+# เมนู LINE (15 ต.ค. 2569 Q18, Q20): a question to the division the menu named, and a problem
+# with a work system (SMG/AMR); neither lists items.
+INQUIRY_FIELDS = [
+    ("description", "พิมพ์สิ่งที่อยากถาม เช่น เลขใบเบิก เลขเครื่อง หรือเลขเรื่อง", True),
+]
+SYSTEM_FIELDS = [
+    ("description", "เล่าปัญหาที่พบ เช่น หน้าจอที่ใช้ เลขมิเตอร์ หรือช่วงเวลา", True),
+    ("impact", "ผลกระทบหรือข้อมูลเพิ่มเติม พิมพ์ต่อได้ หรือกดข้าม", False),
+]
 CATEGORY_LABELS = {
     EquipmentType.Category.METER: "มิเตอร์",
     EquipmentType.Category.TRANSFORMER: "หม้อแปลง",
@@ -117,6 +127,8 @@ FIELD_LABELS = {
 TOPIC_FIELD_LABELS = {
     "suggestion": {"description": "ข้อเสนอแนะ", "impact": "รายละเอียดเพิ่ม"},
     "usage": {"description": "เรื่องที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
+    "inquiry": {"description": "สิ่งที่สอบถาม"},
+    "system": {"description": "ปัญหาที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
 }
 MENU = [("ส่งเรื่องใหม่", "m=new"), ("เรื่องของฉัน", "m=mine"), ("ติดตามเรื่อง", "m=track")]
 MENU_WORDS = {label: data for label, data in MENU}
@@ -1172,6 +1184,10 @@ def off_step(draft, text):
 
 
 def _static_postback(turn, data, draft):
+    if data.startswith("m=item&id="):
+        return _menu_item(turn, data.split("=", 2)[2])
+    if data.startswith("m=ask&id="):
+        return _menu_ask(turn, data.split("=", 2)[2])
     if data == "m=new":
         return _start_new(turn)
     if data == "m=mine":
@@ -1181,6 +1197,108 @@ def _static_postback(turn, data, draft):
     if data.startswith("c="):
         return _case_detail(turn, data[2:])
     return _reprompt(turn, draft)
+
+
+def _menu_entry(pk):
+    if not str(pk).isdigit():
+        return None
+    return (
+        LineMenuItem.objects.filter(pk=int(pk), is_active=True)
+        .select_related("parent", "division")
+        .first()
+    )
+
+
+def _menu_label(item):
+    return f"{item.parent.label} · {item.label}" if item.parent_id else item.label
+
+
+def _menu_item(turn, pk):
+    """A tap on the rich menu or on one of a topic's choices (15 ต.ค. 2569 Q17–Q20)."""
+    item = _menu_entry(pk)
+    if item is None:
+        return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
+    action = item.action
+    A = LineMenuItem.Action
+    if action == A.TOPIC:
+        choices = list(item.choices.filter(is_active=True).order_by("position", "pk")[:12])
+        if not choices:
+            return _menu(turn, "หัวข้อนี้ยังไม่มีเรื่องให้เลือก")
+        turn.set_prompt()
+        turn.say(
+            f"{item.label}\nเลือกเรื่องที่ต้องการ",
+            [(c.label, f"m=item&id={c.pk}") for c in choices],
+        )
+        return
+    if action == A.NEW:
+        return _start_new(turn)
+    if action == A.MINE:
+        return _my_cases(turn)
+    if action == A.FIND:
+        return _track_prompt(turn)
+    if action == A.TRACK:
+        return _menu_track(turn, item)
+    only_problems = turn.internal or getattr(turn.requester, "is_internal", False)
+    if action == A.RETURN:
+        if only_problems:
+            return _menu(turn, "บัญชีเจ้าหน้าที่แจ้งได้เฉพาะปัญหาและข้อเสนอแนะ")
+        return _ask(turn, _menu_draft(turn, item, K.RETURN, "category"))
+    if action == A.PROBLEM:
+        topic = item.topic or Case.Topic.OTHER
+        draft = _menu_draft(turn, item, K.PROBLEM, "topic", topic=topic)
+        if topic in CATEGORY_LABELS:
+            return _set(turn, draft, "item", line={"category": topic})
+        return _set(turn, draft, _next_field(draft))
+    # GENERAL: a problem or suggestion; the rules choose the division.
+    return _ask(turn, _menu_draft(turn, item, K.PROBLEM, "topic", division=""))
+
+
+def _menu_draft(turn, item, kind, step, **data):
+    draft = ConversationDraft.objects.create(
+        identity=turn.identity,
+        requester=turn.requester,
+        kind=kind,
+        step=step,
+        data={
+            "lines": [],
+            "fields": {},
+            "division": item.division.code if item.division_id else "",
+            "menu_label": _menu_label(item),
+            **data,
+        },
+        updated_at=turn.now,
+    )
+    _activate(turn, draft)
+    return draft
+
+
+def _menu_track(turn, item):
+    """ติดตาม: the person's own cases at that division first; otherwise ask the division."""
+    cases = services.visible_cases(_actor(turn))
+    if item.division_id:
+        cases = cases.filter(owner_division_id=item.division_id)
+    if item.kind:
+        cases = cases.filter(kind=item.kind)
+    cases = list(cases.order_by("-submitted_at")[:5])
+    if not cases:
+        return _menu_ask(turn, item.pk, lead="ยังไม่พบเรื่องของคุณในหัวข้อนี้")
+    turn.set_prompt()
+    lines = [f"{c.number} · {_kind_label(c.kind, c.topic)} · {_status_label(c)}" for c in cases]
+    turn.say(
+        f"{_menu_label(item)}\n" + "\n".join(lines) + "\nกดเลขเรื่องเพื่อดูรายละเอียด หรือกด 'ถามเรื่องอื่น'",
+        [(c.number, f"c={c.number}") for c in cases] + [("ถามเรื่องอื่น", f"m=ask&id={item.pk}")],
+    )
+
+
+def _menu_ask(turn, pk, lead=""):
+    """A question to the division the menu named: an สอบถาม/ติดตาม case (Q18, Q35)."""
+    item = _menu_entry(pk)
+    if item is None:
+        return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
+    draft = _menu_draft(turn, item, K.PROBLEM, "topic", topic=Case.Topic.INQUIRY)
+    if lead:
+        turn.say(lead)
+    return _set(turn, draft, _next_field(draft))
 
 
 def _menu(turn, text):
@@ -1493,6 +1611,10 @@ def _skip_model(turn, draft):
 def _summary(draft):
     data = draft.data
     lines = [f"สรุปเรื่อง: {_kind_label(draft.kind, data.get('topic'))}"]
+    if data.get("menu_label"):
+        lines.append(f"หัวข้อ: {data['menu_label']}")
+    if data.get("division"):
+        lines.append(f"ส่งถึง: {data['division']}")
     items = {
         i.code: i
         for i in EquipmentType.objects.filter(code__in=[x["item_code"] for x in data["lines"]])
@@ -1546,6 +1668,10 @@ def _topics():
 def _kind_label(kind, topic=""):
     if topic in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
         return TOPIC_LABELS[topic]
+    if topic == Case.Topic.INQUIRY:
+        return "สอบถาม/ติดตาม"
+    if topic == Case.Topic.SYSTEM:
+        return "แจ้งปัญหาระบบงาน"
     return KIND_LABELS[kind]
 
 
@@ -1555,6 +1681,10 @@ def _fields(draft):
         return USAGE_FIELDS
     if topic == Case.Topic.SUGGESTION:
         return SUGGESTION_FIELDS
+    if topic == Case.Topic.INQUIRY:
+        return INQUIRY_FIELDS
+    if topic == Case.Topic.SYSTEM:
+        return SYSTEM_FIELDS
     return FIELDS[draft.kind]
 
 
@@ -1786,6 +1916,10 @@ def _payload(draft):
         payload["topic"] = data["topic"]
     if data.get("location"):
         payload["latitude"], payload["longitude"] = data["location"]
+    if data.get("division"):
+        payload["division_code"] = data["division"]
+    if data.get("menu_label"):
+        payload["menu_label"] = data["menu_label"]
     for name, value in data["fields"].items():
         if value:
             payload[name] = value

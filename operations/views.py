@@ -28,6 +28,7 @@ from operations import (
     forms,
     identity,
     inventory,
+    line_menu,
     monitoring,
     notifications,
     options,
@@ -55,6 +56,7 @@ from operations.models import (
     Employee,
     EquipmentType,
     FakeStock,
+    LineMenuItem,
     LineQuotaSnapshot,
     NotificationDelivery,
     OutboxEvent,
@@ -1064,6 +1066,80 @@ def admin_monitoring(request):
         }
     )
     return render(request, "operations/admin_monitoring.html", view)
+
+
+def _drawn_picture(value):
+    """The menu picture the browser drew, sent as a data: URL (line_menu.js)."""
+    import base64
+    import binascii
+
+    head, _, body = str(value or "").partition(",")
+    if not head.startswith("data:image/") or ";base64" not in head:
+        return b""
+    try:
+        return base64.b64decode(body, validate=True)
+    except (binascii.Error, ValueError):
+        return b""
+
+
+@admin_required
+def admin_line_menu(request):
+    """เมนู LINE (15 ต.ค. 2569 Q17–Q20, Q32): the buttons as data; publishing replaces the live
+    rich menu only after the admin ticks the confirmation."""
+    if request.method == "POST":
+        post, reason = request.POST, request.POST.get("reason", "")
+        action = post.get("action")
+        if action == "save":
+            item = get_object_or_404(LineMenuItem, pk=post.get("item"))
+            _run(
+                request,
+                lambda: line_menu.save(request.user, item, post, reason),
+                "บันทึกแล้ว บอทใช้ค่าใหม่ทันที",
+            )
+        elif action == "add":
+            parent = LineMenuItem.objects.filter(pk=post.get("parent") or None).first()
+            _run(
+                request,
+                lambda: line_menu.add(request.user, post.get("place", ""), parent, reason),
+                "เพิ่มปุ่มแล้ว ปุ่มใหม่ยังปิดอยู่ แก้ชื่อแล้วเปิดใช้ก่อน",
+            )
+        elif action == "publish":
+            if post.get("confirm") != "1":
+                messages.error(request, "ติ๊กยืนยันก่อน เพราะเมนูจริงของ LINE OA จะเปลี่ยนทันที")
+            else:
+                upload = request.FILES.get("picture")
+                picture = upload.read() if upload else _drawn_picture(post.get("drawn"))
+                _run(
+                    request,
+                    lambda: line_menu.publish(request.user, picture, reason),
+                    "เปลี่ยนเมนูใน LINE แล้ว",
+                )
+        return redirect("admin-line-menu")
+    items = list(LineMenuItem.objects.select_related("division").order_by("position", "pk"))
+    choices = defaultdict(list)
+    for item in items:
+        if item.parent_id:
+            choices[item.parent_id].append(item)
+    tiles = [t for t in items if t.place == LineMenuItem.Place.TILE]
+    for tile in tiles:
+        tile.options = choices[tile.pk]
+    actions = dict(LineMenuItem.Action.choices)
+    return render(
+        request,
+        "operations/admin_line_menu.html",
+        {
+            "tiles": tiles,
+            "bar": [i for i in items if i.place == LineMenuItem.Place.BAR],
+            "divisions": Division.objects.filter(is_active=True).order_by("code"),
+            "tile_actions": [(a, actions[a]) for a in actions if a in line_menu.TILE_ACTIONS],
+            "choice_actions": [(a, actions[a]) for a in actions if a in line_menu.CHOICE_ACTIONS],
+            "bar_actions": [(a, actions[a]) for a in actions if a in line_menu.BAR_ACTIONS],
+            "topics": list(line_menu.TOPICS.items()),
+            "kinds": list(line_menu.KINDS.items()),
+            "drawing": line_menu.drawing(),
+            "line_ready": bool(settings.LINE_CHANNEL_ACCESS_TOKEN),
+        },
+    )
 
 
 EVIDENTLY_CSP = (

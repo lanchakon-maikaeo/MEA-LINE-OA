@@ -10,6 +10,7 @@
   <script src="{% static 'operations/htmx.min.js' %}" defer></script>
   <script src="{% static 'operations/app.js' %}" defer></script>
   <script src="{% static 'operations/tour.js' %}" defer></script>
+  {% block scripts %}{% endblock %}
 </head>
 <body data-page="{% block page_id %}{% endblock %}" data-kind="{% block page_kind %}{% endblock %}">
   <a class="skip-link" href="#main">ข้ามไปเนื้อหา</a>

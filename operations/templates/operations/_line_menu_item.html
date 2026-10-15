@@ -1,0 +1,21 @@
+{# One button of the LINE menu as a form; `actions` are the actions this kind of button may use. #}
+<form class="menu-item-form" method="post">
+  {% csrf_token %}<input type="hidden" name="action" value="save"><input type="hidden" name="item" value="{{ item.pk }}">
+  <div class="menu-item-form__grid">
+    <div class="field"><label for="m{{ item.pk }}-label">ชื่อปุ่ม (ไม่เกิน 20 ตัวอักษร)</label><input id="m{{ item.pk }}-label" name="label" value="{{ item.label }}" maxlength="20" required></div>
+    {% if item.place != "choice" %}<div class="field"><label for="m{{ item.pk }}-note">ข้อความบรรทัดสอง</label><input id="m{{ item.pk }}-note" name="note" value="{{ item.note }}" maxlength="120"></div>{% endif %}
+    <div class="field"><label for="m{{ item.pk }}-action">กดแล้ว</label><select id="m{{ item.pk }}-action" name="item_action">{% for value, label in actions %}<option value="{{ value }}"{% if value == item.action %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    {% if item.place != "bar" %}<div class="field"><label for="m{{ item.pk }}-division">ส่งถึงกอง</label><select id="m{{ item.pk }}-division" name="division"><option value="">ไม่ระบุ (กติกาเลือกกอง)</option>{% for d in divisions %}<option value="{{ d.code }}"{% if item.division_id == d.pk %} selected{% endif %}>{{ d.code }} {{ d.name }}</option>{% endfor %}</select></div>{% endif %}
+    {% if item.place == "choice" %}
+    <div class="field"><label for="m{{ item.pk }}-kind">ติดตามเรื่องชนิด</label><select id="m{{ item.pk }}-kind" name="kind">{% for value, label in kinds %}<option value="{{ value }}"{% if value == item.kind %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="m{{ item.pk }}-topic">หัวข้อปัญหา</label><select id="m{{ item.pk }}-topic" name="topic">{% for value, label in topics %}<option value="{{ value }}"{% if value == item.topic %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    {% endif %}
+    <div class="field"><label for="m{{ item.pk }}-position">ลำดับ</label><input id="m{{ item.pk }}-position" name="position" type="number" min="0" max="99" value="{{ item.position }}"></div>
+  </div>
+  <label class="choice"><input type="checkbox" name="is_active" value="1"{% if item.is_active %} checked{% endif %}> <span>เปิดใช้ปุ่มนี้</span></label>
+  <div class="cluster">
+    <label class="visually-hidden" for="m{{ item.pk }}-reason">เหตุผล</label>
+    <input id="m{{ item.pk }}-reason" name="reason" maxlength="500" required placeholder="เหตุผลที่แก้">
+    <button class="btn btn--sm" type="submit">บันทึก</button>
+  </div>
+</form>

@@ -1,0 +1,81 @@
+{% extends "operations/admin_base.html" %}
+{% load static %}
+{% block title %}เมนู LINE · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block scripts %}<script src="{% static 'operations/line_menu.js' %}" defer></script>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>เมนู LINE</h1>
+    <p class="lede">ปุ่มบนเมนูของ LINE OA นอกจากการพิมพ์แจ้ง แก้ชื่อปุ่ม กองปลายทาง และลำดับได้ บอทใช้ค่าใหม่ทันที ส่วนรูปเมนูใน LINE จะเปลี่ยนเมื่อกด "อัปเดตเมนูใน LINE"</p>
+  </div>
+</div>
+
+<section class="section" aria-labelledby="lm-preview">
+  <div class="section-head"><h2 id="lm-preview">ตัวอย่างรูปเมนู</h2><span class="muted">วาดจากปุ่มที่เปิดใช้ หัวข้อสูงสุด 6 ปุ่ม แถบล่างสูงสุด 4 ปุ่ม</span></div>
+  {{ drawing|json_script:"menu-drawing" }}
+  <canvas class="menu-canvas" width="2500" height="1686" data-menu-canvas aria-label="ตัวอย่างรูปเมนู LINE"></canvas>
+</section>
+
+<section class="section" aria-labelledby="lm-tiles">
+  <div class="section-head"><h2 id="lm-tiles">หัวข้อ</h2><span class="muted">{{ tiles|length }} หัวข้อ</span></div>
+  {% for tile in tiles %}
+  <details class="disclosure"{% if forloop.first %} open{% endif %}>
+    <summary>{{ tile.position }}. {{ tile.label }}{% if tile.division %} · {{ tile.division.code }}{% endif %}{% if not tile.is_active %} <span class="tag tag--muted">ปิด</span>{% endif %} <span class="muted">{{ tile.options|length }} ปุ่มย่อย</span></summary>
+    <div class="disclosure__body">
+      {% include "operations/_line_menu_item.html" with item=tile actions=tile_actions %}
+      {% if tile.action == "topic" %}
+      <h3 class="mt-18">ปุ่มย่อย</h3>
+      {% for choice in tile.options %}
+        <div class="menu-choice">
+          <p class="menu-choice__title">{{ choice.label }}{% if not choice.is_active %} <span class="tag tag--muted">ปิด</span>{% endif %}</p>
+          {% include "operations/_line_menu_item.html" with item=choice actions=choice_actions %}
+        </div>
+      {% empty %}<p class="muted">ยังไม่มีปุ่มย่อย</p>{% endfor %}
+      <form class="cluster mt-18" method="post">
+        {% csrf_token %}<input type="hidden" name="action" value="add"><input type="hidden" name="place" value="choice"><input type="hidden" name="parent" value="{{ tile.pk }}">
+        <label class="visually-hidden" for="add-{{ tile.pk }}">เหตุผล</label>
+        <input id="add-{{ tile.pk }}" name="reason" maxlength="500" required placeholder="เหตุผลที่เพิ่ม">
+        <button class="btn btn--secondary btn--sm" type="submit">เพิ่มปุ่มย่อย</button>
+      </form>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+  <form class="cluster mt-18" method="post">
+    {% csrf_token %}<input type="hidden" name="action" value="add"><input type="hidden" name="place" value="tile">
+    <label class="visually-hidden" for="add-tile">เหตุผล</label>
+    <input id="add-tile" name="reason" maxlength="500" required placeholder="เหตุผลที่เพิ่ม">
+    <button class="btn btn--secondary btn--sm" type="submit">เพิ่มหัวข้อ</button>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="lm-bar">
+  <div class="section-head"><h2 id="lm-bar">แถบล่าง</h2></div>
+  {% for item in bar %}
+  <details class="disclosure">
+    <summary>{{ item.position }}. {{ item.label }}{% if not item.is_active %} <span class="tag tag--muted">ปิด</span>{% endif %}</summary>
+    <div class="disclosure__body">{% include "operations/_line_menu_item.html" with item=item actions=bar_actions %}</div>
+  </details>
+  {% endfor %}
+  <form class="cluster mt-18" method="post">
+    {% csrf_token %}<input type="hidden" name="action" value="add"><input type="hidden" name="place" value="bar">
+    <label class="visually-hidden" for="add-bar">เหตุผล</label>
+    <input id="add-bar" name="reason" maxlength="500" required placeholder="เหตุผลที่เพิ่ม">
+    <button class="btn btn--secondary btn--sm" type="submit">เพิ่มปุ่มแถบล่าง</button>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="lm-publish">
+  <div class="section-head"><h2 id="lm-publish">อัปเดตเมนูใน LINE</h2></div>
+  {% if not line_ready %}<div class="notice notice--info mb-24" role="status"><div class="notice__body">เครื่องนี้ยังไม่ได้ตั้งค่า LINE จึงเปลี่ยนเมนูจริงไม่ได้</div></div>{% endif %}
+  <p class="muted">ใช้รูปที่วาดไว้ด้านบน หรืออัปโหลดรูปที่ออกแบบเอง (2500 × 1686 พิกเซล JPEG หรือ PNG ไม่เกิน 1 MB ตำแหน่งปุ่มต้องตรงกับรูปตัวอย่าง)</p>
+  <form method="post" enctype="multipart/form-data" data-menu-publish>
+    {% csrf_token %}<input type="hidden" name="action" value="publish"><input type="hidden" name="drawn" value="" data-menu-drawn>
+    <div class="field"><label for="lm-picture">รูปที่ออกแบบเอง (ไม่บังคับ)</label><input id="lm-picture" type="file" name="picture" accept="image/jpeg,image/png"></div>
+    <div class="field"><label for="lm-reason">เหตุผล</label><input id="lm-reason" name="reason" maxlength="500" required></div>
+    <label class="choice"><input type="checkbox" name="confirm" value="1" required> <span>ยืนยันว่าเปลี่ยนเมนูจริงของ LINE OA ทันที ทุกคนที่เพิ่มเพื่อนจะเห็นเมนูใหม่</span></label>
+    <button class="btn btn--sm" type="submit"{% if not line_ready %} disabled{% endif %}>อัปเดตเมนูใน LINE</button>
+  </form>
+</section>
+{% endblock %}

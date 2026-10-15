@@ -10,7 +10,7 @@
 </ol>
 
 <div class="case-head" data-tour="case-head">
-  <span class="eyebrow">{{ case.get_kind_display }} · ยื่นทาง {{ case.get_channel_display }}</span>
+  <span class="eyebrow">{{ case.get_kind_display }} · ยื่นทาง {{ case.get_channel_display }}{% if case.menu_label %} · เมนู {{ case.menu_label }}{% endif %}</span>
   <div class="case-head__title">
     <h1>{{ case.number }}</h1>
     {% prio page.level %}

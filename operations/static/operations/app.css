@@ -1239,3 +1239,10 @@ a.kpi--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 .kpi--dark progress::-moz-progress-bar { background: var(--on-primary); }
 .kpi--dark progress.is-alert::-webkit-progress-value { background: var(--danger); }
 .kpi--dark progress.is-alert::-moz-progress-bar { background: var(--danger); }
+
+/* เมนู LINE (15 ต.ค. 2569 Q32): the drawn picture and one form per button */
+.menu-canvas { display: block; width: 100%; height: auto; border: 1px solid var(--hairline-soft); border-radius: 18px; background: var(--canvas); }
+.menu-item-form__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 var(--s-18); }
+.menu-item-form .cluster input { flex: 1 1 220px; }
+.menu-choice { padding: var(--s-12) 0; border-top: 1px solid var(--hairline-soft); }
+.menu-choice__title { margin: 0 0 var(--s-8); font-weight: 600; }

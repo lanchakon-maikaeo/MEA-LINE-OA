@@ -412,6 +412,9 @@ class Case(models.Model):
         OTHER = "other", "อุปกรณ์อื่น"
         USAGE = "usage", "การใช้ไฟฟ้า"
         SUGGESTION = "suggestion", "ข้อเสนอแนะ"
+        # เมนู LINE (15 ต.ค. 2569 Q18, Q20): a question to a division, and a work system's problem.
+        INQUIRY = "inquiry", "สอบถาม/ติดตาม"
+        SYSTEM = "system", "ระบบงาน"
 
     class Channel(models.TextChoices):
         LINE = "line", "LINE"
@@ -471,6 +474,8 @@ class Case(models.Model):
     # ตัวอย่าง (15 ต.ค. 2569 Q33): kept from the demo for staff to look at; in the queues with a
     # tag, never in reports, deadlines or messages (purge_demo_data sets it).
     is_example = models.BooleanField(default=False)
+    # The LINE menu choice the case came from, e.g. "ระบบ SMG, ระบบ AMR · การจัดทำบิล" (Q20).
+    menu_label = models.CharField(max_length=120, blank=True)
 
     class Meta:
         ordering = ["-submitted_at"]
@@ -2168,6 +2173,49 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} {self.name}"
+
+
+class LineMenuItem(models.Model):
+    """เมนู LINE (15 ต.ค. 2569 Q17–Q20, Q32): a tile or a bottom-bar button of the rich menu, or
+    a choice inside a tile. Admins change labels, destinations and order with a reason; the
+    rich menu on LINE changes only when an admin publishes it."""
+
+    class Place(models.TextChoices):
+        TILE = "tile", "ปุ่มใหญ่ของเมนู"
+        BAR = "bar", "แถบล่างของเมนู"
+        CHOICE = "choice", "ปุ่มย่อยในหัวข้อ"
+
+    class Action(models.TextChoices):
+        TOPIC = "topic", "เปิดปุ่มย่อยของหัวข้อนี้"
+        TRACK = "track", "ติดตาม: แสดงเรื่องของผู้ใช้ ถ้าไม่มีให้ถามกองโดยตรง"
+        RETURN = "return", "เริ่มคำขอคืนส่งถึงกองนี้"
+        PROBLEM = "problem", "เริ่มแจ้งปัญหาส่งถึงกองนี้"
+        GENERAL = "general", "แจ้งปัญหาหรือข้อเสนอแนะ (กติกาเลือกกอง)"
+        NEW = "new", "ส่งเรื่องใหม่ (ผู้ใช้เลือกชนิดเอง)"
+        MINE = "mine", "เรื่องของฉัน"
+        FIND = "find", "ติดตามด้วยเลขเรื่อง"
+
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.CASCADE, related_name="choices"
+    )
+    place = models.CharField(max_length=8, choices=Place.choices)
+    position = models.PositiveSmallIntegerField(default=0)
+    label = models.CharField(max_length=20)  # LINE allows 20 characters on a button
+    note = models.CharField(max_length=120, blank=True)  # the tile's second line, or a hint
+    action = models.CharField(max_length=8, choices=Action.choices)
+    division = models.ForeignKey(
+        "Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    kind = models.CharField(max_length=16, blank=True)  # which own cases "track" lists
+    topic = models.CharField(max_length=16, blank=True)  # the problem topic a choice starts
+    is_active = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["place", "position", "pk"]
 
 
 class MonitoringDay(models.Model):

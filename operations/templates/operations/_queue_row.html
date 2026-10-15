@@ -3,7 +3,7 @@
   <div class="qrow__main">
     <div class="qrow__title">
       <a class="qrow__link" href="{% url 'case-detail' row.case.number %}">{{ row.case.number }}</a>
-      <span class="qrow__sub">{{ row.case.get_kind_display }} · {{ row.case.district.name }}</span>
+      <span class="qrow__sub">{% if row.case.menu_label %}{{ row.case.menu_label }}{% else %}{{ row.case.get_kind_display }}{% endif %} · {{ row.case.district.name }}</span>
     </div>
     {% if row.summary %}<p class="qrow__summary">{{ row.summary }}</p>{% endif %}
     {% if row.flags %}
