@@ -15,6 +15,7 @@
     <h1>{{ case.number }}</h1>
     {% prio page.level %}
     {% status_tag case %}
+    {% if case.is_example %}<span class="tag tag--outline" title="ไม่นับในรายงาน ไม่มีกรอบเวลา และไม่ส่งข้อความหาใคร">ตัวอย่าง</span>{% endif %}
   </div>
   <dl class="facts">
     <div><dt>กองเจ้าภาพ</dt><dd>{{ case.owner_division.code }} {{ case.owner_division.name }}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>

@@ -22,6 +22,9 @@
 #                                  taking writes, the Mac data is restored on E5, move_manifest
 #                                  must match, then ngrok starts on E5. A mismatch stops here.
 #   deploy/e5-move.sh back-to-mac  undo a cutover (E5 writes after it are NOT carried back)
+#   deploy/e5-move.sh purge-demo [--keep N1,N2 --apply --username U --reason R]
+#                                  remove the demo data (15 Oct 2026): a dry run that lists what
+#                                  would go unless --apply, which takes a fresh backup first
 #   deploy/e5-move.sh ssh [cmd]    a shell (or one command) on E5 through the tunnel
 #
 # Nothing here types a credential: LINE, AI, backup keys and the ngrok authtoken are put on the
@@ -441,6 +444,20 @@ EOF
   say "cutover done: LINE → ngrok → E5; staff web https://$PUBLIC_HOST/ . The Mac stack is stopped and keeps its data for 7 days (Q17)."
 }
 
+purge_demo() {
+  local arg apply=0
+  for arg in "$@"; do [ "$arg" = --apply ] && apply=1; done
+  on_e5 'sudo /usr/local/sbin/faoj status' >/dev/null 2>&1 || die "E5 has no deployed stack"
+  if [ "$apply" = 1 ]; then
+    say "fresh database backup before anything is removed (faoj backup diff)"
+    on_e5 'sudo /usr/local/sbin/faoj backup diff' || die "the backup failed: nothing was removed"
+  fi
+  # The migration (owner) role: history tables are append-only for the app's role.
+  { printf '%s\n' "$REMOTE_LIB"; cat <<'EOF'; } | as_root "$(printf '%q ' "$@")"
+dc run --rm -T migrate /app/.venv/bin/python manage.py purge_demo_data "$@"
+EOF
+}
+
 back_to_mac() {
   say "E5: stop ngrok and close (data written on E5 since the cutover stays on E5 only)"
   { echo "$REMOTE_LIB"; echo 'dc --profile ngrok stop ngrok >/dev/null; faoj maintenance on'; } | as_root
@@ -463,6 +480,7 @@ case "${1:-}" in
   deploy) deploy_e5;;
   cutover) cutover;;
   back-to-mac) back_to_mac;;
+  purge-demo) shift; purge_demo "$@";;
   ssh) shift; on_e5 "$@";;
-  *) sed -n '2,29p' "$0"; exit 2;;
+  *) sed -n '2,31p' "$0"; exit 2;;
 esac

@@ -185,6 +185,8 @@ def _case_identity(case):
 def _create(event, kind, level, identity, text, case=None, registration=None, message=None):
     if identity is None:
         return None  # Requester without LINE: staff follow up; email arrives later.
+    if case is not None and case.is_example:
+        return None  # ตัวอย่าง (15 ต.ค. 2569 Q33): nobody gets a message about it
     now = timezone.now()
     delay = timedelta(0)
     if level == N.Level.NORMAL:

@@ -1253,6 +1253,7 @@ def sweep_clocks(now=None):
         due = (
             AckClock.objects.select_for_update(skip_locked=True)
             .filter(stopped_at__isnull=True, due_at__lte=now, paused_at__isnull=True)
+            .exclude(case__is_example=True)  # ตัวอย่าง: no reminders or escalations
             .select_related("case", "division")
         )
         for clock in due:

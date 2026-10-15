@@ -124,6 +124,8 @@ def plan(kind, key, case, users, detail="", text=None):
     with a linked LINE get the important ones there too (ADR 0010), whether email is on or not."""
     from operations import staff_line  # local: staff_line reads subjects from this module
 
+    if case is not None and case.is_example:
+        return []  # ตัวอย่าง (15 ต.ค. 2569 Q33): no email or LINE about it
     staff_line.plan(kind, key, case, users)
     if not enabled():
         return []

@@ -462,6 +462,9 @@ class Case(models.Model):
     submitted_at = models.DateTimeField()
     updated_at = models.DateTimeField()
     ended_at = models.DateTimeField(null=True, blank=True)
+    # ตัวอย่าง (15 ต.ค. 2569 Q33): kept from the demo for staff to look at; in the queues with a
+    # tag, never in reports, deadlines or messages (purge_demo_data sets it).
+    is_example = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-submitted_at"]

@@ -217,7 +217,7 @@ def apply_filters(cases, filters):
             | Q(triage__effective_priority="", triage__suggested_priority=filters.priority)
         )
     if filters.overdue:
-        cases = cases.filter(
+        cases = cases.exclude(is_example=True).filter(
             Exists(
                 AckClock.objects.filter(
                     case=OuterRef("pk"),
@@ -387,10 +387,12 @@ def build_rows(cases, now):
             clock=nearest,
             remaining=remaining_minutes(nearest, now, calendar) if nearest and running else None,
             # Past due now (a later policy may have moved a reminded deadline).
-            overdue=any(c.due_at <= now for c in running),
+            overdue=not case.is_example and any(c.due_at <= now for c in running),
             escalated=any(c.escalated_at for c in open_clocks),
         )
         recommendation = triage.current_recommendation if triage else None
+        if case.is_example:
+            row.flags.append(("info", "ตัวอย่าง ไม่นับในรายงาน"))
         if triage and triage.priority_floor == "P0":
             row.flags.append(("alert", "แจ้งเหตุอันตราย"))
         if row.escalated:

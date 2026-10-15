@@ -59,7 +59,7 @@ class _Sets:
         self.user, self.division, self.now, self.days = user, division, now, days
         self.admin_all = division is None
         self.since = now - timedelta(days=days)
-        self.visible = queues.visible(user)
+        self.visible = queues.visible(user).exclude(is_example=True)  # ตัวอย่าง: never counted
         self.owned = (
             self.visible if division is None else self.visible.filter(owner_division=division)
         )
