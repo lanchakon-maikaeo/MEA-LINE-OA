@@ -456,7 +456,26 @@ class OptionsTests(OrgTestCase):
 
 
 class RegistryTests(OrgTestCase):
+    def test_the_registry_is_for_admins_only_by_default(self):
+        # 15 ต.ค. 2569 Q6: admins hold the registry; ตัวเลือกระบบ gives it back to divisions.
+        _, meter = self.submit(withdrawal(("MTR_SYN_A", "1")))
+        d = RegistryDiscrepancy.objects.create(
+            kind="not_found", case=meter, document_number="49001", opened_at=timezone.now()
+        )
+        self.assertTrue(registry.admins_only())
+        self.assertFalse(registry.may_open(self.kcw))
+        self.assertFalse(registry.may_decide(self.kcw, d))
+        self.assertTrue(registry.may_decide(self.admin, d))
+        client = Client()
+        client.force_login(self.kcw)
+        self.assertNotContains(client.get("/console/"), 'href="/registry/"')
+        options.change(self.admin, options.REGISTRY_ACCESS, "staff", "แต่ละกองตัดสินเอง")
+        self.assertTrue(registry.may_decide(self.kcw, d))
+        self.assertFalse(registry.may_decide(self.admin, d))  # admins read only then
+        self.assertContains(client.get("/console/"), 'href="/registry/"')
+
     def test_each_division_sees_and_decides_its_own_discrepancies(self):
+        options.change(self.admin, options.REGISTRY_ACCESS, "staff", "แต่ละกองตัดสินเอง")
         self.assertTrue(registry.per_division())
         _, meter = self.submit(withdrawal(("MTR_SYN_A", "1")))
         _, trf = self.submit(withdrawal(("TRF_SYN_A", "1")))

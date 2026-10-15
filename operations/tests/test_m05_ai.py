@@ -14,7 +14,7 @@ from django.core.management.base import CommandError
 from django.test import Client, override_settings
 from django.utils import timezone
 
-from operations import ai, ai_eval, ai_harness, ai_screen, line_api, pii
+from operations import ai, ai_eval, ai_harness, ai_screen, line_api, options, pii
 from operations.management.commands.run_worker import run_once
 from operations.models import (
     AIConfigVersion,
@@ -205,7 +205,8 @@ class ConfigurationTests(AITestCase):
         self.assertIsNotNone(stored.rotated_at)
         self.assertEqual(self.llm.calls[-1]["key"], RAW_KEY)  # earlier calls used the old key
 
-    def test_only_developer_admins_change_ai_configuration(self):
+    def test_only_ai_editors_change_ai_configuration(self):
+        # 15 ต.ค. 2569 Q23: every admin looks; developer admins change unless ai_editors=admin.
         for user in (self.admin, self.meter):
             with self.subTest(user=user.username):
                 with self.assertRaises(PermissionDenied):
@@ -216,17 +217,29 @@ class ConfigurationTests(AITestCase):
                     ai.activate(user, self.version, "ลอง")
                 client = Client()
                 client.force_login(user)
-                self.assertEqual(client.get("/console/admin/ai/").status_code, 403)
                 self.assertEqual(
                     client.post(
                         f"/console/admin/ai/activate/{self.version.pk}/", {"reason": "x"}
                     ).status_code,
                     403,
                 )
+        admin, meter = Client(), Client()
+        admin.force_login(self.admin)
+        meter.force_login(self.meter)
+        self.assertEqual(meter.get("/console/admin/ai/").status_code, 403)
+        page = admin.get("/console/admin/ai/")
+        self.assertContains(page, "ดูได้อย่างเดียว")
+        self.assertNotContains(page, "/console/admin/ai/credential/")
         with self.assertRaises(CommandError):
             call_command(
                 "import_ai_config", "--username", "admin", "--reason", "ลอง", stdout=StringIO()
             )
+        options.change(None, options.AI_EDITORS, "admin", "ให้แอดมินทุกคนแก้การตั้งค่า AI")
+        page = admin.get("/console/admin/ai/")
+        self.assertNotContains(page, "ดูได้อย่างเดียว")
+        self.assertContains(page, "/console/admin/ai/credential/")
+        with self.assertRaises(PermissionDenied):
+            ai.activate(self.meter, self.version, "ลอง")
 
     def test_only_https_to_allowed_provider_hosts(self):
         for url in (

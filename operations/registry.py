@@ -23,7 +23,7 @@ from django.db import connection, transaction
 from django.db.models import Exists, Max, OuterRef, Q
 from django.utils import timezone
 
-from operations import attachments, identity, inventory, policy
+from operations import attachments, identity, inventory, options, policy
 from operations.contracts import ErrorCode, fail
 from operations.models import (
     Attachment,
@@ -135,12 +135,19 @@ def per_division():
     return registry_division() is None
 
 
+def admins_only():
+    """ตัวเลือกระบบ registry_access (15 ต.ค. 2569 Q6): admins hold the registry, else divisions."""
+    return options.get(options.REGISTRY_ACCESS) == "admin"
+
+
 def is_registry_staff(user):
-    """Decides ส่วนต่างทะเบียน: the registry unit's staff, or (per division) any division's staff
-    for their own (see `may_decide`)."""
+    """Decides ส่วนต่างทะเบียน: the admins when the registry is admins only; else the registry
+    unit's staff, or (per division) any division's staff for their own (see `may_decide`)."""
     if not getattr(user, "is_authenticated", False):
         return False
     scope = identity.staff_scope(user)
+    if admins_only():
+        return scope.is_admin
     division = registry_division()
     if division is None:
         return scope.is_support or bool(scope.division_roles)
@@ -161,6 +168,8 @@ def may_decide(user, d):
     if not is_registry_staff(user):
         return False
     scope = identity.staff_scope(user)
+    if admins_only():
+        return True
     return (
         not per_division()
         or scope.is_support

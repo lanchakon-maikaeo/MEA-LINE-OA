@@ -71,7 +71,7 @@ class RequesterListTests(RequesterTestCase):
         listing = self.client.get(LIST)
         self.assertContains(listing, "ยืนยันรหัสพนักงาน SYN10001")
         self.assertContains(listing, "พนักงานช่าง")
-        self.assertContains(listing, "ผู้แจ้ง · แอดมินระบบ")
+        self.assertContains(listing, "ผู้ใช้ LINE OA · แอดมินระบบ")
         self.assertContains(listing, page(verified.pk))
         self.assertContains(listing, page(staff.pk))
         self.assertNotContains(listing, page(anonymous.pk))

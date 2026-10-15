@@ -39,6 +39,8 @@ from operations.models import Case, District, Division, Priority, Role, RoleGran
 
 ADMIN_URLS = ("admin-",)
 REFERENCE_URLS = {"pii", "routing-words", "duties"}
+ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
+ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
 
 
 def navigation(request):
@@ -67,14 +69,22 @@ def navigation(request):
     else:
         section = "queue"
     profile = getattr(user, "staff_profile", None)
+    # The division switch shows the queue open now, else the one chosen last (15 ต.ค. 2569: on
+    # ทุกกอง it kept showing the division opened before).
+    code = match.kwargs.get("code") if match else None
+    remembered = request.session.get("division", "")
+    all_queue = scope.is_admin and (
+        name in ALL_QUEUE_URLS or (not code and remembered == ALL_QUEUE)
+    )
+    current = "" if all_queue or remembered == ALL_QUEUE else remembered
     return {
         "nav": {
             "scope": scope,
             "divisions": queues.own_divisions(scope) if scope.has_any_access else [],
             "section": section,
             "url_name": name,
-            "current": (match.kwargs.get("code") if match else None)
-            or request.session.get("division", ""),
+            "current": "" if name in ALL_QUEUE_URLS else (code or current),
+            "all_queue": all_queue,
             "name": profile.display_name if profile else user.username,
             "is_intake": _intake_member(scope),
             "has_intake": identity.intake_division() is not None,
@@ -172,7 +182,7 @@ def _attention(user, scope, report, link):
     add("เรื่องเกินกรอบเวลา", report["overdue"], link("overdue"), alert=True)
     add("เรื่องถูกยกระดับ", report["escalated"], link("escalated"), alert=True)
     if approver:
-        add("ผู้แจ้งรอรับรอง", waiting["registrations"], reverse("admin-registrations"), True)
+        add("ผู้ใช้ LINE OA รอรับรอง", waiting["registrations"], reverse("admin-registrations"), True)
     submitted = next(
         (n for value, _, n in report["by_status"] if value == Case.Status.SUBMITTED), 0
     )
@@ -204,8 +214,8 @@ def _queue(request, division, admin_all=False):
     except ValueError:
         number = 1
     items, pager = queues.page(cases, tab, number)
-    if division:
-        request.session["division"] = division.code
+    if division or admin_all:
+        request.session["division"] = division.code if division else ALL_QUEUE
     context = {
         "division": division,
         "admin_all": admin_all,

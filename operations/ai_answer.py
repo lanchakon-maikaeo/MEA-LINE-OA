@@ -438,7 +438,7 @@ def answer(text, rows, facts, own_numbers, version, mode, budget_seconds=None):
 
 def test_version(actor, version):
     """Connection + schema test of every model in the chain (network; outside transactions)."""
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     rows = choosable(list(answers.approved())) or [
         ChatAnswer(key="greeting", title="ทักทาย", text="สวัสดี")
     ]

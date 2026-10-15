@@ -110,8 +110,9 @@
     day.className = "chart-tip__day";
     day.textContent = hit.getAttribute("data-day");
     tip.appendChild(day);
-    tipRow(tip, "new", hit.getAttribute("data-new"), "เรื่องเข้า");
-    tipRow(tip, "ended", hit.getAttribute("data-ended"), "เรื่องจบ");
+    // Cumulative lines (15 ต.ค. 2569): the total so far, then that day's own count.
+    tipRow(tip, "new", hit.getAttribute("data-new-total"), "เข้าสะสม · วันนั้น +" + hit.getAttribute("data-new"));
+    tipRow(tip, "ended", hit.getAttribute("data-ended-total"), "จบสะสม · วันนั้น +" + hit.getAttribute("data-ended"));
     if (parts.cross) {
       parts.cross.setAttribute("x1", x);
       parts.cross.setAttribute("x2", x);

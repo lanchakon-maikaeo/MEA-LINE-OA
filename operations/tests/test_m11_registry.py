@@ -21,7 +21,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from config.environment import inventory_mode
-from operations import contracts, inventory, registry, registry_ops, staff_email
+from operations import contracts, inventory, options, registry, registry_ops, staff_email
 from operations.contracts import Actor, CommandFailed, ErrorCode
 from operations.models import (
     Attachment,
@@ -74,6 +74,8 @@ class RegistryTestCase(Staffing, TestCase):
         setup_world(cls)
         Staffing.staff_up(cls)
         cls.reg = make_staff("reg", (Role.STAFF, "SIM-REG"))
+        # These tests are the registry unit at work: ตัวเลือกระบบ registry_access = staff.
+        options.change(cls.admin, options.REGISTRY_ACCESS, "staff", "หน่วยทะเบียนตัดสินเอง")
         cls.reg.email = "reg@example.test"
         cls.reg.save(update_fields=["email"])
         for code, official in CODES.items():

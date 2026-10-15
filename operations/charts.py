@@ -23,12 +23,18 @@ def nice_ceiling(value):
 
 
 def trend(points, link):
-    """Two series per day: [(day, new, ended)] → lines, ticks, hit columns and end dots.
+    """[(day, new, ended)] → two cumulative lines, ticks, hit columns and end dots.
 
-    `link(metric, day)` returns the drill-down URL of one day's cases."""
+    The lines add up from the first day of the period (15 ต.ค. 2569 Q8), so the gap between them
+    is what came in during the period and has not ended. Each column keeps its own day's counts
+    for the tooltip and the table. `link(metric, day)` returns the drill-down URL of one day."""
     count = len(points)
+    totals, new_sum, ended_sum = [], 0, 0
+    for d, new, ended in points:
+        new_sum, ended_sum = new_sum + new, ended_sum + ended
+        totals.append((d, new_sum, ended_sum))
     plot_w, plot_h = WIDTH - LEFT - RIGHT, HEIGHT - TOP - BOTTOM
-    top = nice_ceiling(max([n for _, n, _ in points] + [e for _, _, e in points] + [0]))
+    top = nice_ceiling(max([new_sum, ended_sum, 0]))
     step = plot_w / max(count, 1)
 
     def x(i):
@@ -39,7 +45,7 @@ def trend(points, link):
 
     def path(index):
         return " ".join(
-            f"{'M' if i == 0 else 'L'}{x(i)} {y(p[index])}" for i, p in enumerate(points)
+            f"{'M' if i == 0 else 'L'}{x(i)} {y(p[index])}" for i, p in enumerate(totals)
         )
 
     ticks = [{"y": y(v), "label": f"{v:,}"} for v in sorted({0, top // 2 if top >= 2 else 0, top})]
@@ -56,6 +62,8 @@ def trend(points, link):
             "day": f"{d.day}/{d.month}/{d.year + 543}",
             "new": new,
             "ended": ended,
+            "new_total": totals[i][1],
+            "ended_total": totals[i][2],
             "href": link("new", d.isoformat()),
             "ended_href": link("ended", d.isoformat()),
         }
@@ -78,11 +86,11 @@ def trend(points, link):
         "labels": labels,
         "columns": columns,
         "ends": [
-            {"x": x(last), "y": y(points[last][1]), "series": "new"},
-            {"x": x(last), "y": y(points[last][2]), "series": "ended"},
+            {"x": x(last), "y": y(new_sum), "series": "new"},
+            {"x": x(last), "y": y(ended_sum), "series": "ended"},
         ]
         if count
         else [],
-        "total_new": sum(n for _, n, _ in points),
-        "total_ended": sum(e for _, _, e in points),
+        "total_new": new_sum,
+        "total_ended": ended_sum,
     }

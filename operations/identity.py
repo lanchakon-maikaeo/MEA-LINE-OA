@@ -159,6 +159,22 @@ def require_developer_admin(user):
         raise PermissionDenied("Developer-admin permission required.")
 
 
+def may_change_ai(user):
+    """ตัวเลือกระบบ ai_editors (15 ต.ค. 2569 Q23): developer admins, or every admin. Every admin
+    may open the AI page to look."""
+    from operations import options  # local: options builds on models only
+
+    scope = staff_scope(user)
+    if scope.is_developer_admin:
+        return True
+    return scope.is_admin and options.get(options.AI_EDITORS) == "admin"
+
+
+def require_ai_editor(user):
+    if not may_change_ai(user):
+        raise PermissionDenied("AI settings permission required.")
+
+
 # --- Audit ------------------------------------------------------------------------------------
 
 

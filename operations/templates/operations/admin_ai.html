@@ -1,7 +1,8 @@
 {% extends "operations/admin_base.html" %}
 {% block content %}
-<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมินผู้พัฒนา</span><h1>การตั้งค่า AI</h1></div></div>
-<p class="lede mb-24">เฉพาะแอดมินผู้พัฒนา · AI ในแชต: <strong>{{ ai_enabled|yesno:"เปิด,ปิด (AI_ENABLED)" }}</strong> · ทุกการเปลี่ยนแปลงผ่าน ทดสอบ → ประเมิน → เปลี่ยนไปใช้ และบันทึก audit</p>
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>การตั้งค่า AI</h1></div></div>
+{% if not can_change %}<div class="notice notice--info mb-24" role="status"><div class="notice__body"><strong>ดูได้อย่างเดียว</strong> การเปลี่ยนรุ่น ประเมิน หรือแก้โมเดลทำได้ตาม <a href="{% url 'admin-options' %}">ตัวเลือกระบบ</a> "ใครเปลี่ยนการตั้งค่า AI ได้"</div></div>{% endif %}
+<p class="lede mb-24">AI ในแชต: <strong>{{ ai_enabled|yesno:"เปิด,ปิด (AI_ENABLED)" }}</strong> · ทุกการเปลี่ยนแปลงผ่าน ทดสอบ → ประเมิน → เปลี่ยนไปใช้ และบันทึก audit</p>
 
 <h2 id="switch">รุ่นที่ใช้งานอยู่</h2>
 <p>AI มีสามงาน แต่ละงานมีรุ่นที่ใช้งานและเกณฑ์ประเมินแยกกัน: สกัดร่างจากแชต (M05), เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06 ไม่เลือกกองหรือระดับเอง ADR 0002) และตอบแชตผู้แจ้งจากคลังคำตอบ (ADR 0012)</p>
@@ -13,7 +14,7 @@
 {% else %}
 <p>ยังไม่มีรุ่นที่เปิดใช้ แชตจะถามทีละช่องโดยไม่ใช้ AI</p>
 {% endif %}
-<form method="post" action="{% url 'admin-ai-action' 'switch' %}">
+{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'switch' %}">
   <fieldset><legend>เปลี่ยนรุ่นที่ใช้งาน</legend>{% csrf_token %}
   {% if switchable %}
     <p><label>เปลี่ยนไปใช้
@@ -25,9 +26,9 @@
     <p>ยังไม่มีรุ่นอื่นที่พร้อมใช้ รุ่นต้องผ่าน "ทดสอบการเชื่อมต่อ" (ใหม่หลังหมุน key) และ "ประเมิน" บน security + heldout-v4 + redteam-v1/v2 ก่อน</p>
   {% endif %}
   </fieldset>
-</form>
+</form>{% endif %}
 {% if stoppable %}
-<form method="post" action="{% url 'admin-ai-action' 'stop' %}">
+{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'stop' %}">
   <fieldset><legend>หยุดใช้ AI ของงาน</legend>{% csrf_token %}
     <p><label>งาน
       <select name="task" required>{% for v in stoppable %}<option value="{{ v.task }}">{{ v.get_task_display }} (v{{ v.number }})</option>{% endfor %}</select>
@@ -35,12 +36,12 @@
     <p><label>เหตุผล <input name="reason" required></label> <button type="submit">หยุดใช้</button></p>
     <p>ใช้เมื่อ AI ของงานนั้นมีปัญหา หรือยังไม่ได้รับอนุมัติให้ใช้ งานใหม่ทำต่อโดยไม่ใช้ AI: แชตถามทีละช่อง ตอบจากคำสำคัญ หรือเจ้าหน้าที่คัดกรองเอง เรื่องที่รอ AI คัดกรองอยู่จะถูกปิดเป็นไม่ใช้ AI การเปิดกลับใช้เมนูเปลี่ยนรุ่นด้านบน และรุ่นนั้นต้องมีผลประเมินของโค้ดปัจจุบัน</p>
   </fieldset>
-</form>
+</form>{% endif %}
 {% endif %}
 
 <h2 id="presets">โมเดลสำเร็จรูป</h2>
 {% for p in presets %}
-<form method="post" action="{% url 'admin-ai-action' 'preset' %}">
+{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'preset' %}">
   <fieldset><legend>{{ p.label }}</legend>{% csrf_token %}<input type="hidden" name="preset" value="{{ p.key }}">
   <p>Model ID <code>{{ p.model_id }}</code> · {{ p.base_url }} · {{ p.limits }} · <a href="{{ p.docs_url }}" rel="noopener noreferrer" target="_blank">เอกสาร</a></p>
   {% if p.credential_ready %}
@@ -52,7 +53,7 @@
   {% endif %}
   <p>ข้อความที่ส่งให้โมเดลนี้ไปถึงผู้ให้บริการอีกราย ใช้ได้เฉพาะข้อมูลจำลองจนกว่าองค์กรอนุมัติ</p>
   </fieldset>
-</form>
+</form>{% endif %}
 {% endfor %}
 
 <h2>รุ่นการตั้งค่า (โมเดลหลัก + สำรองตามลำดับ)</h2>
@@ -68,20 +69,20 @@
       <td>{% if v.last_job and v.last_job.status == "queued" or v.last_job.status == "running" %}{{ v.last_job.get_status_display }} (ขอเมื่อ {{ v.last_job.created_at|date:"H:i" }}){% elif v.eval_passed is None %}ยังไม่ประเมิน{% else %}{{ v.eval_passed|yesno:"ผ่าน,ไม่ผ่าน" }}{% if v.eval_passed and v.eval_result.gate != gate %}<br>ประเมินก่อนเกณฑ์ปัจจุบัน ต้องประเมินใหม่{% endif %}{% if v.eval_result.security %}<br>Security tests: {{ v.eval_result.security.tests }} ({{ v.eval_result.security.passed|yesno:"ผ่าน,ไม่ผ่าน" }}){% endif %}{% for r in v.eval_result.runs %}<br>รอบ {{ forloop.counter }}: {{ r.passed|yesno:"ผ่าน,ไม่ผ่าน" }} (พลาดอันตราย {{ r.metrics.hazard_missed }}, ธงเกิน {{ r.metrics.hazard_over_rate }}, อุปกรณ์ {{ r.metrics.equipment_accuracy }}, ผลกระทบ {{ r.metrics.severe_impact_accuracy }}, ทะเบียน {{ r.metrics.registry_only_accuracy }}, red-team {{ r.metrics.redteam_violations }}, p95 {{ r.metrics.latency_p95_ms }} ms){% endfor %}{% for p in v.eval_result.profiles %}<br>{% if p.dataset %}[{{ p.dataset }}] {% endif %}{% if p.role == "application" %}ร่างที่ผู้แจ้งตรวจ{% elif p.role == "system" %}สายโมเดล{% else %}{{ p.model }}{% endif %}: {{ p.passed|yesno:"ผ่าน,ไม่ผ่าน" }} (intent {{ p.metrics.intent_accuracy }}, items {{ p.metrics.items_exact }}, ร่างไม่ปนเปื้อน {{ p.metrics.injection_resisted }}, p95 {{ p.metrics.latency_p95_ms }} ms){% endfor %}{% endif %}{% if v.last_job.status == "failed" %}<br>การประเมินล่าสุดล้มเหลว: {{ v.last_job.error }}{% endif %}</td>
       <td>
         {% if v.status != "rejected" %}
-        <form class="inline" method="post" action="{% url 'admin-ai-version-action' 'test' v.pk %}">{% csrf_token %}<button type="submit">ทดสอบการเชื่อมต่อ</button></form>
-        <form class="inline" method="post" action="{% url 'admin-ai-version-action' 'evaluate' v.pk %}">{% csrf_token %}<button type="submit">ประเมิน</button></form>
+        {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'test' v.pk %}">{% csrf_token %}<button type="submit">ทดสอบการเชื่อมต่อ</button></form>{% endif %}
+        {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'evaluate' v.pk %}">{% csrf_token %}<button type="submit">ประเมิน</button></form>{% endif %}
         {% endif %}
         {% if v.status != "active" and v.status != "rejected" %}
-        <form class="inline" method="post" action="{% url 'admin-ai-version-action' 'reject' v.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ไม่ใช้</button></form>
+        {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'reject' v.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ไม่ใช้</button></form>{% endif %}
         {% endif %}
       </td>
     </tr>
   {% empty %}<tr><td colspan="6">ยังไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
-<form method="post" action="{% url 'admin-ai-action' 'version' %}">
+{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'version' %}">
   <fieldset><legend>สร้างรุ่นใหม่</legend>{% csrf_token %}{{ version_form.as_p }}<button type="submit">สร้าง</button></fieldset>
-</form>
+</form>{% endif %}
 
 <h2>โปรไฟล์โมเดล</h2>
 <div class="table-wrap"><table>
@@ -91,15 +92,15 @@
   {% empty %}<tr><td colspan="7">ยังไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
-<form method="post" action="{% url 'admin-ai-action' 'profile' %}">
+{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'profile' %}">
   <fieldset><legend>เพิ่มโปรไฟล์ (แก้ค่าเดิมไม่ได้ ให้สร้างใหม่)</legend>{% csrf_token %}{{ profile_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
-</form>
+</form>{% endif %}
 
 <h2>Credential ของผู้ให้บริการ</h2>
 <ul>{% for c in credentials %}<li>{{ c.name }} · {{ c.base_url }} · key ••••{{ c.key_hint }}{% if c.rotated_at %} · เปลี่ยนเมื่อ {{ c.rotated_at|date:"Y-m-d H:i" }}{% endif %}</li>{% empty %}<li>ยังไม่มี</li>{% endfor %}</ul>
-<form method="post" action="{% url 'admin-ai-action' 'credential' %}" autocomplete="off">
+{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'credential' %}" autocomplete="off">
   <fieldset><legend>เพิ่มหรือเปลี่ยน key (ชื่อเดิม = หมุน key; ต้องทดสอบรุ่นใหม่ก่อนเปิดใช้)</legend>{% csrf_token %}{{ credential_form.as_p }}<button type="submit">บันทึก</button></fieldset>
-</form>
+</form>{% endif %}
 
 <h2 id="runs">การเรียก AI ล่าสุด</h2>
 <p class="section-note">ข้อความ LINE 50 ข้อความล่าสุดที่ส่งให้ AI พร้อมสิ่งที่ AI ทำ ใช้ตรวจคำตอบย้อนหลัง (ADR 0012) ข้อความของผู้แจ้งไม่แสดงที่นี่</p>

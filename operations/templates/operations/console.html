@@ -82,14 +82,14 @@
 {% with t=dash.trend %}
 <div class="ov-grid">
   <section class="panel viz ov-trend" aria-labelledby="r-trend">
-    <div class="panel__head"><h3 id="r-trend">เรื่องเข้าและเรื่องจบรายวัน</h3><span class="muted">{{ days }} วันล่าสุด</span></div>
+    <div class="panel__head"><h3 id="r-trend">เรื่องเข้าและเรื่องจบสะสม</h3><span class="muted">{{ days }} วันล่าสุด</span></div>
     <ul class="legend" aria-label="คำอธิบายสี">
       <li><span class="legend__key legend__key--new" aria-hidden="true"></span>เรื่องเข้า {{ t.total_new }}</li>
       <li><span class="legend__key legend__key--ended" aria-hidden="true"></span>เรื่องจบ {{ t.total_ended }}</li>
     </ul>
     <div class="chart" data-chart>
       <svg viewBox="0 0 {{ t.width }} {{ t.height }}" role="img" aria-labelledby="r-trend r-trend-desc">
-        <desc id="r-trend-desc">กราฟเส้นจำนวนเรื่องเข้าและเรื่องจบต่อวัน ตัวเลขทุกวันอยู่ในตารางใต้กราฟ</desc>
+        <desc id="r-trend-desc">กราฟเส้นจำนวนเรื่องเข้าและเรื่องจบสะสมตั้งแต่วันแรกของช่วง ช่องว่างระหว่างสองเส้นคือเรื่องที่ยังไม่จบ ตัวเลขรายวันอยู่ในตารางใต้กราฟ</desc>
         {% for tick in t.ticks %}
           <line class="chart__grid" x1="{{ t.left }}" x2="{{ t.right }}" y1="{{ tick.y }}" y2="{{ tick.y }}"/>
           <text class="chart__tick" x="{{ t.tick_x }}" y="{{ tick.y }}" text-anchor="end" dominant-baseline="middle">{{ tick.label }}</text>
@@ -101,7 +101,7 @@
         <path class="chart__line chart__line--new" d="{{ t.new_path }}"/>
         {% for end in t.ends %}<circle class="chart__dot chart__dot--{{ end.series }}" cx="{{ end.x }}" cy="{{ end.y }}" r="4"/>{% endfor %}
         {% for c in t.columns %}
-          <a class="chart__hit" href="{{ c.href }}" data-x="{{ c.center }}" data-day="{{ c.day }}" data-new="{{ c.new }}" data-ended="{{ c.ended }}" aria-label="{{ c.day }}: เข้า {{ c.new }} เรื่อง จบ {{ c.ended }} เรื่อง เปิดรายการเรื่องเข้า"><rect x="{{ c.x }}" y="{{ t.top }}" width="{{ c.width }}" height="{{ t.plot_h }}"/></a>
+          <a class="chart__hit" href="{{ c.href }}" data-x="{{ c.center }}" data-day="{{ c.day }}" data-new="{{ c.new }}" data-ended="{{ c.ended }}" data-new-total="{{ c.new_total }}" data-ended-total="{{ c.ended_total }}" aria-label="{{ c.day }}: สะสมเข้า {{ c.new_total }} จบ {{ c.ended_total }} เรื่อง วันนั้นเข้า {{ c.new }} จบ {{ c.ended }} เปิดรายการเรื่องเข้าวันนั้น"><rect x="{{ c.x }}" y="{{ t.top }}" width="{{ c.width }}" height="{{ t.plot_h }}"/></a>
         {% endfor %}
       </svg>
       <div class="chart-tip" hidden data-tip></div>
@@ -109,10 +109,10 @@
     <details class="disclosure">
       <summary>ดูเป็นตาราง</summary>
       <div class="disclosure__body table-wrap"><table>
-        <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">เรื่องเข้า</th><th scope="col" class="num">เรื่องจบ</th></tr></thead>
+        <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">เรื่องเข้า</th><th scope="col" class="num">เรื่องจบ</th><th scope="col" class="num">เข้าสะสม</th><th scope="col" class="num">จบสะสม</th></tr></thead>
         <tbody>
           {% for c in t.columns reversed %}
-            <tr><td>{{ c.day }}</td><td class="num">{% if c.new %}<a href="{{ c.href }}">{{ c.new }}</a>{% else %}0{% endif %}</td><td class="num">{% if c.ended %}<a href="{{ c.ended_href }}">{{ c.ended }}</a>{% else %}0{% endif %}</td></tr>
+            <tr><td>{{ c.day }}</td><td class="num">{% if c.new %}<a href="{{ c.href }}">{{ c.new }}</a>{% else %}0{% endif %}</td><td class="num">{% if c.ended %}<a href="{{ c.ended_href }}">{{ c.ended }}</a>{% else %}0{% endif %}</td><td class="num">{{ c.new_total }}</td><td class="num">{{ c.ended_total }}</td></tr>
           {% endfor %}
         </tbody>
       </table></div>
@@ -244,6 +244,7 @@
 </section>
 {% endif %}
 
+{% if nav.scope.is_admin %}{# ข้อมูลประกอบงาน: admins only (15 ต.ค. 2569 Q5) #}
 <section class="section ov-reference" aria-labelledby="ov-reference">
   <h2 id="ov-reference" class="visually-hidden">ข้อมูลประกอบงาน</h2>
   <div class="cluster">
@@ -253,5 +254,6 @@
     <a class="btn btn--secondary" href="{% url 'pii' %}">{% icon "lock" "sm" %} ปิดข้อมูลก่อนส่ง AI</a>
   </div>
 </section>
+{% endif %}
 {% endif %}
 {% endblock %}

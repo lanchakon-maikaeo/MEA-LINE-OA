@@ -889,7 +889,7 @@ def rescore(report):
 
 
 def request_eval(actor, version):
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     if version.status == AIConfigVersion.Status.REJECTED:
         raise ValidationError("A rejected version is not evaluated.")
     try:

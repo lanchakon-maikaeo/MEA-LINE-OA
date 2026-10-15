@@ -29,7 +29,7 @@ class Group:
 GROUPS = (
     Group(
         "คนและสิทธิ์",
-        "บัญชีเจ้าหน้าที่ ผู้แจ้งทาง LINE และทะเบียนพนักงาน",
+        "บัญชีเจ้าหน้าที่ ผู้ใช้ LINE OA และทะเบียนพนักงาน",
         (
             Page(
                 "admin-users",
@@ -39,8 +39,8 @@ GROUPS = (
             ),
             Page(
                 "admin-registrations",
-                "รับรองผู้แจ้ง",
-                "คำขอลงทะเบียนจาก LINE และผู้แจ้งที่รับรองแล้ว",
+                "ผู้ใช้ LINE OA",
+                "คำขอลงทะเบียนจาก LINE และผู้ใช้ที่รับรองแล้ว",
                 (
                     "admin-registration-action",
                     "admin-requester-detail",
@@ -86,7 +86,6 @@ GROUPS = (
                 "AI",
                 "รุ่น AI การประเมิน และการเปิดใช้",
                 ("admin-ai-action", "admin-ai-version-action"),
-                developer=True,
             ),
         ),
     ),

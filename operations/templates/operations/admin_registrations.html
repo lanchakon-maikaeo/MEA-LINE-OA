@@ -3,8 +3,8 @@
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">{% if is_admin %}แอดมิน{% else %}ตามตัวเลือกระบบ{% endif %}</span>
-    <h1>รับรองผู้แจ้ง</h1>
-    <p class="lede">การเลือกเขตของผู้แจ้งเป็นเพียงคำขอ ตรวจตัวตนและเขตก่อนรับรอง</p>
+    <h1>ผู้ใช้ LINE OA</h1>
+    <p class="lede">การเลือกเขตของผู้ใช้เป็นเพียงคำขอ ตรวจตัวตนและเขตก่อนรับรอง</p>
   </div>
 </div>
 {# 15 ต.ค. 2569: what waits first, then the people, then the rarely used parts. #}
@@ -33,8 +33,8 @@
 </section>
 
 <section class="section" aria-labelledby="reg-people">
-  <div class="section-head"><h2 id="reg-people">ผู้แจ้งที่รับรองแล้ว</h2></div>
-<p class="muted">ตำแหน่งงานมาจากทะเบียนพนักงาน ผู้แจ้งที่ไม่ได้ยืนยันด้วยรหัสพนักงาน ระบบผูกให้เมื่อชื่อตรงกับพนักงานคนเดียวในทะเบียน{% if is_admin %} กดชื่อเพื่อดูข้อความที่พิมพ์มา ยืนยันตัวตน ระงับ หรือถอนการรับรอง{% endif %}</p>
+  <div class="section-head"><h2 id="reg-people">ผู้ใช้ที่รับรองแล้ว</h2></div>
+<p class="muted">ตำแหน่งงานมาจากทะเบียนพนักงาน ผู้ใช้ที่ไม่ได้ยืนยันด้วยรหัสพนักงาน ระบบผูกให้เมื่อชื่อตรงกับพนักงานคนเดียวในทะเบียน{% if is_admin %} กดชื่อเพื่อดูข้อความที่พิมพ์มา ยืนยันตัวตน ระงับ หรือถอนการรับรอง{% endif %}</p>
 {% if is_admin and to_review or is_admin and to_confirm %}
 <div class="notice notice--info mb-24" role="status"><div class="notice__body">{% if to_review %}<strong>ต้องตรวจ {{ to_review }} ราย</strong> ชื่อตรงพนักงานในทะเบียนแต่ระบบไม่ผูกให้ เพราะชื่อซ้ำหลายคนหรือทะเบียนระบุเขตอื่น{% endif %}{% if to_review and to_confirm %} · {% endif %}{% if to_confirm %}<strong>รอยืนยัน {{ to_confirm }} ราย</strong> ระบบผูกจากชื่อ แสดงตำแหน่งได้แต่ยังไม่นับเป็นการยืนยันตัวตน{% endif %} เลือกตัวกรอง "ตัวตน" เพื่อดูเฉพาะกลุ่ม แล้วกดชื่อเพื่อตรวจ</div></div>
 {% endif %}
@@ -55,7 +55,7 @@
   {% endwith %}{% empty %}<tr><td colspan="7">ยังไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
-<p class="list-empty" data-list-empty="requesters" hidden>ไม่พบผู้แจ้งที่ตรงกับการค้นหา</p>
+<p class="list-empty" data-list-empty="requesters" hidden>ไม่พบผู้ใช้ที่ตรงกับการค้นหา</p>
 {% if revoked %}
 <details class="disclosure">
   <summary>ถอนการรับรองแล้ว ({{ revoked|length }})</summary>

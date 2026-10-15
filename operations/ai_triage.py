@@ -445,7 +445,7 @@ def process(run_id):
 
 def test_version(actor, version):
     """Connection + schema test of every model in the chain (network; outside transactions)."""
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     sample = {
         "kind": "problem",
         "lines": [],

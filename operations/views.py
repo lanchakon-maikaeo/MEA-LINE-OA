@@ -459,7 +459,10 @@ def _requester_rows(requesters):
                 "channel": channel,
                 "position": employee.position if employee else "",
                 "role": " · ".join(
-                    ["ผู้แจ้งภายใน" if requester.is_internal else "ผู้แจ้ง", *roles[requester.pk]]
+                    [
+                        "ผู้ใช้ LINE OA (ภายใน)" if requester.is_internal else "ผู้ใช้ LINE OA",
+                        *roles[requester.pk],
+                    ]
                 ),
                 "where": requester.division.code
                 if requester.is_internal and requester.division_id
@@ -618,7 +621,7 @@ def admin_requester_action(request, pk, action):
         _run(
             request,
             lambda: identity.set_requester_active(actor, requester, action == "activate", reason),
-            "เปิดใช้ผู้แจ้งแล้ว" if action == "activate" else "ระงับผู้แจ้งแล้ว",
+            "เปิดใช้ผู้ใช้แล้ว" if action == "activate" else "ระงับผู้ใช้แล้ว",
         )
     elif action == "revoke":
         if data.get("confirm") != "1":
@@ -683,7 +686,7 @@ def admin_registration_action(request, pk, action):
         _run(
             request,
             lambda: identity.approve_registration(request.user, registration, reason),
-            "รับรองผู้แจ้งแล้ว",
+            "รับรองผู้ใช้แล้ว",
         )
     elif action == "reject":
         _run(
@@ -957,21 +960,21 @@ def admin_inventory_action(request, action):
     return redirect("admin-inventory")
 
 
-# --- AI configuration (developer-admin only) ----------------------------------------------------
+# --- AI configuration (every admin looks; ตัวเลือกระบบ ai_editors decides who changes) -------------
 
 
-def developer_admin_required(view):
+def ai_editor_required(view):
     @login_required
     @wraps(view)
     def wrapper(request, *args, **kwargs):
-        if not identity.staff_scope(request.user).is_developer_admin:
+        if not identity.may_change_ai(request.user):
             raise PermissionDenied
         return view(request, *args, **kwargs)
 
     return wrapper
 
 
-@developer_admin_required
+@admin_required
 @require_safe
 def admin_ai(request):
     versions = list(
@@ -1014,6 +1017,7 @@ def admin_ai(request):
                 ("refused", "ถ้อยคำของ AI", [("yes", "มีที่ถูกตีกลับ"), ("no", "ไม่มีที่ถูกตีกลับ")]),
             ],
             "ai_enabled": settings.AI_ENABLED,
+            "can_change": identity.may_change_ai(request.user),
             "credential_form": forms.AICredentialForm(),
             "profile_form": forms.AIProfileForm(),
             "version_form": forms.AIVersionForm(),
@@ -1021,7 +1025,7 @@ def admin_ai(request):
     )
 
 
-@developer_admin_required
+@ai_editor_required
 @require_POST
 def admin_ai_action(request, action, pk=None):
     actor, data = request.user, request.POST
