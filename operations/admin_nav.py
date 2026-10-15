@@ -33,7 +33,7 @@ GROUPS = (
         (
             Page(
                 "admin-users",
-                "ผู้ใช้",
+                "บัญชีเจ้าหน้าที่",
                 "บัญชีเจ้าหน้าที่ กอง และบทบาท",
                 ("admin-user-new", "admin-user-detail", "admin-user-action"),
             ),
@@ -96,7 +96,7 @@ GROUPS = (
             Page(
                 "admin-line",
                 "LINE และงานค้าง",
-                "งบข้อความ push การแจ้งเตือนที่ไม่ได้ส่ง และ dead-letter",
+                "งบข้อความแจ้งเตือน การแจ้งเตือนที่ส่งไม่ได้ และงานค้าง",
                 ("admin-requeue",),
                 badge="line",
             ),

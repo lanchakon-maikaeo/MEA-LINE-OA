@@ -100,7 +100,7 @@ class TeachTests(WordTestCase):
         _, meter = self.submit({"kind": "problem", "topic": "meter", "description": LIGHT})
         self.assertEqual(meter.owner_division.code, "กคว.")
         message = self.fails(meter, "บท.", by=self.kcw, keywords="ไฟถนน")
-        self.assertIn("เฉพาะเรื่องที่ส่วนกลางส่งต่อ", message)
+        self.assertIn("เฉพาะเรื่องที่ ฝอจ. ส่งต่อ", message)
         self.assertFalse(RoutingWord.objects.exists())
 
 
@@ -139,7 +139,7 @@ class UseTests(WordTestCase):
         state = web_actions.situation(self.exec, Case.objects.get(pk=off.pk))
         form = web_actions.build_form("request_handoff", state, {})
         self.assertNotIn("keywords", [f.name for f in form.fields])
-        self.assertIn("เฉพาะเรื่องที่ส่วนกลางส่งต่อ", self.fails(off, "บท.", keywords="ซอยสาม"))
+        self.assertIn("เฉพาะเรื่องที่ ฝอจ. ส่งต่อ", self.fails(off, "บท.", keywords="ซอยสาม"))
 
 
 class MoveTests(WordTestCase):

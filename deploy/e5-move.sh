@@ -22,6 +22,7 @@
 #                                  taking writes, the Mac data is restored on E5, move_manifest
 #                                  must match, then ngrok starts on E5. A mismatch stops here.
 #   deploy/e5-move.sh back-to-mac  undo a cutover (E5 writes after it are NOT carried back)
+#   deploy/e5-move.sh manage CMD…  one manage.py command on E5 as the migration (owner) role
 #   deploy/e5-move.sh pii-key      PII_SECRET_KEY on E5 (made there if missing, never shown), a copy
 #                                  for the Mac standby and on the clipboard for the password manager
 #   deploy/e5-move.sh mail         the Gmail sender for OTP mail: address typed, app password hidden
@@ -447,6 +448,13 @@ EOF
   say "cutover done: LINE → ngrok → E5; staff web https://$PUBLIC_HOST/ . The Mac stack is stopped and keeps its data for 7 days (Q17)."
 }
 
+manage_e5() {  # one manage.py command on E5 (owner role, like migrate)
+  [ $# -gt 0 ] || die "usage: deploy/e5-move.sh manage <command> [args…]"
+  { printf '%s\n' "$REMOTE_LIB"; cat <<'EOF'; } | as_root "$(printf '%q ' "$@")"
+dc run --rm -T migrate /app/.venv/bin/python manage.py "$@"
+EOF
+}
+
 pii_key() {  # 15 Oct 2026 Q16/Q36: the key that seals roster e-mails lives on the server
   local standby="$HOME/faoj-standby/env/app.secret.env"
   cat <<'EOF' | as_root
@@ -556,7 +564,8 @@ case "${1:-}" in
   back-to-mac) back_to_mac;;
   purge-demo) shift; purge_demo "$@";;
   pii-key) pii_key;;
+  manage) shift; manage_e5 "$@";;
   mail) mail_setup;;
   ssh) shift; on_e5 "$@";;
-  *) sed -n '2,34p' "$0"; exit 2;;
+  *) sed -n '2,35p' "$0"; exit 2;;
 esac

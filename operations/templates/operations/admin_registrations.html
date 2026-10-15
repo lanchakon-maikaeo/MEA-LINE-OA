@@ -60,7 +60,7 @@
 <details class="disclosure">
   <summary>ถอนการรับรองแล้ว ({{ revoked|length }})</summary>
   <div class="disclosure__body">
-    <p class="muted">เรื่องและข้อความเดิมยังอยู่ครบ ถ้าจะใช้ LINE อีกต้องลงทะเบียนใหม่และได้รหัสผู้แจ้งใหม่</p>
+    <p class="muted">เรื่องและข้อความเดิมยังอยู่ครบ ถ้าจะใช้ LINE อีกต้องลงทะเบียนใหม่และได้รหัสผู้ใช้ใหม่</p>
     <div class="table-wrap"><table class="table--cards">
       <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ตัวตน</th><th scope="col">เขต</th></tr></thead>
       <tbody>
@@ -76,9 +76,9 @@
 {% if is_admin %}
 <section class="section" aria-labelledby="reg-direct">
   <details class="disclosure">
-    <summary id="reg-direct">รับรองผู้แจ้งโดยตรง <span class="muted">สำหรับผู้แจ้งที่ไม่ใช้ LINE</span></summary>
+    <summary id="reg-direct">เพิ่มผู้แจ้งที่ไม่ใช้ LINE</summary>
     <div class="disclosure__body">
-<p>สำหรับผู้แจ้งที่ไม่ใช้ LINE เจ้าหน้าที่กองจะบันทึกเรื่องแทนได้</p>
+<p>คนที่ไม่ใช้ LINE แจ้งเรื่องผ่านเจ้าหน้าที่กองได้ เพิ่มชื่อไว้ที่นี่ แล้วเจ้าหน้าที่บันทึกเรื่องแทน</p>
 <form method="post" action="{% url 'admin-requester-new' %}">
   <fieldset><legend>เพิ่มผู้แจ้ง</legend>{% csrf_token %}{{ requester_form.as_p }}<button type="submit">รับรอง</button></fieldset>
 </form>
@@ -92,7 +92,7 @@
     <div class="disclosure__body">
 <ul>
   {% for reg in recent %}
-    <li>{{ reg.submitted_name }} — {{ reg.requested_district.name }} — {{ reg.get_status_display }} โดย {{ reg.decided_by.username }} {{ reg.decided_at|date:"Y-m-d H:i" }}</li>
+    <li>{{ reg.submitted_name }} · {{ reg.requested_district.name }} · {{ reg.get_status_display }} โดย {{ reg.decided_by.username }} {{ reg.decided_at|date:"Y-m-d H:i" }}</li>
   {% empty %}<li>ยังไม่มี</li>{% endfor %}
 </ul>
     </div>
@@ -102,7 +102,7 @@
 <section class="section" aria-labelledby="reg-open">
   <div class="section-head"><h2 id="reg-open">ใครใช้บอททาง LINE ได้</h2></div>
   <dl class="facts">
-    <div><dt>ใครคุยกับบอทได้</dt><dd>{% if is_production %}ทุกคน (production){% else %}{% for v, label, help in audience_option.choices %}{% if v == audience %}{{ label }}{% endif %}{% endfor %}{% if audience == "testers" %} <span class="muted">({{ testers }} บัญชี)</span>{% endif %}{% endif %}</dd></div>
+    <div><dt>ใครคุยกับบอทได้</dt><dd>{% if is_production %}ทุกคน (ระบบจริง){% else %}{% for v, label, help in audience_option.choices %}{% if v == audience %}{{ label }}{% endif %}{% endfor %}{% if audience == "testers" %} <span class="muted">({{ testers }} บัญชี)</span>{% endif %}{% endif %}</dd></div>
     <div><dt>การยืนยันตัวตนตอนลงทะเบียน</dt><dd>{{ check_label }}</dd></div>
     <div><dt>ผู้อนุมัติการลงทะเบียน</dt><dd>{{ approver_label }}</dd></div>
   </dl>

@@ -2552,7 +2552,7 @@ class RoutingWord(models.Model):
     not route, with the division that took it, so the next such case with the word goes there."""
 
     class Source(models.TextChoices):
-        HANDOFF = "handoff", "ส่วนกลางเลือกตอนโอน"
+        HANDOFF = "handoff", "ฝอจ. เลือกตอนส่งต่อ"
         AI = "ai", "คำที่ AI ยกมา กองรับเรื่องแล้ว"
 
     word = models.CharField(max_length=40)

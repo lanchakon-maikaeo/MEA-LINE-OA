@@ -86,7 +86,7 @@ class AIProfileForm(forms.Form):
     )
     use_json_schema = forms.BooleanField(
         label=(
-            "ให้ผู้ให้บริการบังคับ JSON schema (response_format) — เอาออกถ้าผู้ให้บริการไม่บังคับ "
+            "ให้ผู้ให้บริการบังคับ JSON schema (response_format) เอาออกถ้าผู้ให้บริการไม่บังคับ "
             "(เช่น OpenTyphoon) แล้วระบบจะใส่ schema ใน prompt แทน"
         ),
         required=False,

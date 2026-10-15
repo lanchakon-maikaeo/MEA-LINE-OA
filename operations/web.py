@@ -8,6 +8,7 @@ cases are audited (round 2 Q3). Actions on a case go through services.perform_ac
 import uuid
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -41,6 +42,11 @@ ADMIN_URLS = ("admin-",)
 REFERENCE_URLS = {"pii", "routing-words", "duties"}
 ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
 ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
+
+
+def environment(request):
+    """Which kind of server this is, for the footer (15 ต.ค. 2569: production holds real data)."""
+    return {"app_env": settings.APP_ENV}
 
 
 def navigation(request):

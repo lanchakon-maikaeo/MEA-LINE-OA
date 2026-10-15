@@ -1,12 +1,12 @@
 {% extends "operations/admin_base.html" %}
 {% load ui %}
-{% block title %}คลังคำตอบ — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}คลังคำตอบ · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
     <h1>คลังคำตอบ</h1>
-    <p class="lede">สิ่งที่บอทตอบได้เมื่อผู้แจ้งถามใน LINE ใช้เฉพาะคำตอบที่รับรองแล้ว แก้ข้อความแล้วต้องรับรองใหม่ทุกครั้ง</p>
+    <p class="lede">สิ่งที่บอทตอบได้เมื่อผู้ใช้ LINE OA ถาม ใช้เฉพาะคำตอบที่รับรองแล้ว แก้ข้อความแล้วต้องรับรองใหม่ทุกครั้ง</p>
   </div>
 </div>
 <section class="section" aria-labelledby="ans-state">
@@ -14,7 +14,7 @@
   <ul>
     <li>ตัวเลือกระบบ: {{ mode }} (<a href="{% url 'admin-options' %}#opt-chat_answers">เปลี่ยน</a>)</li>
     <li>รุ่น AI งานตอบแชต: {% if active %}v{{ active.number }} ใช้งานอยู่{% if not usable %} แต่<strong>คลังคำตอบเปลี่ยนหลังประเมิน</strong> ตอนนี้ตอบด้วยคำสำคัญอย่างเดียว ประเมินใหม่ที่ <a href="{% url 'admin-ai' %}">AI</a>{% endif %}{% else %}ยังไม่มี (ตอบด้วยคำสำคัญอย่างเดียว){% endif %}</li>
-    <li class="muted">ข้อความเรื่องการใช้ไฟฟ้าไม่ถูกส่งให้ AI และผู้แจ้งไม่ระบุตัวตนได้คำตอบจากคำสำคัญเท่านั้น</li>
+    <li class="muted">ข้อความเรื่องการใช้ไฟฟ้าไม่ถูกส่งให้ AI และคนที่แจ้งแบบไม่ระบุตัวตนได้คำตอบจากคำสำคัญเท่านั้น</li>
   </ul>
 </section>
 <section class="section" aria-labelledby="ans-list">

@@ -163,7 +163,7 @@ def _keywords(case, payload, recommendation):
     if not routing_words.may_teach(case, recommendation):
         fail(
             ErrorCode.VALIDATION_ERROR,
-            "คำสำคัญใช้ได้เฉพาะเรื่องที่ส่วนกลางส่งต่อ เมื่อกติกาบอกกองไม่ได้",
+            "คำสำคัญใช้ได้เฉพาะเรื่องที่ ฝอจ. ส่งต่อ เมื่อกติกาบอกกองไม่ได้",
         )
     try:
         return routing_words.clean(case, wanted)

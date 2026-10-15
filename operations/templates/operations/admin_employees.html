@@ -1,5 +1,5 @@
 {% extends "operations/admin_base.html" %}
-{% block title %}ทะเบียนพนักงาน — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}ทะเบียนพนักงาน · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
@@ -29,7 +29,7 @@
       <thead><tr><th scope="col">ข้อมูล</th><th scope="col">คอลัมน์ในไฟล์</th></tr></thead>
       <tbody>
       {% for field, label, chosen in preview.fields %}
-        <tr><td>{{ label }}</td><td class="cell--wide"><label class="visually-hidden" for="col-{{ field }}">{{ label }}</label><select id="col-{{ field }}" name="col_{{ field }}"><option value="">— ไม่ใช้ —</option>{% for h in preview.headers %}{% if h %}<option value="{{ h }}"{% if h == chosen %} selected{% endif %}>{{ h }}</option>{% endif %}{% endfor %}</select></td></tr>
+        <tr><td>{{ label }}</td><td class="cell--wide"><label class="visually-hidden" for="col-{{ field }}">{{ label }}</label><select id="col-{{ field }}" name="col_{{ field }}"><option value="">ไม่ใช้</option>{% for h in preview.headers %}{% if h %}<option value="{{ h }}"{% if h == chosen %} selected{% endif %}>{{ h }}</option>{% endif %}{% endfor %}</select></td></tr>
       {% endfor %}
       </tbody>
     </table></div>
@@ -44,7 +44,7 @@
     </dl>
 
     {% if preview.units %}
-    <h3 class="mt-18">ฝ่าย → เขต/หน่วยงาน</h3>
+    <h3 class="mt-18">จับคู่ฝ่ายกับเขตหรือหน่วยงาน</h3>
     <p class="muted">ฝ่ายของพนักงานใช้เป็นเขตของผู้ใช้ LINE OA ฝ่ายที่ยังไม่ตรงกับเขตไหน ให้เลือกเขตที่มีอยู่ เพิ่มเป็นหน่วยงานใหม่ หรือไม่ระบุ (ผู้ใช้จะเลือกเขตเองตอนลงทะเบียน)</p>
     <div class="table-wrap"><table class="table--cards">
       <thead><tr><th scope="col">ฝ่ายในไฟล์</th><th scope="col" class="num">คน</th><th scope="col">เขต/หน่วยงาน</th></tr></thead>

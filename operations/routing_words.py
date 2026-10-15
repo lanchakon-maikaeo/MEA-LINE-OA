@@ -67,7 +67,7 @@ def apply(case, result):
     listed = ", ".join(f"'{row.word}' → {row.division.code}" for row in found)
     divisions = {row.division.code for row in found}
     if len(divisions) > 1:
-        note = f"คำที่ระบบจำชี้ไปหลายกอง ({listed}) ส่วนกลางเป็นผู้เลือก"
+        note = f"คำที่ระบบจำชี้ไปหลายกอง ({listed}) ฝอจ. เป็นผู้เลือก"
         return {**result, "notes": [*result.get("notes", []), note]}
     first = found[0]
     note = (
@@ -283,7 +283,7 @@ def visible(user):
 
 def _managed(actor, row, reason):
     if not may_manage(actor):
-        raise ValidationError("เฉพาะแอดมินและส่วนกลาง")
+        raise ValidationError("เฉพาะแอดมินและ ฝอจ.")
     reason = str(reason or "").strip()
     if not reason:
         raise ValidationError("ระบุเหตุผล")

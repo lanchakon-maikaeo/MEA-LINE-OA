@@ -1,6 +1,6 @@
 {% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}ส่วนต่างทะเบียน {{ d.document_number }} — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}ส่วนต่างทะเบียน {{ d.document_number }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <nav class="crumbs" aria-label="ตำแหน่ง"><a href="{% url 'registry' %}">กระทบยอดทะเบียน</a> / ส่วนต่าง #{{ d.pk }}</nav>
 <div class="page-head">
@@ -29,9 +29,9 @@
 {% endif %}{% empty %}ไม่พบในไฟล์{% endfor %}</dd></div>
         <div><dt>พบเมื่อ</dt><dd>{{ d.opened_at|thai_datetime }}{% if d.found_by %} จากไฟล์ {{ d.found_by.original_name }}{% endif %}</dd></div>
         {% if d.division_note %}<div><dt>ส่งให้กองตรวจ</dt><dd>{{ d.division.code }}: {{ d.division_note }}</dd></div>{% endif %}
-        {% if d.division_answer %}<div><dt>กองตอบ</dt><dd>{{ d.get_division_answer_display }} — {{ d.division_answer_note }} <span class="muted">({{ d.answered_at|thai_short }})</span></dd></div>{% endif %}
+        {% if d.division_answer %}<div><dt>กองตอบ</dt><dd>{{ d.get_division_answer_display }}: {{ d.division_answer_note }} <span class="muted">({{ d.answered_at|thai_short }})</span></dd></div>{% endif %}
         {% if d.registry_reference %}<div><dt>เอกสารแก้ไขของ SAP</dt><dd>{{ d.registry_reference }}</dd></div>{% endif %}
-        {% if d.resolution %}<div><dt>ผล</dt><dd>{{ d.get_resolution_display }}{% if d.resolution_reason %} — {{ d.resolution_reason }}{% endif %}{% if d.resolved_at %} <span class="muted">({{ d.resolved_at|thai_short }})</span>{% endif %}</dd></div>{% endif %}
+        {% if d.resolution %}<div><dt>ผล</dt><dd>{{ d.get_resolution_display }}{% if d.resolution_reason %}: {{ d.resolution_reason }}{% endif %}{% if d.resolved_at %} <span class="muted">({{ d.resolved_at|thai_short }})</span>{% endif %}</dd></div>{% endif %}
       </dl>
     </section>
 

@@ -2,7 +2,7 @@
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>LINE งบข้อความ และงานค้าง</h1></div></div>
 <section class="section" aria-labelledby="line-budget">
-  <div class="section-head"><h2 id="line-budget">งบการแจ้งเตือน (push) เดือนนี้</h2><span class="muted">ใช้ไป {{ state.percent }}%</span></div>
+  <div class="section-head"><h2 id="line-budget">งบข้อความแจ้งเตือน LINE เดือนนี้</h2><span class="muted">ใช้ไป {{ state.percent }}%</span></div>
   <div class="kpis kpis--3">
     <div class="kpi kpi--dark">
       <span class="kpi__label">ใช้แล้ว</span>
@@ -21,7 +21,7 @@
     </div>
   </div>
   <dl class="facts mt-18">
-    <div><dt>ส่ง push</dt><dd>{{ push_enabled|yesno:"เปิด,ปิด (นอก production หรือยังไม่ตั้งค่า)" }}</dd></div>
+    <div><dt>ส่งข้อความแจ้งเตือน</dt><dd>{{ push_enabled|yesno:"เปิด,ปิด (ไม่ใช่ระบบจริง หรือยังไม่ได้ตั้งค่า)" }}</dd></div>
     <div><dt>ยอดจาก LINE ล่าสุด</dt><dd>{% if snapshot.checked_at %}{{ snapshot.usage }} / {{ snapshot.quota|default:"ไม่จำกัด" }} เมื่อ {{ snapshot.checked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เคยตรวจ{% endif %}{% if state.limit_reached %} · LINE แจ้งว่าโควตาเต็ม{% endif %}</dd></div>
     {% if snapshot.alerted_levels %}<div><dt>แจ้งเตือนแล้ว</dt><dd>{{ snapshot.alerted_levels|join:", " }}</dd></div>{% endif %}
   </dl>
@@ -40,7 +40,7 @@
 </section>
 
 <section class="section" aria-labelledby="line-dead">
-<div class="section-head"><h2 id="line-dead">งานค้างและ dead-letter</h2></div>
+<div class="section-head"><h2 id="line-dead">งานค้างและงานที่ส่งไม่สำเร็จ</h2></div>
 <p class="section-note">รออยู่นานสุดต่อชนิดงาน: {% for type, age in health.oldest_pending_seconds.items %}<span class="tag tag--outline">{{ type }} {{ age }} วินาที</span> {% empty %}ไม่มีงานค้าง{% endfor %}</p>
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">#</th><th scope="col">ชนิด</th><th scope="col">ครั้งที่ลอง</th><th scope="col">ข้อผิดพลาดล่าสุด</th><th scope="col">ลองใหม่</th></tr></thead>
@@ -48,7 +48,7 @@
   {% for e in dead %}
     <tr><td>{{ e.pk }}</td><td>{{ e.event_type }}</td><td>{{ e.attempts }}</td><td>{{ e.last_error }}</td>
       <td><form class="inline" method="post" action="{% url 'admin-requeue' e.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ส่งกลับเข้าคิว</button></form></td></tr>
-  {% empty %}<tr><td colspan="5">ไม่มีงานใน dead-letter</td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="5">ไม่มีงานที่ส่งไม่สำเร็จ</td></tr>{% endfor %}
   </tbody>
 </table></div>
 </section>

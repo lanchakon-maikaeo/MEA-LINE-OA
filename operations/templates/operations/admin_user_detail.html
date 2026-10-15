@@ -1,6 +1,6 @@
 {% extends "operations/admin_base.html" %}
 {% block content %}
-<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · ผู้ใช้</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · บัญชีเจ้าหน้าที่</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>
 
 <h2>บทบาท</h2>
 <div class="table-wrap"><table>
@@ -46,7 +46,7 @@
 {% if sections %}
 <form method="post" action="{% url 'admin-user-action' target.pk 'section' %}">
   <fieldset><legend>แผนก (ใช้แยกคิวและรายงาน ไม่เปลี่ยนสิทธิ์)</legend>{% csrf_token %}
-    <p><label for="u-section">แผนก</label> <select id="u-section" name="section"><option value="">— ไม่สังกัดแผนก —</option>{% for s in sections %}<option value="{{ s.pk }}"{% if target.staff_profile.section_id == s.pk %} selected{% endif %}>{{ s.division.code }} · {{ s.name }}</option>{% endfor %}</select></p>
+    <p><label for="u-section">แผนก</label> <select id="u-section" name="section"><option value="">ไม่สังกัดแผนก</option>{% for s in sections %}<option value="{{ s.pk }}"{% if target.staff_profile.section_id == s.pk %} selected{% endif %}>{{ s.division.code }} · {{ s.name }}</option>{% endfor %}</select></p>
     <p><label for="u-section-reason">เหตุผล</label> <input id="u-section-reason" name="reason" maxlength="500"></p>
     <button type="submit">บันทึกแผนก</button></fieldset>
 </form>

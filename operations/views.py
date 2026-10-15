@@ -797,7 +797,7 @@ def admin_requeue(request, pk):
         identity.audit(request.user, "outbox.requeued", event, reason, event_type=event.event_type)
         messages.success(request, "ส่งงานกลับเข้าคิวแล้ว")
     else:
-        messages.error(request, "งานนี้ไม่ได้อยู่ใน dead-letter แล้ว")
+        messages.error(request, "งานนี้ไม่ได้อยู่ในรายการที่ส่งไม่สำเร็จแล้ว")
     return redirect("admin-line")
 
 

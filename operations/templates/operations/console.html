@@ -1,6 +1,6 @@
 {% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}ภาพรวม — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}ภาพรวม · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head ov-head">
   <div class="page-head__text">
@@ -36,7 +36,7 @@
 <section class="section" aria-labelledby="ov-attention">
   <div class="section-head">
     <h2 id="ov-attention">ต้องดูตอนนี้{% if chosen %} · {{ chosen.code }}{% endif %}</h2>
-    {% if scope.is_admin %}<a class="section-head__link" href="{% url 'queue-all' %}">เปิดคิวทุกกอง →</a>{% endif %}
+    {% if scope.is_admin %}<a class="section-head__link" href="{% url 'queue-all' %}">เปิดคิวทุกกอง</a>{% endif %}
   </div>
   {% if attention %}
     <div class="attention" data-tour="report-stats">
@@ -109,7 +109,7 @@
     <details class="disclosure">
       <summary>ดูเป็นตาราง</summary>
       <div class="disclosure__body table-wrap"><table>
-        <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">เรื่องเข้า</th><th scope="col" class="num">เรื่องจบ</th><th scope="col" class="num">เข้าสะสม</th><th scope="col" class="num">จบสะสม</th></tr></thead>
+        <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">เข้า</th><th scope="col" class="num">จบ</th><th scope="col" class="num">เข้าสะสม</th><th scope="col" class="num">จบสะสม</th></tr></thead>
         <tbody>
           {% for c in t.columns reversed %}
             <tr><td>{{ c.day }}</td><td class="num">{% if c.new %}<a href="{{ c.href }}">{{ c.new }}</a>{% else %}0{% endif %}</td><td class="num">{% if c.ended %}<a href="{{ c.ended_href }}">{{ c.ended }}</a>{% else %}0{% endif %}</td><td class="num">{{ c.new_total }}</td><td class="num">{{ c.ended_total }}</td></tr>
@@ -169,7 +169,7 @@
 </section>
 
 <section class="section" aria-labelledby="ov-breakdown">
-  <div class="section-head"><h2 id="ov-breakdown">เรื่องที่เปิดอยู่อยู่ตรงไหน</h2><span class="muted">กดแถบเพื่อเปิดเรื่องในกลุ่มนั้น</span></div>
+  <div class="section-head"><h2 id="ov-breakdown">เรื่องที่ยังเปิด แยกตามกลุ่ม</h2><span class="muted">กดแถบเพื่อเปิดเรื่องในกลุ่มนั้น</span></div>
   <div class="panel-grid viz">
     <section class="panel" aria-labelledby="r-level">
       <div class="panel__head"><h3 id="r-level">ระดับความด่วน</h3></div>
@@ -221,8 +221,8 @@
     <section class="panel" aria-labelledby="r-time">
       <div class="panel__head"><h3 id="r-time">เวลาทำงานเฉลี่ย</h3><span class="muted">{{ days }} วันล่าสุด</span></div>
       <dl class="kv">
-        <div><dt>แก้ปัญหา</dt><dd>{% if report.resolve_count %}<span class="strong">{{ report.avg_resolve|duration }}</span> <a href="{{ dash.times.resolve }}">จาก {{ report.resolve_count }} เรื่อง</a>{% else %}<span class="muted">ยังไม่มีเรื่องที่ทำเสร็จ</span>{% endif %} <span class="muted">(คัดกรองเสร็จ → บันทึกผล)</span></dd></div>
-        <div><dt>เบิก/คืนจนปิด</dt><dd>{% if report.finish_count %}<span class="strong">{{ report.avg_finish|duration }}</span> <a href="{{ dash.times.finish }}">จาก {{ report.finish_count }} เรื่อง</a>{% else %}<span class="muted">ยังไม่มีเรื่องที่ทำเสร็จ</span>{% endif %} <span class="muted">(คัดกรองเสร็จ → ปิด)</span></dd></div>
+        <div><dt>แก้ปัญหา</dt><dd>{% if report.resolve_count %}<span class="strong">{{ report.avg_resolve|duration }}</span> <a href="{{ dash.times.resolve }}">จาก {{ report.resolve_count }} เรื่อง</a>{% else %}<span class="muted">ยังไม่มีเรื่องที่ทำเสร็จ</span>{% endif %} <span class="muted">(นับจากคัดกรองเสร็จถึงบันทึกผล)</span></dd></div>
+        <div><dt>เบิก/คืนจนปิด</dt><dd>{% if report.finish_count %}<span class="strong">{{ report.avg_finish|duration }}</span> <a href="{{ dash.times.finish }}">จาก {{ report.finish_count }} เรื่อง</a>{% else %}<span class="muted">ยังไม่มีเรื่องที่ทำเสร็จ</span>{% endif %} <span class="muted">(นับจากคัดกรองเสร็จถึงปิดเรื่อง)</span></dd></div>
       </dl>
     </section>
   </div>

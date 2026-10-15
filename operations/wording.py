@@ -72,7 +72,7 @@ EXACT = {
     "quantity must be a positive number.": QUANTITY,
     "quantity must be greater than zero.": QUANTITY,
     "serials must be a list.": "รูปแบบเลขเครื่องไม่ถูกต้อง ใส่บรรทัดละหนึ่งเลข",
-    "Each serial must be 1-64 characters.": "เลขเครื่องแต่ละเลขยาวได้ 1–64 ตัวอักษร",
+    "Each serial must be 1-64 characters.": "เลขเครื่องแต่ละเลขยาวได้ 1 ถึง 64 ตัวอักษร",
     "Serials must not repeat.": "มีเลขเครื่องซ้ำกัน ตรวจแล้วลบเลขที่ซ้ำ",
     "payload must be an object.": FORM_BROKEN,
     "kind must be withdrawal, return or problem.": "เลือกชนิดเรื่อง: เบิก ส่งคืน หรือแจ้งปัญหา",

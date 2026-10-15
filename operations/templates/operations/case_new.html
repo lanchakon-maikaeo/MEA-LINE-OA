@@ -1,6 +1,6 @@
 {% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}บันทึกเรื่องแทนผู้แจ้ง — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}บันทึกเรื่องแทนผู้แจ้ง · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block page_class %}page--reading{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -17,10 +17,10 @@
   <div class="field">
     <label for="nc-requester">ผู้แจ้ง <span class="req" aria-hidden="true">*</span></label>
     <select id="nc-requester" name="requester_id" required>
-      <option value="">— เลือกผู้แจ้งที่รับรองแล้ว —</option>
+      <option value="">เลือกผู้แจ้งที่รับรองแล้ว</option>
       {% for r in requesters %}<option value="{{ r.pk }}"{% if values.requester_id == r.pk|stringformat:"s" %} selected{% endif %}>{{ r.display_name }} · {{ r.district.name }}</option>{% endfor %}
     </select>
-    <span class="helptext">ยังไม่มีชื่อ? แอดมินรับรองผู้แจ้งโดยตรงได้ที่หน้ารับรองผู้แจ้ง</span>
+    <span class="helptext">ไม่พบชื่อในรายการ แอดมินเพิ่มผู้แจ้งที่ไม่ใช้ LINE ได้ที่หน้าผู้ใช้ LINE OA</span>
   </div>
   <fieldset class="choice-field">
     <legend>ชนิดเรื่อง <span class="req" aria-hidden="true">*</span></legend>
@@ -59,7 +59,7 @@
   </div>
   <div class="kind-group kind-problem">
     <h2 class="kind-title">ข้อมูลเรื่องแจ้งปัญหา/ข้อเสนอแนะ</h2>
-    <div class="field"><label for="nc-topic">หัวข้อ</label><select id="nc-topic" name="topic"><option value="">— ไม่ระบุ (ให้ระบบดูจากรายละเอียด) —</option>{% for value, label in topics %}<option value="{{ value }}"{% if values.topic == value %} selected{% endif %}>{{ label }}{% if value == "usage" %} (ลักใช้ไฟ ไฟแพง ร้องเรียน){% endif %}</option>{% endfor %}</select><p class="helptext">หัวข้อการใช้ไฟฟ้าไปที่ กตฟ. และไม่ส่งข้อความให้ AI</p></div>
+    <div class="field"><label for="nc-topic">หัวข้อ</label><select id="nc-topic" name="topic"><option value="">ไม่ระบุ (ให้ระบบดูจากรายละเอียด)</option>{% for value, label in topics %}<option value="{{ value }}"{% if values.topic == value %} selected{% endif %}>{{ label }}{% if value == "usage" %} (ลักใช้ไฟ ไฟแพง ร้องเรียน){% endif %}</option>{% endfor %}</select><p class="helptext">หัวข้อการใช้ไฟฟ้าไปที่ กตฟ. และไม่ส่งข้อความให้ AI</p></div>
     <div class="field"><label for="nc-description">ปัญหาที่พบ หรือข้อเสนอแนะ</label><textarea id="nc-description" name="description" rows="3">{{ values.description|default:'' }}</textarea></div>
     <div class="field"><label for="nc-impact">ผลกระทบต่อผู้ใช้ไฟ</label><textarea id="nc-impact" name="impact" rows="2">{{ values.impact|default:'' }}</textarea></div>
   </div>
@@ -70,7 +70,7 @@
     {% for row in rows %}
       <div class="line-row">
         <label class="line-row__field"><span>อุปกรณ์</span>
-          <select name="row-{{ row.i }}-item"><option value="">—</option>{% for item in items %}<option value="{{ item.code }}"{% if row.item == item.code %} selected{% endif %}>{{ item.code }} {{ item.name }}</option>{% endfor %}</select>
+          <select name="row-{{ row.i }}-item"><option value="">เลือกของ</option>{% for item in items %}<option value="{{ item.code }}"{% if row.item == item.code %} selected{% endif %}>{{ item.code }} {{ item.name }}</option>{% endfor %}</select>
         </label>
         <div class="line-row__inputs">
           <label class="line-row__field"><span>จำนวน</span><input name="row-{{ row.i }}-quantity" value="{{ row.quantity }}" inputmode="decimal" autocomplete="off"></label>

@@ -677,7 +677,7 @@ def build_form(action, st, params, demo=False):
                 "เหตุผลที่เลือกต่างจากข้อเสนอ",
                 "select",
                 False,
-                [("", "— ตรงกับข้อเสนอ ไม่ต้องเลือก —"), *reasons.items()],
+                [("", "ตรงกับข้อเสนอ ไม่ต้องเลือก"), *reasons.items()],
             )
         )
         add(_reason(False, help_text="จำเป็นเมื่อเลือกกองต่างจากข้อเสนอ"))
@@ -702,7 +702,7 @@ def build_form(action, st, params, demo=False):
                 "แผนกที่ดูแล",
                 "select",
                 False,
-                [("", "— ไม่ระบุแผนก —"), *[(str(x.pk), x.name) for x in st.sections]],
+                [("", "ไม่ระบุแผนก"), *[(str(x.pk), x.name) for x in st.sections]],
                 str(case.section_id or ""),
                 help="ใช้แยกคิวและรายงานในกอง สิทธิ์และกรอบเวลายังเป็นของกอง",
             )
@@ -1062,17 +1062,17 @@ def build_form(action, st, params, demo=False):
                 "select",
                 False,
                 [
-                    ("", "— ไม่ระบุ —"),
-                    ("R07", "R07 ตรวจทะเบียน"),
-                    ("R08", "R08 ของขาด/แย่งของ"),
-                    ("R09", "R09 หลายกองในเรื่องเดียว"),
+                    ("", "ไม่ระบุ"),
+                    ("R07", "ตรวจทะเบียน"),
+                    ("R08", "ของขาดหรือหลายเรื่องแย่งของกัน"),
+                    ("R09", "หลายกองในเรื่องเดียว"),
                 ],
             )
         )
         add(
             Field(
                 "lines",
-                "รายการที่งานย่อยรับผิดชอบ (R09)",
+                "รายการที่งานย่อยรับผิดชอบ (เมื่อหลายกองอยู่ในเรื่องเดียว)",
                 "checks",
                 False,
                 [(str(line.line_no), _line_label(line)) for line in st.lines],
@@ -1136,7 +1136,7 @@ def build_form(action, st, params, demo=False):
                 "หลักฐานเอกสารจากระบบทะเบียน (SAP)",
                 "file",
                 not optional,
-                help="สแกนหรือรูปเอกสาร SAP ที่ตรงกับเลขเอกสาร 1–5 ไฟล์ JPG, PNG หรือ PDF"
+                help="สแกนหรือรูปเอกสาร SAP ที่ตรงกับเลขเอกสาร 1 ถึง 5 ไฟล์ JPG, PNG หรือ PDF"
                 + (" (จำเป็นเมื่อใส่เลขเอกสาร)" if optional else ""),
             )
         )

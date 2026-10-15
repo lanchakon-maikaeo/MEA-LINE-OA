@@ -1,6 +1,6 @@
 {% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}{{ case.number }} — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}{{ case.number }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block page_id %}case{% endblock %}
 {% block page_kind %}{{ case.kind }}{% endblock %}
 {% block content %}
@@ -187,7 +187,7 @@
         <ul class="stack-sm mt-18">
           {% for d in page.problem.disputes %}<li class="notice notice--warning"><div class="notice__body"><strong>ผู้แจ้งโต้แย้งผล</strong>{{ d.reason }}</div></li>{% endfor %}
         </ul>
-        {% if page.problem.repeat_dispute %}<p class="flag flag--alert mt-8">โต้แย้งซ้ำ — แจ้งผู้กำกับงานแล้ว</p>{% endif %}
+        {% if page.problem.repeat_dispute %}<p class="flag flag--alert mt-8">โต้แย้งซ้ำ แจ้งผู้กำกับงานแล้ว</p>{% endif %}
       {% endif %}
     </section>
     {% endif %}

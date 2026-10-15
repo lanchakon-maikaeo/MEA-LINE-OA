@@ -2,10 +2,10 @@
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>การตั้งค่า AI</h1></div></div>
 {% if not can_change %}<div class="notice notice--info mb-24" role="status"><div class="notice__body"><strong>ดูได้อย่างเดียว</strong> การเปลี่ยนรุ่น ประเมิน หรือแก้โมเดลทำได้ตาม <a href="{% url 'admin-options' %}">ตัวเลือกระบบ</a> "ใครเปลี่ยนการตั้งค่า AI ได้"</div></div>{% endif %}
-<p class="lede mb-24">AI ในแชต: <strong>{{ ai_enabled|yesno:"เปิด,ปิด (AI_ENABLED)" }}</strong> · ทุกการเปลี่ยนแปลงผ่าน ทดสอบ → ประเมิน → เปลี่ยนไปใช้ และบันทึก audit</p>
+<p class="lede mb-24">AI ในแชต: <strong>{{ ai_enabled|yesno:"เปิด,ปิด (AI_ENABLED)" }}</strong> · ทุกรุ่นต้องทดสอบและประเมินก่อนเปลี่ยนไปใช้ และระบบบันทึกทุกการเปลี่ยน</p>
 
 <h2 id="switch">รุ่นที่ใช้งานอยู่</h2>
-<p>AI มีสามงาน แต่ละงานมีรุ่นที่ใช้งานและเกณฑ์ประเมินแยกกัน: สกัดร่างจากแชต (M05), เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06 ไม่เลือกกองหรือระดับเอง ADR 0002) และตอบแชตผู้แจ้งจากคลังคำตอบ (ADR 0012)</p>
+<p>AI มีสามงาน แต่ละงานมีรุ่นและเกณฑ์ประเมินของตัวเอง ได้แก่ สกัดร่างเรื่องจากแชต เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (ไม่เลือกกองหรือระดับเอง) และตอบแชตผู้ใช้ LINE OA จากคลังคำตอบ</p>
 <p>ตอบแชต: {% if active_answer %}<strong>v{{ active_answer.number }}</strong> · {% for e in active_answer.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_answer.activated_at|date:"Y-m-d H:i" }} (<a href="{% url 'admin-answers' %}">คลังคำตอบ</a>){% else %}ยังไม่เปิดใช้ (ตอบจากคำสำคัญเท่านั้น){% endif %}</p>
 <p>คัดกรองเรื่อง: {% if active_triage %}<strong>v{{ active_triage.number }}</strong> · {% for e in active_triage.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_triage.activated_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เปิดใช้ (ข้อเสนอใช้กติกาและธงจากคำเท่านั้น){% endif %}</p>
 <p>สกัดร่างจากแชต:</p>
@@ -49,7 +49,7 @@
     {{ preset_form.as_p }}
     <button type="submit">สร้างรุ่นใช้โมเดลนี้</button>
   {% else %}
-    <p>ยังไม่มี key: ขอ key ที่ <a href="{{ p.key_url }}" rel="noopener noreferrer" target="_blank">{{ p.key_url }}</a> แล้วกรอกในส่วน "Credential ของผู้ให้บริการ" ด้านล่าง ชื่อ <code>{{ p.credential }}</code> Base URL <code>{{ p.base_url }}</code></p>
+    <p>ยังไม่มี key: ขอ key ที่ <a href="{{ p.key_url }}" rel="noopener noreferrer" target="_blank">{{ p.key_url }}</a> แล้วกรอกในส่วน "คีย์ API ของผู้ให้บริการ" ด้านล่าง ชื่อ <code>{{ p.credential }}</code> Base URL <code>{{ p.base_url }}</code></p>
   {% endif %}
   <p>ข้อความที่ส่งให้โมเดลนี้ไปถึงผู้ให้บริการอีกราย ใช้ได้เฉพาะข้อมูลจำลองจนกว่าองค์กรอนุมัติ</p>
   </fieldset>
@@ -86,7 +86,7 @@
 
 <h2>โปรไฟล์โมเดล</h2>
 <div class="table-wrap"><table>
-  <thead><tr><th scope="col">#</th><th scope="col">Model ID</th><th scope="col">Credential</th><th scope="col">Timeout</th><th scope="col">Max tokens</th><th scope="col">Temperature</th><th scope="col">JSON schema</th></tr></thead>
+  <thead><tr><th scope="col">#</th><th scope="col">Model ID</th><th scope="col">คีย์ API</th><th scope="col">Timeout</th><th scope="col">Max tokens</th><th scope="col">Temperature</th><th scope="col">JSON schema</th></tr></thead>
   <tbody>
   {% for p in profiles %}<tr><td>{{ p.pk }}</td><td>{{ p.model_id }}</td><td>{{ p.credential }}</td><td>{{ p.timeout_seconds }} s</td><td>{{ p.max_tokens }}</td><td>{{ p.temperature }}</td><td>{{ p.use_json_schema|yesno:"ส่ง,ไม่ส่ง" }}</td></tr>
   {% empty %}<tr><td colspan="7">ยังไม่มี</td></tr>{% endfor %}
@@ -96,14 +96,14 @@
   <fieldset><legend>เพิ่มโปรไฟล์ (แก้ค่าเดิมไม่ได้ ให้สร้างใหม่)</legend>{% csrf_token %}{{ profile_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
 </form>{% endif %}
 
-<h2>Credential ของผู้ให้บริการ</h2>
+<h2>คีย์ API ของผู้ให้บริการ</h2>
 <ul>{% for c in credentials %}<li>{{ c.name }} · {{ c.base_url }} · key ••••{{ c.key_hint }}{% if c.rotated_at %} · เปลี่ยนเมื่อ {{ c.rotated_at|date:"Y-m-d H:i" }}{% endif %}</li>{% empty %}<li>ยังไม่มี</li>{% endfor %}</ul>
 {% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'credential' %}" autocomplete="off">
   <fieldset><legend>เพิ่มหรือเปลี่ยน key (ชื่อเดิม = หมุน key; ต้องทดสอบรุ่นใหม่ก่อนเปิดใช้)</legend>{% csrf_token %}{{ credential_form.as_p }}<button type="submit">บันทึก</button></fieldset>
 </form>{% endif %}
 
 <h2 id="runs">การเรียก AI ล่าสุด</h2>
-<p class="section-note">ข้อความ LINE 50 ข้อความล่าสุดที่ส่งให้ AI พร้อมสิ่งที่ AI ทำ ใช้ตรวจคำตอบย้อนหลัง (ADR 0012) ข้อความของผู้แจ้งไม่แสดงที่นี่</p>
+<p class="section-note">50 ครั้งล่าสุดที่ส่งข้อความ LINE ให้ AI พร้อมสิ่งที่ AI ทำ ใช้ตรวจคำตอบย้อนหลัง หน้านี้ไม่แสดงข้อความที่ผู้ใช้พิมพ์</p>
 {% include "operations/_list_tools.html" with list="runs" placeholder="ค้นหาคำตอบ ถ้อยคำ หรือเหตุผล" filters=run_filters %}
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">เมื่อ</th><th scope="col">รุ่น</th><th scope="col">ผล</th><th scope="col">AI ทำอะไร</th><th scope="col">โมเดลที่ลอง</th><th scope="col">ผู้แจ้งแก้</th></tr></thead>
