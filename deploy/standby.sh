@@ -225,7 +225,8 @@ files() {
   say "copying private files and n8n data from the restic backup"
   rm -rf "$ROOT/restore/files"
   # Explicit checks: called as `files || true` from check, set -e does not apply in here.
-  dc run --rm -T files-backup -o s3.bucket-lookup=path restore latest --host production \
+  # --no-lock: the reader key cannot write restic's lock file (it would retry forever).
+  dc run --rm -T files-backup -o s3.bucket-lookup=path --no-lock restore latest --host production \
     --target /restore/files || { say "no files copied (restic failed)"; return 1; }
   # The restic image (pinned in compose.yaml) has a shell: copy without another image.
   dc run --rm -T --no-deps -v "$ROOT/restore/files/backup:/from:ro" -v "$ROOT/data:/to" \
