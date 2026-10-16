@@ -189,6 +189,9 @@ PY
 # Run the script on stdin as root on E5. It is saved to a file first and run with stdin from
 # /dev/null: fed through `bash -s`, the first `docker compose exec/run` read the rest of the
 # script as its own input and the lines after it never ran.
+# printf '%q ' with no arguments still prints '' (one empty argument): quote nothing then.
+quote() { [ $# -eq 0 ] || printf '%q ' "$@"; }
+
 as_root() {
   on_e5 "f=\$(mktemp) && cat > \$f && sudo bash \$f $* < /dev/null; rc=\$?; rm -f \$f; exit \$rc"
 }
@@ -450,7 +453,7 @@ EOF
 
 manage_e5() {  # one manage.py command on E5 (owner role, like migrate)
   [ $# -gt 0 ] || die "usage: deploy/e5-move.sh manage <command> [args…]"
-  { printf '%s\n' "$REMOTE_LIB"; cat <<'EOF'; } | as_root "$(printf '%q ' "$@")"
+  { printf '%s\n' "$REMOTE_LIB"; cat <<'EOF'; } | as_root "$(quote "$@")"
 dc run --rm -T migrate /app/.venv/bin/python manage.py "$@"
 EOF
 }
@@ -535,7 +538,7 @@ purge_demo() {
     on_e5 'sudo /usr/local/sbin/faoj backup diff' || die "the backup failed: nothing was removed"
   fi
   # The migration (owner) role: history tables are append-only for the app's role.
-  { printf '%s\n' "$REMOTE_LIB"; cat <<'EOF'; } | as_root "$(printf '%q ' "$@")"
+  { printf '%s\n' "$REMOTE_LIB"; cat <<'EOF'; } | as_root "$(quote "$@")"
 dc run --rm -T migrate /app/.venv/bin/python manage.py purge_demo_data "$@"
 EOF
 }
