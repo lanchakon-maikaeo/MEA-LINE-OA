@@ -1,5 +1,6 @@
-/* เมนู LINE (15 ต.ค. 2569 Q32): draw the rich menu picture from the admin's buttons, in the
-   browser (it shapes Thai text correctly), and send it as a JPEG when the admin publishes. */
+/* เมนู LINE (15 ต.ค. 2569 Q32; 16 ต.ค. 2569 Q2, Q9): draw every menu page from the admin's
+   buttons, in the browser (it shapes Thai text correctly), and send them as JPEGs when the admin
+   publishes, or right after a save the admin confirmed with its tick. */
 (function () {
   "use strict";
   var LIMIT = 1024 * 1024; // LINE's limit for the picture
@@ -38,6 +39,18 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     shapes.forEach(function (s) {
       if (!s.label) return;
+      if (s.place === "tab") {
+        // The tab strip of a staff menu: the open tab dark, the others light.
+        roundRect(ctx, s.x + 10, s.y + 14, s.w - 20, s.h - 28, 36);
+        ctx.fillStyle = s.active ? "#111111" : "#e5e5e5";
+        ctx.fill();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = s.active ? "#ffffff" : "#111111";
+        ctx.font = "700 80px " + font;
+        ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h / 2);
+        return;
+      }
       var bar = s.place === "bar";
       var pad = 14;
       roundRect(ctx, s.x + pad, s.y + pad, s.w - 2 * pad, s.h - 2 * pad, 40);
@@ -95,28 +108,54 @@
   }
 
   function start() {
-    var canvas = document.querySelector("[data-menu-canvas]");
     var data = document.getElementById("menu-drawing");
-    if (!canvas || !data) return;
-    var shapes = JSON.parse(data.textContent).filter(function (s) {
-      return s.label !== undefined;
+    var canvases = document.querySelectorAll("[data-menu-canvas]");
+    if (!data || !canvases.length) return;
+    var pages = JSON.parse(data.textContent).pages || {};
+    var byPage = {};
+    canvases.forEach(function (canvas) {
+      byPage[canvas.getAttribute("data-menu-canvas")] = canvas;
     });
     var render = function () {
-      draw(canvas, shapes);
+      Object.keys(byPage).forEach(function (page) {
+        draw(byPage[page], pages[page] || []);
+      });
     };
-    if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(render);
-    } else {
-      render();
-    }
-    var form = document.querySelector("[data-menu-publish]");
-    if (!form) return;
-    form.addEventListener("submit", function () {
+    // The chips show one page at a time.
+    document.querySelectorAll("[data-menu-page]").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        var page = chip.getAttribute("data-menu-page");
+        document.querySelectorAll("[data-menu-page]").forEach(function (other) {
+          other.classList.toggle("is-active", other === chip);
+        });
+        Object.keys(byPage).forEach(function (key) {
+          byPage[key].hidden = key !== page;
+        });
+      });
+    });
+    var fill = function (form) {
       var file = form.querySelector('input[type="file"]');
-      var drawn = form.querySelector("[data-menu-drawn]");
-      if (drawn && !(file && file.files && file.files.length)) {
-        drawn.value = picture(canvas);
+      var uploaded = file && file.files && file.files.length;
+      form.querySelectorAll("[data-menu-drawn]").forEach(function (input) {
+        var page = input.getAttribute("data-menu-drawn");
+        if (page === "user" && uploaded) return;
+        if (byPage[page]) input.value = picture(byPage[page]);
+      });
+    };
+    var ready = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+    ready.then(function () {
+      render();
+      // A save the admin confirmed: publish every page now (16 ต.ค. 2569 Q2).
+      var auto = document.querySelector("[data-menu-auto]");
+      if (auto) {
+        fill(auto);
+        auto.submit();
       }
+    });
+    document.querySelectorAll("[data-menu-publish]").forEach(function (form) {
+      form.addEventListener("submit", function () {
+        fill(form);
+      });
     });
   }
 

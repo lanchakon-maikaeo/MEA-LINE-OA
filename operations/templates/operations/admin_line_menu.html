@@ -7,18 +7,32 @@
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
     <h1>เมนู LINE</h1>
-    <p class="lede">ปุ่มบนเมนูของ LINE OA นอกจากการพิมพ์แจ้ง แก้ชื่อปุ่ม กองปลายทาง และลำดับได้ บอทใช้ค่าใหม่ทันที ส่วนรูปเมนูใน LINE จะเปลี่ยนเมื่อกด "อัปเดตเมนูใน LINE"</p>
+    <p class="lede">ทุกคนเห็นเมนูแจ้งเรื่อง เจ้าหน้าที่ที่เชื่อม LINE ได้แท็บงานของกองเพิ่ม และ Supervisor ได้แท็บสั่งงาน บอทใช้ค่าใหม่ทันทีที่บันทึก ติ๊ก "อัปเดตเมนูใน LINE" ตอนบันทึกเพื่อเปลี่ยนรูปเมนูจริงด้วย</p>
   </div>
 </div>
+
+{% if auto_publish %}
+<div class="notice notice--info mb-24" role="status" data-menu-auto-note><div class="notice__body">กำลังวาดและส่งเมนูทุกหน้าไปที่ LINE อย่าเพิ่งปิดหน้านี้</div></div>
+<form method="post" data-menu-publish data-menu-auto hidden>
+  {% csrf_token %}<input type="hidden" name="action" value="publish"><input type="hidden" name="confirm" value="1">
+  <input type="hidden" name="reason" value="{{ auto_publish }}">
+  {% for page, title in pages %}<input type="hidden" name="drawn-{{ page }}" value="" data-menu-drawn="{{ page }}">{% endfor %}
+</form>
+{% endif %}
 
 <section class="section" aria-labelledby="lm-preview">
   <div class="section-head"><h2 id="lm-preview">ตัวอย่างรูปเมนู</h2><span class="muted">วาดจากปุ่มที่เปิดใช้ หัวข้อสูงสุด 6 ปุ่ม แถบล่างสูงสุด 4 ปุ่ม</span></div>
   {{ drawing|json_script:"menu-drawing" }}
-  <canvas class="menu-canvas" width="2500" height="1686" data-menu-canvas aria-label="ตัวอย่างรูปเมนู LINE"></canvas>
+  <nav class="chips mb-18" aria-label="หน้าเมนู" data-menu-pages>
+    {% for page, title in pages %}<button type="button" class="chip{% if forloop.first %} is-active{% endif %}" data-menu-page="{{ page }}">{{ title }}</button>{% endfor %}
+  </nav>
+  {% for page, title in pages %}
+    <canvas class="menu-canvas" width="2500" height="1686" data-menu-canvas="{{ page }}" aria-label="ตัวอย่างเมนู {{ title }}"{% if not forloop.first %} hidden{% endif %}></canvas>
+  {% endfor %}
 </section>
 
 <section class="section" aria-labelledby="lm-tiles">
-  <div class="section-head"><h2 id="lm-tiles">หัวข้อ</h2><span class="muted">{{ tiles|length }} หัวข้อ</span></div>
+  <div class="section-head"><h2 id="lm-tiles">แจ้งเรื่อง: หัวข้อ</h2><span class="muted">ทุกคน · {{ tiles|length }} หัวข้อ</span></div>
   {% for tile in tiles %}
   <details class="disclosure"{% if forloop.first %} open{% endif %}>
     <summary>{{ tile.position }}. {{ tile.label }}{% if tile.division %} · {{ tile.division.code }}{% endif %}{% if not tile.is_active %} <span class="tag tag--muted">ปิด</span>{% endif %} <span class="muted">{{ tile.options|length }} ปุ่มย่อย</span></summary>
@@ -51,7 +65,7 @@
 </section>
 
 <section class="section" aria-labelledby="lm-bar">
-  <div class="section-head"><h2 id="lm-bar">แถบล่าง</h2></div>
+  <div class="section-head"><h2 id="lm-bar">แจ้งเรื่อง: แถบล่าง</h2></div>
   {% for item in bar %}
   <details class="disclosure">
     <summary>{{ item.position }}. {{ item.label }}{% if not item.is_active %} <span class="tag tag--muted">ปิด</span>{% endif %}</summary>
@@ -66,15 +80,34 @@
   </form>
 </section>
 
+{% for tab, title, who, items, actions in staff_tabs %}
+<section class="section" aria-labelledby="lm-{{ tab }}">
+  <div class="section-head"><h2 id="lm-{{ tab }}">แท็บ{{ title }}</h2><span class="muted">{{ who }} · {{ items|length }} ปุ่ม</span></div>
+  {% for item in items %}
+  <details class="disclosure">
+    <summary>{{ item.position }}. {{ item.label }}{% if not item.is_active %} <span class="tag tag--muted">ปิด</span>{% endif %} <span class="muted">{{ item.get_action_display }}</span></summary>
+    <div class="disclosure__body">{% include "operations/_line_menu_item.html" with item=item actions=actions %}</div>
+  </details>
+  {% endfor %}
+  <form class="cluster mt-18" method="post">
+    {% csrf_token %}<input type="hidden" name="action" value="add"><input type="hidden" name="place" value="tile"><input type="hidden" name="tab" value="{{ tab }}">
+    <label class="visually-hidden" for="add-{{ tab }}">เหตุผล</label>
+    <input id="add-{{ tab }}" name="reason" maxlength="500" required placeholder="เหตุผลที่เพิ่ม">
+    <button class="btn btn--secondary btn--sm" type="submit">เพิ่มปุ่ม</button>
+  </form>
+</section>
+{% endfor %}
+
 <section class="section" aria-labelledby="lm-publish">
   <div class="section-head"><h2 id="lm-publish">อัปเดตเมนูใน LINE</h2></div>
   {% if not line_ready %}<div class="notice notice--info mb-24" role="status"><div class="notice__body">เครื่องนี้ยังไม่ได้ตั้งค่า LINE จึงเปลี่ยนเมนูจริงไม่ได้</div></div>{% endif %}
-  <p class="muted">ใช้รูปที่วาดไว้ด้านบน หรืออัปโหลดรูปที่ออกแบบเอง (2500 × 1686 พิกเซล JPEG หรือ PNG ไม่เกิน 1 MB ตำแหน่งปุ่มต้องตรงกับรูปตัวอย่าง)</p>
+  <p class="muted">ส่งทุกหน้าในครั้งเดียว ใช้รูปที่วาดไว้ด้านบน หรืออัปโหลดรูปเมนูของทุกคนที่ออกแบบเอง (2500 × 1686 พิกเซล JPEG หรือ PNG ไม่เกิน 1 MB ตำแหน่งปุ่มต้องตรงกับรูปตัวอย่าง)</p>
   <form method="post" enctype="multipart/form-data" data-menu-publish>
-    {% csrf_token %}<input type="hidden" name="action" value="publish"><input type="hidden" name="drawn" value="" data-menu-drawn>
-    <div class="field"><label for="lm-picture">รูปที่ออกแบบเอง (ไม่บังคับ)</label><input id="lm-picture" type="file" name="picture" accept="image/jpeg,image/png"></div>
+    {% csrf_token %}<input type="hidden" name="action" value="publish">
+    {% for page, title in pages %}<input type="hidden" name="drawn-{{ page }}" value="" data-menu-drawn="{{ page }}">{% endfor %}
+    <div class="field"><label for="lm-picture">รูปเมนูของทุกคนที่ออกแบบเอง (ไม่บังคับ)</label><input id="lm-picture" type="file" name="picture" accept="image/jpeg,image/png"></div>
     <div class="field"><label for="lm-reason">เหตุผล</label><input id="lm-reason" name="reason" maxlength="500" required></div>
-    <label class="choice"><input type="checkbox" name="confirm" value="1" required> <span>ยืนยันว่าเปลี่ยนเมนูจริงของ LINE OA ทันที ทุกคนที่เพิ่มเพื่อนจะเห็นเมนูใหม่</span></label>
+    <label class="choice"><input type="checkbox" name="confirm" value="1" required> <span>ยืนยันว่าเปลี่ยนเมนูจริงของ LINE OA ทันที ทุกคนที่เพิ่มเพื่อนและเจ้าหน้าที่ที่เชื่อม LINE จะเห็นเมนูใหม่</span></label>
     <button class="btn btn--sm" type="submit"{% if not line_ready %} disabled{% endif %}>อัปเดตเมนูใน LINE</button>
   </form>
 </section>

@@ -222,16 +222,18 @@ class StaffLineTests(PeopleTestCase):
         case = self.submit({"kind": "problem", "topic": "transformer", "description": "เสียงดัง"})
         reply = self.type(ALICE, "งานของกอง")
         self.assertIn("กองอุปกรณ์ฯ: รอทำ 1 เรื่อง", texts(reply))
+        options.change(None, options.STAFF_LINE_ACTIONS, "view", "ดูอย่างเดียว")
         detail = self.press(ALICE, case.number, reply)
         self.assertIn("เสียงดัง", texts(detail))
-        self.assertNotIn("รับงาน", buttons(detail))  # viewing only by default
-        options.change(None, options.STAFF_LINE_ACTIONS, "act", "ทดสอบ")
+        self.assertNotIn("เริ่มคัดกรอง", buttons(detail))
+        options.change(None, options.STAFF_LINE_ACTIONS, "act", "ทำใน LINE")  # the default
         detail = self.press(ALICE, case.number, reply)
-        self.press(ALICE, "เริ่มคัดกรอง", detail)
+        self.press(ALICE, "เริ่มคัดกรอง", detail)  # nothing to ask: one tap
         self.assertEqual(Case.objects.get(pk=case.pk).status, "triage")
         detail = self.press(ALICE, case.number, reply)
         self.press(ALICE, "ขอข้อมูลเพิ่มจากเขต", detail)
         self.type(ALICE, "ขอรูปหม้อแปลง")
+        self.press(ALICE, "บันทึก")
         self.assertEqual(Case.objects.get(pk=case.pk).status, "awaiting_info")
 
     def test_a_requester_line_can_also_be_staff(self):

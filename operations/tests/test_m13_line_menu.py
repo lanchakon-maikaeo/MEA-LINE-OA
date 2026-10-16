@@ -5,11 +5,19 @@ and publish the picture to LINE only after confirming.
 
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import Client, override_settings
 
-from operations import line_menu, services
+from operations import identity, line_menu, services, staff_line
 from operations.contracts import Actor
-from operations.models import Case, ConversationDraft, Division, LineMenuItem, Role
+from operations.models import (
+    Case,
+    ChannelIdentity,
+    ConversationDraft,
+    Division,
+    LineMenuItem,
+    Role,
+)
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import ALICE, LineTestCase, buttons, texts
 from operations.tests.test_m13_org import real_world, withdrawal
@@ -48,7 +56,7 @@ class MenuTestCase(LineTestCase):
 
 class SeedTests(MenuTestCase):
     def test_the_owners_menu_is_seeded(self):
-        tiles = list(LineMenuItem.objects.filter(place="tile").order_by("position"))
+        tiles = list(LineMenuItem.objects.filter(place="tile", tab="report").order_by("position"))
         self.assertEqual(
             [t.label for t in tiles],
             [*LINKS, "แจ้งปัญหา/ข้อเสนอแนะ"],
@@ -58,6 +66,9 @@ class SeedTests(MenuTestCase):
             ["ติดตามใบเบิก", "ส่งคืน", "สถานะการซ่อม"],
         )
         self.assertEqual(LineMenuItem.objects.filter(place="bar").count(), 2)
+        # 16 ต.ค. 2569 Q15: the staff tabs come seeded too.
+        self.assertEqual(LineMenuItem.objects.filter(tab="work").count(), 6)
+        self.assertEqual(LineMenuItem.objects.filter(tab="order").count(), 6)
         self.assertTrue(all(len(i.label) <= 20 for i in LineMenuItem.objects.all()))
 
 
@@ -199,3 +210,108 @@ class AdminTests(MenuTestCase):
         self.assertIn(("/v2/bot/richmenu/old-1", "DELETE"), calls)
         self.assertIn(("/v2/bot/user/all/richmenu/new-1", "POST"), calls)
         self.assertTrue(picture)
+
+
+class StaffMenuTests(MenuTestCase):
+    """16 ต.ค. 2569 Q2, Q9, Q13: staff and Supervisors get menus with tabs; a confirmed save
+    publishes every page; a staff LINE follows its role."""
+
+    PICTURE = b"\xff\xd8\xff" + b"0" * 100
+
+    def setUp(self):
+        super().setUp()
+        self.boss = make_staff("menuadmin", (Role.ADMIN, None))
+        self.calls = []
+
+    def fake(self, path, data=None, **kwargs):
+        self.calls.append((path, kwargs.get("method"), data))
+        if path == "/v2/bot/richmenu/list":
+            return {"richmenus": [{"richMenuId": "old-1", "name": "faoj-menu-v2"}]}
+        if path == "/v2/bot/richmenu":
+            return {"richMenuId": f"new-{data['name']}"}
+        if path == "/v2/bot/richmenu/alias/list":
+            return {"aliases": [{"richMenuAliasId": "faoj-staff-work"}]}
+        if path.startswith("/v2/bot/richmenu/alias/faoj-"):
+            return {"richMenuId": "menu-of-" + path.rsplit("/", 1)[1]}
+        return {}
+
+    def test_staff_pages_switch_tabs_and_the_user_menu_has_none(self):
+        menu = line_menu.rich_menu("sup-order")
+        switches = [a["action"] for a in menu["areas"] if a["action"]["type"] == "richmenuswitch"]
+        self.assertEqual(
+            [s["richMenuAliasId"] for s in switches],
+            ["faoj-sup-report", "faoj-sup-work", "faoj-sup-order"],
+        )
+        tiles = [a for a in menu["areas"] if a["action"]["type"] == "postback"]
+        self.assertEqual(len(tiles), 6)
+        self.assertTrue(all(a["bounds"]["y"] >= line_menu.TAB_H for a in tiles))
+        user = line_menu.rich_menu("user")
+        self.assertFalse([a for a in user["areas"] if a["action"]["type"] == "richmenuswitch"])
+        self.assertEqual(set(line_menu.drawing()["pages"]), set(line_menu.PAGES))
+
+    @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token")
+    def test_publishing_every_page_sets_aliases_and_links_staff(self):
+        head = make_staff("kaehead", (Role.SUPERVISOR, "กองอุปกรณ์ฯ"))
+        ChannelIdentity.objects.create(
+            channel="line", external_id="U" + "d" * 32, staff_user=head, is_following=True
+        )
+        with patch("operations.line_menu.line_api.call", side_effect=self.fake):
+            line_menu.publish(self.boss, dict.fromkeys(line_menu.PAGES, self.PICTURE), "ครบทุกหน้า")
+        paths = [(path, method) for path, method, _ in self.calls]
+        self.assertIn(("/v2/bot/user/all/richmenu/new-faoj-menu-v2", "POST"), paths)
+        self.assertIn(("/v2/bot/richmenu/alias/faoj-staff-work", None), paths)  # updated
+        created = [data for path, _, data in self.calls if path == "/v2/bot/richmenu/alias"]
+        self.assertEqual(len(created), 4)  # the other staff pages are new aliases
+        link = next(data for path, _, data in self.calls if path == "/v2/bot/richmenu/bulk/link")
+        self.assertEqual(
+            (link["richMenuId"], link["userIds"]), ("new-faoj-sup-work", ["U" + "d" * 32])
+        )
+        self.assertIn(("/v2/bot/richmenu/old-1", "DELETE"), paths)
+
+    @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token")
+    def test_a_staff_line_follows_its_role(self):
+        member = make_staff("kaemember", (Role.STAFF, "กองอุปกรณ์ฯ"))
+        line = ChannelIdentity.objects.create(
+            channel="line", external_id="U" + "e" * 32, staff_user=member, is_following=True
+        )
+        with (
+            patch("operations.line_menu.line_api.call", side_effect=self.fake),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            identity.grant_role(
+                self.boss, member, Role.SUPERVISOR, Division.objects.get(code="กองอุปกรณ์ฯ"), "หัวหน้า"
+            )
+        self.assertIn(
+            (f"/v2/bot/user/{line.external_id}/richmenu/menu-of-faoj-sup-work", "POST", None),
+            self.calls,
+        )
+        self.calls.clear()
+        with (
+            patch("operations.line_menu.line_api.call", side_effect=self.fake),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            staff_line.unlink(line, self.boss, "เลิกใช้")
+        self.assertEqual(
+            self.calls, [(f"/v2/bot/user/{line.external_id}/richmenu", "DELETE", None)]
+        )
+
+    @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token")
+    def test_a_confirmed_save_publishes_from_the_page(self):
+        client = Client()
+        client.force_login(self.boss)
+        tile = LineMenuItem.objects.get(tab="work", action="work_new")
+        form = {
+            "action": "save",
+            "item": tile.pk,
+            "label": "งานใหม่",
+            "item_action": "work_new",
+            "is_active": "1",
+            "reason": "ชื่อสั้นลง",
+        }
+        page = client.post("/console/admin/line-menu/", form, follow=True)
+        self.assertNotContains(page, "data-menu-auto")  # no tick, no publish
+        page = client.post("/console/admin/line-menu/", {**form, "publish": "1"}, follow=True)
+        self.assertContains(page, "data-menu-auto")
+        self.assertContains(page, 'name="drawn-sup-order"')
+        with self.assertRaises(ValidationError):
+            line_menu.save(self.boss, tile, {**form, "item_action": "track"}, "ผิดแท็บ")

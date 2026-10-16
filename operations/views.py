@@ -1095,35 +1095,47 @@ def _drawn_picture(value):
 
 @admin_required
 def admin_line_menu(request):
-    """เมนู LINE (15 ต.ค. 2569 Q17–Q20, Q32): the buttons as data; publishing replaces the live
-    rich menu only after the admin ticks the confirmation."""
+    """เมนู LINE (15 ต.ค. 2569 Q17–Q20, Q32; 16 ต.ค. 2569 Q2, Q13): the buttons of every menu
+    page as data. A save the admin confirms with its tick publishes all pages right after (the
+    page draws them and sends them on its own); publishing never happens without that tick."""
+    T = LineMenuItem.Tab
     if request.method == "POST":
         post, reason = request.POST, request.POST.get("reason", "")
         action = post.get("action")
         if action == "save":
             item = get_object_or_404(LineMenuItem, pk=post.get("item"))
-            _run(
+            saved = _run(
                 request,
                 lambda: line_menu.save(request.user, item, post, reason),
                 "บันทึกแล้ว บอทใช้ค่าใหม่ทันที",
             )
+            if saved and post.get("publish") == "1" and settings.LINE_CHANNEL_ACCESS_TOKEN:
+                request.session["menu_publish"] = reason  # the page publishes when it loads
         elif action == "add":
             parent = LineMenuItem.objects.filter(pk=post.get("parent") or None).first()
             _run(
                 request,
-                lambda: line_menu.add(request.user, post.get("place", ""), parent, reason),
+                lambda: line_menu.add(
+                    request.user, post.get("place", ""), parent, reason, post.get("tab", T.REPORT)
+                ),
                 "เพิ่มปุ่มแล้ว ปุ่มใหม่ยังปิดอยู่ แก้ชื่อแล้วเปิดใช้ก่อน",
             )
         elif action == "publish":
             if post.get("confirm") != "1":
                 messages.error(request, "ติ๊กยืนยันก่อน เพราะเมนูจริงของ LINE OA จะเปลี่ยนทันที")
             else:
+                pictures = {
+                    page: _drawn_picture(post.get(f"drawn-{page}")) for page in line_menu.PAGES
+                }
                 upload = request.FILES.get("picture")
-                picture = upload.read() if upload else _drawn_picture(post.get("drawn"))
+                if upload:
+                    pictures["user"] = upload.read()
                 _run(
                     request,
-                    lambda: line_menu.publish(request.user, picture, reason),
-                    "เปลี่ยนเมนูใน LINE แล้ว",
+                    lambda: line_menu.publish(
+                        request.user, {k: v for k, v in pictures.items() if v}, reason
+                    ),
+                    "เปลี่ยนเมนูใน LINE แล้ว เจ้าหน้าที่ที่เชื่อม LINE ได้เมนูตามบทบาท",
                 )
         return redirect("admin-line-menu")
     items = list(LineMenuItem.objects.select_related("division").order_by("position", "pk"))
@@ -1135,20 +1147,42 @@ def admin_line_menu(request):
     for tile in tiles:
         tile.options = choices[tile.pk]
     actions = dict(LineMenuItem.Action.choices)
+
+    def offered(allowed):
+        return [(a, actions[a]) for a in actions if a in allowed]
+
     return render(
         request,
         "operations/admin_line_menu.html",
         {
-            "tiles": tiles,
+            "tiles": [t for t in tiles if t.tab == T.REPORT],
             "bar": [i for i in items if i.place == LineMenuItem.Place.BAR],
+            "staff_tabs": [
+                (
+                    T.WORK,
+                    "งานของกอง",
+                    "เจ้าหน้าที่ทุกคนที่เชื่อม LINE กับบัญชี",
+                    [t for t in tiles if t.tab == T.WORK],
+                    offered(line_menu.WORK_ACTIONS),
+                ),
+                (
+                    T.ORDER,
+                    "สั่งงาน",
+                    "เฉพาะ Supervisor ของกองและ Supervisor ระดับฝ่าย",
+                    [t for t in tiles if t.tab == T.ORDER],
+                    offered(line_menu.ORDER_ACTIONS),
+                ),
+            ],
             "divisions": Division.objects.filter(is_active=True).order_by("code"),
-            "tile_actions": [(a, actions[a]) for a in actions if a in line_menu.TILE_ACTIONS],
-            "choice_actions": [(a, actions[a]) for a in actions if a in line_menu.CHOICE_ACTIONS],
-            "bar_actions": [(a, actions[a]) for a in actions if a in line_menu.BAR_ACTIONS],
+            "tile_actions": offered(line_menu.TILE_ACTIONS),
+            "choice_actions": offered(line_menu.CHOICE_ACTIONS),
+            "bar_actions": offered(line_menu.BAR_ACTIONS),
             "topics": list(line_menu.TOPICS.items()),
             "kinds": list(line_menu.KINDS.items()),
             "drawing": line_menu.drawing(),
+            "pages": [(page, line_menu.PAGE_TITLES[page]) for page in line_menu.PAGES],
             "line_ready": bool(settings.LINE_CHANNEL_ACCESS_TOKEN),
+            "auto_publish": request.session.pop("menu_publish", ""),
         },
     )
 

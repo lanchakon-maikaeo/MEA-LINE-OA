@@ -338,7 +338,16 @@ def grant_role(actor, user, role, division=None, reason=""):
     )
     if division is not None:
         sync_membership_authority(user, actor)
+    _menu_follows(user, role)
     return grant
+
+
+def _menu_follows(user, role):
+    """A Supervisor role changes the tabs of the person's LINE menu (16 Oct 2569 Q9)."""
+    if role in (Role.SUPERVISOR, Role.DEPARTMENT_SUPERVISOR):
+        from operations import line_menu  # local: line_menu builds on identity
+
+        line_menu.relink_user(user)
 
 
 @transaction.atomic
@@ -376,6 +385,7 @@ def revoke_role(actor, grant, reason):
         role=grant.role,
         division=grant.division.code if grant.division else None,
     )
+    _menu_follows(grant.user, grant.role)
 
 
 @transaction.atomic
@@ -428,10 +438,16 @@ def set_staff_active(actor, user, active, reason):
     user.save(update_fields=["is_active"])
     _end_sessions(user)
     if not active:
-        # ADR 0010: a suspended account loses its LINE link too.
+        # ADR 0010: a suspended account loses its LINE link too, and the staff menu with it.
+        from operations import line_menu  # local: line_menu builds on identity
+
+        rows = list(ChannelIdentity.objects.filter(staff_user=user))
         ChannelIdentity.objects.filter(staff_user=user).update(
             staff_user=None, staff_linked_at=None
         )
+        for row in rows:
+            row.staff_user = None
+            transaction.on_commit(lambda row=row: line_menu.relink(row))
     audit(actor, "staff.activated" if active else "staff.suspended", user, reason)
 
 

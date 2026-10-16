@@ -2227,6 +2227,13 @@ class LineMenuItem(models.Model):
         BAR = "bar", "แถบล่างของเมนู"
         CHOICE = "choice", "ปุ่มย่อยในหัวข้อ"
 
+    class Tab(models.TextChoices):
+        # 16 Oct 2569 Q9, Q13, Q15: everyone sees แจ้งเรื่อง; staff who linked LINE also get
+        # งานของกอง, and Supervisors สั่งงาน, as tabs of their own rich menu.
+        REPORT = "report", "แจ้งเรื่อง"
+        WORK = "work", "งานของกอง"
+        ORDER = "order", "สั่งงาน"
+
     class Action(models.TextChoices):
         TOPIC = "topic", "เปิดปุ่มย่อยของหัวข้อนี้"
         TRACK = "track", "ติดตาม: แสดงเรื่องของผู้ใช้ ถ้าไม่มีให้ถามกองโดยตรง"
@@ -2236,15 +2243,27 @@ class LineMenuItem(models.Model):
         NEW = "new", "ส่งเรื่องใหม่ (ผู้ใช้เลือกชนิดเอง)"
         MINE = "mine", "เรื่องของฉัน"
         FIND = "find", "ติดตามด้วยเลขเรื่อง"
+        WORK_NEW = "work_new", "งานใหม่ของกอง"
+        WORK_MINE = "work_mine", "เรื่องที่มอบให้ฉัน"
+        WORK_ORDERS = "work_orders", "งานสั่งที่ได้รับ"
+        WORK_DUE = "work_due", "งานใกล้หรือเกินกำหนด"
+        WORK_FIND = "work_find", "ค้นหาด้วยเลขเรื่องหรือเลขงาน"
+        OPEN_WEB = "open_web", "เปิดเว็บ"
+        ORDER_NEW = "order_new", "สั่งงานใหม่"
+        ORDER_ISSUED = "order_issued", "งานที่ฉันสั่งและความคืบหน้า"
+        ORDER_ASSIGN = "order_assign", "มอบเรื่องที่มีอยู่ให้คนในกอง"
+        ORDER_LATE = "order_late", "งานเกินกำหนดทุกกองที่ดูแล"
+        ORDER_TODAY = "order_today", "สรุปวันนี้"
 
     parent = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.CASCADE, related_name="choices"
     )
     place = models.CharField(max_length=8, choices=Place.choices)
+    tab = models.CharField(max_length=8, choices=Tab.choices, default=Tab.REPORT)
     position = models.PositiveSmallIntegerField(default=0)
     label = models.CharField(max_length=20)  # LINE allows 20 characters on a button
     note = models.CharField(max_length=120, blank=True)  # the tile's second line, or a hint
-    action = models.CharField(max_length=8, choices=Action.choices)
+    action = models.CharField(max_length=16, choices=Action.choices)
     division = models.ForeignKey(
         "Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -2257,7 +2276,7 @@ class LineMenuItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["place", "position", "pk"]
+        ordering = ["tab", "place", "position", "pk"]
 
 
 class MonitoringDay(models.Model):

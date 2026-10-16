@@ -336,11 +336,12 @@ LINK_CODE = re.compile(r"^เชื่อม\s*([0-9๐-๙]{6})$")
 def _staff_turn(turn):
     """เจ้าหน้าที่ใน LINE (ADR 0010): linking, the staff menu and staff buttons. Returns True when
     this event belonged to the staff side; a LINE that is also a requester keeps that side."""
-    from operations import employees, options, staff_line
+    from operations import employees, options, staff_line, staff_work, work_orders
 
     text = _event_text(turn)
     command = " ".join(text.split()) if text is not None else ""
     prompt = turn.conversation.prompt
+    token, _ = _token(turn)
     match = LINK_CODE.match(command)
     if match:
         user, reason = staff_line.link_with_code(
@@ -355,12 +356,40 @@ def _staff_turn(turn):
         else:
             turn.say("เชื่อม LINE กับบัญชีเจ้าหน้าที่แล้ว พิมพ์ 'งานของกอง' เพื่อดูงาน")
         return True
-    if command == "เชื่อมบัญชีเจ้าหน้าที่":
-        if options.get(options.STAFF_LINK) == "code_or_employee" and employees.has_directory():
+    if command == "เชื่อมบัญชีเจ้าหน้าที่" or (token is not None and token.action == "staff_otp_new"):
+        if options.get(options.STAFF_LINK) == "code_or_otp":
+            turn.set_prompt("staff_otp_emp")
+            turn.say(
+                "พิมพ์รหัสพนักงานของคุณ ระบบจะส่งรหัส 6 หลักไปที่อีเมลในทะเบียนพนักงาน\n"
+                "หรือพิมพ์ เชื่อม ตามด้วยรหัส 6 หลักจากหน้าเว็บ บัญชีของฉัน"
+            )
+        elif options.get(options.STAFF_LINK) == "code_or_employee" and employees.has_directory():
             turn.set_prompt("staff_emp")
             turn.say("พิมพ์รหัสพนักงานของคุณ หรือพิมพ์ เชื่อม ตามด้วยรหัส 6 หลักจากหน้าเว็บ")
         else:
             turn.say("เข้าเว็บ บัญชีของฉัน กด 'เชื่อม LINE' แล้วพิมพ์ เชื่อม ตามด้วยรหัส 6 หลักที่ได้")
+        return True
+    if prompt == "staff_otp_emp" and command:
+        _staff_send_code(turn, command[:32])
+        return True
+    if token is not None and token.action == "staff_otp_again":
+        _staff_send_code(turn, token.value.get("employee_id", ""))
+        return True
+    if prompt == "staff_otp" and command:
+        employee_id = turn.conversation.prompt_data.get("employee_id", "")
+        user, reason, left = staff_line.link_with_otp(turn.identity, employee_id, command)
+        if user is not None:
+            turn.set_prompt()
+            turn.say("เชื่อม LINE กับบัญชีเจ้าหน้าที่แล้ว")
+            staff_line.menu(turn, user)
+        elif reason == "wrong":
+            turn.say(f"รหัสไม่ถูก ลองได้อีก {left} ครั้ง")
+        else:
+            turn.set_prompt()
+            turn.say(
+                "รหัสนี้ใช้ไม่ได้แล้ว ขอรหัสใหม่ได้",
+                [turn.button("ขอรหัสใหม่", "staff_otp_new")],
+            )
         return True
     if prompt == "staff_emp" and command:
         turn.set_prompt("staff_check", employee_id=command[:32])
@@ -377,6 +406,9 @@ def _staff_turn(turn):
         else:
             turn.say("ข้อมูลไม่ตรงทะเบียนพนักงาน ใช้รหัส 6 หลักจากหน้าเว็บแทนได้")
         return True
+    data = (turn.event.get("postback") or {}).get("data", "")
+    if data.startswith("tab="):
+        return True  # a rich menu tab switch (richmenuswitch): LINE changes the menu itself
     user = staff_line.staff_of(turn.identity)
     if user is None:
         return False
@@ -384,7 +416,8 @@ def _staff_turn(turn):
         staff_line.unlink(turn.identity)
         turn.say("เลิกเชื่อม LINE กับบัญชีเจ้าหน้าที่แล้ว")
         return True
-    token, _ = _token(turn)
+    if _staff_work_turn(turn, user, token, data, command, prompt):
+        return True
     if token is not None and token.action == "staff_menu":
         staff_line.menu(turn, user)
         return True
@@ -393,7 +426,7 @@ def _staff_turn(turn):
         if case is None:
             turn.say("ไม่พบเรื่องนี้ในงานของคุณแล้ว")
         else:
-            staff_line.case_detail(turn, user, case)
+            staff_work.case_detail(turn, user, case)
         return True
     if token is not None and token.action == "staff_act":
         case = staff_line._case_for(user, case_id=token.value.get("case"))
@@ -423,13 +456,134 @@ def _staff_turn(turn):
     if command and CASE_NUMBER.fullmatch(command.upper()) and turn.identity.requester_id is None:
         case = staff_line._case_for(user, number=command.upper())
         if case is not None:
-            staff_line.case_detail(turn, user, case)
+            staff_work.case_detail(turn, user, case)
+            return True
+    if command and staff_work.ORDER_NUMBER.fullmatch(command.upper()):
+        order = work_orders.visible(user).filter(number=command.upper()).first()
+        if order is not None:
+            staff_work.order_detail(turn, user, order)
             return True
     if turn.identity.status != ChannelIdentity.Status.ACTIVE:
         # A staff-only LINE: everything else shows the staff menu.
         staff_line.menu(turn, user)
         return True
     return False
+
+
+def _staff_work_turn(turn, user, token, data, command, prompt):
+    """16 Oct 2569 Q8, Q15: the งานของกอง and สั่งงาน tabs, งานสั่ง and case steps in chat."""
+    from django.contrib.auth import get_user_model
+
+    from operations import staff_line, staff_work, work_orders
+
+    User = get_user_model()
+
+    if data.startswith("m=item&id="):
+        item = _menu_entry(data.split("=", 2)[2])
+        if item is not None and item.tab != LineMenuItem.Tab.REPORT:
+            staff_work.handle_item(turn, user, item)
+            return True
+        if item is not None and turn.identity.status != ChannelIdentity.Status.ACTIVE:
+            # A staff-only LINE reports in its division's name (Q8).
+            turn.requester = staff_line.internal_requester(turn.identity, user)
+            turn.anonymous, turn.internal = False, True
+            _menu_item(turn, item.pk)
+            return True
+        return False
+    action = token.action if token is not None else ""
+    value = token.value if token is not None else {}
+    if action == "staff_order":
+        order = work_orders.visible(user).filter(pk=value.get("order")).first()
+        if order is None:
+            turn.say("ไม่พบงานนี้ในงานของคุณแล้ว")
+        else:
+            staff_work.order_detail(turn, user, order)
+        return True
+    if action == "staff_os":
+        order = work_orders.visible(user).filter(pk=value.get("order")).first()
+        person = None
+        if value.get("user"):
+            person = User.objects.filter(pk=value["user"], is_active=True).first()
+        if order is None:
+            turn.say("ไม่พบงานนี้ในงานของคุณแล้ว")
+        else:
+            staff_work.order_step(turn, user, order, value.get("step", ""), person=person)
+        return True
+    if action == "staff_ow_start":
+        staff_work.order_start(turn, user)
+        return True
+    if action == "staff_ow" and prompt == "staff_ow":
+        staff_work.order_answer(turn, user, value=value)
+        return True
+    if action == "staff_step":
+        case = staff_line._case_for(user, case_id=value.get("case"))
+        if case is None:
+            turn.say("ไม่พบเรื่องนี้ในงานของคุณแล้ว")
+        else:
+            staff_work.step_start(turn, user, case, value.get("action", ""))
+        return True
+    if action == "staff_step_pick" and prompt == "staff_step":
+        staff_work.step_answer(turn, user, value.get("v", ""))
+        return True
+    if action == "staff_step_go" and prompt == "staff_step":
+        staff_work.step_go(turn, user)
+        return True
+    if action == "staff_step_cancel":
+        turn.set_prompt()
+        turn.say("ยกเลิกแล้ว ไม่ได้บันทึกอะไร")
+        return True
+    if not command:
+        return False
+    if prompt == "staff_find":
+        staff_work.find(turn, user, command)
+        return True
+    if prompt == "staff_assign":
+        staff_work.assign_case(turn, user, command)
+        return True
+    if prompt == "staff_ow":
+        staff_work.order_answer(turn, user, text=command)
+        return True
+    if prompt == "staff_step":
+        staff_work.step_answer(turn, user, command)
+        return True
+    if prompt == "staff_os_text":
+        order = work_orders.visible(user).filter(pk=turn.conversation.prompt_data.get("order"))
+        order = order.first()
+        if order is None:
+            turn.set_prompt()
+            turn.say("ไม่พบงานนี้ในงานของคุณแล้ว")
+        else:
+            step = turn.conversation.prompt_data.get("step", "")
+            staff_work.order_step(turn, user, order, step, text=command[:2000])
+        return True
+    return False
+
+
+def _staff_send_code(turn, employee_id):
+    """16 Oct 2569 Q10: the employee ID typed for linking; a code goes to the roster e-mail."""
+    from operations import options, staff_line
+
+    reason = staff_line.send_link_code(turn.identity, employee_id)
+    if reason == "":
+        turn.set_prompt("staff_otp", employee_id=employee_id)
+        turn.say(
+            "ส่งรหัส 6 หลักไปที่อีเมลของคุณในทะเบียนพนักงานแล้ว "
+            f"ใช้ได้ {options.get(options.CODE_MINUTES)} นาที\nพิมพ์รหัสที่นี่",
+            [turn.button("ส่งรหัสใหม่", "staff_otp_again", {"employee_id": employee_id})],
+        )
+        return
+    turn.set_prompt()
+    turn.say(
+        {
+            "locked": "ลองครบจำนวนครั้งของวันนี้แล้ว ใช้รหัส 6 หลักจากหน้าเว็บ บัญชีของฉัน แทน",
+            "limit": "ขอรหัสทางอีเมลครบจำนวนของวันนี้แล้ว ใช้รหัส 6 หลักจากหน้าเว็บแทน",
+            "unavailable": "ตอนนี้ส่งอีเมลไม่ได้ ใช้รหัส 6 หลักจากหน้าเว็บ บัญชีของฉัน แทน",
+        }.get(
+            reason,
+            "ไม่พบบัญชีเจ้าหน้าที่ที่ใช้รหัสพนักงานนี้ หรือทะเบียนพนักงานไม่มีอีเมล "
+            "ให้แอดมินตรวจรหัสพนักงานในบัญชีของคุณ หรือใช้รหัส 6 หลักจากหน้าเว็บแทน",
+        )
+    )
 
 
 def _anonymous_requester(turn):
@@ -1218,6 +1372,8 @@ def _menu_item(turn, pk):
     item = _menu_entry(pk)
     if item is None:
         return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
+    if item.tab != LineMenuItem.Tab.REPORT:
+        return _menu(turn, "เมนูนี้สำหรับเจ้าหน้าที่ที่เชื่อม LINE กับบัญชีแล้ว")
     action = item.action
     A = LineMenuItem.Action
     if action == A.TOPIC:

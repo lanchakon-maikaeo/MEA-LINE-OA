@@ -101,6 +101,14 @@ def _link(identity_row, user, method):
     identity_row.staff_user, identity_row.staff_linked_at = user, timezone.now()
     identity_row.save(update_fields=["staff_user", "staff_linked_at"])
     identity.audit(user, "staff.line_linked", identity_row, actor_label="line", method=method)
+    _relink(identity_row)
+
+
+def _relink(identity_row):
+    """The LINE's menu follows its staff link (16 ต.ค. 2569 Q9), after the commit."""
+    from operations import line_menu  # local: line_menu reads staff scopes through identity
+
+    transaction.on_commit(lambda: line_menu.relink(identity_row))
 
 
 def _failed_tries(identity_row):
@@ -154,6 +162,67 @@ def link_with_employee(identity_row, employee_id, proof):
     return profile.user, ""
 
 
+def _otp_target(identity_row, employee_id):
+    """(employee, staff user, "") when an active staff account carries this employee ID and the
+    roster can mail it a code; else (None, None, reason): "locked" after the day's failures, or
+    "no_match" (counted as a failure, so IDs cannot be walked through LINE)."""
+    from operations import email_codes, employees
+    from operations.models import Employee
+
+    if employees.failed_today(identity_row) >= employees.MAX_FAILED:
+        return None, None, "locked"
+    employee_id = (employee_id or "").strip()[:32]
+    employee = Employee.objects.filter(employee_id=employee_id, is_active=True).first()
+    profile = (
+        StaffProfile.objects.select_related("user")
+        .filter(employee_id=employee_id, user__is_active=True)
+        .first()
+        if employee_id
+        else None
+    )
+    if employee is None or profile is None or "otp" not in email_codes.methods(employee):
+        identity.audit(None, "identity.employee_check_failed", identity_row, actor_label="line")
+        return None, None, "no_match"
+    return employee, profile.user, ""
+
+
+@transaction.atomic
+def send_link_code(identity_row, employee_id):
+    """16 Oct 2569 Q10: mail a 6-digit code to the roster e-mail of the staff account that
+    carries this employee ID. Returns "" or why not: off, locked, no_match, limit, unavailable."""
+    from operations import email_codes
+
+    if options.get(options.STAFF_LINK) != "code_or_otp":
+        return "off"
+    employee, _, reason = _otp_target(identity_row, employee_id)
+    if employee is None:
+        return reason
+    return email_codes.issue(identity_row, employee)
+
+
+@transaction.atomic
+def link_with_otp(identity_row, employee_id, typed):
+    """(user, "", 0) when the code is right and the link is made; else (None, reason, left)."""
+    from operations import email_codes
+    from operations.models import Employee
+
+    employee = Employee.objects.filter(employee_id=(employee_id or "").strip()).first()
+    profile = (
+        StaffProfile.objects.select_related("user")
+        .filter(employee_id=employee.employee_id, user__is_active=True)
+        .first()
+        if employee
+        else None
+    )
+    if employee is None or profile is None:
+        return None, "expired", 0
+    ok, reason, left = email_codes.check(identity_row, employee, typed)
+    if not ok:
+        return None, reason, left
+    _link(identity_row, profile.user, "otp")
+    return profile.user, "", 0
+
+
 @transaction.atomic
 def unlink(identity_row, actor=None, reason=""):
     user = identity_row.staff_user
@@ -162,6 +231,7 @@ def unlink(identity_row, actor=None, reason=""):
     identity_row.staff_user, identity_row.staff_linked_at = None, None
     identity_row.save(update_fields=["staff_user", "staff_linked_at"])
     identity.audit(actor or user, "staff.line_unlinked", identity_row, reason, user=user.pk)
+    _relink(identity_row)
     return True
 
 

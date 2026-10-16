@@ -376,6 +376,9 @@ def _notify(kind, order, users, key):
             else None
         )
         if line is not None:
+            from operations import staff_line
+
+            button = staff_line._token(line, "staff_order", {"order": str(order.pk)}, now)
             planned.append(
                 _deliver(
                     N.Channel.LINE_PUSH,
@@ -386,7 +389,7 @@ def _notify(kind, order, users, key):
                     now,
                     identity=line,
                     text=body,
-                    message=text_message(body),
+                    message=text_message(body, [(f"ดูงาน {order.number}", button)]),
                 )
             )
         if staff_email.enabled() and user.email:
