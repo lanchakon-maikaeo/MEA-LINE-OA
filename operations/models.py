@@ -890,6 +890,9 @@ class Attachment(models.Model):
     registry_record = models.ForeignKey(
         "RegistryRecord", null=True, blank=True, on_delete=models.PROTECT, related_name="evidence"
     )
+    work_order = models.ForeignKey(
+        "WorkOrder", null=True, blank=True, on_delete=models.PROTECT, related_name="attachments"
+    )
     declared_name = models.CharField(max_length=200, blank=True)
     content_type = models.CharField(max_length=64, blank=True)
     size = models.PositiveIntegerField(null=True, blank=True)
@@ -911,11 +914,10 @@ class Attachment(models.Model):
                 name="attachment_one_source",
                 condition=(
                     Q(identity__isnull=False, inbox__isnull=False, uploaded_by__isnull=True)
-                    | Q(
-                        identity__isnull=True,
-                        inbox__isnull=True,
-                        uploaded_by__isnull=False,
-                        case__isnull=False,
+                    # Staff uploads belong to a case or a งานสั่ง (16 Oct 2569 Q14).
+                    | (
+                        Q(identity__isnull=True, inbox__isnull=True, uploaded_by__isnull=False)
+                        & (Q(case__isnull=False) | Q(work_order__isnull=False))
                     )
                 ),
             )
@@ -960,6 +962,9 @@ class NotificationDelivery(models.Model):
     )
     registration = models.ForeignKey(
         RegistrationRequest, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    work_order = models.ForeignKey(
+        "WorkOrder", null=True, blank=True, on_delete=models.PROTECT, related_name="deliveries"
     )
     text = models.TextField()
     # The domain event that caused it: replanning the same event never notifies twice.
@@ -2785,3 +2790,59 @@ class AIRoutingRun(models.Model):
         ordering = ["-created_at"]
         # One ask per case: the case sits with ส่วนกลาง across many decisions (revisions).
         constraints = [models.UniqueConstraint(fields=["case"], name="routing_run_one_per_case")]
+
+
+# --- งานสั่ง (16 Oct 2569 Q6, Q14) ----------------------------------------------------------------
+
+
+class WorkOrder(models.Model):
+    """Work a Supervisor gives a division or one of its members: not a case, so it never counts
+    in the district reports. มอบหมาย → รับทราบ → กำลังทำ → เสร็จ; the assignee may send it back
+    with a reason, and a Supervisor closes or cancels it."""
+
+    class Status(models.TextChoices):
+        ASSIGNED = "assigned", "มอบหมายแล้ว"
+        ACKNOWLEDGED = "acknowledged", "รับทราบแล้ว"
+        IN_PROGRESS = "in_progress", "กำลังทำ"
+        DONE = "done", "ทำเสร็จแล้ว"
+        SENT_BACK = "sent_back", "ส่งกลับ"
+        CLOSED = "closed", "ปิดงาน"
+        CANCELLED = "cancelled", "ยกเลิก"
+
+    number = models.CharField(max_length=16, unique=True)
+    title = models.CharField(max_length=200)
+    detail = models.TextField(blank=True)
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="work_orders")
+    # Empty: anyone in the division does it (its Supervisor may name a person later).
+    assignee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    due_on = models.DateField(null=True, blank=True)
+    is_urgent = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ASSIGNED)
+    result = models.TextField(blank=True)  # what was done, written when finishing
+    reason = models.TextField(blank=True)  # the latest send-back or cancel reason
+    acknowledged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)  # closed or cancelled
+    # One reminder near the due date and one after it (Q14).
+    reminded_soon = models.BooleanField(default=False)
+    reminded_late = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["division", "status"], name="work_order_queue")]
+
+    OPEN = (Status.ASSIGNED, Status.ACKNOWLEDGED, Status.IN_PROGRESS)
+    ENDED = (Status.CLOSED, Status.CANCELLED)
+
+    def __str__(self):
+        return self.number

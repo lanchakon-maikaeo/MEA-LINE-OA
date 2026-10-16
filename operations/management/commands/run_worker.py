@@ -18,6 +18,7 @@ from operations import (
     orchestration,
     policy,
     staff_email,
+    work_orders,
 )
 from operations.models import FormSubmission, OutboxEvent, PostbackToken, WebhookInbox
 
@@ -100,6 +101,7 @@ def run_once(limit=20):
     ai_chat.expire_waiting()
     conversation.expire_drafts()
     policy.sweep_clocks()  # M06: acknowledgement reminders and escalation
+    work_orders.remind()  # 16 ต.ค. 2569 Q14: งานสั่ง near and past its due date
     monitoring.maybe_run()  # 15 ต.ค. 2569 Q43: yesterday's numbers after the set hour
     attachments.process_pending()
     attachments.purge_rejected()

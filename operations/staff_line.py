@@ -293,6 +293,10 @@ def recipient_problem(delivery):
         or staff_of(delivery.identity) is None
     ):
         return "staff LINE no longer linked or account inactive"
+    if delivery.work_order_id is not None:
+        from operations import work_orders  # local: work_orders plans through this path
+
+        return work_orders.recipient_problem(delivery)
     if not services.visible_cases(Actor.staff(user)).filter(pk=delivery.case_id).exists():
         return "staff no longer sees the case"
     return ""

@@ -25,6 +25,7 @@
             {% if nav.scope.is_admin %}<a href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
             {% for d in nav.divisions %}<a href="{% url 'division-detail' d.code %}"{% if nav.url_name == 'division-detail' and nav.current == d.code %} aria-current="page"{% endif %}>{{ d.code }} {{ d.name }}</a>{% endfor %}
             <p class="drawer__group">อื่น ๆ</p>
+            <a href="{% url 'orders' %}"{% if nav.section == 'orders' %} aria-current="page"{% endif %}>งานสั่ง{% if nav.orders %} ({{ nav.orders }}){% endif %}</a>
             {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน (SAP)</a>{% endif %}
             {% if nav.is_intake %}<a href="{% url 'case-new' %}">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
             {% if nav.registrations %}<a href="{% url 'admin-registrations' %}">ผู้ใช้ LINE OA</a>{% endif %}
@@ -49,6 +50,7 @@
           {% with first=nav.divisions.0 %}
           <a href="{% if nav.all_queue %}{% url 'queue-all' %}{% elif nav.current %}{% url 'division-detail' nav.current %}{% elif first %}{% url 'division-detail' first.code %}{% else %}{% url 'console' %}{% endif %}"{% if nav.section == 'queue' and nav.url_name != 'console' %} aria-current="page"{% endif %} data-tour-link="queue">คิวงาน</a>
           {% endwith %}
+          <a href="{% url 'orders' %}"{% if nav.section == 'orders' %} aria-current="page"{% endif %}>งานสั่ง{% if nav.orders %} <span class="nav-count" aria-label="รอคุณ {{ nav.orders }} งาน">{{ nav.orders }}</span>{% endif %}</a>
           {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน</a>{% endif %}
           {% if nav.scope.is_admin %}<a href="{% url 'admin-home' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>แอดมิน</a>{% elif nav.registrations %}<a href="{% url 'admin-registrations' %}"{% if nav.url_name == 'admin-registrations' %} aria-current="page"{% endif %}>ผู้ใช้ LINE OA</a>{% endif %}
         </nav>

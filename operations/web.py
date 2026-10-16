@@ -33,6 +33,7 @@ from operations import (
     uploads,
     web_actions,
     wording,
+    work_orders,
     workflow,
 )
 from operations.contracts import Actor, CommandFailed, ErrorCode
@@ -72,6 +73,8 @@ def navigation(request):
         section = "reports"
     elif name and name.startswith("registry"):
         section = "registry"
+    elif name in {"orders", "order-new", "order-detail"}:
+        section = "orders"
     else:
         section = "queue"
     profile = getattr(user, "staff_profile", None)
@@ -97,6 +100,8 @@ def navigation(request):
             # ตัวเลือกระบบ (ADR 0009): a non-admin who may approve LINE registrations.
             "registrations": not scope.is_admin and identity.may_decide_registrations(user),
             "registry": registry.may_open(user),
+            # งานสั่ง (16 ต.ค. 2569 Q14): waiting on this person, shown on the menu link.
+            "orders": work_orders.waiting_count(user) if scope.has_any_access else None,
             "admin": admin_menu,
         }
     }
@@ -244,6 +249,7 @@ def _queue(request, division, admin_all=False):
         return render(request, "operations/_queue_body.html", context)
     if division:
         context["members"] = _members(division)
+        context["may_order"] = division.pk in scope.overseen
     return render(request, "operations/division.html", context)
 
 
@@ -553,6 +559,9 @@ def case_search(request):
         raise Http404
     query = (request.GET.get("q") or "").strip().upper()[:20]
     rows = []
+    order = work_orders.visible(request.user).filter(number=query).first() if query else None
+    if order is not None:  # งานสั่ง numbers (T69-000001) open the order
+        return redirect("order-detail", number=order.number)
     if query:
         cases = queues.visible(request.user).filter(number__icontains=query)
         exact = cases.filter(number=query).first()

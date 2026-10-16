@@ -40,6 +40,8 @@ ANONYMOUS_LIMIT = "anonymous_daily_limit"
 STAFF_LINE_BUDGET = "staff_line_budget"
 STAFF_LINE_ACTIONS = "staff_line_actions"
 STAFF_LINK = "staff_line_link"
+STAFF_NOTIFY = "staff_notify"
+ORDER_REMIND = "order_remind_days"
 CHAT_ANSWERS = "chat_answers"
 CHAT_FOLLOWUP = "chat_followup"
 CHAT_TYPED = "chat_typed_steps"
@@ -220,6 +222,32 @@ OPTIONS = {
                 "ดูงาน รับงาน และตอบผู้แจ้งได้ใน LINE",
                 "ทุกการกระทำผ่านกติกาและสิทธิ์เดียวกับเว็บ และบันทึกใน audit",
             ),
+        ),
+    ),
+    STAFF_NOTIFY: Option(
+        "ใครได้ข้อความแจ้งเตือนงานสั่ง",
+        (
+            (
+                "acting",
+                "เฉพาะคนที่ต้องทำ",
+                "งานที่สั่งถึงคนไหนแจ้งคนนั้น งานที่สั่งถึงทั้งกองแจ้ง Supervisor ของกอง "
+                "(ถ้ากองไม่มี Supervisor แจ้งทุกคนในกอง) คนอื่นดูงานได้จากเมนูโดยไม่ใช้โควตาข้อความ",
+            ),
+            (
+                "division",
+                "ทุกคนในกอง",
+                "ทุกคนรู้พร้อมกัน แต่ใช้โควตาข้อความ LINE มากขึ้นตามจำนวนคน",
+            ),
+        ),
+        "ผู้สั่งได้ข้อความเมื่อมีคนรับทราบ ทำเสร็จ หรือส่งงานกลับเสมอ",
+    ),
+    ORDER_REMIND: Option(
+        "เตือนงานสั่งก่อนถึงกำหนด",
+        (
+            ("1", "1 วันก่อนกำหนด", "เตือนครั้งเดียว และเตือนอีกครั้งเมื่อเกินกำหนด"),
+            ("2", "2 วันก่อนกำหนด", ""),
+            ("3", "3 วันก่อนกำหนด", ""),
+            ("0", "ไม่เตือนก่อนกำหนด", "ยังเตือนเมื่อเกินกำหนด"),
         ),
     ),
     CHAT_ANSWERS: Option(

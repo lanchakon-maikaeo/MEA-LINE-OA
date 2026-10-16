@@ -226,6 +226,11 @@ a:hover { color: var(--charcoal); }
 .mainnav a[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--ink); }
 .mainnav a:hover { box-shadow: inset 0 -2px 0 var(--hairline); }
 .mainnav a[aria-current="page"]:hover { box-shadow: inset 0 -2px 0 var(--ink); }
+.nav-count {
+  display: inline-grid; place-items: center; min-width: 22px; height: 22px; margin-left: var(--s-8); padding: 0 6px;
+  border-radius: var(--r-full); background: var(--danger); color: var(--on-primary);
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
 
 .topbar__tools { display: flex; align-items: center; gap: var(--s-12); flex: none; }
 

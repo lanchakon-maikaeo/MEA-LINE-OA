@@ -1,0 +1,18 @@
+<form method="post" action="{% url 'order-action' order.number s.name %}" class="stack-sm">
+  {% csrf_token %}
+  {% if s.needs == "result" %}
+    <label class="field"><span>ทำอะไรไปแล้ว <span class="req" aria-hidden="true">*</span></span><textarea name="result" rows="3" required></textarea></label>
+  {% elif s.needs == "reason" %}
+    <label class="field"><span>เหตุผล <span class="req" aria-hidden="true">*</span></span><textarea name="reason" rows="2" required></textarea></label>
+  {% elif s.needs == "person" %}
+    <label class="field"><span>คนในกอง {{ order.division.code }}</span>
+      <select name="person" required><option value="">เลือกคน</option>{% for p in people %}<option value="{{ p.pk }}"{% if order.assignee_id == p.pk %} selected{% endif %}>{{ p.staff_profile.display_name|default:p.username }}</option>{% endfor %}</select>
+    </label>
+  {% elif s.needs == "target" %}
+    <label class="field"><span>สั่งถึง</span>
+      <select name="target" required><option value="">เลือกกองหรือคน</option>{% for division, choices in targets %}<optgroup label="{{ division.code }}">{% for value, label in choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</optgroup>{% endfor %}</select>
+    </label>
+    <label class="field"><span>กำหนดเสร็จใหม่</span><input name="due_on" type="date" min="{{ today }}"></label>
+  {% endif %}
+  <button type="submit" class="{% if s.primary %}btn--block{% else %}btn--secondary btn--sm{% endif %}">{{ s.label }}</button>
+</form>

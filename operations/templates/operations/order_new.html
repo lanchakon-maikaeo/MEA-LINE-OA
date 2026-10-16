@@ -1,0 +1,62 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}สั่งงานใหม่ · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_class %}page--reading{% endblock %}
+{% block content %}
+<ol class="crumbs">
+  <li><a href="{% url 'orders' %}">งานสั่ง</a></li>
+  <li aria-current="page">สั่งงานใหม่</li>
+</ol>
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">งานสั่ง</span>
+    <h1>สั่งงานใหม่</h1>
+    <p class="lede">คนที่ได้รับงานจะได้ข้อความทันทีถ้าเชื่อม LINE ไว้ แล้วกดรับทราบ เริ่มทำ และบอกผลเมื่อเสร็จ</p>
+  </div>
+</div>
+{% for error in errors %}<div class="notice notice--error mb-24" role="alert">{% icon "alert" %}<div class="notice__body">{{ error }}</div></div>{% endfor %}
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <div class="field">
+    <label for="o-title">ให้ทำอะไร <span class="req" aria-hidden="true">*</span></label>
+    <input id="o-title" name="title" maxlength="200" required value="{{ values.title|default:'' }}" placeholder="เช่น ตรวจนับมิเตอร์คงคลังก่อนสิ้นเดือน">
+  </div>
+  <div class="field">
+    <label for="o-target">สั่งถึง <span class="req" aria-hidden="true">*</span></label>
+    <select id="o-target" name="target" required aria-describedby="o-target-help">
+      <option value="">เลือกกองหรือคน</option>
+      {% for division, people in targets %}
+        <optgroup label="{{ division.code }} {{ division.name }}">
+          {% for value, label in people %}<option value="{{ value }}"{% if values.target == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </optgroup>
+      {% endfor %}
+    </select>
+    <p class="helptext" id="o-target-help">สั่งถึงทั้งกองแล้ว Supervisor ของกองเลือกคนทำต่อได้ สั่งได้เฉพาะกองที่คุณดูแล</p>
+  </div>
+  <div class="field">
+    <label for="o-detail">รายละเอียด</label>
+    <textarea id="o-detail" name="detail" rows="4" placeholder="ไม่บังคับ">{{ values.detail|default:'' }}</textarea>
+  </div>
+  <div class="form-grid">
+    <div class="field">
+      <label for="o-due">กำหนดเสร็จ</label>
+      <input id="o-due" name="due_on" type="date" min="{{ today }}" value="{{ values.due_on|default:'' }}" aria-describedby="o-due-help">
+      <p class="helptext" id="o-due-help">ไม่บังคับ ระบบเตือนก่อนถึงกำหนดและเมื่อเกินกำหนด</p>
+    </div>
+    <fieldset class="choice-field">
+      <legend>ความเร่งด่วน</legend>
+      <label class="choice"><input type="checkbox" name="urgent" value="1"{% if values.urgent == "1" %} checked{% endif %}> <span>งานด่วน</span></label>
+      <p class="helptext">ข้อความของงานด่วนส่งได้แม้โควตาข้อความ LINE ใกล้หมด</p>
+    </fieldset>
+  </div>
+  <div class="field">
+    <label for="o-files">ไฟล์แนบ</label>
+    <input id="o-files" name="files" type="file" multiple accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf">
+    <p class="helptext">JPG, PNG หรือ PDF ไม่เกิน 5 ไฟล์ ไฟล์ละไม่เกิน 10 MB เปิดได้หลังสแกนไวรัส</p>
+  </div>
+  <div class="form-actions">
+    <button type="submit">สั่งงาน</button>
+    <a class="btn btn--secondary" href="{% url 'orders' %}">ยกเลิก</a>
+  </div>
+</form>
+{% endblock %}
