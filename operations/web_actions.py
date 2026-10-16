@@ -166,9 +166,12 @@ class Situation:
     line: bool = False  # the requester has LINE, so answers there by themselves
     resolver_id: int | None = None  # who recorded the latest ผลการแก้ปัญหา
     sections: list = field(default_factory=list)  # the owner division's active แผนก
+    overseen: frozenset = frozenset()  # divisions this viewer supervises (16 Oct 2569 Q5)
 
     def member(self, division_id, roles=None):
         if self.support:
+            return True
+        if roles is not None and Role.SUPERVISOR in roles and division_id in self.overseen:
             return True
         held = self.roles.get(division_id, frozenset())
         return bool(held if roles is None else held & set(roles))
@@ -237,6 +240,7 @@ def situation(user, case):
         intake_id=intake.pk if intake else None,
         support=scope.is_support,
         separation=identity.separated(scope),
+        overseen=scope.overseen,
         **_readiness(case, lines),
     )
 

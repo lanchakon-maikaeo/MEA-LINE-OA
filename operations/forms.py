@@ -4,6 +4,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 
 from operations.models import (
+    DUTY_ROLES,
     AIConfigVersion,
     AICredential,
     AIProfile,
@@ -24,16 +25,22 @@ class StaffCreateForm(forms.Form):
 
 
 class GrantRoleForm(forms.Form):
-    # ผู้ช่วยเหลือระบบ is granted on the host only (ADR 0007).
-    role = forms.ChoiceField(
-        label="บทบาท", choices=[c for c in Role.choices if c[0] != Role.SYSTEM_SUPPORT]
-    )
+    role = forms.ChoiceField(label="บทบาท")
     division = forms.ModelChoiceField(
-        label="กอง (เว้นว่างสำหรับบทบาทระดับระบบ)",
+        label="กอง (เว้นว่างสำหรับบทบาทระดับระบบและ Supervisor ระดับฝ่าย)",
         queryset=Division.objects.filter(is_active=True),
         required=False,
     )
     reason = forms.CharField(label="เหตุผล", max_length=500, required=False)
+
+    def __init__(self, *args, **kwargs):
+        from operations import identity  # local: identity reads options at request time
+
+        super().__init__(*args, **kwargs)
+        # ผู้ช่วยเหลือระบบ is granted on the host only (ADR 0007); the old duties are offered
+        # only while the organisation splits a division's work (16 Oct 2569 Q3).
+        hidden = {Role.SYSTEM_SUPPORT} | (set() if identity.work_is_split() else DUTY_ROLES)
+        self.fields["role"].choices = [c for c in Role.choices if c[0] not in hidden]
 
 
 class ReasonForm(forms.Form):

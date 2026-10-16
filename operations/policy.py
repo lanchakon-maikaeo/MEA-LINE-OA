@@ -17,6 +17,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -39,6 +40,7 @@ from operations.models import (
     PolicyVersion,
     Priority,
     Recommendation,
+    RoleGrant,
     RoutingReview,
     Section,
 )
@@ -1314,15 +1316,23 @@ def sweep_clocks(now=None):
 
 
 def active_grants(user, activity, now=None):
+    """Authority an admin granted, plus what membership brings (16 Oct 2569 Q4) while the
+    person is still an active member and the division's work is not split."""
     now = now or timezone.now()
     if not getattr(user, "is_authenticated", False) or not user.is_active:
         return AuthorityGrant.objects.none()
-    return AuthorityGrant.objects.filter(
+    grants = AuthorityGrant.objects.filter(
         user=user,
         activity=activity,
         revoked_at__isnull=True,
         valid_from__lte=now,
     ).exclude(valid_until__lte=now)
+    if identity.work_is_split():
+        return grants.filter(member_of__isnull=True)
+    memberships = RoleGrant.objects.filter(
+        user=user, revoked_at__isnull=True, division__is_active=True
+    ).values("division")
+    return grants.filter(Q(member_of__isnull=True) | Q(member_of__in=memberships))
 
 
 def has_authority(user, activity, division_id, now=None):

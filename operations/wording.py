@@ -171,7 +171,7 @@ EXACT = {
     "Only staff of the owner division can take a case.": ("เฉพาะเจ้าหน้าที่ของกองเจ้าภาพรับผิดชอบเรื่องได้"),
     "You are already responsible for this case.": "คุณเป็นผู้รับผิดชอบเรื่องนี้อยู่แล้ว",
     "Only a supervisor of the owner division can assign.": (
-        "เฉพาะผู้กำกับงานของกองเจ้าภาพมอบหมายผู้รับผิดชอบได้"
+        "เฉพาะ Supervisor ของกองเจ้าภาพมอบหมายผู้รับผิดชอบได้"
     ),
     "assignee_id is required.": "เลือกผู้รับผิดชอบ",
     "Assignee must be active staff of the owner division.": (

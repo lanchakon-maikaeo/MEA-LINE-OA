@@ -86,18 +86,28 @@ class Role(models.TextChoices):
     # ADR 0007: one person (the system's designer) acts for every division, unbound by the
     # separation of duties; granted only on the host (manage.py system_support).
     SYSTEM_SUPPORT = "system_support", "ผู้ช่วยเหลือระบบ"
-    # Division roles. A role is a duty, not approval authority (AuthorityGrant is M06).
-    STAFF = "staff", "เจ้าหน้าที่กอง"
+    # 16 Oct 2569 (Q5): oversees every division (ผอ. ฝอจ. at first); assigns work anywhere.
+    DEPARTMENT_SUPERVISOR = "department_supervisor", "Supervisor ระดับฝ่าย"
+    # Division roles. With ตัวเลือก "หน้าที่ในกอง" = member (16 Oct 2569 Q3) every member does
+    # every step and holds the division's authority; the duties below matter only when the
+    # organisation splits them again.
+    STAFF = "staff", "สมาชิกกอง"
     APPROVER = "approver", "ผู้อนุมัติ"
     ISSUER = "issuer", "ผู้จ่าย"
     RECEIVER = "receiver", "ผู้รับคืน"
     INSPECTOR = "inspector", "ผู้ตรวจสภาพ"
     RESOLVER = "resolver", "ผู้แก้ปัญหา"
-    SUPERVISOR = "supervisor", "ผู้กำกับงานในกอง"
+    SUPERVISOR = "supervisor", "Supervisor ของกอง"
 
 
-GLOBAL_ROLES = frozenset({Role.ADMIN, Role.DEVELOPER_ADMIN, Role.SYSTEM_SUPPORT})
+GLOBAL_ROLES = frozenset(
+    {Role.ADMIN, Role.DEVELOPER_ADMIN, Role.SYSTEM_SUPPORT, Role.DEPARTMENT_SUPERVISOR}
+)
 DIVISION_ROLES = frozenset(set(Role) - GLOBAL_ROLES)
+# What a member does when the division's work is not split (16 Oct 2569 Q3).
+MEMBER_ROLES = frozenset(DIVISION_ROLES - {Role.SUPERVISOR})
+# The duties a split division hands out one by one; merged into สมาชิกกอง on 16 Oct 2569.
+DUTY_ROLES = frozenset(MEMBER_ROLES - {Role.STAFF})
 
 
 class StaffProfile(models.Model):
@@ -1302,6 +1312,12 @@ class AuthorityGrant(models.Model):
     # The approver or document behind the grant (G02 replaces synthetic grants).
     approval_reference = models.CharField(max_length=200)
     is_synthetic = models.BooleanField(default=False)
+    # 16 Oct 2569 Q4: authority that comes with membership of this division. It counts only
+    # while the person is still a member and the division's work is not split (ตัวเลือก
+    # "หน้าที่ในกอง"); empty for authority an admin granted on its own.
+    member_of = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     # Empty for synthetic demo seeds and ผู้ช่วยเหลือระบบ's own grants (made on the host, ADR 0007);
     # an admin never grants authority to themselves.
     granted_by = models.ForeignKey(
@@ -2079,7 +2095,7 @@ class DeadlinePause(models.Model):
 
     class Kind(models.TextChoices):
         AWAITING_INFO = "awaiting_info", "รอข้อมูลจากเขต"
-        SUPERVISOR = "supervisor", "ผู้กำกับงานอนุมัติพัก"
+        SUPERVISOR = "supervisor", "Supervisor อนุมัติพัก"
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="deadline_pauses")
     kind = models.CharField(max_length=16, choices=Kind.choices)

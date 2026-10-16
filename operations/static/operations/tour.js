@@ -82,7 +82,7 @@
         { page: "case", kind: "return", show: { action: "inspect" }, stage: 4, title: "5. ตรวจสภาพ",
           body: "ผู้ตรวจต้องไม่ใช่คนรับของชิ้นนั้น แบ่งผลเป็นพร้อมใช้ ต้องซ่อม หรือดำเนินการอื่น ผลขัดกันให้ผู้มีอำนาจรับรองสภาพอีกคนตัดสิน" },
         { page: "case", kind: "return", show: { action: "terminate_return" }, stage: 5, title: "6. ส่วนที่ไม่มา",
-          body: "ถ้าเขตไม่ส่งของบางส่วน ผู้กำกับงานยุติพร้อมเหตุผล (สูญหายต้องมีเลขเอกสารทะเบียน)" },
+          body: "ถ้าเขตไม่ส่งของบางส่วน Supervisor ยุติพร้อมเหตุผล (สูญหายต้องมีเลขเอกสารทะเบียน)" },
         { page: "case", kind: "return", target: "[data-tour=timeline]", show: { open: "[data-tour=timeline] details" }, stage: 5, title: "6. ปิดเรื่อง",
           body: "รับและตรวจครบแล้วเรื่องปิดเอง ไม่ต้องกดปิด" }
       ]
@@ -101,7 +101,7 @@
         { page: "case", kind: "problem", show: { action: "request_info" }, stage: 1, title: "2. ขอข้อมูลเพิ่มจากเขต",
           body: "ข้อความนี้ส่งถึงผู้แจ้งทาง LINE ระหว่างรอเขตตอบ กรอบเวลาของ ฝอจ. หยุดนับ" },
         { page: "case", kind: "problem", target: "[data-tour=clocks]", stage: 2, title: "3. กรอบเวลาแก้ไข",
-          body: "นับเวลาทำการ 07:30–15:30 เรื่องฉุกเฉินนับต่อเนื่อง เกินเวลาแล้วระบบเตือนและยกระดับให้ผู้กำกับงาน" },
+          body: "นับเวลาทำการ 07:30–15:30 เรื่องฉุกเฉินนับต่อเนื่อง เกินเวลาแล้วระบบเตือนและยกระดับให้ Supervisor" },
         { page: "case", kind: "problem", show: { action: "request_child_work" }, stage: 2, title: "3. ให้กองอื่นช่วย",
           body: "สร้างงานย่อยให้กองอื่นทำบางส่วน กองเดิมยังดูแลเรื่องหลัก" },
         { page: "case", kind: "problem", show: { action: "resolve" }, stage: 3, title: "4. บันทึกผลการแก้ปัญหา",

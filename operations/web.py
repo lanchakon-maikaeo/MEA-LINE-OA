@@ -243,14 +243,31 @@ def _queue(request, division, admin_all=False):
     if _is_htmx(request):
         return render(request, "operations/_queue_body.html", context)
     if division:
-        context["members"] = (
-            RoleGrant.objects.filter(
-                division=division, revoked_at__isnull=True, user__is_active=True
-            )
-            .select_related("user__staff_profile")
-            .order_by("user__username", "role")
-        )
+        context["members"] = _members(division)
     return render(request, "operations/division.html", context)
+
+
+def _members(division):
+    """One row per person (16 Oct 2569 Q3): Supervisor ของกอง or สมาชิกกอง, or each duty when
+    the organisation splits the division's work."""
+    grants = (
+        RoleGrant.objects.filter(division=division, revoked_at__isnull=True, user__is_active=True)
+        .select_related("user__staff_profile")
+        .order_by("user__username", "role")
+    )
+    people = {}
+    for grant in grants:
+        people.setdefault(grant.user, set()).add(grant.role)
+    split = identity.work_is_split()
+    rows = []
+    for user, roles in people.items():
+        if split:
+            label = ", ".join(sorted(Role(r).label for r in roles))
+        else:
+            label = Role(Role.SUPERVISOR if Role.SUPERVISOR in roles else Role.STAFF).label
+        profile = getattr(user, "staff_profile", None)
+        rows.append({"name": profile.display_name if profile else user.username, "label": label})
+    return rows
 
 
 def _registry_count(user, division, admin_all):

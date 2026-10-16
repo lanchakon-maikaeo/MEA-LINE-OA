@@ -40,6 +40,7 @@ from operations import (
     sealing,
 )
 from operations.models import (
+    DUTY_ROLES,
     AIConfigVersion,
     AICredential,
     AIProfile,
@@ -194,10 +195,18 @@ def admin_users(request):
         .prefetch_related(Prefetch("role_grants", queryset=grants, to_attr="active_grants"))
         .order_by("username")
     )
+    split = identity.work_is_split()
     for user in users:
         codes = sorted({g.division.code for g in user.active_grants if g.division})
         user.division_codes = codes
-        user.roles_label = ", ".join(sorted({Role(g.role).label for g in user.active_grants}))
+        roles = {g.role for g in user.active_grants}
+        if not split:
+            # 16 Oct 2569 Q3: a member does every step and a Supervisor is a member too.
+            if roles & DUTY_ROLES:
+                roles = (roles - DUTY_ROLES) | {Role.STAFF}
+            if Role.SUPERVISOR in roles:
+                roles.discard(Role.STAFF)
+        user.roles_label = ", ".join(sorted({Role(r).label for r in roles}))
     divisions = sorted({code for u in users for code in u.division_codes})
     return render(
         request,
@@ -251,6 +260,7 @@ def admin_user_detail(request, pk):
             .order_by("division__code", "order"),
             "grant_form": forms.GrantRoleForm(),
             "move_form": forms.ChangeDivisionForm(),
+            "work_split": identity.work_is_split(),
         },
     )
 
@@ -839,11 +849,12 @@ def admin_policy(request):
         {
             "versions": PolicyVersion.objects.select_related("activated_by"),
             "grants": AuthorityGrant.objects.select_related(
-                "user__staff_profile", "division", "item", "granted_by", "revoked_by"
+                "user__staff_profile", "division", "item", "granted_by", "revoked_by", "member_of"
             ),
             "activate_form": forms.PolicyActivateForm(),
             "grant_form": grant_form,
             "now": timezone.now(),
+            "work_split": identity.work_is_split(),
         },
     )
 

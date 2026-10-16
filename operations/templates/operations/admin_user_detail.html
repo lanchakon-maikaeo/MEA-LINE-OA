@@ -25,7 +25,10 @@
 
 <div class="form-grid">
 <form method="post" action="{% url 'admin-user-action' target.pk 'grant' %}">
-  <fieldset><legend>เพิ่มบทบาท</legend>{% csrf_token %}{{ grant_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
+  <fieldset><legend>เพิ่มบทบาท</legend>{% csrf_token %}
+    {% if work_split %}<p class="helptext">ตอนนี้แยกหน้าที่ย่อยในกอง แต่ละคนทำได้เฉพาะหน้าที่ที่ได้รับ</p>
+    {% else %}<p class="helptext">สมาชิกกองทำได้ทุกขั้นตอนของกองและมีอำนาจของกองติดมาด้วย Supervisor ของกองสั่งงานและมอบงานในกองนั้นได้เพิ่ม ส่วน Supervisor ระดับฝ่ายดูแลทุกกอง (เว้นช่องกองว่าง)</p>{% endif %}
+    {{ grant_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'employee-id' %}">
   <fieldset><legend>รหัสพนักงาน (ใช้เชื่อม LINE ด้วยการยืนยันกับทะเบียนพนักงาน)</legend>{% csrf_token %}
@@ -35,14 +38,14 @@
 </form>
 <p>LINE: {% if line %}เชื่อมแล้ว {{ line.staff_linked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่ได้เชื่อม{% endif %}</p>
 {% if line %}<form method="post" action="{% url 'admin-user-action' target.pk 'line-unlink' %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">เลิกเชื่อม LINE ของบัญชีนี้</button></form>{% endif %}
-<form method="post" action="{% url 'admin-user-action' target.pk 'full-division' %}">
+{% if work_split %}<form method="post" action="{% url 'admin-user-action' target.pk 'full-division' %}">
   <fieldset><legend>ทำได้ทุกงานในกอง (ทุกบทบาทและอำนาจของกองในครั้งเดียว)</legend>{% csrf_token %}
     <p class="helptext">ให้ทีละรายการ จึงถอนบางบทบาทหรืออำนาจภายหลังได้เมื่อจะแยกหน้าที่ ถ้าต้องการให้คนเดียวทำต่อกันได้ทุกขั้น ให้ปิดการแยกหน้าที่ในตัวเลือกระบบด้วย</p>
     <p><label for="u-full-division">กอง</label> <select id="u-full-division" name="division" required>{% for d in active_divisions %}<option value="{{ d.pk }}">{{ d.code }} {{ d.name }}</option>{% endfor %}</select></p>
     <p><label for="u-full-reason">เหตุผล</label> <input id="u-full-reason" name="reason" maxlength="500" required></p>
     <p><label for="u-full-ref">เลขอ้างอิงการมอบอำนาจ</label> <input id="u-full-ref" name="approval_reference" maxlength="200" required></p>
     <button type="submit">ให้ทำได้ทุกงานในกองนี้</button></fieldset>
-</form>
+</form>{% endif %}
 {% if sections %}
 <form method="post" action="{% url 'admin-user-action' target.pk 'section' %}">
   <fieldset><legend>แผนก (ใช้แยกคิวและรายงาน ไม่เปลี่ยนสิทธิ์)</legend>{% csrf_token %}

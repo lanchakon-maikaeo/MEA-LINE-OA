@@ -205,7 +205,7 @@ def timeline(case):
         division = event.data.get("division", "")
         target = event.data.get("to", "")
         if target.startswith("supervisors:"):
-            target = f"ผู้กำกับงาน {target.split(':', 1)[1]}"
+            target = f"Supervisor {target.split(':', 1)[1]}"
         parts = [
             p for p in (detail, division and f"กอง {division}", target and f"ไป {target}") if p
         ]

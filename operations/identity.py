@@ -18,7 +18,9 @@ from django.utils import timezone
 from operations import orchestration
 from operations.models import (
     DIVISION_ROLES,
+    DUTY_ROLES,
     GLOBAL_ROLES,
+    MEMBER_ROLES,
     AuditEvent,
     AuthorityGrant,
     ChannelIdentity,
@@ -47,13 +49,32 @@ class StaffScope:
     division_roles: dict[int, frozenset[str]] = field(default_factory=dict)
     # ADR 0007: acts for every division with every role; bound by no separation of duties.
     is_support: bool = False
+    # 16 Oct 2569 Q5: divisions this person supervises (assigns work, sees every case); a
+    # Supervisor ระดับฝ่าย supervises every active division without being a member of it.
+    overseen: frozenset[int] = frozenset()
+    is_department_supervisor: bool = False
 
     @property
     def has_any_access(self):
-        return self.is_admin or self.is_support or bool(self.division_roles)
+        return self.is_admin or self.is_support or bool(self.division_roles or self.overseen)
 
 
 NO_SCOPE = StaffScope(user_id=None)
+
+
+def work_is_split():
+    """ตัวเลือก "หน้าที่ในกอง" (16 Oct 2569 Q3): False = every member does every step."""
+    from operations import options  # local: options builds on models only
+
+    return options.get(options.DIVISION_WORK) == "roles"
+
+
+def _as_member(held, split):
+    """A member does every step of the division unless its work is split; a Supervisor of the
+    division is a member too."""
+    if split or not held:
+        return frozenset(held)
+    return frozenset(held | MEMBER_ROLES)
 
 
 def staff_scope(user):
@@ -75,13 +96,20 @@ def staff_scope(user):
         else:
             roles.setdefault(division_id, set()).add(role)
     is_admin = Role.ADMIN in global_roles
+    split = work_is_split() if roles else True
+    department = Role.DEPARTMENT_SUPERVISOR in global_roles
+    overseen = {d for d, r in roles.items() if Role.SUPERVISOR in r}
+    if department:
+        overseen |= set(Division.objects.filter(is_active=True).values_list("pk", flat=True))
     return StaffScope(
         user_id=user.pk,
         is_admin=is_admin,
         # Developer-admin is an extra duty of an admin, never a standalone path.
         is_developer_admin=is_admin and Role.DEVELOPER_ADMIN in global_roles,
-        division_roles={division: frozenset(r) for division, r in roles.items()},
+        division_roles={division: _as_member(r, split) for division, r in roles.items()},
         is_support=Role.SYSTEM_SUPPORT in global_roles,
+        overseen=frozenset(overseen),
+        is_department_supervisor=department,
     )
 
 
@@ -96,6 +124,8 @@ def holds(scope, division_id, roles=None):
     if scope is None:
         return False
     if scope.is_support:
+        return True
+    if roles is not None and Role.SUPERVISOR in roles and division_id in scope.overseen:
         return True
     held = scope.division_roles.get(division_id, frozenset())
     return bool(held if roles is None else held & set(roles))
@@ -117,6 +147,8 @@ def can_access_division(scope, division_id, roles=None):
     """Own-division rule: admins see all divisions, staff only divisions they hold a role in."""
     if scope.is_admin or scope.is_support:
         return True
+    if division_id in scope.overseen and (roles is None or Role.SUPERVISOR in roles):
+        return True
     held = scope.division_roles.get(division_id, frozenset())
     return bool(held) if roles is None else bool(held & set(roles))
 
@@ -125,7 +157,7 @@ def filter_by_division(queryset, scope, field_name):
     """Restrict a queryset of division-owned rows to the scope; deny by default."""
     if scope.is_admin or scope.is_support:
         return queryset
-    return queryset.filter(**{f"{field_name}__in": list(scope.division_roles)})
+    return queryset.filter(**{f"{field_name}__in": [*scope.division_roles, *scope.overseen]})
 
 
 def resolve_requester(channel, external_id):
@@ -276,6 +308,11 @@ def grant_role(actor, user, role, division=None, reason=""):
         raise ValidationError("Global roles cannot be scoped to a division.")
     if role in DIVISION_ROLES and (division is None or not division.is_active):
         raise ValidationError("Division roles need an active division.")
+    if role in DUTY_ROLES and not work_is_split():
+        raise ValidationError(
+            "ตอนนี้สมาชิกกองทำได้ทุกขั้นตอน ให้บทบาทสมาชิกกองหรือ Supervisor แทน "
+            "(ถ้าจะแยกหน้าที่ย่อย เปลี่ยนตัวเลือกระบบ หน้าที่ในกอง ก่อน)"
+        )
     locked = _lock_active_admins()
     _require_account_admin(actor, user, locked)
     if role == Role.DEVELOPER_ADMIN and (actor.pk, Role.DEVELOPER_ADMIN, True) not in locked:
@@ -299,6 +336,8 @@ def grant_role(actor, user, role, division=None, reason=""):
         role=role,
         division=division.code if division else None,
     )
+    if division is not None:
+        sync_membership_authority(user, actor)
     return grant
 
 
@@ -405,6 +444,61 @@ DIVISION_AUTHORITY = (
 )
 
 
+def membership_authority(division):
+    """What membership brings (16 Oct 2569 Q4): ฝอจ. decides routes for every division; any
+    other division holds its own division's authority, with no category, item or quantity cap."""
+    if division.kind == Division.Kind.COORDINATION:
+        return [(AuthorityGrant.Activity.ROUTING_DECISION, None)]
+    return [(activity, division) for activity in DIVISION_AUTHORITY]
+
+
+def sync_membership_authority(user, actor=None):
+    """Make the authority rows each of the user's memberships brings, once. They count only
+    while the membership lasts and the division's work is not split (policy.active_grants), so
+    nothing is revoked here. `actor` None = a migration or manage.py. Returns rows added."""
+    divisions = Division.objects.filter(
+        pk__in=RoleGrant.objects.filter(
+            user=user, revoked_at__isnull=True, division__isnull=False
+        ).values("division")
+    ).order_by("pk")
+    now = timezone.now()
+    added = 0
+    for division in divisions:
+        for activity, scope in membership_authority(division):
+            if AuthorityGrant.objects.filter(
+                user=user,
+                member_of=division,
+                activity=activity,
+                division=scope,
+                revoked_at__isnull=True,
+            ).exists():
+                continue
+            reason = f"มาพร้อมการเป็นสมาชิก {division.code}"
+            grant = AuthorityGrant.objects.create(
+                user=user,
+                activity=activity,
+                division=scope,
+                member_of=division,
+                valid_from=now,
+                reason=reason,
+                approval_reference="สมาชิกกอง",
+                # An admin never grants authority to themselves (authority_not_self_granted).
+                granted_by=actor if actor is not None and actor.pk != user.pk else None,
+            )
+            audit(
+                actor,
+                "authority.granted",
+                grant,
+                reason,
+                user=user.pk,
+                activity=activity,
+                division=scope.code if scope else None,
+                member_of=division.code,
+            )
+            added += 1
+    return added
+
+
 @transaction.atomic
 def grant_full_division(actor, user, division, reason, approval_reference):
     """ทำได้ทุกงานในกอง (user, 10 Oct 2569: one account per division for now): every division
@@ -421,6 +515,23 @@ def grant_full_division(actor, user, division, reason, approval_reference):
     user = User.objects.select_for_update().get(pk=user.pk)
     if not division.is_active or not user.is_active:
         raise ValidationError("ใช้ได้กับกองและบัญชีที่ใช้งานอยู่เท่านั้น")
+    if not work_is_split():
+        # 16 Oct 2569 Q3: membership already brings every step and the division's authority.
+        if RoleGrant.objects.filter(user=user, division=division, revoked_at__isnull=True).exists():
+            return 0, sync_membership_authority(user, actor)
+        grant = RoleGrant.objects.create(
+            user=user, role=Role.STAFF, division=division, granted_by=actor, reason=reason
+        )
+        audit(
+            actor,
+            "role.granted",
+            grant,
+            reason,
+            user=user.pk,
+            role=Role.STAFF,
+            division=division.code,
+        )
+        return 1, sync_membership_authority(user, actor)
     roles = 0
     for role in sorted(DIVISION_ROLES):
         if RoleGrant.objects.filter(
@@ -757,7 +868,7 @@ def may_decide_registrations(user):
     if choice == "staff":
         return bool(scope.division_roles)
     if choice == "supervisor":
-        return any(Role.SUPERVISOR in roles for roles in scope.division_roles.values())
+        return bool(scope.overseen)
     return False
 
 

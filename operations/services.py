@@ -147,7 +147,8 @@ def _staff_condition(ctx):
     """Owner division, a handoff waiting for one of their divisions, or a routing decision
     within their authority. Other divisions' queues stay closed (B.2)."""
     divisions = list(ctx.scope.division_roles)
-    condition = Q(owner_division__in=divisions) | Q(
+    # 16 Oct 2569 Q5: a Supervisor reads every case of the divisions they oversee.
+    condition = Q(owner_division__in=[*divisions, *ctx.scope.overseen]) | Q(
         Exists(
             Handoff.objects.filter(
                 case=OuterRef("pk"), status=Handoff.Status.PENDING, to_division__in=divisions

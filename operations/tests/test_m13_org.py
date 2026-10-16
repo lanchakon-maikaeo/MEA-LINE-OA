@@ -36,7 +36,6 @@ from operations import (
 from operations.contracts import Actor, CommandFailed, ErrorCode
 from operations.management.commands import load_org, seed_org_demo
 from operations.models import (
-    DIVISION_ROLES,
     AckClock,
     AuditEvent,
     AuthorityGrant,
@@ -277,6 +276,7 @@ class OwnerDeskTests(OrgTestCase):
         return Case.objects.get(pk=case.pk)
 
     def test_another_member_records_the_districts_answer_not_the_resolver(self):
+        options.change(self.admin, options.SEPARATION, "on", "ขั้นที่ต่อกันเป็นคนละคน")
         case = self.resolved()
         answer = {"channel": "phone", "intake_note": "เขตโทรแจ้งว่าเรียบร้อย"}
         with self.assertRaises(CommandFailed) as caught:
@@ -376,23 +376,24 @@ class SectionTests(OrgTestCase):
 
 class OptionsTests(OrgTestCase):
     def test_options_start_safe_and_change_only_by_admin_with_a_reason(self):
-        self.assertEqual(options.get(options.SEPARATION), "on")
+        # 16 Oct 2569 Q4: separation is off by default; members do every step of their division.
+        self.assertEqual(options.get(options.SEPARATION), "off")
         self.assertEqual(options.get(options.REGISTRATION), "admin")
         with self.assertRaises(PermissionDenied):
-            options.change(self.kcw, options.SEPARATION, "off", "อยากทำเอง")
+            options.change(self.kcw, options.SEPARATION, "on", "อยากแยก")
         with self.assertRaises(ValidationError):
-            options.change(self.admin, options.SEPARATION, "off", "")
+            options.change(self.admin, options.SEPARATION, "on", "")
         with self.assertRaises(ValidationError):
             options.change(self.admin, options.SEPARATION, "maybe", "ค่าแปลก")
-        options.change(self.admin, options.SEPARATION, "off", "กองละหนึ่งบัญชี")
-        self.assertEqual(options.get(options.SEPARATION), "off")
+        options.change(self.admin, options.SEPARATION, "on", "ขั้นที่ต่อกันเป็นคนละคน")
+        self.assertEqual(options.get(options.SEPARATION), "on")
         event = AuditEvent.objects.get(action="option.changed")
-        self.assertEqual((event.data["previous"], event.data["value"]), ("on", "off"))
+        self.assertEqual((event.data["previous"], event.data["value"]), ("off", "on"))
         client = Client()
         client.force_login(self.admin)
         page = client.get("/console/admin/options/")
         self.assertContains(page, "การแยกหน้าที่ในเรื่องเดียวกัน")
-        self.assertContains(page, "กองละหนึ่งบัญชี")
+        self.assertContains(page, "ขั้นที่ต่อกันเป็นคนละคน")
         client.post(
             "/console/admin/options/",
             {"key": options.REGISTRATION, "value": "staff", "reason": "สะดวก"},
@@ -401,17 +402,17 @@ class OptionsTests(OrgTestCase):
 
     def test_one_account_does_every_step_of_its_division(self):
         solo = make_staff("solo")
+        # 16 Oct 2569 Q3: one membership brings every step and the division's authority.
         roles, grants = identity.grant_full_division(
             self.admin, solo, Division.objects.get(code="กองอุปกรณ์ฯ"), "บัญชีเดียวของกอง", "REF-1"
         )
-        self.assertEqual((roles, grants), (len(DIVISION_ROLES), len(identity.DIVISION_AUTHORITY)))
+        self.assertEqual((roles, grants), (1, len(identity.DIVISION_AUTHORITY)))
         self.assertEqual(
             identity.grant_full_division(
                 self.admin, solo, Division.objects.get(code="กองอุปกรณ์ฯ"), "ซ้ำ", "REF-1"
             ),
             (0, 0),
         )
-        options.change(self.admin, options.SEPARATION, "off", "กองละหนึ่งบัญชี")
         _, case = self.submit({"kind": "problem", "topic": "transformer", "description": "ดับ"})
         self.act(solo, case, "start_triage")
         self.act(solo, case, "set_priority", {"priority": "P2", "reason": "ทดสอบ"})

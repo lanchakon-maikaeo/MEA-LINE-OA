@@ -66,8 +66,8 @@
     <table>
       <thead><tr><th scope="col">ผู้ใช้</th><th scope="col">บทบาท</th></tr></thead>
       <tbody>
-        {% for grant in members %}
-          <tr><td>{{ grant.user.staff_profile.display_name|default:grant.user.username }}</td><td>{{ grant.get_role_display }}</td></tr>
+        {% for member in members %}
+          <tr><td>{{ member.name }}</td><td>{{ member.label }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

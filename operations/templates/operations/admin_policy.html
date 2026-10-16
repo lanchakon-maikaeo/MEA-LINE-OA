@@ -20,7 +20,9 @@
 </table></div>
 
 <h2>อำนาจ</h2>
-<p>บทบาทในกองไม่ใช่อำนาจ อำนาจบันทึกแยกตามกิจกรรม ขอบเขต และวันมีผล พร้อมผู้รับรอง แอดมินให้อำนาจแก่ตัวเองไม่ได้ อำนาจอนุมัติเบิกและจัดสรรของขาดจำกัดหมวด/รายการได้ จำนวนสูงสุดเทียบกับจำนวนอนุมัติต่อรายการและต้องระบุรายการของ</p>
+{% if work_split %}<p>ตอนนี้แยกหน้าที่ย่อยในกอง บทบาทในกองไม่ใช่อำนาจ ต้องให้อำนาจทีละคน แถวที่มาพร้อมการเป็นสมาชิกกองจึงยังไม่มีผล</p>
+{% else %}<p>สมาชิกกองได้อำนาจของกองตัวเองติดมาโดยไม่จำกัดหมวดหรือจำนวน (แถวที่เขียนว่า มาพร้อมการเป็นสมาชิก) และหมดไปเองเมื่อถอนออกจากกอง สมาชิก ฝอจ. ได้อำนาจตัดสินเส้นทางทุกกอง</p>{% endif %}
+<p>อำนาจที่ให้แยกรายคนบันทึกตามกิจกรรม ขอบเขต และวันมีผล พร้อมผู้รับรอง แอดมินให้อำนาจแก่ตัวเองไม่ได้ อำนาจอนุมัติเบิกและจัดสรรของขาดจำกัดหมวด/รายการได้ จำนวนสูงสุดเทียบกับจำนวนอนุมัติต่อรายการและต้องระบุรายการของ</p>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">ผู้ได้รับ</th><th scope="col">กิจกรรม</th><th scope="col">ขอบเขต</th><th scope="col">มีผล</th><th scope="col">อ้างอิง</th><th scope="col">สถานะ</th></tr></thead>
   <tbody>
@@ -30,7 +32,7 @@
       <td class="cell--end" data-label="กิจกรรม">{{ g.get_activity_display }}</td>
       <td data-label="ขอบเขต">{% if g.division %}{{ g.division.code }}{% else %}ทุกกอง{% endif %}{% if g.item %}<br>{{ g.item.code }}{% elif g.category %}<br>{{ g.get_category_display }}{% endif %}{% if g.max_quantity %}<br>ไม่เกิน {{ g.max_quantity }} ต่อรายการ{% endif %}</td>
       <td class="cell--two" data-label="มีผล">{{ g.valid_from|date:"Y-m-d H:i" }} ถึง {% if g.valid_until %}{{ g.valid_until|date:"Y-m-d H:i" }}{% else %}ไม่กำหนด{% endif %}</td>
-      <td class="cell--wide" data-label="อ้างอิง">{{ g.approval_reference }}{% if g.is_synthetic %} (จำลอง){% endif %}<br>ให้โดย {{ g.granted_by.username|default:"ระบบตั้งต้น" }}</td>
+      <td class="cell--wide" data-label="อ้างอิง">{% if g.member_of %}มาพร้อมการเป็นสมาชิก {{ g.member_of.code }}{% if work_split %} (ยังไม่มีผล){% endif %}{% else %}{{ g.approval_reference }}{% if g.is_synthetic %} (จำลอง){% endif %}<br>ให้โดย {{ g.granted_by.username|default:"ระบบตั้งต้น" }}{% endif %}</td>
       <td class="cell--wide" data-label="สถานะ">{% if g.revoked_at %}ถอนแล้ว {{ g.revoked_at|date:"Y-m-d H:i" }}<br>{{ g.revoke_reason }}{% elif g.valid_until and g.valid_until <= now %}หมดอายุ{% else %}
         <form class="inline" method="post" action="{% url 'admin-policy-action' 'revoke' g.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ถอน</button></form>{% endif %}</td>
     </tr>

@@ -246,7 +246,7 @@ class AdminGuardTests(IdentityTestCase):
         ):
             with self.subTest(url=url):
                 self.assertEqual(client.get(url).status_code, 200)
-        self.assertContains(self.client_for(self.meter).get("/account/"), "เจ้าหน้าที่กอง")
+        self.assertContains(self.client_for(self.meter).get("/account/"), "สมาชิกกอง")
 
     def test_admin_actions_require_csrf_token(self):
         client = Client(enforce_csrf_checks=True)

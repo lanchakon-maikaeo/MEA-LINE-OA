@@ -452,8 +452,9 @@ def prefetch(cases):
 
 
 def own_divisions(scope):
-    """Divisions a user may open a queue for: their own, or every active one for an admin."""
+    """Divisions a user may open a queue for: their own and those they supervise, or every
+    active one for an admin."""
     divisions = Division.objects.filter(is_active=True).order_by("code")
     if scope.is_admin or scope.is_support:
         return list(divisions)
-    return list(divisions.filter(pk__in=list(scope.division_roles)))
+    return list(divisions.filter(pk__in=[*scope.division_roles, *scope.overseen]))
