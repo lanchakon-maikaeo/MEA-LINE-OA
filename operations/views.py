@@ -1048,10 +1048,19 @@ def admin_ai(request):
 @admin_required
 def admin_monitoring(request):
     """Monitoring (15 ต.ค. 2569 Q40–Q47): every admin looks; computing now follows the AI right."""
+    from operations import monitor_judge
+
     if request.method == "POST":
         if not identity.may_change_ai(request.user):
             raise PermissionDenied
-        _run(request, lambda: monitoring.refresh(request.user), "คำนวณตัวเลขล่าสุดแล้ว")
+        if request.POST.get("action") == "calibrate":
+            _run(
+                request,
+                lambda: monitor_judge.request_calibration(request.user),
+                "ส่งการทดสอบตัวตัดสินเข้าคิวแล้ว ผลขึ้นที่หน้านี้ภายในไม่กี่นาที",
+            )
+        else:
+            _run(request, lambda: monitoring.refresh(request.user), "คำนวณตัวเลขล่าสุดแล้ว")
         return redirect("admin-monitoring")
     try:
         days = max(7, min(int(request.GET.get("days", 14)), 90))
@@ -1064,9 +1073,19 @@ def admin_monitoring(request):
         options.MONITOR_UNANSWERED,
         options.MONITOR_EMAIL,
         options.MONITOR_TIME,
+        options.MONITOR_JUDGE,
     )
+    _, judge_profile = monitor_judge.main_profile()
     view.update(
         {
+            "judge_on": options.get(options.MONITOR_JUDGE) == "on",
+            "judge_model": judge_profile.model_id if judge_profile else "",
+            "calibration": monitor_judge.latest_calibration(judge_profile)
+            if judge_profile
+            else None,
+            "judge_blocker": monitor_judge.blocker(),
+            "judge_pass": monitor_judge.PASS,
+            "judge_alert": monitor_judge.ALERT,
             "days": days,
             "periods": (7, 14, 30, 90),
             "can_change": identity.may_change_ai(request.user),

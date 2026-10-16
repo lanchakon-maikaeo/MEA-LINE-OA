@@ -2865,3 +2865,32 @@ class WorkOrder(models.Model):
 
     def __str__(self):
         return self.number
+
+
+class JudgeCalibration(models.Model):
+    """การทดสอบตัวตัดสินคำตอบแชต (16 Oct 2569 Q12): Evidently's judges on a frozen set of
+    synthetic good and bad answers, with one model. Only a model that scored at least 90% on
+    both faithfulness and relevance may judge real answers (monitor_judge)."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "รอคิว"
+        RUNNING = "running", "กำลังทดสอบ"
+        DONE = "done", "เสร็จ"
+        FAILED = "failed", "ทดสอบไม่สำเร็จ"
+
+    version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="+")
+    profile = models.ForeignKey(AIProfile, on_delete=models.PROTECT, related_name="+")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    faithful = models.FloatField(null=True, blank=True)  # share judged as labelled
+    relevant = models.FloatField(null=True, blank=True)
+    passed = models.BooleanField(default=False)
+    details = models.JSONField(default=list, blank=True)  # labels and verdicts, no text
+    error = models.CharField(max_length=200, blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]

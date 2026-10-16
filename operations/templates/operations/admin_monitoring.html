@@ -27,8 +27,46 @@
 {% if latest.alerts %}
 <div class="notice notice--warning mb-24" role="status"><div class="notice__body"><strong>เรื่องที่ควรดู ({{ latest.day|thai_date }})</strong><ul class="mt-8">{% for a in latest.alerts %}<li>{{ a }}</li>{% endfor %}</ul></div></div>
 {% else %}
-<div class="notice notice--success mb-24" role="status"><div class="notice__body">{% icon "check" %} {{ latest.day|thai_date }} ไม่มีค่าที่เกินเกณฑ์</div></div>
+<div class="notice notice--success mb-24" role="status"><div class="notice__body">{% icon "check" %} {{ latest.day|thai_date }} {% if tests %}ผ่านการตรวจของ Evidently ทุกข้อ{% else %}ไม่มีเรื่องที่ควรดู (ข้อมูลยังไม่พอให้ Evidently ตรวจ){% endif %}</div></div>
 {% endif %}
+
+<section class="section" aria-labelledby="mon-tests">
+  <div class="section-head"><h2 id="mon-tests">การตรวจของ Evidently</h2><span class="muted">{{ latest.day|thai_date }} · เกณฑ์มาจากตัวเลือกระบบ</span></div>
+  {% if tests %}
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">ข้อที่ตรวจ</th><th scope="col">ผล</th><th scope="col">ค่าจริง</th></tr></thead>
+    <tbody>
+    {% for t in tests %}
+      <tr>
+        <td class="cell--title">{{ t.name }}{% if t.evidently %}<br><span class="muted">{{ t.evidently }}</span>{% endif %}</td>
+        <td data-label="ผล">{% if t.status == "pass" %}<span class="tag tag--closed">ผ่าน</span>{% else %}<span class="tag tag--alert">ไม่ผ่าน</span>{% endif %}</td>
+        <td data-label="ค่าจริง">{{ t.value|default:"-" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">วันนี้ยังมีข้อมูลไม่พอให้ตรวจ (AI ต้องถูกเรียกอย่างน้อย 5 ครั้งต่องาน และข้อความต้องพอเทียบกับช่วงก่อนหน้า)</p>{% endif %}
+</section>
+
+<section class="section" aria-labelledby="mon-judge">
+  <div class="section-head"><h2 id="mon-judge">ตัวตัดสินคำตอบแชต (Evidently LLM judge)</h2><span class="muted">{% if judge_on %}เปิดอยู่{% else %}ปิดอยู่{% endif %}</span></div>
+  <p class="muted">ตรวจทุกคืนไม่เกิน 50 คำตอบ ว่าคำตอบตรงกับคลังคำตอบและตรงกับคำถาม ต่ำกว่า {% widthratio judge_alert 1 100 %}% ไม่ผ่าน ใช้โมเดลหลักของรุ่นตอบแชต{% if judge_model %} ({{ judge_model }}){% endif %} อ่านเฉพาะข้อความที่ปิดข้อมูลส่วนบุคคลแล้ว</p>
+  {% if judge.status == "ok" %}
+    <dl class="facts mt-18">
+      <div><dt>คำตอบที่ตรวจ</dt><dd class="num">{{ judge.judged }} จาก {{ judge.sampled }}</dd></div>
+      <div><dt>ตรงกับคลังคำตอบ</dt><dd class="num">{% widthratio judge.faithful 1 100 %}%</dd></div>
+      <div><dt>ตรงกับคำถาม</dt><dd class="num">{% widthratio judge.relevant 1 100 %}%</dd></div>
+    </dl>
+  {% endif %}
+  <div class="panel mt-18">
+    <div class="panel__head"><h3>การทดสอบตัวตัดสินกับชุดตัวอย่าง</h3></div>
+    {% if calibration %}
+      <p>{{ calibration.created_at|thai_datetime }} · {{ calibration.get_status_display }}{% if calibration.status == "done" %} · ตรงกับคลังคำตอบถูก {% widthratio calibration.faithful 1 100 %}% · ตรงกับคำถามถูก {% widthratio calibration.relevant 1 100 %}% · {% if calibration.passed %}<span class="tag tag--closed">ผ่าน</span>{% else %}<span class="tag tag--alert">ไม่ผ่าน</span>{% endif %}{% elif calibration.error %} · {{ calibration.error }}{% endif %}</p>
+    {% else %}<p class="muted">ยังไม่เคยทดสอบ</p>{% endif %}
+    <p class="muted">ตัวตัดสินต้องตัดสินชุดคำตอบจำลอง 20 ข้อถูกอย่างน้อย {% widthratio judge_pass 1 100 %}% ทั้งสองข้อ จึงเปิดใช้ในตัวเลือกระบบได้{% if judge_blocker %} · ตอนนี้: {{ judge_blocker }}{% endif %}</p>
+    {% if can_change %}<form method="post" class="mt-8">{% csrf_token %}<input type="hidden" name="action" value="calibrate"><button class="btn btn--secondary btn--sm" type="submit">ทดสอบตัวตัดสินกับชุดตัวอย่าง</button></form>{% endif %}
+  </div>
+</section>
 
 <div class="ov-grid">
   <section class="panel viz" aria-labelledby="mon-calls">

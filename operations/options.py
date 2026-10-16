@@ -64,8 +64,9 @@ MONITOR_ERROR = "monitoring_error_rate"
 MONITOR_P95 = "monitoring_p95_ms"
 MONITOR_UNANSWERED = "monitoring_unanswered_times"
 MONITOR_EMAIL = "monitoring_email"
+MONITOR_JUDGE = "monitoring_judge"
 # Monitoring thresholds follow the right to change AI settings (15 ต.ค. 2569 Q45).
-AI_RIGHT = {MONITOR_ERROR, MONITOR_P95, MONITOR_UNANSWERED, MONITOR_EMAIL}
+AI_RIGHT = {MONITOR_ERROR, MONITOR_P95, MONITOR_UNANSWERED, MONITOR_EMAIL, MONITOR_JUDGE}
 
 OPTIONS = {
     DIVISION_WORK: Option(
@@ -509,6 +510,22 @@ OPTIONS = {
             ("on", "ส่งอีเมลหาแอดมินที่มีอีเมล", "ส่งวันละครั้งหลังคำนวณเสร็จ"),
         ),
     ),
+    MONITOR_JUDGE: Option(
+        "Monitoring: ให้ AI ตรวจคำตอบแชต (Evidently LLM judge)",
+        (
+            (
+                "off",
+                "ปิด",
+                "ค่าที่ตกลงไว้ (16 ต.ค. 2569) เปิดได้เมื่อตัวตัดสินผ่านชุดตัวอย่างอย่างน้อย 90%",
+            ),
+            (
+                "on",
+                "เปิด: ตรวจคำตอบแชตไม่เกิน 50 ข้อทุกคืน",
+                "ตรวจว่าคำตอบตรงกับคลังคำตอบและตรงกับคำถาม ด้วยโมเดลหลักของรุ่นตอบแชต "
+                "อ่านเฉพาะข้อความที่ปิดข้อมูลส่วนบุคคลแล้ว ไม่อ่านเรื่องการใช้ไฟฟ้า ต่ำกว่า 80% แจ้งเตือน",
+            ),
+        ),
+    ),
 }
 
 
@@ -533,6 +550,12 @@ def change(actor, key, value, reason):
     option = OPTIONS[key]
     if value not in {v for v, _, _ in option.choices}:
         raise ValidationError("เลือกจากค่าที่มีให้เท่านั้น")
+    if key == MONITOR_JUDGE and value == "on":
+        from operations import monitor_judge  # local: the judge reads AI versions
+
+        problem = monitor_judge.blocker()
+        if problem:
+            raise ValidationError(problem)
     reason = identity._require_reason(reason)
     row, _ = SystemOption.objects.select_for_update().get_or_create(
         key=key, defaults={"value": option.default}

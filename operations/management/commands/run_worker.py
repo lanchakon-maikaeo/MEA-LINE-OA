@@ -13,6 +13,7 @@ from operations import (
     ai_routing,
     attachments,
     conversation,
+    monitor_judge,
     monitoring,
     notifications,
     orchestration,
@@ -103,6 +104,7 @@ def run_once(limit=20):
     policy.sweep_clocks()  # M06: acknowledgement reminders and escalation
     work_orders.remind()  # 16 ต.ค. 2569 Q14: งานสั่ง near and past its due date
     monitoring.maybe_run()  # 15 ต.ค. 2569 Q43: yesterday's numbers after the set hour
+    monitor_judge.process_queued()  # 16 ต.ค. 2569 Q12: the judge's test on synthetic answers
     attachments.process_pending()
     attachments.purge_rejected()
     PostbackToken.objects.filter(
