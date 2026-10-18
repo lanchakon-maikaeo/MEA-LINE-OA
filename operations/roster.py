@@ -35,7 +35,7 @@ FIELDS = {
     "name": ("ชื่อ-สกุล", ("ชื่อสกุล", "ชื่อนามสกุล", "ชื่อ", "name", "fullname")),
     "position": ("ตำแหน่ง", ("ตำแหน่ง", "position")),
     "line_of_work": ("สายงาน", ("สายงาน",)),
-    "department": ("ฝ่าย (ใช้เป็นเขต/หน่วยงาน)", ("ฝ่าย", "department")),
+    "department": ("ฝ่าย (ใช้เป็นหน่วยงาน (เขต/ฝ่าย))", ("ฝ่าย", "department")),
     "division_name": ("กอง", ("กอง", "division")),
     "section_name": ("แผนก", ("แผนก", "section")),
     "work_group": ("กลุ่มงาน", ("กลุ่มงาน",)),

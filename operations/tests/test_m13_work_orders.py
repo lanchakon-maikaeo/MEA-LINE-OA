@@ -65,6 +65,8 @@ class IssueTests(OrderTestCase):
             work_orders.create(self.director, "งานทดสอบ", self.kcw_division, assignee=self.ktf)
         with self.assertRaises(ValidationError):
             work_orders.create(self.director, "  ", self.kcw_division)
+        with self.assertRaises(ValidationError):
+            work_orders.create(self.director, "งานทดสอบ", self.kcw_division, channel="unknown")
 
     def test_division_work_goes_to_its_supervisor_and_person_work_to_the_person(self):
         self.order()
@@ -85,6 +87,7 @@ class IssueTests(OrderTestCase):
             channel="line", external_id="U" + "c" * 32, staff_user=self.kcw2, is_following=True
         )
         order = self.order(assignee=self.kcw2)
+        self.assertEqual(order.channel, WorkOrder.Channel.WEB)
         line = self.notices("staff_order_new", self.kcw2).get(channel=N.Channel.LINE_PUSH)
         self.assertIn(order.number, line.text)
         self.assertIn(f"/orders/{order.number}/", line.text)
@@ -126,8 +129,6 @@ class FlowTests(OrderTestCase):
 
     def test_sent_back_work_is_given_again_or_cancelled(self):
         order = self.order(assignee=self.kcw)
-        with self.assertRaises(ValidationError):
-            work_orders.act(self.kcw, order, "send_back")
         order = work_orders.act(self.kcw, order, "send_back", reason="งานนี้เป็นของ กตฟ.")
         self.assertEqual(order.status, S.SENT_BACK)
         self.assertIn("งานนี้เป็นของ กตฟ.", self.notices("staff_order_back", self.director).get().text)
@@ -138,7 +139,7 @@ class FlowTests(OrderTestCase):
             (order.status, order.division, order.assignee), (S.ASSIGNED, self.ktf_division, None)
         )
         self.assertEqual(self.notices("staff_order_new", self.ktf).count(), 1)
-        order = work_orders.act(self.director, order, "cancel", reason="ไม่ต้องทำแล้ว")
+        order = work_orders.act(self.director, order, "cancel")
         self.assertEqual(order.status, S.CANCELLED)
 
 
@@ -170,6 +171,34 @@ class WebTests(OrderTestCase):
         client.force_login(user)
         return client
 
+    def test_orders_use_normal_scoped_queues_and_legacy_list_redirects(self):
+        received = self.order(assignee=self.kcw)
+        other = work_orders.create(self.director, "ตรวจมิเตอร์ชำรุด", self.ktf_division)
+        ended = self.order()
+        work_orders.act(self.director, ended, "cancel")
+        for user in (self.admin, self.director, self.head, self.kcw):
+            with self.subTest(user=user.username):
+                client = self.client_for(user)
+                page = client.get(reverse("division-detail", args=[self.kcw_division.code]))
+                self.assertEqual(page.context["tab"], "host")
+                self.assertContains(page, received.number)
+                self.assertNotContains(page, ended.number)
+                self.assertNotContains(page, other.number)
+                if user not in (self.admin, self.director):
+                    self.assertEqual(
+                        client.get(reverse("order-detail", args=[other.number])).status_code, 404
+                    )
+                self.assertNotContains(page, 'href="/orders/"')
+        admin = self.client_for(self.admin)
+        self.assertRedirects(admin.get(reverse("orders")), reverse("queue-all") + "?tab=host")
+        self.assertContains(admin.get(reverse("queue-all")), other.number)
+        personal = self.client_for(self.director).get(
+            reverse("division-detail", args=[self.kcw_division.code]), {"tab": "mine"}
+        )
+        self.assertNotContains(personal, received.number)
+        closed = admin.get(reverse("queue-all"), {"tab": "closed"})
+        self.assertContains(closed, ended.number)
+
     def test_a_supervisor_issues_with_a_file_and_the_member_finishes_it(self):
         director = self.client_for(self.director)
         page = director.get(reverse("order-new"))
@@ -190,11 +219,12 @@ class WebTests(OrderTestCase):
         order = WorkOrder.objects.get()
         self.assertRedirects(response, reverse("order-detail", args=[order.number]))
         self.assertTrue(order.is_urgent)
+        self.assertEqual(order.channel, WorkOrder.Channel.WEB)
         self.assertEqual(order.attachments.count(), 1)
         member = self.client_for(self.kcw)
-        listing = member.get(reverse("orders"))
+        listing = member.get(reverse("division-detail", args=[self.kcw_division.code]))
         self.assertContains(listing, order.number)
-        self.assertContains(listing, 'class="nav-count"')
+        self.assertNotContains(listing, 'href="/orders/"')
         page = member.get(reverse("order-detail", args=[order.number]))
         self.assertContains(page, "รับทราบ")
         member.post(reverse("order-action", args=[order.number, "acknowledge"]))
@@ -206,5 +236,7 @@ class WebTests(OrderTestCase):
         )
         found = director.get(reverse("case-search"), {"q": order.number.lower()})
         self.assertRedirects(found, reverse("order-detail", args=[order.number]))
-        tabs = self.client_for(self.director).get(reverse("orders"), {"tab": "issued"})
+        tabs = self.client_for(self.director).get(
+            reverse("division-detail", args=[self.kcw_division.code])
+        )
         self.assertContains(tabs, order.number)

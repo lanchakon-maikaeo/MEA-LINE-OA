@@ -22,6 +22,8 @@ def load(document):
     units += [(row, Division.Kind.DIVISION) for row in document["divisions"]]
     divisions = sections = closed = 0
     for row, kind in units:
+        if row["code"] == "กองอุปกรณ์ฯ" and Division.objects.filter(code="กอจ.").exists():
+            row = {**row, "code": "กอจ."}
         division, created = Division.objects.get_or_create(
             code=row["code"], defaults={"name": row["name"], "kind": kind}
         )
@@ -57,6 +59,9 @@ def load(document):
             .exclude(pk__in=wanted)
             .update(is_active=False)
         )
+    from operations.line_menu import bind_seed_divisions
+
+    bind_seed_divisions()
     return divisions, sections, closed
 
 

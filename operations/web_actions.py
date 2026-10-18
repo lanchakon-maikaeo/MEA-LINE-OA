@@ -52,7 +52,7 @@ BUTTON_LABELS = {
     "start_triage": "เริ่มคัดกรอง",
     "claim": "รับเป็นผู้รับผิดชอบ",
     "assign": "มอบหมายผู้รับผิดชอบ",
-    "request_info": "ขอข้อมูลเพิ่มจากเขต",
+    "request_info": "ขอข้อมูลเพิ่มจากหน่วยงาน (เขต/ฝ่าย)",
     "info_received": "ได้ข้อมูลครบแล้ว",
     "hold": "พักเรื่องไว้ก่อน",
     "resume": "ทำต่อ",
@@ -73,8 +73,8 @@ BUTTON_LABELS = {
     "issue": "บันทึกการจ่ายของ",
     "terminate_outstanding": "ยุติส่วนที่ค้างจ่าย",
     "resolve_discrepancy": "ปิดส่วนต่างการส่งมอบ",
-    "confirm": "บันทึกคำตอบแทนเขต",
-    "dispute_resolution": "บันทึกการโต้แย้งแทนเขต",
+    "confirm": "บันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)",
+    "dispute_resolution": "บันทึกการโต้แย้งแทนหน่วยงาน (เขต/ฝ่าย)",
     "close": "ปิดเรื่อง",
     "reopen": "เปิดเรื่องใหม่",
     "return_instructions": "แจ้งวิธีส่งคืน",
@@ -487,7 +487,7 @@ def hints(st, offers):
             out.append(
                 Hint(
                     f"ผู้แจ้งไม่ได้ผูก LINE ไว้ จึง{answer}ใน LINE ไม่ได้ "
-                    f"ติดต่อเขตทางอื่น แล้ว{who}กด “บันทึกคำตอบแทนเขต”"
+                    f"ติดต่อหน่วยงาน (เขต/ฝ่าย)ทางอื่น แล้ว{who}กด “บันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)”"
                 )
             )
     close = workflow.ACTIONS["close"]
@@ -499,17 +499,22 @@ def hints(st, offers):
         and st.close_from is not None
     ):
         if case.kind == K.PROBLEM:
-            out.append(Hint("ถ้าเขตยังไม่ตอบผล ปิดเรื่องเองได้ตั้งแต่", st.close_from))
+            out.append(Hint("ถ้าหน่วยงาน (เขต/ฝ่าย)ยังไม่ตอบผล ปิดเรื่องเองได้ตั้งแต่", st.close_from))
             if st.line:
                 who = _who(st, names)
-                out.append(Hint(f"ถ้าเขตแจ้งทางอื่นว่าเรียบร้อยแล้ว {who}กด “บันทึกคำตอบแทนเขต” เรื่องจะปิดทันที"))
+                out.append(
+                    Hint(
+                        f"ถ้าหน่วยงาน (เขต/ฝ่าย)แจ้งทางอื่นว่าเรียบร้อยแล้ว {who}กด "
+                        "“บันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)” เรื่องจะปิดทันที"
+                    )
+                )
         else:
-            out.append(Hint("ถ้าเขตยังไม่ยืนยันรับ ปิดเรื่องเองได้ตั้งแต่", st.close_from))
+            out.append(Hint("ถ้าหน่วยงาน (เขต/ฝ่าย)ยังไม่ยืนยันรับ ปิดเรื่องเองได้ตั้งแต่", st.close_from))
     return out
 
 
 def _who(st, names):
-    """Who should press “บันทึกคำตอบแทนเขต” when this viewer cannot."""
+    """Who should press “บันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)” when this viewer cannot."""
     if "confirm" in names:
         return ""
     return f"ให้ {_intake_code(st)} " if st.intake_id is not None else "ให้เจ้าหน้าที่อีกคนในกอง "
@@ -580,7 +585,7 @@ def _priority_field(case):
 
 
 def _reason(required=False, label="เหตุผล", help_text=""):
-    return Field("reason", label, "textarea", required, help=help_text)
+    return Field("reason", label + " (ไม่บังคับ)", "textarea", False, help=help_text)
 
 
 def _members(division_id):
@@ -635,7 +640,15 @@ def build_form(action, st, params, demo=False):
         add(Field("assignee_id", "ผู้รับผิดชอบ", "select", True, _members(case.owner_division_id)))
         add(_reason())
     elif action == "request_info":
-        add(_reason(True, "ขอข้อมูลอะไรจากเขต", "ข้อความนี้ส่งถึงผู้แจ้งทาง LINE"))
+        add(
+            Field(
+                "reason",
+                "ขอข้อมูลอะไรจากหน่วยงาน (เขต/ฝ่าย)",
+                "textarea",
+                True,
+                help="ข้อความนี้ส่งถึงผู้แจ้งทาง LINE",
+            )
+        )
     elif action in (
         "hold",
         "decline",
@@ -727,7 +740,7 @@ def build_form(action, st, params, demo=False):
     elif action == "record_facts":
         for name, title in FACT_FIELDS:
             add(Field(f"fact-{name}", title, "select", False, FACT_CHOICES))
-        add(_reason(True, help_text="บอกว่ารู้ข้อเท็จจริงนี้จากไหน เช่น เขตแจ้งทางโทรศัพท์"))
+        add(_reason(True, help_text="บอกว่ารู้ข้อเท็จจริงนี้จากไหน เช่น หน่วยงาน (เขต/ฝ่าย)แจ้งทางโทรศัพท์"))
     elif action == "approve":
         rows = [
             {
@@ -868,7 +881,7 @@ def build_form(action, st, params, demo=False):
             add(
                 Field(
                     "result",
-                    "เขตได้รับของ",
+                    "หน่วยงาน (เขต/ฝ่าย)ได้รับของ",
                     "radio",
                     True,
                     [("full", "ครบตามที่บันทึกจ่าย"), ("mismatch", "ไม่ตรง (กรอกจำนวนที่ได้จริง)")],
@@ -897,28 +910,32 @@ def build_form(action, st, params, demo=False):
                         columns=[("quantity", "จำนวน", "number"), ("serials", "เลขเครื่อง", "text")],
                     )
                 )
-            form.intro = "บันทึกคำตอบที่เขตแจ้งทางช่องทางอื่น (ไม่ใช่ LINE)"
+            form.intro = "บันทึกคำตอบที่หน่วยงาน (เขต/ฝ่าย)แจ้งทางช่องทางอื่น (ไม่ใช่ LINE)"
         else:
-            form.intro = "เขตยอมรับผลการแก้ปัญหาแล้ว บันทึกแทนเขต"
-        add(Field("channel", "เขตแจ้งทาง", "select", True, STAFF_CHANNELS))
+            form.intro = "หน่วยงาน (เขต/ฝ่าย)ยอมรับผลการแก้ปัญหาแล้ว บันทึกแทนหน่วยงาน (เขต/ฝ่าย)"
+        add(Field("channel", "หน่วยงาน (เขต/ฝ่าย)แจ้งทาง", "select", True, STAFF_CHANNELS))
         add(Field("intake_note", "บันทึกการรับแจ้ง", "textarea", True, help="เช่น ใครโทรมา เวลาไหน"))
     elif action == "dispute_resolution":
-        form.intro = "เขตแจ้งว่ายังไม่เรียบร้อย เรื่องจะกลับไปที่กองเจ้าภาพ"
-        add(Field("channel", "เขตแจ้งทาง", "select", True, STAFF_CHANNELS))
+        form.intro = "หน่วยงาน (เขต/ฝ่าย)แจ้งว่ายังไม่เรียบร้อย เรื่องจะกลับไปที่กองเจ้าภาพ"
+        add(Field("channel", "หน่วยงาน (เขต/ฝ่าย)แจ้งทาง", "select", True, STAFF_CHANNELS))
         add(Field("intake_note", "บันทึกการรับแจ้ง", "textarea", True))
-        add(_reason(True, "เขตแจ้งว่ายังไม่เรียบร้อยอย่างไร"))
+        add(_reason(True, "หน่วยงาน (เขต/ฝ่าย)แจ้งว่ายังไม่เรียบร้อยอย่างไร"))
     elif action == "close":
         if case.kind == K.WITHDRAWAL:
-            form.intro = f"ปิดได้เมื่อเขตไม่ยืนยันรับเกิน {settings.RECEIPT_NO_RESPONSE_DAYS} วัน"
+            form.intro = (
+                f"ปิดได้เมื่อหน่วยงาน (เขต/ฝ่าย)ไม่ยืนยันรับเกิน {settings.RECEIPT_NO_RESPONSE_DAYS} วัน"
+            )
             add(Field("reference", "เลขเอกสารอ้างอิง", required=True))
         else:
-            form.intro = f"ปิดได้เมื่อเขตไม่ตอบผลเกิน {settings.RECEIPT_NO_RESPONSE_DAYS} วัน"
+            form.intro = (
+                f"ปิดได้เมื่อหน่วยงาน (เขต/ฝ่าย)ไม่ตอบผลเกิน {settings.RECEIPT_NO_RESPONSE_DAYS} วัน"
+            )
         add(_reason(True))
     elif action == "return_instructions":
         add(Field("place", "สถานที่ส่งคืน", required=True))
         add(Field("from_date", "ตั้งแต่วันที่", "date"))
         add(Field("to_date", "ถึงวันที่", "date"))
-        add(Field("note", "ข้อความเพิ่มเติมถึงเขต", "textarea"))
+        add(Field("note", "ข้อความเพิ่มเติมถึงหน่วยงาน (เขต/ฝ่าย)", "textarea"))
     elif action == "receive":
         rows = []
         for line in st.lines:
@@ -1149,10 +1166,7 @@ def build_form(action, st, params, demo=False):
         # ADR 0007: every การทำแทนกอง by ผู้ช่วยเหลือระบบ carries a reason.
         reason = next((f for f in form.fields if f.name == "reason"), None)
         if reason is None:
-            add(_reason(True, "เหตุผลที่ทำแทนกอง", "ผู้ช่วยเหลือระบบต้องบอกเหตุผลทุกครั้ง"))
-        elif not reason.required:
-            reason.required = True
-            reason.help = "ผู้ช่วยเหลือระบบต้องบอกเหตุผลทุกครั้ง (บันทึกว่าทำแทนกอง)"
+            add(_reason(True, "เหตุผลที่ทำแทนกอง", "เหตุผลไม่บังคับ"))
     if form.irreversible:
         form.fields.append(
             Field(

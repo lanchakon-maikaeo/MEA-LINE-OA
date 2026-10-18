@@ -147,7 +147,7 @@ class AITestCase(OrchestrationTestCase):
         patch_catalog.start()
         self.addCleanup(patch_catalog.stop)
         ai_settings = override_settings(
-            AI_SECRET_KEY=Fernet.generate_key().decode(), AI_ENABLED=True
+            AI_SECRET_KEY=Fernet.generate_key().decode(), AI_ENABLED=True, AI_MCP_ENABLED=False
         )
         ai_settings.enable()
         self.addCleanup(ai_settings.disable)
@@ -1204,11 +1204,10 @@ class SwitchTests(AITestCase):
         client.post("/console/admin/ai/switch/", {"version": unready.pk, "reason": "ลอง"})
         self.assertEqual(ai.active_version(), self.version)
         client.post("/console/admin/ai/switch/", {"version": ready.pk, "reason": ""})
-        self.assertEqual(ai.active_version(), self.version)  # a reason is required
-        client.post("/console/admin/ai/switch/", {"version": ready.pk, "reason": "ใช้ harness"})
+        self.assertEqual(ai.active_version(), ready)  # editing notes are optional
         self.assertEqual(ai.active_version(), ready)
         event = AuditEvent.objects.filter(action="ai.version_activated").latest("pk")
-        self.assertEqual((event.reason, event.data["pipeline"]), ("ใช้ harness", "harness"))
+        self.assertEqual((event.reason, event.data["pipeline"]), ("", "harness"))
         client.post("/console/admin/ai/switch/", {"version": self.version.pk, "reason": "กลับ"})
         self.assertEqual(ai.active_version(), self.version)  # switching back is the same menu
         for user in (self.admin, self.meter):

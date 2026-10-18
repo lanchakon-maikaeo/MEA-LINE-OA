@@ -6,7 +6,7 @@
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
     <h1>หน้าที่ของกอง</h1>
-    <p class="lede">กรอกว่าแต่ละกองทำอะไรและดูแลอะไร AI ใช้ข้อมูลนี้เสนอกองให้เรื่องที่กติกาและคำที่ระบบจำบอกไม่ได้ ตัวอย่างข้อความใช้ทดสอบ AI เท่านั้น ตอนทำงานจริง AI ไม่เห็นตัวอย่าง ทุกการแก้ต้องระบุเหตุผลและมีบันทึก</p>
+    <p class="lede">ระบุหน้าที่และขอบเขตความรับผิดชอบของแต่ละกอง เพื่อให้ AI เสนอกองรับผิดชอบเมื่อกติกาและคำสำคัญยังระบุไม่ได้ ตัวอย่างข้อความใช้สำหรับทดสอบ AI เท่านั้น ระบบบันทึกประวัติการแก้ไข โดยไม่บังคับระบุเหตุผล</p>
   </div>
 </div>
 
@@ -36,7 +36,7 @@
         {% csrf_token %}<input type="hidden" name="action" value="overview"><input type="hidden" name="division" value="{{ d.code }}">
         <div class="field"><label for="ov-{{ d.pk }}">กองนี้ทำอะไร ดูแลอะไร</label><textarea id="ov-{{ d.pk }}" name="overview" rows="4" maxlength="2000">{{ d.duty_overview }}</textarea></div>
         <div class="field"><label for="ovx-{{ d.pk }}">ตัวอย่างข้อความที่เป็นของกองนี้แต่ไม่เข้ารายการใด (ไม่บังคับ บรรทัดละข้อ)</label><textarea id="ovx-{{ d.pk }}" name="examples" rows="3">{{ d.duty_examples|lines }}</textarea></div>
-        <div class="field"><label for="ovr-{{ d.pk }}">เหตุผล</label><input id="ovr-{{ d.pk }}" name="reason" maxlength="500" required></div>
+        <div class="field"><label for="ovr-{{ d.pk }}">เหตุผล (ไม่บังคับ)</label><input id="ovr-{{ d.pk }}" name="reason" maxlength="500"></div>
         <button class="btn btn--sm" type="submit">บันทึกภาพรวม</button>
       </form>
     </div>
@@ -50,7 +50,7 @@
         <div class="field"><label for="t-{{ e.pk }}">หัวข้องาน</label><input id="t-{{ e.pk }}" name="title" value="{{ e.title }}" maxlength="100" required></div>
         <div class="field"><label for="d-{{ e.pk }}">คำอธิบาย</label><textarea id="d-{{ e.pk }}" name="description" rows="3" maxlength="1000" required>{{ e.description }}</textarea></div>
         <div class="field"><label for="x-{{ e.pk }}">ตัวอย่างข้อความ (อย่างน้อย {{ min_examples }} ข้อ บรรทัดละข้อ)</label><textarea id="x-{{ e.pk }}" name="examples" rows="3" required>{{ e.examples|lines }}</textarea></div>
-        <div class="field"><label for="r-{{ e.pk }}">เหตุผล</label><input id="r-{{ e.pk }}" name="reason" maxlength="500" required></div>
+        <div class="field"><label for="r-{{ e.pk }}">เหตุผล (ไม่บังคับ)</label><input id="r-{{ e.pk }}" name="reason" maxlength="500"></div>
         <button class="btn btn--sm" type="submit" name="action" value="change">บันทึก</button>
         <button class="btn btn--sm btn--ghost" type="submit" name="action" value="retire">เลิกใช้รายการนี้</button>
       </form>
@@ -65,7 +65,7 @@
         <div class="field"><label for="nt-{{ d.pk }}">หัวข้องาน</label><input id="nt-{{ d.pk }}" name="title" maxlength="100" required placeholder="เช่น ไฟถนนและเสาไฟ"></div>
         <div class="field"><label for="nd-{{ d.pk }}">คำอธิบาย</label><textarea id="nd-{{ d.pk }}" name="description" rows="3" maxlength="1000" required placeholder="เช่น ไฟถนนดับ เสาไฟเอียง โคมแตก"></textarea></div>
         <div class="field"><label for="nx-{{ d.pk }}">ตัวอย่างข้อความ (อย่างน้อย {{ min_examples }} ข้อ บรรทัดละข้อ)</label><textarea id="nx-{{ d.pk }}" name="examples" rows="3" required></textarea></div>
-        <div class="field"><label for="nr-{{ d.pk }}">เหตุผล</label><input id="nr-{{ d.pk }}" name="reason" maxlength="500" required></div>
+        <div class="field"><label for="nr-{{ d.pk }}">เหตุผล (ไม่บังคับ)</label><input id="nr-{{ d.pk }}" name="reason" maxlength="500"></div>
         <button class="btn btn--sm" type="submit">เพิ่ม</button>
       </form>
     </div>

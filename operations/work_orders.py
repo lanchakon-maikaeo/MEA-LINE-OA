@@ -161,13 +161,24 @@ def _number(now):
 
 
 @transaction.atomic
-def create(actor, title, division, assignee=None, detail="", due_on=None, urgent=False):
+def create(
+    actor,
+    title,
+    division,
+    assignee=None,
+    detail="",
+    due_on=None,
+    urgent=False,
+    channel=WorkOrder.Channel.WEB,
+):
     """A new งานสั่ง; the doer is told at once (Q14)."""
     title = " ".join((title or "").split())
     if not title:
         raise ValidationError("บอกว่าให้ทำอะไร")
     if len(title) > TITLE_MAX:
         raise ValidationError(f"ชื่องานยาวได้ไม่เกิน {TITLE_MAX} ตัวอักษร")
+    if channel not in WorkOrder.Channel.values:
+        raise ValidationError("ช่องทางสั่งงานไม่ถูกต้อง")
     _check_target(division, assignee)
     _require_issuer(actor, division)
     now = timezone.now()
@@ -180,6 +191,7 @@ def create(actor, title, division, assignee=None, detail="", due_on=None, urgent
         division=division,
         assignee=assignee,
         issued_by=actor,
+        channel=channel,
         due_on=due_on,
         is_urgent=bool(urgent),
     )
@@ -192,6 +204,7 @@ def create(actor, title, division, assignee=None, detail="", due_on=None, urgent
         assignee=assignee.pk if assignee else None,
         due_on=due_on.isoformat() if due_on else None,
         urgent=order.is_urgent,
+        channel=order.channel,
     )
     _notify("staff_order_new", order, doers(order), f"new:{order.pk}")
     return order
@@ -218,12 +231,10 @@ def act(actor, order, step, reason="", result="", assignee=None, division=None, 
             notice = ("staff_order_ack", [order.issued_by])
     elif step == "done":
         if not result:
-            raise ValidationError("เล่าสั้น ๆ ว่าทำอะไรไปแล้ว")
+            raise ValidationError("แจ้งผลสั้น ๆ ว่าทำอะไรไปแล้ว")
         order.status, order.result, order.done_at = S.DONE, result, now
         notice = ("staff_order_done", [order.issued_by])
     elif step == "send_back":
-        if not reason:
-            raise ValidationError("บอกเหตุผลที่ส่งกลับ")
         order.status, order.reason = S.SENT_BACK, reason
         notice = ("staff_order_back", [order.issued_by])
     elif step == "assign_person":
@@ -249,8 +260,6 @@ def act(actor, order, step, reason="", result="", assignee=None, division=None, 
     elif step == "close":
         order.status, order.ended_at = S.CLOSED, now
     elif step == "cancel":
-        if not reason:
-            raise ValidationError("บอกเหตุผลที่ยกเลิก")
         order.status, order.reason, order.ended_at = S.CANCELLED, reason, now
     order.save()
     identity.audit(
@@ -437,24 +446,6 @@ def remind(now=None):
 
 # --- Lists ------------------------------------------------------------------------------------
 
-TABS = {
-    "mine": "งานของฉัน",
-    "issued": "ที่ฉันสั่ง",
-    "overseen": "ทุกกองที่ดูแล",
-    "due": "ใกล้หรือเกินกำหนด",
-    "ended": "ปิดแล้ว",
-}
-
-
-def tabs_for(user):
-    scope = identity.staff_scope(user)
-    keys = ["mine"]
-    if scope.overseen or WorkOrder.objects.filter(issued_by=user).exists():
-        keys.append("issued")
-    if scope.overseen:
-        keys.append("overseen")
-    return [*keys, "due", "ended"]
-
 
 def tab_orders(user, tab, now=None):
     now = now or timezone.now()
@@ -476,25 +467,3 @@ def tab_orders(user, tab, now=None):
         return orders.filter(status__in=WorkOrder.OPEN, due_on__lte=limit).order_by("due_on")
     cutoff = now - timedelta(days=30)
     return orders.filter(status__in=WorkOrder.ENDED, ended_at__gte=cutoff).order_by("-ended_at")
-
-
-def waiting_count(user):
-    """For the menu: open orders waiting on this person, plus finished ones they should close."""
-    scope = identity.staff_scope(user)
-    if not scope.has_any_access:
-        return 0
-    mine = tab_orders(user, "mine").count()
-    to_close = visible(user).filter(issued_by=user, status=S.DONE).count()
-    return mine + to_close
-
-
-def row(order, today):
-    """What a list row shows."""
-    late = order.due_on is not None and order.status in WorkOrder.OPEN and order.due_on < today
-    soon = (
-        order.due_on is not None
-        and order.status in WorkOrder.OPEN
-        and not late
-        and order.due_on <= today + timedelta(days=1)
-    )
-    return {"order": order, "late": late, "soon": soon}

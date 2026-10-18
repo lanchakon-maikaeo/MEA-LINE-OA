@@ -44,16 +44,16 @@
     </dl>
 
     {% if preview.units %}
-    <h3 class="mt-18">จับคู่ฝ่ายกับเขตหรือหน่วยงาน</h3>
-    <p class="muted">ฝ่ายของพนักงานใช้เป็นเขตของผู้ใช้ LINE OA ฝ่ายที่ยังไม่ตรงกับเขตไหน ให้เลือกเขตที่มีอยู่ เพิ่มเป็นหน่วยงานใหม่ หรือไม่ระบุ (ผู้ใช้จะเลือกเขตเองตอนลงทะเบียน)</p>
+    <h3 class="mt-18">จับคู่ฝ่ายกับหน่วยงาน (เขต/ฝ่าย)หรือหน่วยงาน</h3>
+    <p class="muted">ฝ่ายของพนักงานใช้เป็นหน่วยงาน (เขต/ฝ่าย)ของผู้ใช้ LINE OA ฝ่ายที่ยังไม่ตรงกับหน่วยงาน (เขต/ฝ่าย)ไหน ให้เลือกหน่วยงาน (เขต/ฝ่าย)ที่มีอยู่ เพิ่มเป็นหน่วยงานใหม่ หรือไม่ระบุ (ผู้ใช้จะเลือกหน่วยงาน (เขต/ฝ่าย)เองตอนลงทะเบียน)</p>
     <div class="table-wrap"><table class="table--cards">
-      <thead><tr><th scope="col">ฝ่ายในไฟล์</th><th scope="col" class="num">คน</th><th scope="col">เขต/หน่วยงาน</th></tr></thead>
+      <thead><tr><th scope="col">ฝ่ายในไฟล์</th><th scope="col" class="num">คน</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)/หน่วยงาน</th></tr></thead>
       <tbody>
       {% for u in preview.units %}
         <tr>
           <td>{{ u.text }}</td>
           <td class="num cell--end" data-label="คน">{{ u.count }}</td>
-          <td class="cell--wide">{% if u.match %}{{ u.match.name }} <span class="muted">(ตรงกันแล้ว)</span>{% else %}<input type="hidden" name="unit_key" value="{{ u.key }}"><label class="visually-hidden" for="unit-{{ forloop.counter }}">เขตของ {{ u.text }}</label><select id="unit-{{ forloop.counter }}" name="unit_choice"><option value="{{ new_unit }}"{% if u.choice == new_unit %} selected{% endif %}>เพิ่มเป็นหน่วยงานใหม่</option><option value=""{% if u.choice == "" %} selected{% endif %}>ไม่ระบุ</option>{% for d in districts %}<option value="{{ d.code }}"{% if u.choice == d.code %} selected{% endif %}>{{ d.name }}</option>{% endfor %}</select>{% endif %}</td>
+          <td class="cell--wide">{% if u.match %}{{ u.match.name }} <span class="muted">(ตรงกันแล้ว)</span>{% else %}<input type="hidden" name="unit_key" value="{{ u.key }}"><label class="visually-hidden" for="unit-{{ forloop.counter }}">หน่วยงาน (เขต/ฝ่าย)ของ {{ u.text }}</label><select id="unit-{{ forloop.counter }}" name="unit_choice"><option value="{{ new_unit }}"{% if u.choice == new_unit %} selected{% endif %}>เพิ่มเป็นหน่วยงานใหม่</option><option value=""{% if u.choice == "" %} selected{% endif %}>ไม่ระบุ</option>{% for d in districts %}<option value="{{ d.code }}"{% if u.choice == d.code %} selected{% endif %}>{{ d.name }}</option>{% endfor %}</select>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -61,7 +61,7 @@
     {% endif %}
 
     <label class="choice"><input type="checkbox" name="deactivate_missing" value="1"> <span>ปิดคนที่ไม่อยู่ในไฟล์นี้ (ใช้เมื่อไฟล์เป็นรายชื่อทั้งหมด) ผู้ใช้ LINE ที่ผูกกับคนนั้นยังใช้งานได้ แต่ขึ้นป้าย "ไม่อยู่ในทะเบียนล่าสุด"</span></label>
-    <div class="field"><label for="emp-reason">เหตุผล</label><input id="emp-reason" name="reason" maxlength="500" placeholder="เช่น ทะเบียนพนักงานประจำเดือนตุลาคม"></div>
+    <div class="field"><label for="emp-reason">เหตุผล (ไม่บังคับ)</label><input id="emp-reason" name="reason" maxlength="500" placeholder="เช่น ทะเบียนพนักงานประจำเดือนตุลาคม"></div>
     <div class="cluster">
       <button class="btn btn--secondary btn--sm" type="submit" name="action" value="preview">ตรวจอีกครั้ง</button>
       <button class="btn btn--sm" type="submit" name="action" value="import"{% if preview.missing %} disabled{% endif %}>นำเข้า {{ preview.usable }} คน</button>

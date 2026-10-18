@@ -4,25 +4,25 @@
   <div class="page-head__text">
     <span class="eyebrow">{% if is_admin %}แอดมิน{% else %}ตามตัวเลือกระบบ{% endif %}</span>
     <h1>ผู้ใช้ LINE OA</h1>
-    <p class="lede">การเลือกเขตของผู้ใช้เป็นเพียงคำขอ ตรวจตัวตนและเขตก่อนรับรอง</p>
+    <p class="lede">พนักงานที่ยืนยันตัวตนผ่าน ระบบรับรองอัตโนมัติ ส่วนคำขอที่ยังไม่ผ่านการยืนยันให้แอดมินตรวจและกดรับรอง</p>
   </div>
 </div>
 {# 15 ต.ค. 2569: what waits first, then the people, then the rarely used parts. #}
 <section class="section" aria-labelledby="reg-pending">
   <div class="section-head"><h2 id="reg-pending">รอรับรอง</h2><span class="muted">{{ pending|length }} คำขอ</span></div>
 <div class="table-wrap"><table class="table--cards">
-  <thead><tr><th scope="col">ชื่อที่แจ้ง</th><th scope="col">เขตที่ขอ</th><th scope="col">ส่งเมื่อ</th><th scope="col">ตัดสิน</th></tr></thead>
+  <thead><tr><th scope="col">ชื่อที่แจ้ง</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)ที่ขอ</th><th scope="col">ส่งเมื่อ</th><th scope="col">ตัดสิน</th></tr></thead>
   <tbody>
   {% for reg in pending %}
     <tr>
-      <td>{{ reg.submitted_name }}{% if reg.employee %}<br><span class="tag">ตรงทะเบียนพนักงาน {{ reg.employee.employee_id }}</span>{% if reg.verified_by %} <span class="tag tag--outline">ยืนยันด้วย{{ reg.get_verified_by_display }}</span>{% endif %}{% endif %}{% if reg.latitude %}<br><a href="https://www.google.com/maps?q={{ reg.latitude }},{{ reg.longitude }}" target="_blank" rel="noopener">ดูตำแหน่งที่ส่ง</a>{% endif %}</td><td class="cell--wide" data-label="เขตที่ขอ">{{ reg.requested_district.name }}</td><td class="cell--end" data-label="ส่งเมื่อ">{{ reg.created_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ reg.submitted_name }}{% if reg.employee %}<br><span class="tag">ตรงทะเบียนพนักงาน {{ reg.employee.employee_id }}</span>{% if reg.verified_by %} <span class="tag tag--outline">ยืนยันด้วย{{ reg.get_verified_by_display }}</span>{% endif %}{% endif %}{% if reg.latitude %}<br><a href="https://www.google.com/maps?q={{ reg.latitude }},{{ reg.longitude }}" target="_blank" rel="noopener">ดูตำแหน่งที่ส่ง</a>{% endif %}</td><td class="cell--wide" data-label="หน่วยงาน (เขต/ฝ่าย)ที่ขอ">{{ reg.requested_district.name }}</td><td class="cell--end" data-label="ส่งเมื่อ">{{ reg.created_at|date:"Y-m-d H:i" }}</td>
       <td class="cell--wide">
         <form class="inline" method="post" action="{% url 'admin-registration-action' reg.pk 'approve' %}">
-          {% csrf_token %}<label>หมายเหตุ <input name="reason"></label><button type="submit">รับรอง</button>
+          {% csrf_token %}<button type="submit">รับรอง</button>
         </form>
-        <form class="inline" method="post" action="{% url 'admin-registration-action' reg.pk 'reject' %}">
-          {% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ปฏิเสธ</button>
-        </form>
+        <details><summary>ปฏิเสธคำขอ</summary><form method="post" action="{% url 'admin-registration-action' reg.pk 'reject' %}">
+          {% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">ปฏิเสธ</button>
+        </form></details>
       </td>
     </tr>
   {% empty %}
@@ -33,14 +33,14 @@
 </section>
 
 <section class="section" aria-labelledby="reg-people">
-  <div class="section-head"><h2 id="reg-people">ผู้ใช้ที่รับรองแล้ว</h2></div>
+  <div class="section-head"><h2 id="reg-people">ผู้ใช้ที่ลงทะเบียนแล้ว</h2></div>
 <p class="muted">ตำแหน่งและฝ่ายมาจากทะเบียนพนักงาน ผู้ใช้ที่ไม่ได้ยืนยันด้วยรหัสพนักงาน ระบบผูกให้เมื่อชื่อตรงกับพนักงานคนเดียวในทะเบียน{% if is_admin %} กดชื่อเพื่อดูข้อความที่พิมพ์มา ยืนยันตัวตน ระงับ หรือถอนการรับรอง{% endif %}</p>
 {% if is_admin and to_review or is_admin and to_confirm %}
-<div class="notice notice--info mb-24" role="status"><div class="notice__body">{% if to_review %}<strong>ต้องตรวจ {{ to_review }} ราย</strong> ชื่อตรงพนักงานในทะเบียนแต่ระบบไม่ผูกให้ เพราะชื่อซ้ำหลายคนหรือทะเบียนระบุเขตอื่น{% endif %}{% if to_review and to_confirm %} · {% endif %}{% if to_confirm %}<strong>รอยืนยัน {{ to_confirm }} ราย</strong> ระบบผูกจากชื่อ แสดงตำแหน่งได้แต่ยังไม่นับเป็นการยืนยันตัวตน{% endif %} เลือกตัวกรอง "ตัวตน" เพื่อดูเฉพาะกลุ่ม แล้วกดชื่อเพื่อตรวจ</div></div>
+<div class="notice notice--info mb-24" role="status"><div class="notice__body">{% if to_review %}<strong>ต้องตรวจ {{ to_review }} ราย</strong> ชื่อตรงพนักงานในทะเบียนแต่ระบบไม่ผูกให้ เพราะชื่อซ้ำหลายคนหรือทะเบียนระบุหน่วยงาน (เขต/ฝ่าย)อื่น{% endif %}{% if to_review and to_confirm %} · {% endif %}{% if to_confirm %}<strong>รอยืนยัน {{ to_confirm }} ราย</strong> ระบบผูกจากชื่อ แสดงตำแหน่งได้แต่ยังไม่นับเป็นการยืนยันตัวตน{% endif %} เลือกตัวกรอง "ตัวตน" เพื่อดูเฉพาะกลุ่ม แล้วกดชื่อเพื่อตรวจ</div></div>
 {% endif %}
 {% include "operations/_list_tools.html" with list="requesters" placeholder="ค้นหาชื่อ รหัสพนักงาน ตำแหน่ง หรือบทบาท" filters=requester_filters %}
 <div class="table-wrap"><table class="table--cards">
-  <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ตัวตน</th><th scope="col">ตำแหน่ง · ฝ่าย</th><th scope="col">เขต</th><th scope="col">บทบาทในระบบ</th><th scope="col">สถานะ</th></tr></thead>
+  <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ตัวตน</th><th scope="col">ตำแหน่ง · ฝ่าย</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)</th><th scope="col">บทบาทในระบบ</th><th scope="col">สถานะ</th>{% if is_admin %}<th scope="col">รับรอง</th>{% endif %}</tr></thead>
   <tbody data-list-items="requesters">
   {% for row in requesters %}{% with requester=row.requester %}
     <tr data-item data-district="{{ requester.district.code }}" data-status="{{ requester.status }}" data-identity="{{ row.state }}" data-search="{{ requester.display_name|lower }} {{ row.where|lower }} {{ row.proof|lower }} {{ row.position|lower }} {{ row.role|lower }}">
@@ -48,11 +48,14 @@
       <td class="cell--title">{% if is_admin %}<a href="{% url 'admin-requester-detail' requester.pk %}">{{ requester.display_name }}</a>{% else %}{{ requester.display_name }}{% endif %}</td>
       <td class="cell--wide" data-label="ตัวตน">{% if row.state == "review" %}<span class="tag tag--alert">ต้องตรวจ</span> {{ row.note }}{% else %}{{ row.proof }}{% if row.state == "name" %} <span class="tag tag--outline">รอยืนยัน</span>{% endif %}{% endif %}<br><span class="muted">{{ row.channel }}</span></td>
       <td data-label="ตำแหน่ง · ฝ่าย">{{ row.position|default:"—" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</td>
-      <td class="cell--two" data-label="เขต">{{ row.where }}</td>
+      <td class="cell--two" data-label="หน่วยงาน (เขต/ฝ่าย)">{{ row.where }}</td>
       <td data-label="บทบาท">{{ row.role }}</td>
       <td class="cell--two" data-label="สถานะ">{% if requester.status == "active" %}{{ requester.get_status_display }}{% else %}<span class="tag tag--muted">{{ requester.get_status_display }}</span>{% endif %}</td>
+      {% if is_admin %}<td>{% if row.state == "name" and requester.status == "active" %}
+        <form method="post" action="{% url 'admin-requester-action' requester.pk 'link-employee' %}">{% csrf_token %}<input type="hidden" name="next" value="registrations"><input type="hidden" name="employee_id" value="{{ requester.employee.employee_id }}"><button type="submit">รับรองพนักงาน</button></form>
+      {% elif row.state == "review" %}<a href="{% url 'admin-requester-detail' requester.pk %}">ตรวจตัวตน</a>{% elif row.state == "verified" %}ยืนยันแล้ว{% else %}—{% endif %}</td>{% endif %}
     </tr>
-  {% endwith %}{% empty %}<tr><td colspan="7">ยังไม่มี</td></tr>{% endfor %}
+  {% endwith %}{% empty %}<tr><td colspan="{% if is_admin %}8{% else %}7{% endif %}">ยังไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
 <p class="list-empty" data-list-empty="requesters" hidden>ไม่พบผู้ใช้ที่ตรงกับการค้นหา</p>
@@ -62,10 +65,10 @@
   <div class="disclosure__body">
     <p class="muted">เรื่องและข้อความเดิมยังอยู่ครบ ถ้าจะใช้ LINE อีกต้องลงทะเบียนใหม่และได้รหัสผู้ใช้ใหม่</p>
     <div class="table-wrap"><table class="table--cards">
-      <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ตัวตน</th><th scope="col">เขต</th></tr></thead>
+      <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ตัวตน</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)</th></tr></thead>
       <tbody>
       {% for row in revoked %}{% with requester=row.requester %}
-        <tr><td class="cell--end" data-label="รหัส">{{ requester.pk }}</td><td class="cell--title">{% if is_admin %}<a href="{% url 'admin-requester-detail' requester.pk %}">{{ requester.display_name }}</a>{% else %}{{ requester.display_name }}{% endif %}</td><td class="cell--wide" data-label="ตัวตน">{{ row.proof }}</td><td class="cell--wide" data-label="เขต">{{ row.where }}</td></tr>
+        <tr><td class="cell--end" data-label="รหัส">{{ requester.pk }}</td><td class="cell--title">{% if is_admin %}<a href="{% url 'admin-requester-detail' requester.pk %}">{{ requester.display_name }}</a>{% else %}{{ requester.display_name }}{% endif %}</td><td class="cell--wide" data-label="ตัวตน">{{ row.proof }}</td><td class="cell--wide" data-label="หน่วยงาน (เขต/ฝ่าย)">{{ row.where }}</td></tr>
       {% endwith %}{% endfor %}
       </tbody>
     </table></div>
@@ -115,7 +118,7 @@
         <label class="choice"><input type="radio" name="value" value="{{ v }}"{% if v == audience %} checked{% endif %} required> <span><strong>{{ label }}</strong>{% if forloop.first %} <span class="muted">(ค่าเริ่มต้น)</span>{% endif %}<br><span class="muted">{{ help }}</span></span></label>
       {% endfor %}
     </fieldset>
-    <div class="field"><label for="reason-audience">เหตุผล</label><input id="reason-audience" name="reason" maxlength="500" required></div>
+    <div class="field"><label for="reason-audience">เหตุผล (ไม่บังคับ)</label><input id="reason-audience" name="reason" maxlength="500"></div>
     <button class="btn btn--sm" type="submit">บันทึก</button>
   </form>
   <p class="muted section-note mt-18">เปลี่ยนการยืนยันตัวตนและผู้อนุมัติได้ที่ <a href="{% url 'admin-options' %}">ตัวเลือกระบบ</a></p>

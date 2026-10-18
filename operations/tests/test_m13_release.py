@@ -126,9 +126,7 @@ class StopTriageTests(PolicyTestCase):
         self.activate_triage()
         with self.assertRaises(PermissionDenied):
             ai.stop(self.coordinator, TRIAGE, "หยุด")
-        with self.assertRaises(ValidationError):
-            ai.stop(self.dev, TRIAGE, "  ")
-        ai.stop(self.dev, TRIAGE, "หยุด")
+        ai.stop(self.dev, TRIAGE, "")
         with self.assertRaises(ValidationError):
             ai.stop(self.dev, TRIAGE, "หยุดซ้ำ")  # already off
         self.assertEqual(AuditEvent.objects.filter(action="ai.task_stopped").count(), 1)
@@ -139,10 +137,7 @@ class StopTriageTests(PolicyTestCase):
         client.force_login(self.dev)
         self.assertContains(client.get(reverse("admin-ai")), "หยุดใช้ AI ของงาน")
         url = reverse("admin-ai-action", args=["stop"])
-        client.post(url, {"task": TRIAGE, "reason": ""})
-        version.refresh_from_db()
-        self.assertEqual(version.status, AIConfigVersion.Status.ACTIVE)  # no reason, no change
-        page = client.post(url, {"task": TRIAGE, "reason": "ทดสอบหยุดจากหน้าเว็บ"}, follow=True)
+        page = client.post(url, {"task": TRIAGE, "reason": ""}, follow=True)
         self.assertContains(page, "หยุดใช้ AI แล้ว")
         self.assertNotContains(page, "หยุดใช้ AI ของงาน")  # nothing left to stop
         version.refresh_from_db()

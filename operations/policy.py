@@ -245,7 +245,11 @@ def activate_policy(actor, version, approved_by_name, approval_reference, reason
         identity.require_admin(actor)
     reason = identity._require_reason(reason)
     approved_by_name = identity._require_reason(approved_by_name)
+    if not approved_by_name:
+        raise ValidationError("ระบุผู้อนุมัติ")
     approval_reference = identity._require_reason(approval_reference)
+    if not approval_reference:
+        raise ValidationError("ระบุเอกสารอ้างอิงการอนุมัติ")
     with transaction.atomic():
         version = PolicyVersion.objects.select_for_update().get(pk=version.pk)
         if version.status == PolicyVersion.Status.ACTIVE:
@@ -1390,6 +1394,8 @@ def grant_authority(
         raise ValidationError("Grant authority to active staff only.")
     reason = identity._require_reason(reason)
     approval_reference = identity._require_reason(approval_reference)
+    if not approval_reference:
+        raise ValidationError("ระบุเอกสารอ้างอิงการอนุมัติ")
     valid_from = valid_from or timezone.now()
     if valid_until is not None and valid_until <= valid_from:
         raise ValidationError("The end must be after the start.")

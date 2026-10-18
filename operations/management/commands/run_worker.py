@@ -41,8 +41,19 @@ class Command(BaseCommand):
 
     def handle(self, *args, once, interval, **options):
         if not once:
+            from operations import line_menu_release
+
+            threading.Thread(
+                target=line_menu_release.run_loop, name="line-menu", daemon=True
+            ).start()
             threading.Thread(target=ai_eval.job_loop, name="ai-eval", daemon=True).start()
+        next_approval_check = 0
         while True:
+            if time.monotonic() >= next_approval_check:
+                from operations import identity
+
+                identity.approve_verified_registrations()
+                next_approval_check = time.monotonic() + 300
             handled = run_once()
             HEARTBEAT.touch()
             if once:

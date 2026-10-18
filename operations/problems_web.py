@@ -35,7 +35,7 @@ HEADER = (
     "เลขเรื่อง",
     "หัวข้อ",
     "ประเภทผู้แจ้ง",
-    "เขต",
+    "หน่วยงาน (เขต/ฝ่าย)",
     "ช่องทาง",
     "เจ้าหน้าที่บันทึกแทน",
     "กองผู้บันทึก",
@@ -169,7 +169,7 @@ def problems(request):
 def _reporter_kind(requester):
     if requester.is_anonymous:
         return "ไม่ระบุตัวตน"
-    return "ผู้แจ้งภายใน" if requester.is_internal else "ผู้แจ้งเขต"
+    return "ผู้แจ้งภายใน" if requester.is_internal else "ผู้แจ้งหน่วยงาน (เขต/ฝ่าย)"
 
 
 def _staff_divisions(users):

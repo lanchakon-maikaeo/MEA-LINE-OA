@@ -276,7 +276,7 @@ class OwnerDeskTests(OrgTestCase):
         return Case.objects.get(pk=case.pk)
 
     def test_another_member_records_the_districts_answer_not_the_resolver(self):
-        options.change(self.admin, options.SEPARATION, "on", "ขั้นที่ต่อกันเป็นคนละคน")
+        options.change(self.admin, options.SEPARATION, "on", "")
         case = self.resolved()
         answer = {"channel": "phone", "intake_note": "เขตโทรแจ้งว่าเรียบร้อย"}
         with self.assertRaises(CommandFailed) as caught:
@@ -382,10 +382,8 @@ class OptionsTests(OrgTestCase):
         with self.assertRaises(PermissionDenied):
             options.change(self.kcw, options.SEPARATION, "on", "อยากแยก")
         with self.assertRaises(ValidationError):
-            options.change(self.admin, options.SEPARATION, "on", "")
-        with self.assertRaises(ValidationError):
             options.change(self.admin, options.SEPARATION, "maybe", "ค่าแปลก")
-        options.change(self.admin, options.SEPARATION, "on", "ขั้นที่ต่อกันเป็นคนละคน")
+        options.change(self.admin, options.SEPARATION, "on", "")
         self.assertEqual(options.get(options.SEPARATION), "on")
         event = AuditEvent.objects.get(action="option.changed")
         self.assertEqual((event.data["previous"], event.data["value"]), ("off", "on"))
@@ -393,7 +391,7 @@ class OptionsTests(OrgTestCase):
         client.force_login(self.admin)
         page = client.get("/console/admin/options/")
         self.assertContains(page, "การแยกหน้าที่ในเรื่องเดียวกัน")
-        self.assertContains(page, "ขั้นที่ต่อกันเป็นคนละคน")
+        self.assertEqual(event.reason, "")
         client.post(
             "/console/admin/options/",
             {"key": options.REGISTRATION, "value": "staff", "reason": "สะดวก"},
@@ -536,7 +534,7 @@ class LineTopicTests(LineTestCase):
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
         self.assertIn("4. การใช้ไฟฟ้า (ลักใช้ไฟ ไฟแพง ร้องเรียน)", texts(self.sent[-1]))
         self.press(ALICE, "การใช้ไฟฟ้า")
-        self.assertIn("เล่าเรื่องที่พบ", texts(self.sent[-1]))
+        self.assertIn("แจ้งเรื่องที่พบ", texts(self.sent[-1]))
         self.type(ALICE, "สงสัยมีการลักใช้ไฟ (ข้อมูลทดสอบ)")
         self.press(ALICE, "ข้าม")
         summary = self.press(ALICE, "ข้าม")
@@ -551,7 +549,7 @@ class LineTopicTests(LineTestCase):
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
         self.press(ALICE, "ข้อเสนอแนะ")
-        self.assertIn("พิมพ์ข้อเสนอแนะได้เลย", texts(self.sent[-1]))
+        self.assertIn("กรุณาแจ้งข้อเสนอแนะ", texts(self.sent[-1]))
         self.type(ALICE, "อยากให้แจ้งเวลารับของล่วงหน้า (ทดสอบ)")
         self.press(ALICE, "ข้าม")
         summary = self.press(ALICE, "ข้าม")
@@ -583,7 +581,7 @@ class LineTopicTests(LineTestCase):
         self.press(ALICE, "MTR_SYN_A")
         self.type(ALICE, "1")
         self.press(ALICE, "เพิ่มรายการ")
-        self.press(ALICE, "หม้อแปลง")
+        self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "TRF_SYN_A")
         self.type(ALICE, "1")
         self.press(ALICE, "ไปต่อ")

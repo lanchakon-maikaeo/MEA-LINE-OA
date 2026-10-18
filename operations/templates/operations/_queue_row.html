@@ -1,4 +1,25 @@
-{% load ui %}<li class="qrow{% if row.level == 'P0' %} qrow--hazard{% endif %}" data-kind="{{ row.case.kind }}">
+{% load ui %}{% if row.order %}{% with o=row.order %}
+<li class="qrow" data-kind="work_order">
+  <div class="qrow__prio">{% prio row.level %}</div>
+  <div class="qrow__main">
+    <div class="qrow__title">
+      <a class="qrow__link" href="{% url 'order-detail' o.number %}">{{ o.number }}</a>
+      <span class="qrow__sub">งานสั่ง · {{ o.division.code }}</span>
+    </div>
+    <p class="qrow__summary">{{ row.summary }}</p>
+    <p class="qrow__note">สั่งโดย {{ o.issued_by.staff_profile.display_name|default:o.issued_by.username }} · {% if o.channel %}ผ่าน {{ o.get_channel_display }}{% else %}ไม่ระบุช่องทาง{% endif %}</p>
+    {% if row.flags %}<ul class="flags qrow__flags">{% for tone, text in row.flags %}<li class="flag{% if tone %} flag--{{ tone }}{% endif %}">{{ text }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  <div class="qrow__meta">
+    <span class="tag{% if o.status == 'closed' %} tag--closed{% elif o.status == 'cancelled' %} tag--muted{% elif o.status == 'sent_back' %} tag--alert{% endif %}">{{ o.get_status_display }}</span>
+    <time class="muted" datetime="{{ o.created_at|date:'c' }}" title="{{ o.created_at|thai_datetime }}">เข้า {{ o.created_at|thai_short }} น.</time>
+    {% if o.due_on %}<span class="due{% if row.overdue %} due--over{% endif %}">{% if row.overdue %}เกินกำหนด{% else %}กำหนด{% endif %} {{ o.due_on|thai_date }}</span>{% endif %}
+    {% if o.ended_at %}<span class="muted">ปิด {{ o.ended_at|thai_short }}</span>{% endif %}
+    <span class="muted">ดูแลโดย {{ o.division.code }} · {% if o.assignee %}{{ o.assignee.staff_profile.display_name|default:o.assignee.username }}{% else %}ทั้งกอง{% endif %}</span>
+  </div>
+</li>
+{% endwith %}{% else %}
+<li class="qrow{% if row.level == 'P0' %} qrow--hazard{% endif %}" data-kind="{{ row.case.kind }}">
   <div class="qrow__prio">{% prio row.level %}</div>
   <div class="qrow__main">
     <div class="qrow__title">
@@ -15,6 +36,7 @@
   </div>
   <div class="qrow__meta">
     {% status_tag row.case %}
+    <time class="muted" datetime="{{ row.case.submitted_at|date:'c' }}" title="{{ row.case.submitted_at|thai_datetime }}">เข้า {{ row.case.submitted_at|thai_short }} น.</time>
     {% if row.clock %}
       {% if row.remaining is None %}
         <span class="due due--paused">พักกรอบเวลา</span>
@@ -30,3 +52,4 @@
     <span class="muted">{% if row.case.owner_division %}ดูแลโดย {{ row.case.owner_division.code }}{% if row.case.section %} · {{ row.case.section.name }}{% endif %}{% endif %}{% if row.case.assignee %} · {{ row.case.assignee.staff_profile.display_name|default:row.case.assignee.username }}{% endif %}</span>
   </div>
 </li>
+{% endif %}

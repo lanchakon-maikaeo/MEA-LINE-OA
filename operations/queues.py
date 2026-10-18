@@ -1,17 +1,17 @@
 """Division queues of the staff web (M10 Q6, Q7; round 2 Q1).
 
-Every tab, count, search result and export starts from services.visible_cases, so the web never
-shows more than the service layer allows; a tab only narrows that set. All members of a division
-see the same cases, and their roles only preset the filters they land on.
+Cases start from services.visible_cases and work orders from work_orders.visible; every tab,
+count and export narrows those permission scopes. Members of a division see the same cases,
+and duty roles only preset the case filters they land on.
 """
 
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from django.utils import timezone
 
-from operations import fulfilment, policy, returns, services, workflow
+from operations import fulfilment, identity, policy, returns, services, work_orders, workflow
 from operations.contracts import Actor
 from operations.models import (
     AckClock,
@@ -24,6 +24,7 @@ from operations.models import (
     Priority,
     Role,
     RoutingReview,
+    WorkOrder,
 )
 
 S = Case.Status
@@ -38,7 +39,7 @@ TABS = [
     ("child", "งานย่อย"),
     ("decide", "รอฉันตัดสิน"),
     ("mine", "งานของฉัน"),
-    ("district", "รอเขตตอบ"),
+    ("district", "รอหน่วยงาน (เขต/ฝ่าย)ตอบ"),
     ("closed", "ปิดแล้ว"),
 ]
 TAB_LABELS = dict(TABS)
@@ -81,6 +82,8 @@ def visible(user):
 def decides(user, now=None):
     """Holds an authority that makes cases wait for this user (routing, approval, ...)."""
     if policy.routing_scope(user, now) is not None:
+        return True
+    if work_orders.may_issue(user) or WorkOrder.objects.filter(issued_by=user).exists():
         return True
     return any(
         policy.active_grants(user, activity, now).exists() for activity in DECISION_ACTIVITIES
@@ -170,6 +173,7 @@ class Filters:
             "district": self.district,
             "section": self.section,
             "overdue": "1" if self.overdue else "",
+            "preset": "1" if self.preset else "",
             **extra,
         }
         return {k: v for k, v in params.items() if v}
@@ -186,14 +190,22 @@ def read_filters(params, roles):
                 return Filters(**preset, preset=True)
     priority = params.get("priority", "")
     section = params.get("section") or ""
-    return Filters(
+    filters = Filters(
         kind=params.get("kind", "") if params.get("kind") in K.values else "",
         priority=priority if priority in [*Priority.values, "none"] else "",
-        status=params.get("status", "") if params.get("status") in S.values else "",
+        status=params.get("status", "")
+        if params.get("status") in [*S.values, *WorkOrder.Status.values]
+        else "",
         district=params.get("district", "") if (params.get("district") or "").isdigit() else "",
         section=section if section == "none" or section.isdigit() else "",
         overdue=params.get("overdue") == "1",
     )
+    preset = ROLE_PRESETS.get(next(iter(roles))) if len(roles) == 1 else None
+    if params.get("preset") == "1" and preset:
+        filters.preset = filters.kind == preset.get("kind", "") and filters.status == preset.get(
+            "status", ""
+        )
+    return filters
 
 
 def apply_filters(cases, filters):
@@ -230,16 +242,70 @@ def apply_filters(cases, filters):
     return cases
 
 
+def order_condition(tab, division, user, now, scope=None):
+    """Work orders share queue tabs, keeping their own lifecycle and permissions."""
+    scope = scope or identity.staff_scope(user)
+    owned = Q(division=division) if division else Q()
+    if tab == "host":
+        return owned & ~Q(status__in=WorkOrder.ENDED)
+    if tab == "mine":
+        mine = Q(assignee=user) | Q(assignee__isnull=True, division__in=list(scope.division_roles))
+        return owned & mine & Q(status__in=WorkOrder.OPEN)
+    if tab == "decide":
+        supervisor = Q(issued_by=user) | Q(division__in=list(scope.overseen))
+        return (
+            owned & supervisor & Q(status__in=[WorkOrder.Status.DONE, WorkOrder.Status.SENT_BACK])
+        )
+    if tab == "closed":
+        return owned & Q(
+            status__in=WorkOrder.ENDED, ended_at__gte=now - timedelta(days=CLOSED_DAYS)
+        )
+    return Q(pk__in=[])
+
+
+def order_queryset(user, tab, division, now, filters=None):
+    orders = work_orders.visible(user).filter(order_condition(tab, division, user, now))
+    if filters is not None:
+        # Duty presets narrow cases only; receiving a supervisor's order is independent of duty.
+        if filters.district or filters.section not in ("", "none"):
+            return orders.none()
+        if not filters.preset:
+            if filters.kind:
+                return orders.none()
+            if filters.status:
+                orders = orders.filter(status=filters.status)
+        if filters.priority == "P1":
+            orders = orders.filter(is_urgent=True)
+        elif filters.priority == "P3":
+            orders = orders.filter(is_urgent=False)
+        elif filters.priority:
+            return orders.none()
+        if filters.overdue:
+            orders = orders.filter(status__in=WorkOrder.OPEN, due_on__lt=timezone.localdate(now))
+    return orders.select_related("division", "assignee__staff_profile", "issued_by__staff_profile")
+
+
 def counts(user, division, now, keys, admin_all=False):
     base = visible(user)
+    scope = identity.staff_scope(user)
+    orders = work_orders.visible(user).aggregate(
+        **{
+            key: Count("pk", filter=order_condition(key, division, user, now, scope))
+            for key in keys
+        }
+    )
     return {
-        key: base.filter(tab_condition(key, division, user, now, admin_all)).count() for key in keys
+        key: base.filter(tab_condition(key, division, user, now, admin_all)).count() + orders[key]
+        for key in keys
     }
 
 
 def overdue_count(user, division, now, admin_all=False):
     cases = visible(user).filter(tab_condition("host", division, user, now, admin_all))
-    return apply_filters(cases, Filters(overdue=True)).count()
+    return (
+        apply_filters(cases, Filters(overdue=True)).count()
+        + order_queryset(user, "host", division, now, Filters(overdue=True)).count()
+    )
 
 
 # --- Rows ---------------------------------------------------------------------------------------
@@ -247,7 +313,7 @@ def overdue_count(user, division, now, admin_all=False):
 
 @dataclass
 class Row:
-    case: Case
+    case: Case | None
     level: str
     summary: str
     clock: AckClock | None = None
@@ -256,6 +322,7 @@ class Row:
     escalated: bool = False
     flags: list = field(default_factory=list)
     handoff: dict | None = None
+    order: WorkOrder | None = None
 
 
 def level_of(triage):
@@ -336,8 +403,9 @@ def _answered_after_request(ids):
 
 
 def build_rows(cases, now):
-    """Queue rows for a page of cases (a few queries for the whole page)."""
-    cases = list(cases)
+    """Rows for an already ordered page; case metadata is fetched in batches."""
+    items = list(cases)
+    cases = [item for item in items if isinstance(item, Case)]
     ids = [c.pk for c in cases]
     triages = {
         t.case_id: t
@@ -418,16 +486,38 @@ def build_rows(cases, now):
         if triage and triage.policy_change_pending:
             row.flags.append(("info", "กติกาใหม่เสนอต่างจากเดิม"))
         rows.append(row)
-    return rows
+    by_number = {row.case.number: row for row in rows}
+    for order in (item for item in items if isinstance(item, WorkOrder)):
+        row = Row(
+            case=None,
+            order=order,
+            level=Priority.P1 if order.is_urgent else Priority.P3,
+            summary=order.title,
+            overdue=bool(
+                order.due_on
+                and order.due_on < timezone.localdate(now)
+                and order.status in WorkOrder.OPEN
+            ),
+        )
+        if order.status == WorkOrder.Status.SENT_BACK and order.reason:
+            row.flags.append(("alert", f"ส่งกลับ: {order.reason}"))
+        by_number[order.number] = row
+    return [by_number[item.number] for item in items]
 
 
-def ordered(cases, tab):
+def ordered(cases, tab, orders=()):
     """B.4 order (level → date needed → arrival); closed cases newest first."""
-    cases = list(cases.select_related("triage"))
+    cases = [*cases.select_related("triage"), *orders]
     if tab == "closed":
         return sorted(cases, key=lambda c: c.ended_at or c.updated_at, reverse=True)
 
     def key(case):
+        if isinstance(case, WorkOrder):
+            return (
+                policy.rank(Priority.P1 if case.is_urgent else Priority.P3),
+                case.due_on or date.max,
+                case.created_at,
+            )
         triage = getattr(case, "triage", None)
         if triage is None:
             return (policy.rank(""), case.needed_by or date.max, case.submitted_at)
@@ -436,8 +526,8 @@ def ordered(cases, tab):
     return sorted(cases, key=key)
 
 
-def page(cases, tab, number):
-    items = ordered(cases, tab)
+def page(cases, tab, number, orders=()):
+    items = ordered(cases, tab, orders)
     total = len(items)
     pages = max(1, -(-total // PAGE_SIZE))
     number = min(max(1, number), pages)

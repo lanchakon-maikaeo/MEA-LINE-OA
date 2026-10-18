@@ -39,7 +39,7 @@
         <div class="field"><label for="c-{{ a.key }}">ต่อท้ายคำตอบด้วย</label><select id="c-{{ a.key }}" name="action">{% for v, label in actions %}<option value="{{ v }}"{% if v == a.action %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
         <label class="choice"><input type="checkbox" name="short_only" value="1"{% if a.short_only %} checked{% endif %}> <span>ตอบเมื่อข้อความมีแค่คำสำคัญ (เช่น ทักทาย ขอบคุณ)</span></label>
         <label class="choice"><input type="checkbox" name="approve" value="1"{% if a.status == 'approved' %} checked{% endif %}> <span>รับรองให้ใช้ตอบ</span></label>
-        <div class="field"><label for="r-{{ a.key }}">เหตุผล</label><input id="r-{{ a.key }}" name="reason" maxlength="500" required></div>
+        <div class="field"><label for="r-{{ a.key }}">เหตุผล (ไม่บังคับ)</label><input id="r-{{ a.key }}" name="reason" maxlength="500"></div>
         <button class="btn btn--sm" type="submit">บันทึก</button>
         {% if a.status != 'retired' %}<button class="btn btn--sm btn--ghost" type="submit" name="op" value="retire">เลิกใช้</button>{% endif %}
         {% if a.approved_by %}<p class="muted mt-8">รับรองโดย {{ a.approved_by.username }} · {{ a.approved_at|date:"Y-m-d H:i" }} · รหัส {{ a.key }}</p>{% endif %}
@@ -65,7 +65,7 @@
     <div class="field"><label for="n-text">ข้อความที่บอทตอบ</label><textarea id="n-text" name="text" rows="4" maxlength="1000" required></textarea></div>
     <div class="field"><label for="n-kw">คำสำคัญ (บรรทัดละคำ)</label><textarea id="n-kw" name="keywords" rows="3"></textarea></div>
     <div class="field"><label for="n-act">ต่อท้ายคำตอบด้วย</label><select id="n-act" name="action">{% for v, label in actions %}<option value="{{ v }}">{{ label }}</option>{% endfor %}</select></div>
-    <div class="field"><label for="n-reason">เหตุผล</label><input id="n-reason" name="reason" maxlength="500" required></div>
+    <div class="field"><label for="n-reason">เหตุผล (ไม่บังคับ)</label><input id="n-reason" name="reason" maxlength="500"></div>
     <button class="btn btn--sm" type="submit">เพิ่มเป็นร่าง</button>
   </form>
   </div>

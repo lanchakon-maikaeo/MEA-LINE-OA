@@ -113,11 +113,10 @@ class ActingTests(SupportTestCase):
             self.assertTrue(decision.reason, decision.action)
         self.assertTrue(AuditEvent.objects.filter(action="case.issue", data__has_key="support"))
 
-    def test_every_step_needs_a_reason(self):
+    def test_reason_is_optional_and_the_step_is_still_audited(self):
         case = self.submit()
-        with self.assertRaises(CommandFailed) as caught:
-            self.by_designer(case, "start_triage", reason="")
-        self.assertEqual(caught.exception.code, ErrorCode.VALIDATION_ERROR)
+        self.by_designer(case, "start_triage", reason="")
+        self.assertTrue(case.decisions.filter(action="start_triage", reason="").exists())
 
     def test_others_stay_bound_by_the_separation_of_duties(self):
         case = self.ready()
@@ -139,7 +138,7 @@ class VisibilityTests(SupportTestCase):
         page = client.get(f"/cases/{case.number}/")
         self.assertContains(page, "อนุมัติ")  # it can act where admins only read
         form = client.get(f"/cases/{case.number}/act/approve/")
-        self.assertContains(form, "ผู้ช่วยเหลือระบบต้องบอกเหตุผลทุกครั้ง")
+        self.assertContains(form, "ไม่บังคับ")
         with override_settings(STAFF_EMAIL_ENABLED=True):
             self.by_designer(case, "approve", lines((1, "3")), reason="ผู้อนุมัติลา")
             event = OutboxEvent.objects.filter(

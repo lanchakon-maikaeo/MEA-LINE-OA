@@ -37,7 +37,7 @@ from operations import (
     workflow,
 )
 from operations.contracts import Actor, CommandFailed, ErrorCode
-from operations.models import Case, District, Division, Priority, Role, RoleGrant
+from operations.models import Case, District, Division, Priority, Role, RoleGrant, WorkOrder
 
 ADMIN_URLS = ("admin-",)
 REFERENCE_URLS = {"pii", "routing-words", "duties"}
@@ -74,7 +74,7 @@ def navigation(request):
     elif name and name.startswith("registry"):
         section = "registry"
     elif name in {"orders", "order-new", "order-detail"}:
-        section = "orders"
+        section = "queue"
     else:
         section = "queue"
     profile = getattr(user, "staff_profile", None)
@@ -100,8 +100,6 @@ def navigation(request):
             # ตัวเลือกระบบ (ADR 0009): a non-admin who may approve LINE registrations.
             "registrations": not scope.is_admin and identity.may_decide_registrations(user),
             "registry": registry.may_open(user),
-            # งานสั่ง (16 ต.ค. 2569 Q14): waiting on this person, shown on the menu link.
-            "orders": work_orders.waiting_count(user) if scope.has_any_access else None,
             "admin": admin_menu,
         }
     }
@@ -166,13 +164,24 @@ def home(request):
             }
         )
     busy = [c for c in cards if c["open"] or c["mine"] or c["overdue"] or c["escalated"]]
+    open_count = sum(
+        card["open"]
+        for card in cards
+        if context["chosen"] is None or card["division"] == context["chosen"]
+    )
+    queue_link = (
+        reverse("division-detail", args=[context["chosen"].code])
+        if context["chosen"]
+        else reverse("queue-all")
+    )
     context.update(
         scope=scope,
         cards=cards,
         busy_cards=sorted(busy, key=lambda c: (-c["overdue"], -c["open"])),
         quiet_cards=[c for c in cards if c not in busy],
         attention=_attention(request.user, scope, context["report"], link),
-        open_link=link("open"),
+        open_link=queue_link,
+        open_count=open_count,
         new_link=link("new", "window"),
         ended_link=link("ended", "window"),
         today=now,
@@ -198,7 +207,7 @@ def _attention(user, scope, report, link):
         (n for value, _, n in report["by_status"] if value == Case.Status.SUBMITTED), 0
     )
     add("เรื่องใหม่รอคัดกรอง", submitted, link("status", Case.Status.SUBMITTED))
-    add("รอเขตตอบ", report["district"], link("district"))
+    add("รอหน่วยงาน (เขต/ฝ่าย)ตอบ", report["district"], link("district"))
     add("งานย่อยค้าง", report["children"], link("children"))
     if scope.is_admin:
         add("การแจ้งเตือนที่ส่งไม่สำเร็จ", waiting["line"], reverse("admin-line"), alert=True)
@@ -225,7 +234,8 @@ def _queue(request, division, admin_all=False):
         number = int(request.GET.get("page", "1"))
     except ValueError:
         number = 1
-    items, pager = queues.page(cases, tab, number)
+    orders = queues.order_queryset(request.user, tab, division, now, filters)
+    items, pager = queues.page(cases, tab, number, orders)
     if division or admin_all:
         request.session["division"] = division.code if division else ALL_QUEUE
     context = {
@@ -240,16 +250,23 @@ def _queue(request, division, admin_all=False):
         "now": now,
         "kinds": Case.Kind.choices,
         "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "รอคัดกรอง")],
-        "statuses": Case.Status.choices,
+        "statuses": [
+            *Case.Status.choices,
+            *(
+                (value, label)
+                for value, label in WorkOrder.Status.choices
+                if value not in Case.Status.values
+            ),
+        ],
         "districts": District.objects.order_by("name"),
         "sections": list(division.sections.filter(is_active=True)) if division else [],
+        "may_order": division.pk in scope.overseen if division else bool(scope.overseen),
     }
     context["registry_count"] = _registry_count(request.user, division, admin_all)
     if _is_htmx(request):
         return render(request, "operations/_queue_body.html", context)
     if division:
         context["members"] = _members(division)
-        context["may_order"] = division.pk in scope.overseen
     return render(request, "operations/division.html", context)
 
 
@@ -490,20 +507,7 @@ def case_action(request, number, action):
                 )
                 payload["evidence"] = [str(a.pk) for a in stored]
             key = request.POST.get("idempotency_key", "")
-            priority = payload.pop("priority", None) if action == "complete_triage" else None
-            if priority:
-                # One submit, two decisions: the level, then the end of triage. A key is unique
-                # per action, so the same key makes a double submit replay both.
-                services.perform_action(
-                    Actor.staff(request.user),
-                    case.pk,
-                    "set_priority",
-                    expected_revision=revision,
-                    idempotency_key=key,
-                    payload={"priority": priority, **payload},
-                )
-                revision += 1
-            services.perform_action(
+            services.perform_form_action(
                 Actor.staff(request.user),
                 case.pk,
                 action,
@@ -567,7 +571,19 @@ def case_search(request):
         exact = cases.filter(number=query).first()
         if exact is not None:
             return redirect("case-detail", number=exact.number)
-        found = list(queues.prefetch(cases).order_by("-submitted_at")[:30])
+        orders = (
+            work_orders.visible(request.user)
+            .filter(number__icontains=query)
+            .select_related("division", "assignee__staff_profile", "issued_by__staff_profile")
+        )
+        found = sorted(
+            [
+                *queues.prefetch(cases).order_by("-submitted_at")[:30],
+                *orders.order_by("-created_at")[:30],
+            ],
+            key=lambda item: item.created_at if isinstance(item, WorkOrder) else item.submitted_at,
+            reverse=True,
+        )[:30]
         rows = queues.build_rows(found, timezone.now())
     return render(request, "operations/search.html", {"query": query, "rows": rows})
 
@@ -644,7 +660,8 @@ def _export(request, division, admin_all=False):
     cases = queues.visible(request.user).filter(
         queues.tab_condition(tab, division, request.user, now, admin_all)
     )
-    cases = queues.ordered(queues.apply_filters(queues.prefetch(cases), filters), tab)
+    orders = queues.order_queryset(request.user, tab, division, now, filters)
+    cases = queues.ordered(queues.apply_filters(queues.prefetch(cases), filters), tab, orders)
     text, count, truncated = reports.export_csv(cases, now)
     identity.audit(
         request.user,
@@ -730,7 +747,7 @@ def _dashboard(report, link):
                 link("escalated"),
                 "alert" if report["escalated"] else "",
             ),
-            ("รอเขตตอบ", report["district"], link("district"), ""),
+            ("รอหน่วยงาน (เขต/ฝ่าย)ตอบ", report["district"], link("district"), ""),
             ("งานย่อยค้าง", report["children"], link("children"), ""),
         ],
         "trend": charts.trend(report["trend"], link),

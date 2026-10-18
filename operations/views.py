@@ -28,7 +28,6 @@ from operations import (
     forms,
     identity,
     inventory,
-    line_menu,
     monitoring,
     notifications,
     options,
@@ -57,7 +56,6 @@ from operations.models import (
     Employee,
     EquipmentType,
     FakeStock,
-    LineMenuItem,
     LineQuotaSnapshot,
     NotificationDelivery,
     OutboxEvent,
@@ -282,6 +280,14 @@ def admin_user_action(request, pk, action):
             )
         else:
             messages.error(request, "ข้อมูลบทบาทไม่ถูกต้อง")
+    elif action == "registration-notifications":
+        from operations import admin_line
+
+        _run(
+            request,
+            lambda: admin_line.set_notifications(actor, target, data.get("enabled") == "1"),
+            "บันทึกผู้รับแจ้งการสมัครแล้ว",
+        )
     elif action == "revoke":
         grant_id = data.get("grant_id", "")
         if not grant_id.isdigit():
@@ -406,16 +412,14 @@ def admin_registrations(request):
             "audience": options.get(options.LINE_AUDIENCE),
             "audience_option": options.OPTIONS[options.LINE_AUDIENCE],
             "testers": len(settings.LINE_ALLOWED_RECIPIENTS),
-            "check_label": options.OPTIONS[options.REGISTRATION_CHECK].label_of(
-                options.get(options.REGISTRATION_CHECK)
-            ),
+            "check_label": "ยืนยันตัวตนและกองตามทะเบียน แล้วให้สมาชิกกองอัตโนมัติ",
             "approver_label": options.OPTIONS[options.REGISTRATION].label_of(
                 options.get(options.REGISTRATION)
             ),
             "requester_filters": [
                 (
                     "district",
-                    "เขต",
+                    "หน่วยงาน (เขต/ฝ่าย)",
                     list(
                         District.objects.filter(is_active=True)
                         .order_by("code")
@@ -479,7 +483,13 @@ def _requester_rows(requesters):
                 "stale": employee is not None and not employee.is_active,
                 "role": " · ".join(
                     [
-                        "ผู้ใช้ LINE OA (ภายใน)" if requester.is_internal else "ผู้ใช้ LINE OA",
+                        (
+                            "เจ้าหน้าที่ · เบิก/คืนได้"
+                            if state == "verified" and not requester.is_external
+                            else "ผู้ใช้ LINE OA (ภายใน)"
+                            if requester.is_internal
+                            else "ผู้ใช้ LINE OA"
+                        ),
                         *roles[requester.pk],
                     ]
                 ),
@@ -493,6 +503,7 @@ def _requester_rows(requesters):
 
 REQUESTER_MESSAGES = 300  # newest messages on one page
 REQUESTER_HISTORY = {
+    "requester.employee_access_restored": "ระบบให้สิทธิ์เบิก/คืนแก่พนักงานที่ยืนยันแล้ว",
     "registration.approved": "รับรองการลงทะเบียน",
     "registration.auto_approved": "ระบบรับรองเอง (ตรงทะเบียนพนักงาน)",
     "requester.created_direct": "แอดมินเพิ่มผู้แจ้งโดยตรง",
@@ -506,7 +517,7 @@ REQUESTER_HISTORY = {
     "requester.employee_linked": "แอดมินผูกทะเบียนพนักงาน",
     "requester.employee_confirmed": "แอดมินยืนยันว่าเป็นพนักงานที่ชื่อตรง",
     "requester.employee_unlinked": "แอดมินยกเลิกการผูกทะเบียนพนักงาน",
-    "requester.district_changed": "แอดมินแก้เขต",
+    "requester.district_changed": "แอดมินแก้หน่วยงาน (เขต/ฝ่าย)",
 }
 ACTOR_LABELS = {"system": "ระบบ", "line": "LINE", "manage.py": "คำสั่งของผู้ดูแลระบบ"}
 
@@ -567,6 +578,7 @@ def admin_requester_detail(request, pk):
         "operations/admin_requester_detail.html",
         {
             "requester": requester,
+            "grant_form": forms.GrantRoleForm(),
             "row": row,
             "candidates": candidates,
             "districts": District.objects.filter(is_active=True).order_by("code"),
@@ -651,13 +663,23 @@ def admin_requester_action(request, pk, action):
                 lambda: identity.revoke_requester(actor, requester, reason),
                 "ถอนการรับรองแล้ว ถ้าจะใช้ LINE ต่อต้องลงทะเบียนใหม่",
             )
+    elif action == "grant-role":
+        form = forms.GrantRoleForm(data)
+        if form.is_valid():
+            _run(
+                request,
+                lambda: identity.grant_requester_role(actor, requester, **form.cleaned_data),
+                "เพิ่มสิทธิ์เจ้าหน้าที่ให้ผู้ใช้ LINE แล้ว",
+            )
+        else:
+            messages.error(request, "ข้อมูลบทบาทไม่ถูกต้อง")
     elif action == "link-employee":
         _run(
             request,
             lambda: identity.link_requester_employee(
                 actor, requester, data.get("employee_id", ""), reason
             ),
-            "ผูกกับทะเบียนพนักงานแล้ว",
+            "รับรองพนักงานแล้ว เบิก/คืนได้",
         )
     elif action == "unlink-employee":
         _run(
@@ -671,10 +693,12 @@ def admin_requester_action(request, pk, action):
             lambda: identity.set_requester_district(
                 actor, requester, data.get("district", ""), reason
             ),
-            "แก้เขตแล้ว เรื่องเดิมยังอยู่เขตเดิม เรื่องใหม่ใช้เขตนี้",
+            "แก้หน่วยงาน (เขต/ฝ่าย)แล้ว เรื่องเดิมยังอยู่หน่วยงาน (เขต/ฝ่าย)เดิม เรื่องใหม่ใช้หน่วยงาน (เขต/ฝ่าย)นี้",
         )
     else:
         raise Http404
+    if data.get("next") == "registrations":
+        return redirect("admin-registrations")
     return redirect("admin-requester-detail", pk=requester.pk)
 
 
@@ -804,9 +828,7 @@ def admin_line(request):
 def admin_requeue(request, pk):
     event = get_object_or_404(OutboxEvent, pk=pk)
     reason = request.POST.get("reason", "").strip()
-    if not reason:
-        messages.error(request, "ต้องระบุเหตุผล")
-    elif orchestration.requeue(event):
+    if orchestration.requeue(event):
         identity.audit(request.user, "outbox.requeued", event, reason, event_type=event.event_type)
         messages.success(request, "ส่งงานกลับเข้าคิวแล้ว")
     else:
@@ -1037,6 +1059,7 @@ def admin_ai(request):
                 ("refused", "ถ้อยคำของ AI", [("yes", "มีที่ถูกตีกลับ"), ("no", "ไม่มีที่ถูกตีกลับ")]),
             ],
             "ai_enabled": settings.AI_ENABLED,
+            "agent_mcp_enabled": settings.AI_ENABLED and settings.AI_MCP_ENABLED,
             "can_change": identity.may_change_ai(request.user),
             "credential_form": forms.AICredentialForm(),
             "profile_form": forms.AIProfileForm(),
@@ -1096,114 +1119,6 @@ def admin_monitoring(request):
         }
     )
     return render(request, "operations/admin_monitoring.html", view)
-
-
-def _drawn_picture(value):
-    """The menu picture the browser drew, sent as a data: URL (line_menu.js)."""
-    import base64
-    import binascii
-
-    head, _, body = str(value or "").partition(",")
-    if not head.startswith("data:image/") or ";base64" not in head:
-        return b""
-    try:
-        return base64.b64decode(body, validate=True)
-    except (binascii.Error, ValueError):
-        return b""
-
-
-@admin_required
-def admin_line_menu(request):
-    """เมนู LINE (15 ต.ค. 2569 Q17–Q20, Q32; 16 ต.ค. 2569 Q2, Q13): the buttons of every menu
-    page as data. A save the admin confirms with its tick publishes all pages right after (the
-    page draws them and sends them on its own); publishing never happens without that tick."""
-    T = LineMenuItem.Tab
-    if request.method == "POST":
-        post, reason = request.POST, request.POST.get("reason", "")
-        action = post.get("action")
-        if action == "save":
-            item = get_object_or_404(LineMenuItem, pk=post.get("item"))
-            saved = _run(
-                request,
-                lambda: line_menu.save(request.user, item, post, reason),
-                "บันทึกแล้ว บอทใช้ค่าใหม่ทันที",
-            )
-            if saved and post.get("publish") == "1" and settings.LINE_CHANNEL_ACCESS_TOKEN:
-                request.session["menu_publish"] = reason  # the page publishes when it loads
-        elif action == "add":
-            parent = LineMenuItem.objects.filter(pk=post.get("parent") or None).first()
-            _run(
-                request,
-                lambda: line_menu.add(
-                    request.user, post.get("place", ""), parent, reason, post.get("tab", T.REPORT)
-                ),
-                "เพิ่มปุ่มแล้ว ปุ่มใหม่ยังปิดอยู่ แก้ชื่อแล้วเปิดใช้ก่อน",
-            )
-        elif action == "publish":
-            if post.get("confirm") != "1":
-                messages.error(request, "ติ๊กยืนยันก่อน เพราะเมนูจริงของ LINE OA จะเปลี่ยนทันที")
-            else:
-                pictures = {
-                    page: _drawn_picture(post.get(f"drawn-{page}")) for page in line_menu.PAGES
-                }
-                upload = request.FILES.get("picture")
-                if upload:
-                    pictures["user"] = upload.read()
-                _run(
-                    request,
-                    lambda: line_menu.publish(
-                        request.user, {k: v for k, v in pictures.items() if v}, reason
-                    ),
-                    "เปลี่ยนเมนูใน LINE แล้ว เจ้าหน้าที่ที่เชื่อม LINE ได้เมนูตามบทบาท",
-                )
-        return redirect("admin-line-menu")
-    items = list(LineMenuItem.objects.select_related("division").order_by("position", "pk"))
-    choices = defaultdict(list)
-    for item in items:
-        if item.parent_id:
-            choices[item.parent_id].append(item)
-    tiles = [t for t in items if t.place == LineMenuItem.Place.TILE]
-    for tile in tiles:
-        tile.options = choices[tile.pk]
-    actions = dict(LineMenuItem.Action.choices)
-
-    def offered(allowed):
-        return [(a, actions[a]) for a in actions if a in allowed]
-
-    return render(
-        request,
-        "operations/admin_line_menu.html",
-        {
-            "tiles": [t for t in tiles if t.tab == T.REPORT],
-            "bar": [i for i in items if i.place == LineMenuItem.Place.BAR],
-            "staff_tabs": [
-                (
-                    T.WORK,
-                    "งานของกอง",
-                    "เจ้าหน้าที่ทุกคนที่เชื่อม LINE กับบัญชี",
-                    [t for t in tiles if t.tab == T.WORK],
-                    offered(line_menu.WORK_ACTIONS),
-                ),
-                (
-                    T.ORDER,
-                    "สั่งงาน",
-                    "เฉพาะ Supervisor ของกองและ Supervisor ระดับฝ่าย",
-                    [t for t in tiles if t.tab == T.ORDER],
-                    offered(line_menu.ORDER_ACTIONS),
-                ),
-            ],
-            "divisions": Division.objects.filter(is_active=True).order_by("code"),
-            "tile_actions": offered(line_menu.TILE_ACTIONS),
-            "choice_actions": offered(line_menu.CHOICE_ACTIONS),
-            "bar_actions": offered(line_menu.BAR_ACTIONS),
-            "topics": list(line_menu.TOPICS.items()),
-            "kinds": list(line_menu.KINDS.items()),
-            "drawing": line_menu.drawing(),
-            "pages": [(page, line_menu.PAGE_TITLES[page]) for page in line_menu.PAGES],
-            "line_ready": bool(settings.LINE_CHANNEL_ACCESS_TOKEN),
-            "auto_publish": request.session.pop("menu_publish", ""),
-        },
-    )
 
 
 EVIDENTLY_CSP = (
@@ -1489,7 +1404,7 @@ def _staged(value):
 @admin_required
 def admin_employees(request):
     """ทะเบียนพนักงาน (15 ต.ค. 2569 Q10, Q27–Q29): the owner uploads the organisation's roster
-    (.xlsx or .csv); a preview shows which column is which field and which เขต/หน่วยงาน each ฝ่าย
+    (.xlsx or .csv); a preview shows which column is which field and which unit each department
     is, then the import. Names and e-mails never leave this page; no AI reads the file."""
     upload, columns = None, None
     if request.method == "POST":
@@ -1563,9 +1478,7 @@ def admin_employees(request):
             "latest": Employee.objects.order_by("-imported_at").first(),
             "sealing": sealing.available(),
             "mail": email_codes.sending_ready(),
-            "check": options.OPTIONS[options.REGISTRATION_CHECK].label_of(
-                options.get(options.REGISTRATION_CHECK)
-            ),
+            "check": "ยืนยันตัวตนและกองตามทะเบียน แล้วให้สมาชิกกองอัตโนมัติ",
             "methods": options.OPTIONS[options.EMAIL_METHODS].label_of(
                 options.get(options.EMAIL_METHODS)
             ),

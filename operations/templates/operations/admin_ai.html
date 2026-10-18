@@ -7,6 +7,7 @@
 <h2 id="switch">รุ่นที่ใช้งานอยู่</h2>
 <p>AI มีสามงาน แต่ละงานมีรุ่นและเกณฑ์ประเมินของตัวเอง ได้แก่ สกัดร่างเรื่องจากแชต เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (ไม่เลือกกองหรือระดับเอง) และตอบแชตผู้ใช้ LINE OA จากคลังคำตอบ</p>
 <p>ตอบแชต: {% if active_answer %}<strong>v{{ active_answer.number }}</strong> · {% for e in active_answer.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_answer.activated_at|date:"Y-m-d H:i" }} (<a href="{% url 'admin-answers' %}">คลังคำตอบ</a>){% else %}ยังไม่เปิดใช้ (ตอบจากคำสำคัญเท่านั้น){% endif %}</p>
+<p>Agent ผ่าน MCP ใน LINE: <strong>{{ agent_mcp_enabled|yesno:"เปิด,ปิด" }}</strong> · ใช้รุ่นสกัดร่างที่เปิดใช้อยู่ ค้นข้อมูลตามสิทธิ์และเตรียมคำสั่งให้ยืนยันก่อนดำเนินการ หาก AI ขัดข้องยังใช้เมนูเดิมได้</p>
 <p>คัดกรองเรื่อง: {% if active_triage %}<strong>v{{ active_triage.number }}</strong> · {% for e in active_triage.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_triage.activated_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เปิดใช้ (ข้อเสนอใช้กติกาและธงจากคำเท่านั้น){% endif %}</p>
 <p>สกัดร่างจากแชต:</p>
 {% if active %}
@@ -20,7 +21,7 @@
     <p><label>เปลี่ยนไปใช้
       <select name="version" required>{% for v in switchable %}<option value="{{ v.pk }}">v{{ v.number }} · {{ v.get_task_display }} · {{ v.get_pipeline_display }} · {% for e in v.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %}{% if v.few_shot %} · ตัวอย่าง {{ v.few_shot }}{% endif %}</option>{% endfor %}</select>
     </label></p>
-    <p><label>เหตุผล <input name="reason" required></label> <button type="submit">เปลี่ยน</button></p>
+    <p><label>เหตุผล <input name="reason"></label> <button type="submit">เปลี่ยน</button></p>
     <p>มีผลกับข้อความใหม่ทันที ข้อความที่กำลังเรียก AI อยู่ใช้รุ่นเดิมจนจบ เปลี่ยนกลับได้จากเมนูนี้</p>
   {% else %}
     <p>ยังไม่มีรุ่นอื่นที่พร้อมใช้ รุ่นต้องผ่าน "ทดสอบการเชื่อมต่อ" (ใหม่หลังหมุน key) และ "ประเมิน" บน security + heldout-v4 + redteam-v1/v2 ก่อน</p>
@@ -33,7 +34,7 @@
     <p><label>งาน
       <select name="task" required>{% for v in stoppable %}<option value="{{ v.task }}">{{ v.get_task_display }} (v{{ v.number }})</option>{% endfor %}</select>
     </label></p>
-    <p><label>เหตุผล <input name="reason" required></label> <button type="submit">หยุดใช้</button></p>
+    <p><label>เหตุผล <input name="reason"></label> <button type="submit">หยุดใช้</button></p>
     <p>ใช้เมื่อ AI ของงานนั้นมีปัญหา หรือยังไม่ได้รับอนุมัติให้ใช้ งานใหม่ทำต่อโดยไม่ใช้ AI: แชตถามทีละช่อง ตอบจากคำสำคัญ หรือเจ้าหน้าที่คัดกรองเอง เรื่องที่รอ AI คัดกรองอยู่จะถูกปิดเป็นไม่ใช้ AI การเปิดกลับใช้เมนูเปลี่ยนรุ่นด้านบน และรุ่นนั้นต้องมีผลประเมินของโค้ดปัจจุบัน</p>
   </fieldset>
 </form>{% endif %}
@@ -73,7 +74,7 @@
         {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'evaluate' v.pk %}">{% csrf_token %}<button type="submit">ประเมิน</button></form>{% endif %}
         {% endif %}
         {% if v.status != "active" and v.status != "rejected" %}
-        {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'reject' v.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ไม่ใช้</button></form>{% endif %}
+        {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'reject' v.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">ไม่ใช้</button></form>{% endif %}
         {% endif %}
       </td>
     </tr>

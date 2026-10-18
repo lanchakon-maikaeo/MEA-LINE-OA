@@ -81,7 +81,11 @@ def queue(turn, draft, text, message=None):
     requester said 'ไม่ใช่ข้อมูลเพิ่ม' to a message first offered to staff)."""
     version = version_for_chat()
     # Messages already prepared this turn (e.g. "มีอัปเดตใหม่") go out with the AI answer.
+    from operations import agent_chat
+
     result = {"prefix": turn.replies[:2]}
+    if agent_chat.enabled():
+        result["agent_context"] = agent_chat.state(turn)
     if message is not None:
         result["message"] = message.pk
     shape = conversation.off_step(draft, text)
@@ -130,6 +134,16 @@ def _turn_for(run):
     conv, _ = Conversation.objects.get_or_create(identity=identity)
     turn = Turn(run.inbox, run.inbox.payload, identity, conv, timezone.now())
     requester = identity.requester
+    from operations import staff_line
+
+    if (
+        run.result.get("agent_context") is not None
+        and requester is None
+        and staff_line.staff_of(identity) is not None
+        and run.inbox.source_user_id == identity.external_id
+        and run.inbox.channel == identity.channel
+    ):
+        return turn, True
     if (
         identity.status != ChannelIdentity.Status.ACTIVE
         or requester is None
@@ -150,6 +164,16 @@ def _turn_for(run):
     return turn, True
 
 
+def _reprompt(turn, draft):
+    from operations import staff_line
+
+    staff = staff_line.staff_of(turn.identity)
+    if turn.requester is None and staff is not None:
+        staff_line.menu(turn, staff)
+    else:
+        conversation._reprompt(turn, draft)
+
+
 def _current_draft(turn):
     draft = turn.conversation.active_draft
     return draft if draft is not None and draft.status == D.OPEN else None
@@ -160,15 +184,25 @@ def _blocked(run, turn, usable):
     if not usable:
         return R.FAILED
     draft = _current_draft(turn)
+    from operations import agent_chat
+
+    if run.result.get("agent_context") is not None and (
+        run.result["agent_context"] != agent_chat.state(turn)
+        or ConversationMessage.objects.filter(
+            identity=turn.identity, inbox_id__gt=run.inbox_id
+        ).exists()
+    ):
+        turn.say("ขั้นตอนเปลี่ยนแล้ว กรุณาใช้เมนูล่าสุด")
+        return R.STALE
     if (draft.pk if draft else None) != run.draft_id or (
         draft is not None and draft.revision != run.draft_revision
     ):
         turn.say("ข้อความก่อนหน้าถูกแทนด้วยขั้นตอนล่าสุด")
-        conversation._reprompt(turn, draft)
+        _reprompt(turn, draft)
         return R.STALE
     if not settings.AI_ENABLED:
         turn.say("ระบบอ่านข้อความปิดอยู่ ขอถามทีละข้อ")
-        conversation._reprompt(turn, draft)
+        _reprompt(turn, draft)
         return R.FALLBACK
     return None
 
@@ -238,18 +272,34 @@ def process(run_id):
     )
     extraction, attempts = (None, [{"outcome": "skipped: no time left"}])
     started = time.monotonic()
-    if run.config_version.task == AIConfigVersion.Task.ANSWER:
+    deadline = started + budget
+    from operations import agent_chat
+
+    agent_result, agent_attempts = (None, [])
+    if run.result.get("agent_context") is not None:
+        agent_result, agent_attempts = agent_chat.plan(run, source_text, budget)
+        budget = max(0, budget - (time.monotonic() - started))
+    if agent_result is not None:
+        attempts = agent_attempts
+    elif run.config_version.task == AIConfigVersion.Task.ANSWER:
         attempts = [{"outcome": "no extraction version: chat answer only"}]
     elif run.result.get("typed_as") == "question":
         attempts = [{"outcome": "a question at a typed step: chat answer only"}]
-    elif message is not None and budget >= 2:
+    elif message is not None and budget >= 2 and turn.requester is not None:
         extraction, attempts = ai.extract(source_text, context, run.config_version, budget)
     chat = None
-    if message is not None and not _proposals(extraction):
+    if (
+        agent_result is None
+        and turn.requester is not None
+        and message is not None
+        and not _proposals(extraction)
+    ):
         # Not a request the guided flow can take: maybe a question (คลังคำตอบ ข/ค, ADR 0012).
-        chat = _ask_answer(run, source_text, budget - (time.monotonic() - started))
+        chat = _ask_answer(run, source_text, deadline - time.monotonic())
         if chat is not None:
             attempts = attempts + chat["attempts"]
+    if agent_result is None:
+        attempts = agent_attempts + attempts
     with transaction.atomic():
         turn, usable = _turn_for(run)
         run = AIRun.objects.select_for_update().get(pk=run_id)
@@ -261,6 +311,9 @@ def process(run_id):
         status = _blocked(run, turn, usable)
         if status:
             extraction = None
+        elif agent_result is not None:
+            status = R.ANSWERED if agent_result["kind"] == "reply" else R.APPLIED
+            agent_chat.present(turn, run, agent_result)
         elif _proposals(extraction):
             status = R.APPLIED
             apply(turn, draft, extraction, run)
@@ -277,7 +330,7 @@ def process(run_id):
         elif extraction is None:
             status = R.FAILED
             turn.say("ระบบอ่านข้อความไม่สำเร็จ ขอถามทีละข้อ")
-            conversation._reprompt(turn, draft)
+            _reprompt(turn, draft)
         else:
             status = R.APPLIED
             if draft is None and not _proposals(extraction):
@@ -286,7 +339,7 @@ def process(run_id):
         replies = _finish(run, status, attempts, extraction, turn)
         draft = _current_draft(turn) if status == R.APPLIED and _proposals(extraction) else None
     if draft is not None:
-        replies = _rephrase(run, draft, replies, started + budget - time.monotonic())
+        replies = _rephrase(run, draft, replies, deadline - time.monotonic())
     conversation.send_reply(run.inbox_id, replies[:5])
     return status
 
@@ -373,7 +426,7 @@ def _answer(turn, draft, chat):
     answer = answers.approved().filter(key=key).first()
     if answer is None:
         turn.say("ยังไม่เข้าใจข้อความ กรุณาเลือกจากปุ่ม หรือพิมพ์รายละเอียดเพิ่ม")
-        conversation._reprompt(turn, draft)
+        _reprompt(turn, draft)
         return {"key": chat["key"], "by": "none", "refused": chat["refused"]}
     written = chat["reply"] if key != answers.OUT_OF_SCOPE else None
     answers.respond(turn, draft, answer, written)
@@ -450,7 +503,7 @@ def expire_waiting(now=None):
                 conversation._draft_text(turn, draft, message.text)
             elif usable:
                 turn.say("ระบบอ่านข้อความไม่ทันเวลา ขอถามทีละข้อ")
-                conversation._reprompt(turn, draft)
+                _reprompt(turn, draft)
             replies = _finish(run, R.FALLBACK, run.attempts, None, turn)
         conversation.send_reply(run.inbox_id, replies[:5])
         handled += 1
@@ -464,7 +517,7 @@ def apply(turn, draft, extraction, run):
     proposals = [p for p in extraction.requests if p.intent in ai.KIND_FOR_INTENT]
     if not proposals:
         turn.say("ยังไม่เข้าใจข้อความ กรุณาเลือกจากปุ่ม หรือพิมพ์รายละเอียดเพิ่ม")
-        return conversation._reprompt(turn, draft)
+        return _reprompt(turn, draft)
     first, extra = proposals[0], proposals[1:]
     kind = ai.KIND_FOR_INTENT[first.intent]
     has_content = draft is not None and (draft.data.get("lines") or draft.data.get("fields"))

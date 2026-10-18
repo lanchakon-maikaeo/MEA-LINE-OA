@@ -83,6 +83,8 @@ PROMISES = (
 )
 # The humanizer rules for bot texts, and what gives away a chatbot.
 STYLE = (
+    "เล่า",
+    "บอกหน่อย",
     "—",
     "–",
     " -- ",

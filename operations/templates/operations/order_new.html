@@ -4,14 +4,14 @@
 {% block page_class %}page--reading{% endblock %}
 {% block content %}
 <ol class="crumbs">
-  <li><a href="{% url 'orders' %}">งานสั่ง</a></li>
+  <li><a href="{% url 'orders' %}">คิวงาน</a></li>
   <li aria-current="page">สั่งงานใหม่</li>
 </ol>
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">งานสั่ง</span>
     <h1>สั่งงานใหม่</h1>
-    <p class="lede">คนที่ได้รับงานจะได้ข้อความทันทีถ้าเชื่อม LINE ไว้ แล้วกดรับทราบ เริ่มทำ และบอกผลเมื่อเสร็จ</p>
+    <p class="lede">ระบบจะแจ้งผู้รับมอบหมายที่เชื่อม LINE แล้ว ผู้รับสามารถกดรับทราบ เริ่มดำเนินการ และแจ้งผลเมื่อเสร็จสิ้น</p>
   </div>
 </div>
 {% for error in errors %}<div class="notice notice--error mb-24" role="alert">{% icon "alert" %}<div class="notice__body">{{ error }}</div></div>{% endfor %}

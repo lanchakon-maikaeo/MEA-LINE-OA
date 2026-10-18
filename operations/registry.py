@@ -242,8 +242,6 @@ def _codes(text):
 def update_config(actor, movement_types, column_aliases, storage_locations, reason):
     """Admin only, audited. Inputs are plain text from the settings form."""
     identity.require_admin(actor)
-    if not (reason or "").strip():
-        raise ValidationError("ระบุเหตุผลของการเปลี่ยนการตั้งค่า")
     types = {kind: _codes(movement_types.get(kind, "")) for kind in MOVEMENT_KINDS}
     seen = {}
     for kind, codes in types.items():
@@ -275,6 +273,19 @@ def update_config(actor, movement_types, column_aliases, storage_locations, reas
         aliases=sorted(names),
     )
     return row
+
+
+def set_line_group(actor, item, group, reason=""):
+    identity.require_admin(actor)
+    group = (group or "").strip()
+    if group and group not in EquipmentType.LineGroup.values:
+        raise ValidationError("เลือกหมวดเมนู LINE จากรายการ")
+    before = item.line_group
+    if before != group:
+        item.line_group = group
+        item.save(update_fields=["line_group"])
+        identity.audit(actor, "registry.line_group_set", item, reason, before=before, after=group)
+    return item
 
 
 def set_official_code(actor, item, code, reason=""):
@@ -1082,7 +1093,7 @@ def _locked(discrepancy_id):
 
 def _reason(text, message="ระบุเหตุผล"):
     text = (text or "").strip()
-    if not text:
+    if not text and message != "ระบุเหตุผล":
         raise ValidationError(message)
     return text[:2000]
 

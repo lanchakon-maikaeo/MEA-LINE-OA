@@ -300,8 +300,6 @@ def _managed(actor, row, reason):
     if not may_manage(actor):
         raise ValidationError("เฉพาะแอดมินและ ฝอจ.")
     reason = str(reason or "").strip()
-    if not reason:
-        raise ValidationError("ระบุเหตุผล")
     if row.cancelled_at is not None:
         raise ValidationError("คำนี้ถูกยกเลิกไปแล้ว")
     return reason

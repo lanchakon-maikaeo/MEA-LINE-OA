@@ -60,7 +60,7 @@ LINE_ACTIONS = {
     "claim": "รับงาน",
     "start_triage": "เริ่มคัดกรอง",
     "accept_handoff": "รับงานที่ส่งต่อ",
-    "request_info": "ขอข้อมูลเพิ่มจากเขต",
+    "request_info": "ขอข้อมูลเพิ่ม",
 }
 
 
@@ -247,7 +247,8 @@ def internal_requester(identity_row, user):
     scope = identity.staff_scope(user)
     division = next(iter(queues.own_divisions(scope)), None)
     district, _ = District.objects.get_or_create(
-        code=identity.UNKNOWN_DISTRICT, defaults={"name": "ไม่ระบุเขต", "is_active": False}
+        code=identity.UNKNOWN_DISTRICT,
+        defaults={"name": "ไม่ระบุหน่วยงาน (เขต/ฝ่าย)", "is_active": False},
     )
     name = getattr(getattr(user, "staff_profile", None), "display_name", user.username)
     requester = Requester.objects.create(
@@ -363,6 +364,10 @@ def recipient_problem(delivery):
         or staff_of(delivery.identity) is None
     ):
         return "staff LINE no longer linked or account inactive"
+    if delivery.kind == "staff_registration":
+        if not identity.staff_scope(user).is_admin or not user.staff_profile.notify_registrations:
+            return "registration notifications no longer allowed"
+        return ""
     if delivery.work_order_id is not None:
         from operations import work_orders  # local: work_orders plans through this path
 
@@ -404,22 +409,9 @@ def _case_for(user, case_id=None, number=None):
 
 
 def menu(turn, user):
-    """งานของกอง: counts per division and the cases waiting for this division, as buttons."""
-    from operations import queues as q
+    from operations import staff_work
 
-    scope = identity.staff_scope(user)
-    now = turn.now
-    rows, buttons = [], []
-    visible = q.visible(user)
-    for division in q.own_divisions(scope)[:3]:
-        host = visible.filter(q.tab_condition("host", division, user, now))
-        rows.append(f"{division.code}: รอทำ {host.count()} เรื่อง")
-        for case in q.ordered(host, "host")[:4]:
-            buttons.append(turn.button(case.number, "staff_case", {"case": str(case.pk)}))
-    if not rows:
-        rows.append("บัญชีนี้ยังไม่มีกองที่ดูแล")
-    buttons.append(turn.button("แจ้งปัญหา/ข้อเสนอแนะ", "staff_report"))
-    turn.say("งานของกอง\n" + "\n".join(rows), buttons[:12])
+    staff_work.list_page(turn, user)
 
 
 def case_detail(turn, user, case):
@@ -458,7 +450,9 @@ def act(turn, user, case, action, reason=""):
         return
     if action == "request_info" and not reason:
         turn.set_prompt("staff_info", case=str(case.pk))
-        turn.say(f"เรื่อง {case.number}: พิมพ์สิ่งที่อยากให้เขตส่งเพิ่ม ข้อความนี้ถึงผู้แจ้งทาง LINE")
+        turn.say(
+            f"เรื่อง {case.number}: ระบุข้อมูลเพิ่มเติมที่ต้องการจากหน่วยงาน (เขต/ฝ่าย) ข้อความนี้ถึงผู้แจ้งทาง LINE"
+        )
         return
     try:
         services.perform_action(

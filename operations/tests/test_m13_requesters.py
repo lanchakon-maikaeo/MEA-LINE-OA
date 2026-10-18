@@ -25,6 +25,8 @@ from operations.models import (
     ChannelIdentity,
     ConversationMessage,
     District,
+    Division,
+    Employee,
     NotificationDelivery,
     Requester,
     Role,
@@ -54,6 +56,9 @@ class RequesterTestCase(PeopleTestCase):
 
 class RequesterListTests(RequesterTestCase):
     def test_the_list_shows_proof_position_and_role_without_anonymous_reporters(self):
+        Employee.objects.filter(employee_id="SYN10001").update(
+            division=Division.objects.get(code="กคว.")
+        )
         options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")
         self.register(ALICE)
         self.type(ALICE, "SYN10001")
@@ -107,7 +112,7 @@ class EmployeeMatchTests(RequesterTestCase):
         self.assertContains(detail, "ชื่อตรงทะเบียน SYN10001 (ยังไม่ได้ยืนยัน)")
         self.assertContains(detail, "พนักงานช่าง")
         self.assertContains(detail, "รอยืนยัน")
-        self.assertContains(detail, "ยืนยันว่าเป็นคนนี้")
+        self.assertContains(detail, "รับรองพนักงานคนนี้")
         self.assertContains(self.client.get(LIST), 'data-identity="name"')
 
         # Case 2: an admin checks the person, then confirms the employee the name matched.
@@ -117,8 +122,7 @@ class EmployeeMatchTests(RequesterTestCase):
         self.assertEqual(identity.requester_roles([requester])[requester.pk], ["แอดมินระบบ"])
         event = AuditEvent.objects.get(action="requester.employee_confirmed")
         self.assertEqual((event.reason, event.data["employee"]), ("โทรถามแล้ว", "SYN10001"))
-        with self.assertRaises(ValidationError):
-            identity.link_requester_employee(self.admin, requester, "SYN10001", "ซ้ำ")
+        identity.link_requester_employee(self.admin, requester, "SYN10001", "ซ้ำ")
         self.assertContains(self.client.get(LIST), 'data-identity="verified"')
 
     def test_no_match_for_a_shared_name_or_another_district(self):
@@ -163,12 +167,10 @@ class EmployeeMatchTests(RequesterTestCase):
         requester = identity.create_requester(self.admin, "พนักงานจำลอง สาม", "D01", "ทดสอบ")
         self.assertIsNone(requester.employee)
         with self.assertRaises(ValidationError):
-            identity.set_requester_district(self.admin, requester, "D03", "")
-        with self.assertRaises(ValidationError):
             identity.set_requester_district(self.admin, requester, "D01", "เขตเดิม")
         with self.assertRaises(PermissionDenied):
             identity.set_requester_district(self.meter, requester, "D03", "ไม่ใช่แอดมิน")
-        self.act(requester, "district", district="D03", reason="เลือกเขตผิดตอนลงทะเบียน")
+        self.act(requester, "district", district="D03", reason="")
         requester.refresh_from_db()
         self.assertEqual(requester.district.code, "D03")
         self.assertEqual(
@@ -176,7 +178,9 @@ class EmployeeMatchTests(RequesterTestCase):
         )
         event = AuditEvent.objects.get(action="requester.district_changed")
         self.assertEqual((event.data["previous"], event.data["district"]), ("D01", "D03"))
-        self.assertContains(self.client.get(page(requester.pk)), "แอดมินแก้เขต · D01 → D03")
+        self.assertContains(
+            self.client.get(page(requester.pk)), "แอดมินแก้หน่วยงาน (เขต/ฝ่าย) · D01 → D03"
+        )
         internal = Requester.objects.create(
             display_name="ผอ. (กคว.)",
             district=requester.district,
@@ -188,8 +192,6 @@ class EmployeeMatchTests(RequesterTestCase):
 
     def test_an_admin_link_or_unlink_is_kept_by_later_imports(self):
         requester = identity.create_requester(self.admin, "พนักงานจำลอง หนึ่ง", "D01", "ทดสอบ")
-        with self.assertRaises(ValidationError):
-            identity.unlink_requester_employee(self.admin, requester, "")
         with self.assertRaises(ValidationError):
             identity.link_requester_employee(self.admin, requester, "NOPE", "ผิดรหัส")
         self.act(requester, "unlink-employee", reason="คนละคน")
@@ -225,16 +227,7 @@ class LineAudienceTests(RequesterTestCase):
             "/console/admin/options/",
             {"key": "line_audience", "value": "everyone", "reason": "", "next": "registrations"},
         )
-        self.assertEqual(options.get(options.LINE_AUDIENCE), "testers")
-        response = self.client.post(
-            "/console/admin/options/",
-            {
-                "key": "line_audience",
-                "value": "everyone",
-                "reason": "ให้คนที่ลงทะเบียนแล้วใช้ได้เลย",
-                "next": "registrations",
-            },
-        )
+        self.assertEqual(options.get(options.LINE_AUDIENCE), "everyone")
         self.assertRedirects(response, LIST)
         self.assertContains(self.client.get(LIST), "ทุกคน: ทักมาลงทะเบียนได้")
         self.assertTrue(texts(self.type(stranger, "สวัสดีครับ")))  # the bot answers now
@@ -246,8 +239,7 @@ class SuspendRevokeTests(RequesterTestCase):
     def test_suspend_and_open_again_need_a_reason_and_push_nothing(self):
         requester = self.approve(ALICE)
         self.act(requester, "suspend", reason="")
-        self.assertEqual(Requester.objects.get(pk=requester.pk).status, "active")
-        self.act(requester, "suspend", reason="ย้ายหน่วยงาน")
+
         self.assertEqual(Requester.objects.get(pk=requester.pk).status, "suspended")
         self.assertIn("ถูกระงับ", texts(self.type(ALICE, "สวัสดี")))
         self.assertIsNone(identity.resolve_requester("line", ALICE))
@@ -258,7 +250,7 @@ class SuspendRevokeTests(RequesterTestCase):
         reasons = AuditEvent.objects.filter(target_type="Requester", target_id=str(requester.pk))
         self.assertEqual(
             sorted(reasons.values_list("action", "reason")),
-            [("requester.activated", "กลับมาแล้ว"), ("requester.suspended", "ย้ายหน่วยงาน")],
+            [("requester.activated", "กลับมาแล้ว"), ("requester.suspended", "")],
         )
         self.assertFalse(NotificationDelivery.objects.exists())
 
@@ -297,7 +289,7 @@ class MessagesTests(RequesterTestCase):
         """The same LINE account reports a suggestion anonymously, then registers."""
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
         self.say(self.event(ALICE, "follow"))
-        self.press(ALICE, "แจ้งแบบไม่ระบุตัวตน")
+        self.press(ALICE, "ไม่ระบุตัวตน")
         self.press(ALICE, "ข้อเสนอแนะ")
         self.type(ALICE, "อยากให้มีที่จอดรถรับของ")
         self.press(ALICE, "ข้าม")

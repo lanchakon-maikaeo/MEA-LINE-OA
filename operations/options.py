@@ -98,8 +98,8 @@ OPTIONS = {
             (
                 "on",
                 "เปิด: ขั้นที่ต่อกันต้องเป็นคนละคน",
-                "เช่น ผู้อนุมัติไม่จ่ายเอง ผู้จ่ายไม่บันทึกการยืนยันรับแทนเขต "
-                "ผู้แก้ปัญหาไม่บันทึกคำตอบแทนเขต ผู้รับของคืนไม่ตรวจสภาพเอง",
+                "เช่น ผู้อนุมัติไม่จ่ายเอง ผู้จ่ายไม่บันทึกการยืนยันรับแทนหน่วยงาน (เขต/ฝ่าย) "
+                "ผู้แก้ปัญหาไม่บันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย) ผู้รับของคืนไม่ตรวจสภาพเอง",
             ),
         ),
         "ผู้ช่วยเหลือระบบไม่ถูกจำกัดอยู่แล้วไม่ว่าเลือกแบบใด",
@@ -172,7 +172,7 @@ OPTIONS = {
                 "full",
                 "ต้องมีทั้งชื่อและนามสกุล",
                 "คำทักทาย คำถาม คำขอ ข้อความที่มีตัวเลข หรือคำเดียว ระบบไม่รับเป็นชื่อ "
-                "แต่ถามใหม่พร้อมตัวอย่าง และมีปุ่ม 'แก้ชื่อ' ตอนเลือกเขต",
+                "แต่ถามใหม่พร้อมตัวอย่าง และมีปุ่ม 'แก้ชื่อ' ตอนเลือกหน่วยงาน (เขต/ฝ่าย)",
             ),
             ("any", "รับข้อความที่พิมพ์เป็นชื่อ (2-200 ตัวอักษร)", "ผู้อนุมัติต้องตรวจชื่อเอง"),
         ),
@@ -180,7 +180,6 @@ OPTIONS = {
     ANONYMOUS: Option(
         "แจ้งปัญหา/ข้อเสนอแนะแบบไม่ระบุตัวตน",
         (
-            ("off", "ปิด: ต้องลงทะเบียนก่อนแจ้งทุกเรื่อง", ""),
             (
                 "on",
                 "เปิด: คนที่ยังไม่ลงทะเบียนแจ้งปัญหา/ข้อเสนอแนะได้ ต้องส่งตำแหน่ง",
@@ -581,4 +580,10 @@ def change(actor, key, value, reason):
 def rows():
     """(key, option, current value, stored row or None) for the settings page."""
     stored = {row.key: row for row in SystemOption.objects.select_related("updated_by")}
-    return [(key, option, get(key), stored.get(key)) for key, option in OPTIONS.items()]
+    # Historical settings remain readable for migrations, but cannot override ADR 0019.
+    retired = {REGISTRATION_CHECK, EMAIL_TYPED}
+    return [
+        (key, option, get(key), stored.get(key))
+        for key, option in OPTIONS.items()
+        if key not in retired
+    ]

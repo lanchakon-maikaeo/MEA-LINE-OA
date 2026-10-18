@@ -113,10 +113,10 @@ def request_handoff(ctx, case, payload, reason, target):
             if policy.current_policy()
             else {}
         )
-        if category not in allowed or not reason:
+        if category not in allowed:
             fail(
                 ErrorCode.VALIDATION_ERROR,
-                "Differs from the proposal: choose a reason category and explain briefly.",
+                "เลือกประเภทการส่งต่อ",
             )
     now = timezone.now()
     declined_before = Handoff.objects.filter(
@@ -297,9 +297,6 @@ def set_priority(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "Priority must be P0-P3.")
     state = policy.state_for(case)
     previous = state.confirmed_priority
-    changes = value != state.suggested_priority or (previous and previous != value)
-    if changes and not reason:
-        fail(ErrorCode.VALIDATION_ERROR, "Give the new facts behind this level.")
     data = {"priority": value, "previous": previous, "suggested": state.suggested_priority}
     floor = state.priority_floor
     if floor and policy.rank(value) > policy.rank(floor):

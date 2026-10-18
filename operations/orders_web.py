@@ -11,10 +11,11 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.http import FileResponse, Http404
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
-from operations import attachments, identity, uploads, work_orders
+from operations import attachments, identity, queues, uploads, work_orders
 from operations.models import Attachment, WorkOrder
 
 User = get_user_model()
@@ -143,25 +144,18 @@ def _offers(order, steps):
 @require_safe
 def orders(request):
     _require_access(request)
-    keys = work_orders.tabs_for(request.user)
-    tab = request.GET.get("tab", keys[0])
-    if tab not in keys:
-        tab = keys[0]
-    today = timezone.localdate()
-    found = work_orders.tab_orders(request.user, tab)
-    return render(
-        request,
-        "operations/orders.html",
-        {
-            "tab": tab,
-            "tabs": [
-                (key, work_orders.TABS[key], work_orders.tab_orders(request.user, key).count())
-                for key in keys
-            ],
-            "rows": [work_orders.row(order, today) for order in found[:200]],
-            "may_issue": work_orders.may_issue(request.user),
-        },
-    )
+    scope = identity.staff_scope(request.user)
+    if scope.is_admin or scope.is_support:
+        target = "queue-all"
+        args = []
+    else:
+        divisions = queues.own_divisions(scope)
+        if not divisions:
+            return redirect("console")
+        target = "division-detail"
+        args = [divisions[0].code]
+    tab = {"mine": "mine", "ended": "closed"}.get(request.GET.get("tab"), "host")
+    return redirect(f"{reverse(target, args=args)}?tab={tab}")
 
 
 @login_required
@@ -187,6 +181,7 @@ def order_new(request):
                         detail=request.POST.get("detail", ""),
                         due_on=_read_date(request.POST.get("due_on")),
                         urgent=request.POST.get("urgent") == "1",
+                        channel=WorkOrder.Channel.WEB,
                     )
                     if files:
                         uploads.store(request.user, None, files, work_order=order)

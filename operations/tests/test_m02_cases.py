@@ -520,11 +520,9 @@ class OnBehalfSubmissionTests(CaseTestCase):
         )
 
     def test_requester_without_line_is_created_by_admin_and_served_by_intake(self):
-        with self.assertRaises(ValidationError):
-            identity.create_requester(self.admin, "คุณสมชาย", "D05", "")
         with self.assertRaises(PermissionDenied):
             identity.create_requester(self.meter, "คุณสมชาย", "D05", "ไม่ใช้ LINE")
-        requester = identity.create_requester(self.admin, " คุณสมชาย  ใจดี ", "D05", "ไม่ใช้ LINE")
+        requester = identity.create_requester(self.admin, " คุณสมชาย  ใจดี ", "D05", "")
         self.assertEqual(requester.display_name, "คุณสมชาย ใจดี")
         self.assertFalse(requester.channelidentity_set.exists())
         self.assertTrue(
@@ -745,9 +743,6 @@ class ScopeAndPermissionTests(CaseTestCase):
 
         started = self.make_case(K.WITHDRAWAL, S.AWAITING_EXECUTION)
         self.assertFails(ErrorCode.FORBIDDEN, self.act, self.as_requester(), started, "cancel")
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.as_staff(self.meter), started, "cancel"
-        )
         cancelled = self.act(self.as_staff(self.meter), started, "cancel", payload={"reason": "ซ้ำ"})
         self.assertEqual(cancelled.status, S.CANCELLED)
 
@@ -819,9 +814,6 @@ class ScopeAndPermissionTests(CaseTestCase):
     def test_triage_can_decline_with_a_reason(self):
         case = self.submit()
         self.act(self.as_staff(self.intake), case, "start_triage", 1)
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.as_staff(self.intake), case, "decline"
-        )
         result = self.act(
             self.as_staff(self.intake), case, "decline", payload={"reason": "ซ้ำกับเรื่องเดิม"}
         )

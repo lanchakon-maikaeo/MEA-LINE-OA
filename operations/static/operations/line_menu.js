@@ -1,9 +1,6 @@
-/* เมนู LINE (15 ต.ค. 2569 Q32; 16 ต.ค. 2569 Q2, Q9): draw every menu page from the admin's
-   buttons, in the browser (it shapes Thai text correctly), and send them as JPEGs when the admin
-   publishes, or right after a save the admin confirmed with its tick. */
+/* Build-time renderer for bundled LINE menu images (ADR 0019). */
 (function () {
   "use strict";
-  var LIMIT = 1024 * 1024; // LINE's limit for the picture
 
   function wrap(ctx, text, width) {
     var words = String(text || "").split(" ");
@@ -97,16 +94,6 @@
     });
   }
 
-  function picture(canvas) {
-    var quality = 0.92;
-    var url = canvas.toDataURL("image/jpeg", quality);
-    while (url.length * 0.75 > LIMIT && quality > 0.4) {
-      quality -= 0.1;
-      url = canvas.toDataURL("image/jpeg", quality);
-    }
-    return url;
-  }
-
   function start() {
     var data = document.getElementById("menu-drawing");
     var canvases = document.querySelectorAll("[data-menu-canvas]");
@@ -121,42 +108,8 @@
         draw(byPage[page], pages[page] || []);
       });
     };
-    // The chips show one page at a time.
-    document.querySelectorAll("[data-menu-page]").forEach(function (chip) {
-      chip.addEventListener("click", function () {
-        var page = chip.getAttribute("data-menu-page");
-        document.querySelectorAll("[data-menu-page]").forEach(function (other) {
-          other.classList.toggle("is-active", other === chip);
-        });
-        Object.keys(byPage).forEach(function (key) {
-          byPage[key].hidden = key !== page;
-        });
-      });
-    });
-    var fill = function (form) {
-      var file = form.querySelector('input[type="file"]');
-      var uploaded = file && file.files && file.files.length;
-      form.querySelectorAll("[data-menu-drawn]").forEach(function (input) {
-        var page = input.getAttribute("data-menu-drawn");
-        if (page === "user" && uploaded) return;
-        if (byPage[page]) input.value = picture(byPage[page]);
-      });
-    };
     var ready = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
-    ready.then(function () {
-      render();
-      // A save the admin confirmed: publish every page now (16 ต.ค. 2569 Q2).
-      var auto = document.querySelector("[data-menu-auto]");
-      if (auto) {
-        fill(auto);
-        auto.submit();
-      }
-    });
-    document.querySelectorAll("[data-menu-publish]").forEach(function (form) {
-      form.addEventListener("submit", function () {
-        fill(form);
-      });
-    });
+    ready.then(render);
   }
 
   if (document.readyState === "loading") {

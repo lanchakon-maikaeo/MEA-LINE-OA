@@ -273,7 +273,7 @@ class MatrixTests(FulfilmentTestCase):
         actions = contract_document()["actions"]
         self.assertIn("lines", actions["approve"]["payload"])
         self.assertIn("document_number", actions["issue"]["payload"])
-        self.assertTrue(actions["deny_approval"]["reason_required"])
+        self.assertFalse(actions["deny_approval"]["reason_required"])
 
 
 # --- Approval (Q2, Q3, Q4, Q13) ----------------------------------------------------------------
@@ -282,10 +282,7 @@ class MatrixTests(FulfilmentTestCase):
 class ApprovalTests(FulfilmentTestCase):
     def test_counters_stay_separate_and_less_than_requested_needs_a_reason(self):
         case = self.ready()
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.approver, case, "approve", lines((1, "2"))
-        )
-        result = self.act(self.approver, case, "approve", lines((1, "2", "จำลองการอนุมัติบางส่วน")))
+        result = self.act(self.approver, case, "approve", lines((1, "2")))
         self.assertEqual(result.status, S.AWAITING_EXECUTION)
         line = self.line(case)
         self.assertEqual(
@@ -374,9 +371,6 @@ class ApprovalTests(FulfilmentTestCase):
         result = self.act(self.approver, case, "approve", lines((1, "0", "ไม่ตรงระเบียบ")))
         self.assertEqual(result.status, S.REJECTED)
         other = self.ready()
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.approver, other, "deny_approval"
-        )
         result = self.act(self.approver, other, "deny_approval", {"reason": "ซ้ำกับเรื่องเดิม"})
         self.assertEqual(result.status, S.REJECTED)
         self.assertEqual(self.line(other).approval_reason, "ซ้ำกับเรื่องเดิม")

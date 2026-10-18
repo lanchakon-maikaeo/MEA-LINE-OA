@@ -138,7 +138,6 @@ ACTIONS = {
             "พักเรื่อง",
             "M02",
             _per_kind(lambda k, st: {s: {S.ON_HOLD} for s in st if s != S.SUBMITTED}),
-            reason_required=True,
         ),
         ActionSpec("resume", "ทำต่อ", "M02", _per_kind(lambda k, _: {S.ON_HOLD: {RESUME}})),
         # Requesters may cancel without a reason while submitted/triage; staff always give one.
@@ -153,7 +152,6 @@ ACTIONS = {
             "ไม่รับเรื่อง",
             "M02",
             _per_kind(lambda k, _: {S.TRIAGE: {S.REJECTED}}),
-            reason_required=True,
         ),
         # --- Later modules: present in the matrix, refused until their guards exist ----------
         ActionSpec(
@@ -177,21 +175,18 @@ ACTIONS = {
             "ไม่ตอบรับงาน",
             "M06",
             _per_kind(lambda k, st: _same(_working(st))),
-            reason_required=True,
         ),
         ActionSpec(
             "request_routing_decision",
             "ขอผู้ประสานตัดสิน",
             "M06",
             _per_kind(lambda k, st: _same(_working(st))),
-            reason_required=True,
         ),
         ActionSpec(
             "decide_routing",
             "ตัดสินเส้นทาง",
             "M06",
             _per_kind(lambda k, st: _same(_working(st))),
-            reason_required=True,
         ),
         ActionSpec(
             "set_priority",
@@ -211,7 +206,6 @@ ACTIONS = {
             "ยืนยัน/แก้ข้อเท็จจริง",
             "M06",
             _per_kind(lambda k, st: _same(_working(st))),
-            reason_required=True,
         ),
         # --- M07: withdrawal fulfilment (approval authority, allocation, issue, receipt) ----
         # Lines are decided one by one; the case waits until every line is decided (Q3).
@@ -231,14 +225,12 @@ ACTIONS = {
             "ไม่อนุมัติ",
             "M07",
             _per_kind(_only(K.WITHDRAWAL, {S.AWAITING_APPROVAL: {S.REJECTED}})),
-            reason_required=True,
         ),
         ActionSpec(
             "allocate",
             "จัดสรรของขาด",
             "M07",
             _per_kind(_only(K.WITHDRAWAL, _same([S.AWAITING_EXECUTION, S.IN_PROGRESS]))),
-            reason_required=True,
         ),
         ActionSpec(
             "issue",
@@ -267,7 +259,6 @@ ACTIONS = {
                     },
                 )
             ),
-            reason_required=True,
         ),
         # A delivery the district reported as not matching (Q18); deliveries made before a
         # cancellation can still be confirmed or settled (Q7).
@@ -289,7 +280,6 @@ ACTIONS = {
                     },
                 )
             ),
-            reason_required=True,
         ),
         ActionSpec(
             "receive",
@@ -320,14 +310,12 @@ ACTIONS = {
             "ตัดสินผลตรวจขัดกัน",
             "M08",
             _per_kind(_only(K.RETURN, {S.IN_PROGRESS: {S.IN_PROGRESS, S.CLOSED}})),
-            reason_required=True,
         ),
         ActionSpec(
             "resolve_return_discrepancy",
             "บันทึกผลส่วนต่างการรับคืน",
             "M08",
             _per_kind(_only(K.RETURN, {S.IN_PROGRESS: {S.IN_PROGRESS, S.CLOSED}})),
-            reason_required=True,
         ),
         ActionSpec(
             "terminate_return",
@@ -342,7 +330,6 @@ ACTIONS = {
                     },
                 )
             ),
-            reason_required=True,
         ),
         # --- M09: problems, child work, deadline pauses -----------------------------------
         ActionSpec(
@@ -356,7 +343,6 @@ ACTIONS = {
             "โต้แย้งผล",
             "M09",
             _per_kind(_only(K.PROBLEM, {S.AWAITING_CONFIRMATION: {S.IN_PROGRESS}})),
-            reason_required=True,
         ),
         ActionSpec("request_child_work", "สร้างงานย่อย", "M09", _per_kind(_child(False))),
         ActionSpec("accept_child_work", "ตอบรับงานย่อย", "M09", _per_kind(_child(False))),
@@ -365,14 +351,12 @@ ACTIONS = {
             "ไม่รับงานย่อย",
             "M09",
             _per_kind(_child(True)),
-            reason_required=True,
         ),
         ActionSpec(
             "decide_child_work",
             "ตัดสินงานย่อย",
             "M09",
             _per_kind(_child(False)),
-            reason_required=True,
         ),
         ActionSpec("finish_child_work", "บันทึกผลงานย่อย", "M09", _per_kind(_child(True))),
         ActionSpec(
@@ -380,19 +364,17 @@ ACTIONS = {
             "ยกเลิกงานย่อย",
             "M09",
             _per_kind(_child(True)),
-            reason_required=True,
         ),
         ActionSpec(
             "pause_deadlines",
             "พักกรอบเวลา",
             "M09",
             _per_kind(lambda k, _: {S.ON_HOLD: {S.ON_HOLD}}),
-            reason_required=True,
         ),
         # Withdrawal: การยืนยันรับของ per delivery, also while more is still to come (Q6).
         ActionSpec(
             "confirm",
-            "เขตยืนยันผล",
+            "หน่วยงาน (เขต/ฝ่าย)ยืนยันผล",
             "M07-M09",
             {
                 K.WITHDRAWAL: {
@@ -423,7 +405,6 @@ ACTIONS = {
             "เปิดเรื่องใหม่",
             "M07-M09",
             _per_kind(lambda k, _: {S.CLOSED: {S.IN_PROGRESS}} if k == K.PROBLEM else {}),
-            reason_required=True,
         ),
     ]
 }

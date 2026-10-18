@@ -4,12 +4,12 @@
 {% block page_id %}order{% endblock %}
 {% block content %}
 <ol class="crumbs">
-  <li><a href="{% url 'orders' %}">งานสั่ง</a></li>
+  <li><a href="{% url 'division-detail' order.division.code %}">คิว {{ order.division.code }}</a></li>
   <li aria-current="page">{{ order.number }}</li>
 </ol>
 
 <div class="case-head">
-  <span class="eyebrow">งานสั่ง · สั่งโดย {{ order.issued_by.staff_profile.display_name|default:order.issued_by.username }}</span>
+  <span class="eyebrow">งานสั่ง · สั่งโดย {{ order.issued_by.staff_profile.display_name|default:order.issued_by.username }}{% if order.channel %} · ผ่าน {{ order.get_channel_display }}{% endif %}</span>
   <div class="case-head__title">
     <h1>{{ order.number }}</h1>
     {% if order.is_urgent %}<span class="prio prio--P0">ด่วน</span>{% endif %}

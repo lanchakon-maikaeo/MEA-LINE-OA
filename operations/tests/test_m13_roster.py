@@ -18,6 +18,7 @@ from operations.models import (
     AuditEvent,
     ChannelIdentity,
     District,
+    Division,
     EmailCode,
     Employee,
     RegistrationRequest,
@@ -187,6 +188,9 @@ class LineEmailTests(RosterTestCase):
     def setUp(self):
         super().setUp()
         self.load()
+        Employee.objects.filter(employee_id="510001").update(
+            division=Division.objects.get(code="กคว.")
+        )
         options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")
 
     def say(self, *args, **kwargs):
@@ -196,7 +200,7 @@ class LineEmailTests(RosterTestCase):
 
     def start(self, user=ALICE, employee_id="510001"):
         reply = self.say(self.event(user, "follow"))
-        self.assertIn("ลงทะเบียนในฐานะ", texts(reply))
+        self.assertIn("เลือกประเภทผู้ใช้", texts(reply))
         self.assertIn("อื่น ๆ", buttons(reply))
         self.assertIn("รหัสพนักงาน", texts(self.press(user, "พนักงาน กฟน.")))
         return self.type(user, employee_id)
@@ -228,13 +232,13 @@ class LineEmailTests(RosterTestCase):
         self.start(BOB, "510002")
         self.press(BOB, "พิมพ์อีเมลเอง")
         reply = self.type(BOB, "two@example.test")
-        self.assertIn("เลือกเขต", texts(reply))  # the roster gives no เขต for this ฝ่าย
+        self.assertIn("เลือกหน่วยงาน (เขต/ฝ่าย)", texts(reply))  # the roster gives no เขต for this ฝ่าย
         reply = self.press(BOB, District.objects.get(code="D01").name)
-        self.assertIn("รอเจ้าหน้าที่", texts(reply))
+        self.assertIn("ยืนยันตัวตนแล้ว", texts(reply))
         waiting = RegistrationRequest.objects.get(identity__external_id=BOB)
         self.assertEqual(
             (waiting.status, waiting.verified_by, waiting.employee.employee_id),
-            ("pending", "email", "510002"),
+            ("approved", "email", "510002"),
         )
 
     def test_wrong_codes_run_out_and_the_day_has_a_limit(self):
@@ -259,19 +263,20 @@ class LineEmailTests(RosterTestCase):
         self.assertIn("เจ้าหน้าที่ตรวจแทน", texts(reply))
         self.type(ALICE, "สมหญิง ทดสอบ")
         reply = self.press(ALICE, District.objects.get(code="D01").name)
-        self.assertIn("รอเจ้าหน้าที่", texts(reply))
+        self.assertIn("ระหว่างรอแจ้งปัญหา", texts(reply))
         registration = RegistrationRequest.objects.get()
         self.assertEqual((registration.status, registration.employee), ("pending", None))
 
-    def test_others_register_with_a_name_for_a_person_to_approve(self):
+    def test_others_register_with_a_name_and_can_report_immediately(self):
         self.say(self.event(ALICE, "follow"))
-        self.assertIn("พิมพ์ชื่อ-นามสกุล", texts(self.press(ALICE, "อื่น ๆ")))
-        self.type(ALICE, "ผู้รับเหมา ทดสอบ")
-        self.assertIn("รอเจ้าหน้าที่", texts(self.press(ALICE, District.objects.get(code="D01").name)))
-        self.assertEqual(RegistrationRequest.objects.get().status, "pending")
+        self.assertIn("พิมพ์ชื่อของคุณ", texts(self.press(ALICE, "อื่น ๆ")))
+        reply = self.type(ALICE, "ผู้รับเหมา ทดสอบ")
+        self.assertIn("ลงทะเบียนแล้ว", texts(reply))
+        row = ChannelIdentity.objects.get(external_id=ALICE)
+        self.assertTrue(row.requester.is_external)
+        self.assertFalse(RegistrationRequest.objects.exists())
 
-    def test_approval_mode_keeps_the_old_start(self):
-        options.change(None, options.REGISTRATION_CHECK, "approval", "ให้คนอนุมัติทุกคำขอ")
+    def test_legacy_approval_option_does_not_hide_registration_choices(self):
+        options.change(None, options.REGISTRATION_CHECK, "approval", "ค่าเก่า")
         reply = self.say(self.event(ALICE, "follow"))
-        self.assertIn("พิมพ์ชื่อ-นามสกุล", texts(reply))
-        self.assertNotIn("พนักงาน กฟน.", buttons(reply))
+        self.assertEqual(set(buttons(reply)), {"พนักงาน กฟน.", "อื่น ๆ", "ไม่ระบุตัวตน"})

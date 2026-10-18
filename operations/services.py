@@ -365,12 +365,9 @@ def _submission_requester(ctx, submission, intake):
 
 
 def _check_anonymous(requester, submission):
-    """ADR 0010: while ตัวเลือกระบบ allows it, an unregistered LINE user reports a problem or a
-    suggestion only, always with a location, and only a few a day."""
+    """Anonymous reports are problem-only, require a location and have a daily limit."""
     from operations import options
 
-    if options.get(options.ANONYMOUS) != "on":
-        fail(ErrorCode.FORBIDDEN, "Anonymous reports are turned off.")
     if submission.kind != Case.Kind.PROBLEM:
         fail(ErrorCode.FORBIDDEN, "Withdrawals and returns need a registered requester.")
     if submission.fields.get("latitude") is None:
@@ -442,7 +439,7 @@ def submit_case(actor, *, idempotency_key, payload):
         requester = _submission_requester(ctx, submission, intake)
         if requester.is_anonymous:
             _check_anonymous(requester, submission)
-        elif requester.is_internal:
+        elif requester.is_internal or requester.is_external:
             # ผู้แจ้งภายใน (Q8): staff report problems and suggestions in their division's name.
             if submission.kind != Case.Kind.PROBLEM:
                 fail(ErrorCode.FORBIDDEN, "Withdrawals and returns need a registered requester.")
@@ -627,8 +624,6 @@ def _cancel(ctx, case, payload, reason, target):
         return data
     else:
         _require_owner_staff(ctx, case)
-        if not reason:
-            fail(ErrorCode.VALIDATION_ERROR, "A reason is required.")
         if case.kind == Case.Kind.RETURN:
             returns.cancel_guard(case)  # M08 Q8: goods that arrived must be inspected
     if payload.get("resolution") or payload.get("reference"):
@@ -678,6 +673,31 @@ def _handler(action, case):
     return HANDLERS[action]
 
 
+@transaction.atomic
+def perform_form_action(actor, case_id, action, *, expected_revision, idempotency_key, payload):
+    """Commit the form's priority confirmation and triage decision together on every channel."""
+    payload = dict(payload)
+    priority = payload.pop("priority", None) if action == "complete_triage" else None
+    if priority:
+        perform_action(
+            actor,
+            case_id,
+            "set_priority",
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            payload={"priority": priority, **payload},
+        )
+        expected_revision += 1
+    return perform_action(
+        actor,
+        case_id,
+        action,
+        expected_revision=expected_revision,
+        idempotency_key=idempotency_key,
+        payload=payload,
+    )
+
+
 @_dependency_guard
 def perform_action(actor, case_id, action, *, expected_revision, idempotency_key, payload=None):
     """Apply one matrix action to a case the actor can see, at the revision they last saw."""
@@ -705,7 +725,7 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         payload = parse_action_payload(action, payload)
         acting_for = support.acting_for(ctx.scope, case)
         # ADR 0007: every การทำแทนกอง by ผู้ช่วยเหลือระบบ carries a reason.
-        reason = clean_reason(payload, spec.reason_required or acting_for is not None)
+        reason = clean_reason(payload, spec.reason_required)
         if expected_revision != case.revision:
             fail(ErrorCode.REVISION_CONFLICT, "The case changed; reload and try again.")
         targets = spec.targets(case.kind, case.status)

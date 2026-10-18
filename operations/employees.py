@@ -101,7 +101,7 @@ def import_csv(actor, data, check_label_text, deactivate_missing=False, syntheti
         district_code = (row.get("district_code") or "").strip()
         division_code = (row.get("division_code") or "").strip()
         if district_code and district_code not in districts:
-            problems.append(f"แถว {number}: ไม่รู้จักเขต {district_code}")
+            problems.append(f"แถว {number}: ไม่รู้จักหน่วยงาน (เขต/ฝ่าย) {district_code}")
             continue
         if division_code and division_code not in divisions:
             problems.append(f"แถว {number}: ไม่รู้จักกอง {division_code}")

@@ -563,16 +563,13 @@ class FriendlyFlowTests(WebTestCase):
         )
         self.assertEqual(policy.state_for(case).confirmed_priority, "P2")
 
-    def test_a_refused_level_keeps_triage_and_explains_in_thai(self):
+    def test_triage_accepts_a_level_change_without_an_edit_reason(self):
         case = self.at_owner()
-        before = case.revision
         response = self.post(self.trf_staff, case, "complete_triage", {"priority": "P0"})
-        self.assertContains(response, "notice--error", status_code=400)
-        self.assertContains(response, "ข้อเท็จจริงใหม่", status_code=400)
-        self.assertNotContains(response, "Give the new facts", status_code=400)
+        self.assertRedirects(response, f"/cases/{case.number}/")
         case.refresh_from_db()
-        self.assertEqual((case.status, case.revision), (S.TRIAGE, before))
-        self.assertFalse(case.decisions.filter(action="set_priority").exists())
+        self.assertEqual(case.status, S.IN_PROGRESS)
+        self.assertTrue(case.decisions.filter(action="set_priority", reason="").exists())
 
     def test_once_the_level_is_confirmed_the_form_does_not_ask_again(self):
         case = self.at_owner()
@@ -598,7 +595,7 @@ class FriendlyFlowTests(WebTestCase):
         page = self.client_for(self.trf_staff).get(f"/cases/{case.number}/")
         self.assertContains(page, "ปิดเรื่องเองได้ตั้งแต่")
         self.assertContains(page, "ผู้แจ้งไม่ได้ผูก LINE ไว้")
-        self.assertContains(page, "SIM-TRIAGE กด “บันทึกคำตอบแทนเขต”")
+        self.assertContains(page, "SIM-TRIAGE กด “บันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)”")
         self.assertIn("confirm", dict(self.offers(self.intake, case)))
         case.decisions.filter(action="resolve").update(
             created_at=timezone.now() - timedelta(days=8)

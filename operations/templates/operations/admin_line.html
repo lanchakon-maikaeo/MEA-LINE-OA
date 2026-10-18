@@ -47,7 +47,7 @@
   <tbody>
   {% for e in dead %}
     <tr><td>{{ e.pk }}</td><td>{{ e.event_type }}</td><td>{{ e.attempts }}</td><td>{{ e.last_error }}</td>
-      <td><form class="inline" method="post" action="{% url 'admin-requeue' e.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">ส่งกลับเข้าคิว</button></form></td></tr>
+      <td><form class="inline" method="post" action="{% url 'admin-requeue' e.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">ส่งกลับเข้าคิว</button></form></td></tr>
   {% empty %}<tr><td colspan="5">ไม่มีงานที่ส่งไม่สำเร็จ</td></tr>{% endfor %}
   </tbody>
 </table></div>

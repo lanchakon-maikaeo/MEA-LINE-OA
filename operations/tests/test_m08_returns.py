@@ -352,7 +352,6 @@ class InspectionTests(ReturnTestCase):
         _, _, repair = self.figures("MTR_SYN_A")
         self.inspect(case, {"repair": "1"})
         self.assertEqual(self.figures("MTR_SYN_A")[2], repair + 1)
-        self.assertFails(ErrorCode.VALIDATION_ERROR, self.inspect, case, {"other": "1"}, seq=2)
         result = self.act(
             self.inspector,
             case,

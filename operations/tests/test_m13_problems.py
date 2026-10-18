@@ -139,7 +139,7 @@ class ExportTests(ProblemsTestCase):
         self.assertEqual(tuple(rows[0]), problems_web.HEADER)
         self.assertEqual(len(rows) - 1, 4)
         kinds = sorted(row[2] for row in rows[1:])
-        self.assertEqual(kinds, sorted(["ไม่ระบุตัวตน"] * 2 + ["ผู้แจ้งเขต"] * 2))
+        self.assertEqual(kinds, sorted(["ไม่ระบุตัวตน"] * 2 + ["ผู้แจ้งหน่วยงาน (เขต/ฝ่าย)"] * 2))
         phoned = next(row for row in rows[1:] if row[0] == self.phoned.number)
         self.assertEqual((phoned[4], phoned[5], phoned[6]), ("โทรศัพท์", "ใช่", "SIM-TRIAGE"))
         for private in (

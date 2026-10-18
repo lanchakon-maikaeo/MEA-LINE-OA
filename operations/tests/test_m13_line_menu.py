@@ -1,11 +1,7 @@
-"""เมนู LINE (15 ต.ค. 2569 Q17–Q20, Q32, Q35): six topics besides typing, each sending to its
-division; tracking shows the person's own cases or asks the division; admins edit the buttons
-and publish the picture to LINE only after confirming.
-"""
+"""Legacy menu compatibility, requester ownership, and role changes (ADR 0019)."""
 
 from unittest.mock import patch
 
-from django.core.exceptions import ValidationError
 from django.test import Client, override_settings
 
 from operations import identity, line_menu, services, staff_line
@@ -77,8 +73,9 @@ class ChatTests(MenuTestCase):
         reply = self.open("Meter, CT, VT")
         self.assertEqual(list(buttons(reply)), ["ติดตามใบเบิก", "ส่งคืน", "สถานะการซ่อม"])
         reply = self.press(ALICE, "ติดตามใบเบิก")
-        self.assertIn("ยังไม่พบเรื่องของคุณ", texts(reply))
-        self.assertIn("พิมพ์สิ่งที่อยากถาม", texts(reply))
+        self.assertIn("ยังไม่มีเรื่อง", texts(reply))
+        reply = self.press(ALICE, "ถามเรื่องอื่น")
+        self.assertIn("แจ้งรายละเอียดที่ต้องการสอบถาม", texts(reply))
         reply = self.type(ALICE, "ใบเบิกเลข 4900001234 ได้ของเมื่อไร (ทดสอบ)")
         self.assertIn("ส่งถึง: กคว.", texts(reply))
         self.assertIn("หัวข้อ: Meter, CT, VT · ติดตามใบเบิก", texts(reply))
@@ -104,7 +101,7 @@ class ChatTests(MenuTestCase):
     def test_a_system_problem_goes_to_its_division_without_items(self):
         self.open("ระบบ SMG, AMR")
         reply = self.press(ALICE, "การจัดทำบิล")
-        self.assertIn("เล่าปัญหาที่พบ", texts(reply))
+        self.assertIn("แจ้งปัญหาที่พบ", texts(reply))
         self.type(ALICE, "บิลเดือนนี้ไม่ออก (ทดสอบ)")
         reply = self.press(ALICE, "ข้าม")
         self.assertIn("ส่งถึง: ศอค.", texts(reply))
@@ -139,77 +136,13 @@ class ChosenDivisionTests(MenuTestCase):
 
 
 class AdminTests(MenuTestCase):
-    def setUp(self):
-        super().setUp()
-        self.boss = make_staff("menuadmin", (Role.ADMIN, None))
-
-    def test_the_picture_areas_follow_the_buttons(self):
-        menu = line_menu.rich_menu()
-        self.assertEqual(len(menu["areas"]), 8)  # six tiles and two bar buttons
-        first = menu["areas"][0]
-        self.assertEqual(first["bounds"], {"x": 0, "y": 0, "width": 833, "height": 700})
-        self.assertTrue(first["action"]["data"].startswith("m=item&id="))
-        bar = menu["areas"][-1]
-        self.assertEqual((bar["bounds"]["y"], bar["bounds"]["height"]), (1400, 286))
-
-    def test_admins_edit_buttons_with_a_reason(self):
-        choice = self.tile("ระบบ SMG, AMR").choices.first()
+    def test_menu_editor_and_browser_publish_endpoint_are_removed(self):
         client = Client()
-        client.force_login(self.boss)
-        page = client.get("/console/admin/line-menu/")
-        self.assertContains(page, "data-menu-canvas")
-        self.assertContains(page, 'id="menu-drawing"')
-        form = {
-            "action": "save",
-            "item": choice.pk,
-            "label": "ปัญหาการใช้งานระบบที่ยาวเกินยี่สิบ",
-            "item_action": "problem",
-            "reason": "ทดสอบ",
-        }
-        page = client.post("/console/admin/line-menu/", form, follow=True)
-        self.assertContains(page, "ไม่เกิน 20")
-        line_menu.save(
-            self.boss,
-            choice,
-            {
-                "label": "ใช้งานระบบไม่ได้",
-                "item_action": "problem",
-                "division": "ศอค.",
-                "topic": "system",
-                "is_active": "1",
-            },
-            "ชื่อสั้นลง",
+        client.force_login(self.admin)
+        self.assertEqual(client.get("/console/admin/line-menu/").status_code, 404)
+        self.assertEqual(
+            client.post("/console/admin/line-menu/", {"action": "publish"}).status_code, 404
         )
-        choice.refresh_from_db()
-        self.assertEqual(choice.label, "ใช้งานระบบไม่ได้")
-
-    @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token")
-    def test_publishing_needs_the_confirmation_and_replaces_the_old_menu(self):
-        client = Client()
-        client.force_login(self.boss)
-        picture = b"\xff\xd8\xff" + b"0" * 100
-        calls = []
-
-        def fake(path, data=None, **kwargs):
-            calls.append((path, kwargs.get("method")))
-            if path == "/v2/bot/richmenu/list":
-                return {"richmenus": [{"richMenuId": "old-1", "name": "faoj-main-v1"}]}
-            if path == "/v2/bot/richmenu":
-                return {"richMenuId": "new-1"}
-            return {}
-
-        with patch("operations.line_menu.line_api.call", side_effect=fake):
-            page = client.post(
-                "/console/admin/line-menu/",
-                {"action": "publish", "reason": "เมนูใหม่", "drawn": ""},
-                follow=True,
-            )
-            self.assertContains(page, "ติ๊กยืนยันก่อน")
-            self.assertEqual(calls, [])
-            line_menu.publish(self.boss, b"\xff\xd8\xff" + b"0" * 100, "เมนูใหม่")
-        self.assertIn(("/v2/bot/richmenu/old-1", "DELETE"), calls)
-        self.assertIn(("/v2/bot/user/all/richmenu/new-1", "POST"), calls)
-        self.assertTrue(picture)
 
 
 class StaffMenuTests(MenuTestCase):
@@ -236,6 +169,9 @@ class StaffMenuTests(MenuTestCase):
         return {}
 
     def test_staff_pages_switch_tabs_and_the_user_menu_has_none(self):
+        from operations import line_menu_catalog
+
+        line_menu_catalog.sync()
         menu = line_menu.rich_menu("sup-order")
         switches = [a["action"] for a in menu["areas"] if a["action"]["type"] == "richmenuswitch"]
         self.assertEqual(
@@ -243,30 +179,34 @@ class StaffMenuTests(MenuTestCase):
             ["faoj-sup-report", "faoj-sup-work", "faoj-sup-order"],
         )
         tiles = [a for a in menu["areas"] if a["action"]["type"] == "postback"]
-        self.assertEqual(len(tiles), 6)
+        self.assertEqual(len(tiles), 4)
         self.assertTrue(all(a["bounds"]["y"] >= line_menu.TAB_H for a in tiles))
         user = line_menu.rich_menu("user")
         self.assertFalse([a for a in user["areas"] if a["action"]["type"] == "richmenuswitch"])
         self.assertEqual(set(line_menu.drawing()["pages"]), set(line_menu.PAGES))
 
-    @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token")
-    def test_publishing_every_page_sets_aliases_and_links_staff(self):
-        head = make_staff("kaehead", (Role.SUPERVISOR, "กองอุปกรณ์ฯ"))
-        ChannelIdentity.objects.create(
-            channel="line", external_id="U" + "d" * 32, staff_user=head, is_following=True
-        )
-        with patch("operations.line_menu.line_api.call", side_effect=self.fake):
-            line_menu.publish(self.boss, dict.fromkeys(line_menu.PAGES, self.PICTURE), "ครบทุกหน้า")
-        paths = [(path, method) for path, method, _ in self.calls]
-        self.assertIn(("/v2/bot/user/all/richmenu/new-faoj-menu-v2", "POST"), paths)
-        self.assertIn(("/v2/bot/richmenu/alias/faoj-staff-work", None), paths)  # updated
-        created = [data for path, _, data in self.calls if path == "/v2/bot/richmenu/alias"]
-        self.assertEqual(len(created), 4)  # the other staff pages are new aliases
-        link = next(data for path, _, data in self.calls if path == "/v2/bot/richmenu/bulk/link")
-        self.assertEqual(
-            (link["richMenuId"], link["userIds"]), ("new-faoj-sup-work", ["U" + "d" * 32])
-        )
-        self.assertIn(("/v2/bot/richmenu/old-1", "DELETE"), paths)
+    def test_every_page_limits_buttons_and_service_pages_have_personal_tracking(self):
+        from operations import line_menu_catalog
+
+        line_menu_catalog.sync()
+        drawing = line_menu.drawing()["pages"]
+        for page in line_menu.PAGES:
+            with self.subTest(page=page):
+                nav = [
+                    a["action"]
+                    for a in line_menu.rich_menu(page)["areas"]
+                    if a["action"]["type"] == "postback"
+                ]
+                self.assertEqual(len(nav), 3 if page == "user" else 4)
+                if page.endswith("report"):
+                    self.assertEqual(
+                        [(a["displayText"], a["data"]) for a in nav],
+                        list(line_menu.SERVICE_BUTTONS),
+                    )
+                elif page != "user":
+                    self.assertEqual(nav[-1]["data"], "m=roles")
+                if page.startswith(("staff-", "sup-")):
+                    self.assertEqual(drawing[page][0]["label"], "บริการ")
 
     @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token")
     def test_a_staff_line_follows_its_role(self):
@@ -295,23 +235,20 @@ class StaffMenuTests(MenuTestCase):
             self.calls, [(f"/v2/bot/user/{line.external_id}/richmenu", "DELETE", None)]
         )
 
-    @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token")
-    def test_a_confirmed_save_publishes_from_the_page(self):
-        client = Client()
-        client.force_login(self.boss)
-        tile = LineMenuItem.objects.get(tab="work", action="work_new")
-        form = {
-            "action": "save",
-            "item": tile.pk,
-            "label": "งานใหม่",
-            "item_action": "work_new",
-            "is_active": "1",
-            "reason": "ชื่อสั้นลง",
-        }
-        page = client.post("/console/admin/line-menu/", form, follow=True)
-        self.assertNotContains(page, "data-menu-auto")  # no tick, no publish
-        page = client.post("/console/admin/line-menu/", {**form, "publish": "1"}, follow=True)
-        self.assertContains(page, "data-menu-auto")
-        self.assertContains(page, 'name="drawn-sup-order"')
-        with self.assertRaises(ValidationError):
-            line_menu.save(self.boss, tile, {**form, "item_action": "track"}, "ผิดแท็บ")
+    @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token", OUTBOUND_ENABLED=True)
+    def test_removing_last_membership_clears_the_staff_menu(self):
+        from operations.models import RoleGrant
+
+        member = make_staff("lastmember", (Role.STAFF, "กองอุปกรณ์ฯ"))
+        line = ChannelIdentity.objects.create(
+            channel="line", external_id="U" + "f" * 32, staff_user=member, is_following=True
+        )
+        grant = RoleGrant.objects.get(user=member, role=Role.STAFF, revoked_at=None)
+        with (
+            patch("operations.line_menu.line_api.call", side_effect=self.fake),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            identity.revoke_role(self.boss, grant, "สิ้นสุดหน้าที่")
+        self.assertEqual(
+            self.calls, [(f"/v2/bot/user/{line.external_id}/richmenu", "DELETE", None)]
+        )

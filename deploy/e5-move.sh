@@ -107,6 +107,9 @@ source_tree() {
       --exclude=archive --exclude=private-media --exclude=.claude --exclude=node_modules \
       --exclude='*.jpg' --exclude='*.jpeg' --exclude='*.webp' --exclude='._*' . \
     | on_e5 'rm -rf ~/src.new && mkdir -p ~/src.new && tar -xzf - -C ~/src.new && rm -rf ~/src && mv ~/src.new ~/src && du -sh ~/src'
+  # Bundle only the reviewed menu assets; the main archive still excludes personal images.
+  COPYFILE_DISABLE=1 tar -C "$REPO" --no-xattrs --no-mac-metadata -czf - operations/line_assets \
+    | on_e5 'tar -xzf - -C ~/src'
   echo "$(git -C "$REPO" rev-parse --short HEAD)$(git -C "$REPO" diff --quiet || echo -dirty)" | on_e5 'cat > ~/src/.commit'
 }
 

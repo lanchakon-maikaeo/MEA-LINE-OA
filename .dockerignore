@@ -10,3 +10,5 @@ archive
 *.jpg
 *.jpeg
 PROJECT.md
+
+!operations/line_assets/*.jpg

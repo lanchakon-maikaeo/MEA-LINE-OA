@@ -113,18 +113,13 @@ class WorkTabTests(StaffChatTestCase):
 
 
 class OrderTabTests(StaffChatTestCase):
-    def test_a_supervisor_orders_work_through_a_few_questions(self):
+    def test_a_supervisor_orders_work_with_text_and_confirmation(self):
         self.link(self.director, ALICE)
-        reply = self.tile(A.ORDER_NEW)
-        self.assertIn("กองอุปกรณ์ฯ", buttons(reply))
-        reply = self.press(ALICE, "กองอุปกรณ์ฯ", reply)
-        self.assertIn("ทั้งกอง", buttons(reply))
-        self.press(ALICE, "ทั้งกอง", reply)
-        reply = self.type(ALICE, "ตรวจนับเครื่องมือก่อนสิ้นเดือน (ทดสอบ)")
-        self.press(ALICE, "พรุ่งนี้", reply)
-        summary = self.press(ALICE, "ด่วน")
+        self.tile(A.ORDER_NEW)
+        summary = self.type(ALICE, "ให้ทั้งกอง กองอุปกรณ์ฯ ตรวจนับเครื่องมือพรุ่งนี้ ด่วน")
         self.assertIn("ตรวจก่อนสั่งงาน", texts(summary))
-        self.press(ALICE, "สั่งงาน", summary)
+        self.assertFalse(WorkOrder.objects.exists())
+        self.type(ALICE, "ยืนยัน")
         order = WorkOrder.objects.get()
         self.assertEqual(
             (order.division, order.assignee, order.is_urgent, order.issued_by),
@@ -154,7 +149,5 @@ class OrderTabTests(StaffChatTestCase):
         WorkOrder.objects.filter(pk=order.pk).update(
             due_on=timezone.localdate() - timedelta(days=2)
         )
-        self.assertIn(
-            "กองอุปกรณ์ฯ: เรื่องเกินกรอบเวลา 0 · งานสั่งเกินกำหนด 1", texts(self.tile(A.ORDER_LATE))
-        )
+        self.assertIn("งานสั่งเกินกำหนด 1 รายการ", texts(self.tile(A.ORDER_LATE)))
         self.assertIn("งานสั่ง: ค้าง 1", texts(self.tile(A.ORDER_TODAY)))

@@ -8,7 +8,7 @@ never the requester's text in a push; the details come back only in this 1:1 cha
 """
 
 import re
-from datetime import date, timedelta
+from datetime import date
 
 from django.conf import settings
 from django.urls import reverse
@@ -26,7 +26,9 @@ ORDER_NUMBER = re.compile(r"^T\d{2}-\d{6}$")
 SHORT_LABELS = {
     "complete_triage": "คัดกรองเสร็จ",
     "set_priority": "ยืนยันระดับ",
-    "dispute_resolution": "บันทึกโต้แย้งแทนเขต",
+    "request_info": "ขอข้อมูลเพิ่ม",
+    "confirm": "บันทึกคำตอบแทน",
+    "dispute_resolution": "บันทึกโต้แย้งแทน",
     "decide_inspection": "ตัดสินผลตรวจ",
     "terminate_return": "ยุติส่วนค้างคืน",
 }
@@ -57,6 +59,27 @@ def _case_line(case):
 # --- The tab buttons ----------------------------------------------------------------------------
 
 
+def navigation(turn, user):
+    """Less frequent actions stay in chat, within the linked account's current role."""
+    actions = {A.WORK_DUE, A.WORK_FIND, A.OPEN_WEB}
+    if work_orders.may_issue(user):
+        actions |= {A.ORDER_ISSUED, A.ORDER_LATE, A.ORDER_TODAY}
+    rows = LineMenuItem.objects.filter(
+        action__in=actions, place=LineMenuItem.Place.TILE, is_active=True
+    ).order_by("tab", "position", "pk")
+    seen, quick = set(), []
+    for item in rows:
+        if item.action not in seen:
+            seen.add(item.action)
+            quick.append((item.label, f"m=item&id={item.pk}"))
+    if identity.staff_scope(user).is_admin:
+        from operations.admin_line import nav_button
+
+        quick.append(nav_button(turn, "แอดมิน", "home"))
+    quick.append(("บริการ", "m=home"))
+    turn.say("เลือกการดำเนินการตามสิทธิ์", quick)
+
+
 def handle_item(turn, user, item):
     """A tap on a งานของกอง or สั่งงาน button of the rich menu."""
     if item.tab == T.ORDER and not work_orders.may_issue(user):
@@ -72,7 +95,7 @@ def handle_item(turn, user, item):
         A.OPEN_WEB: lambda: open_web(turn),
         A.ORDER_NEW: lambda: order_start(turn, user),
         A.ORDER_ISSUED: lambda: orders_issued(turn, user),
-        A.ORDER_ASSIGN: lambda: assign_prompt(turn),
+        A.ORDER_ASSIGN: lambda: list_page(turn, user, "assign"),
         A.ORDER_LATE: lambda: late(turn, user),
         A.ORDER_TODAY: lambda: today_summary(turn, user),
     }.get(item.action, lambda: staff_line.menu(turn, user))()
@@ -90,40 +113,91 @@ def open_web(turn):
     )
 
 
-def work_mine(turn, user):
-    cases = (
-        queues.visible(user)
-        .filter(assignee=user, status__in=workflow.OPEN)
-        .select_related("owner_division")
-        .order_by("submitted_at")
-    )
-    total = cases.count()
-    if not total:
-        turn.say("ยังไม่มีเรื่องที่มอบให้คุณ", [web_button()])
-        return
-    shown = list(cases[:10])
+def list_button(turn, label, kind, page=1):
+    return turn.button(label, "staff_list", {"kind": kind, "page": page})
+
+
+def list_page(turn, user, kind="group", page=1):
+    from django.core.paginator import Paginator
+
+    scope = identity.staff_scope(user)
+    cases = queues.visible(user).select_related("owner_division")
+    action, key = "staff_case", "case"
+    if kind == "mine":
+        query, title = cases.filter(assignee=user, status__in=workflow.OPEN), "งานของฉัน"
+    elif kind in {"received", "issued", "due_orders"}:
+        query = work_orders.tab_orders(
+            user, {"received": "mine", "issued": "issued", "due_orders": "due"}[kind]
+        )
+        title = {"received": "งานสั่งที่ได้รับ", "issued": "งานที่ฉันสั่ง", "due_orders": "งานสั่งใกล้กำหนด"}[
+            kind
+        ]
+        action, key = "staff_order", "order"
+    elif kind == "late_orders":
+        query = work_orders.visible(user).filter(
+            division__in=work_orders.issuable(user),
+            status__in=WorkOrder.OPEN,
+            due_on__lt=timezone.localdate(),
+        )
+        title, action, key = "งานสั่งเกินกำหนด", "staff_order", "order"
+    elif kind in {"due_cases", "late"}:
+        divisions = (
+            list(work_orders.issuable(user)) if kind == "late" else list(scope.division_roles)
+        )
+        query, title = _overdue_cases(user, divisions), "เรื่องเกินกำหนด"
+    elif kind == "assign":
+        query = cases.filter(
+            owner_division__in=work_orders.issuable(user), status__in=workflow.OPEN
+        )
+        title, action = "เลือกเรื่องที่จะมอบ", "staff_assign_pick"
+    else:
+        kind = "group"
+        query = cases.filter(queues.tab_condition("host", None, user, turn.now))
+        title = "งานของกอง"
+    query = query.order_by("pk")
+    rows = Paginator(query, 5).get_page(page)
+    quick = [turn.button(row.number, action, {key: str(row.pk)}) for row in rows]
+    for label, number in (("ย้อนกลับ", rows.number - 1), ("ถัดไป", rows.number + 1)):
+        if 1 <= number <= rows.paginator.num_pages:
+            quick.append(list_button(turn, label, kind, number))
+    quick += [list_button(turn, "งานของฉัน", "mine"), list_button(turn, "งานสั่งที่ได้รับ", "received")]
+    if work_orders.may_issue(user):
+        quick += [
+            list_button(turn, "งานที่ฉันสั่ง", "issued"),
+            turn.button("สั่งงานใหม่", "staff_ow_start"),
+        ]
+    if kind in {"due_cases", "late"}:
+        quick.append(
+            list_button(turn, "งานสั่งใกล้กำหนด", "late_orders" if kind == "late" else "due_orders")
+        )
+    elif kind == "late_orders":
+        quick.append(list_button(turn, "เรื่องเกินกำหนด", "late"))
+    elif kind == "group":
+        quick.append(turn.button("แจ้งปัญหา", "staff_report"))
+    else:
+        quick.append(turn.button("หน้าหลัก", "staff_menu"))
+    if scope.is_admin:
+        from operations.admin_line import nav_button
+
+        quick.append(nav_button(turn, "แอดมิน", "home"))
+    lines = [
+        _order_line(row, timezone.localdate()) if key == "order" else _case_line(row)
+        for row in rows
+    ]
+    turn.set_prompt()
     turn.say(
-        f"เรื่องที่มอบให้คุณ {total} เรื่อง\n"
-        + "\n".join(_case_line(c) for c in shown)
-        + _more(total, len(shown)),
-        [turn.button(c.number, "staff_case", {"case": str(c.pk)}) for c in shown],
+        f"{title} {rows.paginator.count} รายการ · หน้า {rows.number}/{rows.paginator.num_pages}\n"
+        + "\n".join(lines or ["ยังไม่มีงานสั่ง" if key == "order" else "ยังไม่มีรายการ"]),
+        quick,
     )
+
+
+def work_mine(turn, user):
+    return list_page(turn, user, "mine")
 
 
 def orders_received(turn, user):
-    orders = work_orders.tab_orders(user, "mine")
-    total = orders.count()
-    if not total:
-        turn.say("ยังไม่มีงานสั่งถึงคุณหรือกองของคุณ")
-        return
-    today = timezone.localdate()
-    shown = list(orders[:10])
-    turn.say(
-        f"งานสั่งที่ได้รับ {total} งาน\n"
-        + "\n".join(_order_line(o, today) for o in shown)
-        + _more(total, len(shown)),
-        [turn.button(o.number, "staff_order", {"order": str(o.pk)}) for o in shown],
-    )
+    return list_page(turn, user, "received")
 
 
 def _overdue_cases(user, divisions):
@@ -137,22 +211,7 @@ def _overdue_cases(user, divisions):
 
 
 def due(turn, user):
-    """ใกล้หรือเกินกำหนด: overdue cases of the person's divisions and งานสั่ง near its date."""
-    scope = identity.staff_scope(user)
-    cases = _overdue_cases(user, list(scope.division_roles))
-    orders = work_orders.tab_orders(user, "due")
-    if not cases.exists() and not orders.exists():
-        turn.say("ไม่มีเรื่องหรืองานสั่งที่ใกล้หรือเกินกำหนด")
-        return
-    today = timezone.localdate()
-    shown_cases, shown_orders = list(cases[:6]), list(orders[:6])
-    rows = [f"เรื่องเกินกรอบเวลา {cases.count()} เรื่อง"]
-    rows += [_case_line(c) for c in shown_cases]
-    rows += [f"งานสั่งใกล้หรือเกินกำหนด {orders.count()} งาน"]
-    rows += [_order_line(o, today) for o in shown_orders]
-    buttons = [turn.button(c.number, "staff_case", {"case": str(c.pk)}) for c in shown_cases]
-    buttons += [turn.button(o.number, "staff_order", {"order": str(o.pk)}) for o in shown_orders]
-    turn.say("\n".join(rows), buttons)
+    return list_page(turn, user, "due_cases")
 
 
 def find_prompt(turn):
@@ -172,49 +231,18 @@ def find(turn, user, text):
         if case is not None:
             turn.set_prompt()
             return case_detail(turn, user, case)
-    turn.say("ไม่พบเลขนี้ในงานของคุณ ลองพิมพ์ใหม่ หรือกดเมนูอื่น")
+    turn.say("ไม่พบเลขเรื่องหรืองานสั่งในสิทธิ์ กรุณาระบุเลขใหม่หรือเลือกเมนูอื่น")
 
 
 # --- Supervisors --------------------------------------------------------------------------------
 
 
 def orders_issued(turn, user):
-    orders = work_orders.tab_orders(user, "issued")
-    total = orders.count()
-    if not total:
-        turn.say("ยังไม่มีงานที่คุณสั่งค้างอยู่", [turn.button("สั่งงานใหม่", "staff_ow_start")])
-        return
-    today = timezone.localdate()
-    shown = list(orders[:10])
-    done = sum(1 for o in orders if o.status == WorkOrder.Status.DONE)
-    head = f"งานที่คุณสั่ง {total} งาน" + (f" · รอคุณปิดงาน {done}" if done else "")
-    turn.say(
-        head + "\n" + "\n".join(_order_line(o, today) for o in shown) + _more(total, len(shown)),
-        [turn.button(o.number, "staff_order", {"order": str(o.pk)}) for o in shown],
-    )
+    return list_page(turn, user, "issued")
 
 
 def late(turn, user):
-    """เกินกำหนดทุกกองที่ดูแล: overdue cases and งานสั่ง per supervised division."""
-    scope = identity.staff_scope(user)
-    divisions = list(work_orders.issuable(user))
-    today = timezone.localdate()
-    rows, buttons = [], []
-    for division in divisions:
-        cases = _overdue_cases(user, [division.pk]).count()
-        orders = WorkOrder.objects.filter(
-            division=division, status__in=WorkOrder.OPEN, due_on__lt=today
-        ).count()
-        if cases or orders:
-            rows.append(f"{division.code}: เรื่องเกินกรอบเวลา {cases} · งานสั่งเกินกำหนด {orders}")
-    late_orders = WorkOrder.objects.filter(
-        division__in=list(scope.overseen), status__in=WorkOrder.OPEN, due_on__lt=today
-    ).order_by("due_on")[:6]
-    buttons += [turn.button(o.number, "staff_order", {"order": str(o.pk)}) for o in late_orders]
-    if not rows:
-        turn.say("ไม่มีงานเกินกำหนดในกองที่คุณดูแล")
-        return
-    turn.say("งานเกินกำหนดในกองที่ดูแล\n" + "\n".join(rows), [*buttons, web_button()])
+    return list_page(turn, user, "late_orders")
 
 
 def today_summary(turn, user):
@@ -251,7 +279,7 @@ def assign_prompt(turn):
 def assign_case(turn, user, text):
     case = staff_line._case_for(user, number=text.strip().upper())
     if case is None:
-        turn.say("ไม่พบเรื่องนี้ในกองที่คุณดูแล ลองพิมพ์เลขใหม่")
+        turn.say("ไม่พบเรื่องนี้ในกองที่รับผิดชอบ กรุณาระบุเลขเรื่องใหม่")
         return
     turn.set_prompt()
     step_start(turn, user, case, "assign")
@@ -286,35 +314,73 @@ def order_detail(turn, user, order):
         else:
             buttons.append(turn.button(label, "staff_os", {"order": str(order.pk), "step": name}))
     buttons.append(("เปิดในเว็บ", web(f"/orders/{order.number}/")))
-    turn.say("\n".join(rows), buttons)
+    turn.say(
+        "\n".join(rows),
+        [
+            *buttons[:11],
+            turn.button("กลับรายการ", "staff_list", {"kind": "group"}),
+            turn.button("หน้าหลัก", "staff_menu"),
+        ],
+    )
 
 
-def order_step(turn, user, order, step, text="", person=None):
+def order_step(turn, user, order, step, text="", person=None, skip_reason=False, page=1):
     """One step of a งานสั่ง; steps that need words or a person ask first."""
     from django.core.exceptions import PermissionDenied, ValidationError
 
-    if step in ("done", "send_back", "cancel") and not text:
+    if (
+        step in ("done", "send_back", "cancel")
+        and not text
+        and not (skip_reason and step != "done")
+    ):
         turn.set_prompt("staff_os_text", order=str(order.pk), step=step)
         turn.say(
             "พิมพ์สั้น ๆ ว่าทำอะไรไปแล้ว"
             if step == "done"
             else "พิมพ์เหตุผลที่ส่งกลับ"
             if step == "send_back"
-            else "พิมพ์เหตุผลที่ยกเลิก"
+            else "พิมพ์เหตุผลที่ยกเลิก",
+            (
+                [
+                    turn.button(
+                        "ไม่ระบุเหตุผล",
+                        "staff_os",
+                        {"order": str(order.pk), "step": step, "skip_reason": True},
+                    )
+                ]
+                if step != "done"
+                else []
+            )
+            + [turn.button("กลับงาน", "staff_order", {"order": str(order.pk)})],
         )
         return
     if step == "assign_person" and person is None:
-        people = work_orders.members(order.division_id)[:MAX_BUTTONS]
-        turn.say(
-            f"มอบงาน {order.number} ให้ใครใน {order.division.code}",
-            [
-                turn.button(
-                    work_orders.name_of(p),
-                    "staff_os",
-                    {"order": str(order.pk), "step": step, "user": p.pk},
+        from django.core.paginator import Paginator
+
+        if step not in dict(work_orders.steps_for(user, order)):
+            turn.say("ทำขั้นนี้ไม่ได้แล้ว อาจมีคนทำไปก่อน")
+            return
+        people = Paginator(work_orders.members(order.division_id), 5).get_page(page)
+        quick = [
+            turn.button(
+                f"{p.pk} {work_orders.name_of(p)}"[:20],
+                "staff_os",
+                {"order": str(order.pk), "step": step, "user": p.pk},
+            )
+            for p in people
+        ]
+        for label, number in (("ย้อนกลับ", people.number - 1), ("ถัดไป", people.number + 1)):
+            if 1 <= number <= people.paginator.num_pages:
+                quick.append(
+                    turn.button(
+                        label, "staff_os", {"order": str(order.pk), "step": step, "page": number}
+                    )
                 )
-                for p in people
-            ],
+        quick.append(turn.button("กลับงาน", "staff_order", {"order": str(order.pk)}))
+        turn.say(
+            f"มอบงาน {order.number} ให้ใครใน {order.division.code} · "
+            f"หน้า {people.number}/{people.paginator.num_pages}",
+            quick,
         )
         return
     try:
@@ -337,110 +403,14 @@ def order_step(turn, user, order, step, text="", person=None):
     order_detail(turn, user, order)
 
 
-# The new-order questions: division, person, what, due date, urgent, then confirm.
-DUE_CHOICES = (("", "ไม่กำหนด"), ("1", "พรุ่งนี้"), ("3", "ภายใน 3 วัน"), ("7", "ภายใน 7 วัน"))
+# Thai calendar date parser retained for callers of staff_work._typed_date.
 TYPED_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$")
 
 
 def order_start(turn, user, division=None):
-    divisions = list(work_orders.issuable(user))
-    if not divisions:
-        turn.say("คุณยังไม่ได้เป็น Supervisor ของกองใด")
-        return
-    if division is None and len(divisions) == 1:
-        division = divisions[0]
-    if division is None:
-        turn.set_prompt("staff_ow", step="division")
-        turn.say(
-            "สั่งงานถึงกองไหน",
-            [turn.button(d.code, "staff_ow", {"division": d.pk}) for d in divisions[:MAX_BUTTONS]],
-        )
-        return
-    people = work_orders.members(division.pk)[: MAX_BUTTONS - 1]
-    turn.set_prompt("staff_ow", step="person", division=division.pk)
-    turn.say(
-        f"สั่งถึงทั้ง {division.code} หรือคนไหน",
-        [turn.button("ทั้งกอง", "staff_ow", {"person": 0})]
-        + [turn.button(work_orders.name_of(p), "staff_ow", {"person": p.pk}) for p in people],
-    )
+    from operations import staff_orders_chat
 
-
-def order_answer(turn, user, value=None, text=""):
-    """The next answer of the new-order questions, from a button `value` or typed `text`."""
-    from django.contrib.auth import get_user_model
-    from django.core.exceptions import PermissionDenied, ValidationError
-
-    data = dict(turn.conversation.prompt_data)
-    step = data.get("step")
-    value = value or {}
-    if "division" in value:
-        division = work_orders.issuable(user).filter(pk=value["division"]).first()
-        if division is None:
-            return order_start(turn, user)
-        return order_start(turn, user, division)
-    if step == "person" and "person" in value:
-        data.update(step="title", person=value["person"] or None)
-        turn.set_prompt("staff_ow", **data)
-        turn.say("พิมพ์ว่าให้ทำอะไร (สั้น ๆ ไม่เกิน 200 ตัวอักษร)")
-        return
-    if step == "title" and text:
-        data.update(step="due", title=text[: work_orders.TITLE_MAX])
-        turn.set_prompt("staff_ow", **data)
-        turn.say(
-            "กำหนดเสร็จเมื่อไร (หรือพิมพ์วันที่ เช่น 25/10)",
-            [turn.button(label, "staff_ow", {"due": days}) for days, label in DUE_CHOICES],
-        )
-        return
-    if step == "due" and ("due" in value or text):
-        due_on = None
-        if "due" in value and value["due"]:
-            due_on = timezone.localdate() + timedelta(days=int(value["due"]))
-        elif text:
-            due_on = _typed_date(text)
-            if due_on is None:
-                turn.say("อ่านวันที่ไม่ออก พิมพ์แบบ 25/10 หรือกดปุ่ม")
-                return
-        data.update(step="urgent", due=due_on.isoformat() if due_on else "")
-        turn.set_prompt("staff_ow", **data)
-        turn.say(
-            "งานด่วนไหม",
-            [
-                turn.button("ปกติ", "staff_ow", {"urgent": 0}),
-                turn.button("ด่วน", "staff_ow", {"urgent": 1}),
-            ],
-        )
-        return
-    if step == "urgent" and "urgent" in value:
-        data.update(step="confirm", urgent=bool(value["urgent"]))
-        turn.set_prompt("staff_ow", **data)
-        return _order_summary(turn, user, data)
-    if step == "confirm" and value.get("go"):
-        User = get_user_model()
-        division = work_orders.issuable(user).filter(pk=data.get("division")).first()
-        person = User.objects.filter(pk=data["person"]).first() if data.get("person") else None
-        try:
-            order = work_orders.create(
-                user,
-                data.get("title", ""),
-                division,
-                person,
-                due_on=date.fromisoformat(data["due"]) if data.get("due") else None,
-                urgent=data.get("urgent", False),
-            )
-        except (ValidationError, PermissionDenied) as exc:
-            turn.set_prompt()
-            messages = getattr(exc, "messages", None) or ["สั่งงานนี้ไม่ได้"]
-            turn.say("; ".join(messages))
-            return
-        turn.set_prompt()
-        turn.say(
-            f"สั่งงาน {order.number} แล้ว คนทำได้รับข้อความแล้ว",
-            [turn.button(order.number, "staff_order", {"order": str(order.pk)})],
-        )
-        return
-    if step == "confirm":
-        return _order_summary(turn, user, data)
-    turn.say("เลือกจากปุ่ม หรือพิมพ์คำตอบ")
+    staff_orders_chat.start(turn, user)
 
 
 def _typed_date(text):
@@ -462,30 +432,6 @@ def _typed_date(text):
     except ValueError:
         return None
     return chosen if chosen >= today else None
-
-
-def _order_summary(turn, user, data):
-    from django.contrib.auth import get_user_model
-
-    division = work_orders.issuable(user).filter(pk=data.get("division")).first()
-    person = get_user_model().objects.filter(pk=data.get("person") or 0).first()
-    due_on = date.fromisoformat(data["due"]) if data.get("due") else None
-    rows = [
-        "ตรวจก่อนสั่งงาน",
-        f"ให้ทำ: {data.get('title', '')}",
-        f"ถึง: {division.code if division else '-'}"
-        + (f" · {work_orders.name_of(person)}" if person else " · ทั้งกอง"),
-        f"กำหนด: {due_on.day}/{due_on.month}/{due_on.year + 543}" if due_on else "กำหนด: ไม่กำหนด",
-        "งานด่วน" if data.get("urgent") else "งานปกติ",
-    ]
-    turn.say(
-        "\n".join(rows),
-        [
-            turn.button("สั่งงาน", "staff_ow", {"go": 1}),
-            turn.button("เริ่มใหม่", "staff_ow_start"),
-            ("แนบไฟล์ในเว็บ", web("/orders/new/")),
-        ],
-    )
 
 
 # --- Case steps in chat ---------------------------------------------------------------------------
@@ -514,7 +460,7 @@ def _askable(form):
             continue
         if f.kind not in CHAT_KINDS:
             return None
-        if f.kind in ("select", "radio") and len(f.choices) > MAX_BUTTONS and f.required:
+        if f.kind in ("select", "radio") and len(f.choices) > 10 and f.required:
             return None
         if f.required:
             fields.append(f)
@@ -561,7 +507,14 @@ def case_detail(turn, user, case):
                 shown = f"{label} (เว็บ)" if len(label) <= 14 else label
                 buttons.append((shown, web(path)))
     buttons.append(("เปิดในเว็บ", web(f"/cases/{case.number}/")))
-    turn.say("\n".join(rows), buttons)
+    turn.say(
+        "\n".join(rows),
+        [
+            *buttons[:11],
+            turn.button("กลับรายการ", "staff_list", {"kind": "group"}),
+            turn.button("หน้าหลัก", "staff_menu"),
+        ],
+    )
 
 
 def step_start(turn, user, case, action):
@@ -605,7 +558,9 @@ def _ask_next(turn, user):
         if f.name in values:
             continue
         lead = f"{case.number} · {offer.label}\n{f.label}" + (f"\n{f.help}" if f.help else "")
-        skip = []
+        skip = [turn.button("ยกเลิก", "staff_step_cancel")]
+        if values:
+            skip.insert(0, turn.button("ย้อนกลับ", "staff_step_back"))
         if f.kind in ("select", "radio"):
             choices = sorted(f.choices, key=lambda c: str(c[0]) != str(f.initial or ""))
             turn.say(
@@ -630,8 +585,26 @@ def _ask_next(turn, user):
         rows.append("ขั้นนี้ย้อนกลับไม่ได้")
     turn.say(
         "\n".join(rows),
-        [turn.button("บันทึก", "staff_step_go"), turn.button("ยกเลิก", "staff_step_cancel")],
+        [
+            turn.button("บันทึก", "staff_step_go"),
+            turn.button("แก้คำตอบ", "staff_step_back"),
+            turn.button("ยกเลิก", "staff_step_cancel"),
+        ],
     )
+
+
+def step_back(turn, user):
+    case, form, _, data = _state(turn, user)
+    if form is None:
+        turn.set_prompt()
+        return list_page(turn, user)
+    values = dict(data.get("values", {}))
+    for field in reversed(_askable(form)):
+        if field.name in values:
+            values.pop(field.name)
+            break
+    turn.set_prompt("staff_step", **{**data, "values": values})
+    _ask_next(turn, user)
 
 
 def step_answer(turn, user, value):
@@ -669,7 +642,7 @@ def step_go(turn, user):
         from operations import web_actions
 
         payload = web_actions.payload_from(form, post)
-        services.perform_action(
+        services.perform_form_action(
             Actor.staff(user),
             case.pk,
             offer.name,

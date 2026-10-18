@@ -144,6 +144,7 @@ LINE_PUSH_CRITICAL_RESERVE_PERCENT = int(os.environ.get("LINE_PUSH_CRITICAL_RESE
 LINE_PUSH_DEBOUNCE_MINUTES = int(os.environ.get("LINE_PUSH_DEBOUNCE_MINUTES") or 10)
 
 # --- AI (M05) ------------------------------------------------------------------------------
+AI_MCP_ENABLED = os.environ.get("AI_MCP_ENABLED", "true").lower() == "true"
 AI_ENABLED = os.environ.get("AI_ENABLED", "false").lower() == "true"
 # Fernet key for API keys stored in the DB; kept outside the database.
 AI_SECRET_KEY = os.environ.get("AI_SECRET_KEY", "")

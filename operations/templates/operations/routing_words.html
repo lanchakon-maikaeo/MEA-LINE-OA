@@ -33,8 +33,8 @@
             {% csrf_token %}<input type="hidden" name="word_id" value="{{ w.pk }}">
             <label class="visually-hidden" for="rw-div-{{ w.pk }}">ย้ายไปกอง</label>
             <select id="rw-div-{{ w.pk }}" name="division">{% for d in divisions %}<option value="{{ d.code }}"{% if d.pk == w.division_id %} selected{% endif %}>{{ d.code }}</option>{% endfor %}</select>
-            <label class="visually-hidden" for="rw-reason-{{ w.pk }}">เหตุผล</label>
-            <input id="rw-reason-{{ w.pk }}" name="reason" maxlength="500" required placeholder="เหตุผล">
+            <label class="visually-hidden" for="rw-reason-{{ w.pk }}">เหตุผล (ไม่บังคับ)</label>
+            <input id="rw-reason-{{ w.pk }}" name="reason" maxlength="500" placeholder="เหตุผล">
             <button class="btn btn--sm btn--secondary" type="submit" name="action" value="move">ย้ายกอง</button>
             <button class="btn btn--sm btn--ghost" type="submit" name="action" value="cancel">ยกเลิกคำ</button>
           </form>

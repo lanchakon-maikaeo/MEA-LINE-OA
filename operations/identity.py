@@ -223,10 +223,7 @@ def audit(actor, action, target, reason="", actor_label="", **data):
 
 
 def _require_reason(reason):
-    reason = (reason or "").strip()
-    if not reason:
-        raise ValidationError("A reason is required.")
-    return reason
+    return (reason or "").strip()
 
 
 # --- Staff accounts and roles -----------------------------------------------------------------
@@ -338,16 +335,15 @@ def grant_role(actor, user, role, division=None, reason=""):
     )
     if division is not None:
         sync_membership_authority(user, actor)
-    _menu_follows(user, role)
+    _menu_follows(user)
     return grant
 
 
-def _menu_follows(user, role):
-    """A Supervisor role changes the tabs of the person's LINE menu (16 Oct 2569 Q9)."""
-    if role in (Role.SUPERVISOR, Role.DEPARTMENT_SUPERVISOR):
-        from operations import line_menu  # local: line_menu builds on identity
+def _menu_follows(user):
+    """Refresh LINE access after any role grant or removal, including the last membership."""
+    from operations import line_menu
 
-        line_menu.relink_user(user)
+    line_menu.relink_user(user)
 
 
 @transaction.atomic
@@ -385,7 +381,7 @@ def revoke_role(actor, grant, reason):
         role=grant.role,
         division=grant.division.code if grant.division else None,
     )
-    _menu_follows(grant.user, grant.role)
+    _menu_follows(grant.user)
 
 
 @transaction.atomic
@@ -527,6 +523,8 @@ def grant_full_division(actor, user, division, reason, approval_reference):
             raise ValidationError("ให้สิทธิ์แก่ตัวเองไม่ได้ (Q16)")
     reason = _require_reason(reason)
     approval_reference = _require_reason(approval_reference)
+    if not approval_reference:
+        raise ValidationError("ระบุเอกสารอ้างอิงการอนุมัติ")
     division = Division.objects.select_for_update().get(pk=division.pk)
     user = User.objects.select_for_update().get(pk=user.pk)
     if not division.is_active or not user.is_active:
@@ -775,7 +773,9 @@ def submit_registration(
     identity, _ = ChannelIdentity.objects.select_for_update().get_or_create(
         channel=channel, external_id=external_id
     )
-    if identity.status == ChannelIdentity.Status.ACTIVE:
+    if identity.status == ChannelIdentity.Status.ACTIVE and not (
+        identity.requester_id and identity.requester.is_external
+    ):
         raise ValidationError("Identity is already approved.")
     pending = identity.registrations.filter(status=RegistrationRequest.Status.PENDING).first()
     if pending is not None:
@@ -786,7 +786,7 @@ def submit_registration(
         identity.requester = None
         identity.save(update_fields=["status", "requester"])
     latitude, longitude = location or (None, None)
-    return RegistrationRequest.objects.create(
+    registration = RegistrationRequest.objects.create(
         identity=identity,
         submitted_name=submitted_name,
         requested_district=district,
@@ -795,6 +795,128 @@ def submit_registration(
         longitude=longitude,
         verified_by=verified_by if employee is not None else "",
     )
+
+    from operations import admin_line
+
+    admin_line.notify(registration)
+    return registration
+
+
+@transaction.atomic
+def external_requester(identity_row, name):
+    """A named problem-only reporter, including an employee awaiting manual verification."""
+    name = " ".join(name.split())
+    if not 2 <= len(name) <= 200:
+        raise ValidationError("ระบุชื่อ 2–200 ตัวอักษร")
+    row = ChannelIdentity.objects.select_for_update().get(pk=identity_row.pk)
+    if row.status == ChannelIdentity.Status.REVOKED:
+        raise ValidationError("บัญชีนี้ถูกถอนการรับรอง ติดต่อแอดมินก่อน")
+    if row.requester_id:
+        if row.requester.status != Requester.Status.ACTIVE:
+            raise ValidationError("บัญชีผู้แจ้งถูกระงับ ติดต่อแอดมินก่อน")
+        return row.requester
+    district, _ = District.objects.get_or_create(
+        code="D00", defaults={"name": "ไม่ระบุหน่วยงาน (เขต/ฝ่าย)", "is_active": False}
+    )
+    requester = Requester.objects.create(
+        display_name=name,
+        district=district,
+        approved_by=system_user(),
+        is_external=True,
+    )
+    row.requester, row.status = requester, ChannelIdentity.Status.ACTIVE
+    row.save(update_fields=["requester", "status"])
+    audit(system_user(), "requester.external_registered", requester, actor_label="line")
+    return requester
+
+
+@transaction.atomic
+def provision_employee_staff(identity_row, employee, actor):
+    """Called only after identity verification; grant the roster's member role, never Supervisor."""
+    employee = Employee.objects.select_for_update().get(pk=employee.pk)
+    if not employee.is_active:
+        raise ValidationError("พนักงานไม่อยู่ในทะเบียนที่ใช้งานอยู่")
+    profiles = list(
+        StaffProfile.objects.filter(employee_id=employee.employee_id).select_related("user")
+    )
+    if len(profiles) > 1:
+        raise ValidationError("รหัสพนักงานผูกหลายบัญชี ให้แอดมินตรวจ")
+    if profiles:
+        user = profiles[0].user
+        if not user.is_active:
+            raise ValidationError("บัญชีเจ้าหน้าที่ถูกระงับ ให้แอดมินตรวจ")
+    else:
+        username = f"line-employee-{employee.pk}"
+        if User.objects.filter(username=username).exists():
+            raise ValidationError("บัญชีพนักงานซ้ำ ให้แอดมินตรวจ")
+        user = User.objects.create_user(username=username, password=None)
+        StaffProfile.objects.create(
+            user=user, display_name=employee.name, employee_id=employee.employee_id
+        )
+    if identity_row.staff_user_id and identity_row.staff_user_id != user.pk:
+        raise ValidationError("LINE นี้เชื่อมกับพนักงานอีกคน ให้แอดมินตรวจ")
+    if ChannelIdentity.objects.filter(staff_user=user).exclude(pk=identity_row.pk).exists():
+        raise ValidationError("พนักงานนี้เชื่อม LINE อื่นแล้ว ให้แอดมินตรวจ")
+    if employee.division_id and employee.division.is_active:
+        grant, created = RoleGrant.objects.get_or_create(
+            user=user,
+            role=Role.STAFF,
+            division=employee.division,
+            revoked_at__isnull=True,
+            defaults={"granted_by": actor, "reason": "ยืนยันตัวตนและกองตามทะเบียนพนักงาน"},
+        )
+        if created:
+            audit(
+                actor,
+                "role.granted",
+                user,
+                grant.reason,
+                role=Role.STAFF,
+                division=employee.division.code,
+            )
+            sync_membership_authority(user, actor)
+    identity_row.staff_user, identity_row.staff_linked_at = user, timezone.now()
+    identity_row.save(update_fields=["staff_user", "staff_linked_at"])
+    from operations import line_menu
+
+    transaction.on_commit(lambda: line_menu.relink_user(user))
+    return user
+
+
+@transaction.atomic
+def grant_requester_role(actor, requester, role, division=None, reason=""):
+    """Manage a verified LINE employee without a second web registration."""
+    require_admin(actor)
+    reason = _require_reason(reason)
+    requester = Requester.objects.select_for_update().get(pk=requester.pk)
+    if (
+        requester.status != Requester.Status.ACTIVE
+        or not requester.employee_id
+        or (
+            requester.employee_link
+            not in {Requester.EmployeeLink.VERIFIED, Requester.EmployeeLink.ADMIN}
+        )
+    ):
+        raise ValidationError("ต้องยืนยันตัวตนพนักงานก่อนให้สิทธิ์เจ้าหน้าที่")
+    lines = list(
+        ChannelIdentity.objects.select_for_update().filter(
+            requester=requester, status=ChannelIdentity.Status.ACTIVE
+        )
+    )
+    if len(lines) != 1:
+        raise ValidationError("ต้องมีบัญชี LINE ที่ใช้งานได้เพียงบัญชีเดียว")
+    user = provision_employee_staff(lines[0], requester.employee, actor)
+    if not (
+        role == Role.STAFF
+        and division is not None
+        and division == requester.employee.division
+        and division.is_active
+    ):
+        grant_role(actor, user, role, division, reason)
+    requester.is_external = False
+    requester.save(update_fields=["is_external"])
+    audit(actor, "requester.staff_access", requester, reason, user=user.pk, role=role)
+    return user
 
 
 SYSTEM_USERNAME = "system"
@@ -815,13 +937,10 @@ def system_user():
 
 @transaction.atomic
 def auto_approve_registration(registration):
-    """การอนุมัติอัตโนมัติ (ADR 0010): only for a request whose employee check passed, while
-    ตัวเลือกระบบ says so; recorded in the audit trail with the employee it matched."""
-    from operations import options
-
+    """Approve only verified active employees; internal division membership is separate."""
     registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
-    if options.get(options.REGISTRATION_CHECK) != "employee_auto" or registration.employee is None:
-        raise ValidationError("Automatic approval is not enabled for this request.")
+    if registration.employee is None or not registration.verified_by:
+        raise ValidationError("Automatic approval needs verified employee evidence.")
     how = registration.get_verified_by_display() if registration.verified_by else "ข้อมูลยืนยัน"
     return _approve(
         system_user(),
@@ -844,6 +963,9 @@ def registration_status(channel, external_id):
 
 def _registration_event(registration):
     """Dispatch intent for the registration-result notification (planned by the worker, M04)."""
+    from operations import admin_line
+
+    admin_line.notify(registration)
     OutboxEvent.objects.create(
         event_type=orchestration.EVENT_REGISTRATION,
         subject_type="registration",
@@ -903,16 +1025,42 @@ def _approve(actor, registration, reason="", automatic=False):
     from operations import employees  # local: employees audits through this module
 
     registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
+    if registration.status == RegistrationRequest.Status.APPROVED:
+        return registration.identity.requester
     if registration.status != RegistrationRequest.Status.PENDING:
         raise ValidationError("Registration is not pending.")
     identity = ChannelIdentity.objects.select_for_update().get(pk=registration.identity_id)
-    requester = Requester.objects.create(
-        display_name=registration.submitted_name,
-        district=registration.requested_district,
-        approved_by=actor,
-        employee=registration.employee,
-        employee_link=Requester.EmployeeLink.VERIFIED if registration.employee else "",
-    )
+    if identity.status == ChannelIdentity.Status.REVOKED or (
+        identity.requester_id and identity.requester.status != Requester.Status.ACTIVE
+    ):
+        raise ValidationError("บัญชีถูกระงับหรือถอนการรับรอง ให้แอดมินตรวจ")
+    employee = registration.employee
+    if employee is not None:
+        if not employee.is_active:
+            raise ValidationError("พนักงานไม่อยู่ในทะเบียนที่ใช้งานอยู่")
+        if employee.division_id and employee.division.is_active:
+            provision_employee_staff(identity, employee, actor)
+    values = {
+        "display_name": registration.submitted_name,
+        "district": registration.requested_district,
+        "approved_by": actor,
+        "employee": employee,
+        "employee_link": (
+            Requester.EmployeeLink.VERIFIED
+            if registration.verified_by
+            else Requester.EmployeeLink.ADMIN
+        )
+        if employee
+        else "",
+        "is_external": employee is None,
+    }
+    if identity.requester_id and identity.requester.status == Requester.Status.ACTIVE:
+        requester = identity.requester
+        for field, value in values.items():
+            setattr(requester, field, value)
+        requester.save(update_fields=list(values))
+    else:
+        requester = Requester.objects.create(**values)
     if registration.employee is None:
         employees.match_requesters([requester])
         requester.refresh_from_db()
@@ -925,6 +1073,9 @@ def _approve(actor, registration, reason="", automatic=False):
     registration.decision_reason = reason.strip()
     registration.save(update_fields=["status", "decided_by", "decided_at", "decision_reason"])
     _registration_event(registration)
+    from operations import line_menu
+
+    transaction.on_commit(lambda: line_menu.relink(identity))
     audit(
         actor,
         "registration.auto_approved" if automatic else "registration.approved",
@@ -958,7 +1109,7 @@ def anonymous_requester(identity_row):
     if requester is not None:
         return requester
     district, _ = District.objects.get_or_create(
-        code=UNKNOWN_DISTRICT, defaults={"name": "ไม่ระบุเขต", "is_active": False}
+        code=UNKNOWN_DISTRICT, defaults={"name": "ไม่ระบุหน่วยงาน (เขต/ฝ่าย)", "is_active": False}
     )
     requester = Requester.objects.create(
         display_name="ไม่ระบุตัวตน",
@@ -1001,7 +1152,7 @@ def revoke_identity(actor, identity, reason):
 
 
 def _managed_requester(actor, requester, reason):
-    """The requester row, locked, for an admin change with a reason. Anonymous reporters are not
+    """The requester row, locked, for an audited admin change. Anonymous reporters are not
     managed here (staff never see who they are) and a revoked requester is final."""
     reason = _require_reason(reason)
     require_admin(actor)
@@ -1056,14 +1207,32 @@ def link_requester_employee(actor, requester, employee_id, reason):
     if employee is None:
         raise ValidationError("ไม่พบรหัสพนักงานนี้ในทะเบียนพนักงานที่ใช้งานอยู่")
     link = Requester.EmployeeLink
-    if requester.employee_id == employee.pk and requester.employee_link == link.ADMIN:
-        raise ValidationError("ผูกกับพนักงานคนนี้อยู่แล้ว")
     confirmed = requester.employee_id == employee.pk and requester.employee_link == link.NAME
     requester.employee = employee
     requester.employee_link = link.ADMIN
-    requester.save(update_fields=["employee", "employee_link"])
+    if not requester.district.is_active and employee.district_id and employee.district.is_active:
+        requester.district = employee.district
+    requester.save(update_fields=["employee", "employee_link", "district"])
     action = "requester.employee_confirmed" if confirmed else "requester.employee_linked"
     audit(actor, action, requester, reason, employee=employee.employee_id)
+    lines = list(
+        ChannelIdentity.objects.select_for_update().filter(
+            requester=requester, status=ChannelIdentity.Status.ACTIVE
+        )
+    )
+    if len(lines) == 1:
+        line = lines[0]
+        if employee.division_id and employee.division.is_active:
+            provision_employee_staff(line, employee, actor)
+        requester.is_external = False
+        requester.save(update_fields=["is_external"])
+        from operations import line_menu
+
+        transaction.on_commit(lambda: line_menu.relink(line))
+        for registration in line.registrations.filter(status=RegistrationRequest.Status.PENDING):
+            registration.employee = employee
+            registration.save(update_fields=["employee"])
+            _approve(actor, registration, reason)
     return requester
 
 
@@ -1076,12 +1245,12 @@ def set_requester_district(actor, requester, district_code, reason):
 
     requester, reason = _managed_requester(actor, requester, reason)
     if requester.is_internal:
-        raise ValidationError("ผู้แจ้งภายในแจ้งในนามกอง ไม่มีเขต")
+        raise ValidationError("ผู้แจ้งภายในแจ้งในนามกอง ไม่มีหน่วยงาน (เขต/ฝ่าย)")
     district = District.objects.filter(code=district_code, is_active=True).first()
     if district is None:
-        raise ValidationError("ไม่รู้จักเขตนี้")
+        raise ValidationError("ไม่รู้จักหน่วยงาน (เขต/ฝ่าย)นี้")
     if district.pk == requester.district_id:
-        raise ValidationError("ผู้แจ้งอยู่เขตนี้อยู่แล้ว")
+        raise ValidationError("ผู้แจ้งอยู่หน่วยงาน (เขต/ฝ่าย)นี้อยู่แล้ว")
     previous = requester.district.code
     requester.district = district
     requester.save(update_fields=["district"])
@@ -1176,3 +1345,56 @@ def create_requester(actor, display_name, district_code, reason):
     employees.match_requesters([requester])
     requester.refresh_from_db()
     return requester
+
+
+def approve_verified_registrations():
+    """Retry verified registrations after roster corrections; no name-only approvals."""
+    pending = (
+        RegistrationRequest.objects.filter(
+            status=RegistrationRequest.Status.PENDING, employee__is_active=True
+        )
+        .exclude(verified_by="")
+        .order_by("pk")
+    )
+    approved = 0
+    for registration in pending.iterator():
+        try:
+            auto_approve_registration(registration)
+        except ValidationError:
+            continue
+        approved += 1
+    legacy = Requester.objects.filter(
+        status=Requester.Status.ACTIVE,
+        is_external=True,
+        employee__is_active=True,
+        employee_link__in=[Requester.EmployeeLink.VERIFIED, Requester.EmployeeLink.ADMIN],
+    )
+    for requester in legacy.iterator():
+        try:
+            with transaction.atomic():
+                requester = Requester.objects.select_for_update().get(pk=requester.pk)
+                if not requester.is_external or requester.status != Requester.Status.ACTIVE:
+                    continue
+                lines = list(
+                    ChannelIdentity.objects.select_for_update().filter(
+                        requester=requester,
+                        status=ChannelIdentity.Status.ACTIVE,
+                    )
+                )
+                if len(lines) != 1:
+                    continue
+                employee = requester.employee
+                if employee.division_id and employee.division.is_active:
+                    provision_employee_staff(lines[0], employee, system_user())
+                requester.is_external = False
+                if (
+                    not requester.district.is_active
+                    and employee.district_id
+                    and employee.district.is_active
+                ):
+                    requester.district = employee.district
+                requester.save(update_fields=["is_external", "district"])
+                audit(system_user(), "requester.employee_access_restored", requester)
+        except ValidationError:
+            continue
+    return approved

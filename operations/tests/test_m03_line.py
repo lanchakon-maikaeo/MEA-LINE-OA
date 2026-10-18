@@ -16,7 +16,6 @@ from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
-from django.core.management.base import CommandError
 from django.db import OperationalError
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
@@ -305,6 +304,8 @@ class WebhookTests(LineTestCase):
 class RegistrationTests(LineTestCase):
     def register(self, user, name="สมชาย ใจดี", district="การไฟฟ้านครหลวงเขตวัดเลียบ"):
         reply = self.say(self.event(user, "follow"))
+        self.press(user, "พนักงาน กฟน.")
+        reply = self.press(user, "ใช้วิธีอื่น")
         self.assertIn("พิมพ์ชื่อ-นามสกุล", texts(reply))
         reply = self.type(user, name)
         self.assertIn(district, buttons(reply))
@@ -312,7 +313,7 @@ class RegistrationTests(LineTestCase):
 
     def test_following_grants_nothing_and_registration_waits_for_admin(self):
         reply = self.register(ALICE)
-        self.assertIn("รอเจ้าหน้าที่", texts(reply))
+        self.assertIn("ระหว่างรอแจ้งปัญหา", texts(reply))
         registration = RegistrationRequest.objects.get()
         self.assertEqual(
             (
@@ -323,19 +324,17 @@ class RegistrationTests(LineTestCase):
             ("สมชาย ใจดี", "D01", "pending"),
         )
         identity_row = ChannelIdentity.objects.get(external_id=ALICE)
-        self.assertEqual(identity_row.status, "pending")
-        for attempt in (self.postback(ALICE, "m=new"), self.text(ALICE, "W69-000001")):
-            reply = self.say(attempt)
-            self.assertIn("รอเจ้าหน้าที่รับรอง", texts(reply))
-        self.assertFalse(ConversationDraft.objects.exists())
-
-        identity.approve_registration(self.admin, registration)
+        self.assertEqual(identity_row.status, "active")
+        self.assertTrue(identity_row.requester.is_external)
         reply = self.say(self.postback(ALICE, "m=new"))
-        self.assertIn("ประเภทใด", texts(reply))
+        self.assertNotIn("เบิก", buttons(reply))
+        identity.approve_registration(self.admin, registration)
+        identity_row.refresh_from_db()
+        self.assertTrue(identity_row.requester.is_external)
 
     def test_pending_request_can_be_cancelled_and_restarted(self):
         self.register(ALICE)
-        reply = self.say(self.text(ALICE, "สถานะ"))
+        reply = self.say(self.text(ALICE, "สถานะลงทะเบียน"))
         reply = self.press(ALICE, "ยกเลิกคำขอ", reply)
         self.assertIn("ยกเลิกคำขอแล้ว", texts(reply))
         self.assertEqual(RegistrationRequest.objects.get().status, "cancelled")
@@ -518,7 +517,7 @@ class DraftConversationTests(LineTestCase):
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "เบิก")
         reply = self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "ทิ้งเดิม เริ่มใหม่", reply)
+        self.press(ALICE, "ยกเลิกร่างเดิม", reply)
         statuses = sorted(ConversationDraft.objects.values_list("status", flat=True))
         self.assertEqual(statuses, ["discarded", "open"])
 
@@ -824,34 +823,10 @@ class RunnerTests(LineTestCase):
 
 
 class RichMenuTests(LineTestCase):
-    def test_rich_menu_posts_three_static_postbacks_and_replaces_older_menus(self):
-        calls = []
-
-        def fake(path, data=None, **kwargs):
-            calls.append((path, kwargs.get("method"), kwargs.get("content_type")))
-            if path == "/v2/bot/richmenu/list":
-                return {"richmenus": [{"richMenuId": "old", "name": "faoj-main-v1"}]}
-            if path == "/v2/bot/richmenu":
-                self.assertEqual(
-                    [a["action"]["data"] for a in data["areas"]], ["m=new", "m=mine", "m=track"]
-                )
-                return {"richMenuId": "new"}
-            return {}
-
-        with patch.object(line_api, "call", side_effect=fake):
+    def test_legacy_command_delegates_to_resumable_role_menus(self):
+        with patch("operations.line_menu_release.sync") as sync:
             call_command("setup_line_rich_menu", stdout=StringIO())
-        self.assertEqual(
-            calls,
-            [
-                ("/v2/bot/richmenu/list", None, None),
-                ("/v2/bot/richmenu", None, None),
-                ("/v2/bot/richmenu/new/content", None, "image/png"),
-                ("/v2/bot/user/all/richmenu/new", "POST", None),
-                ("/v2/bot/richmenu/old", "DELETE", None),
-            ],
-        )
-        with override_settings(LINE_CHANNEL_ACCESS_TOKEN=""), self.assertRaises(CommandError):
-            call_command("setup_line_rich_menu", stdout=StringIO())
+        sync.assert_called_once_with()
 
 
 # --- Answers to "เจ้าหน้าที่ขอข้อมูลเพิ่ม" (found with the LINE mockup, 8 Oct 2569) -----------

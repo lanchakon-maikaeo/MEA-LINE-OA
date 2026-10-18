@@ -21,7 +21,7 @@
     <div><dt>กองเจ้าภาพ</dt><dd>{{ case.owner_division.code }} {{ case.owner_division.name }}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>
     {% if case.topic == "usage" %}<div><dt>หัวข้อ</dt><dd>การใช้ไฟฟ้า <span class="muted">(ไม่ส่งให้ AI)</span></dd></div>{% endif %}
     <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
-    <div><dt>เขต</dt><dd>{{ case.district.name }}</dd></div>
+    <div><dt>หน่วยงาน (เขต/ฝ่าย)</dt><dd>{{ case.district.name }}</dd></div>
     <div><dt>ผู้แจ้ง</dt><dd>{% if case.requester.is_anonymous %}<span class="tag">ไม่ระบุตัวตน</span>{% else %}{{ case.requester.display_name }}{% with e=case.requester.employee %}{% if e %}<br><span class="muted">{{ e.position }}{% if e.position and e.department %} · {% endif %}{{ e.department }}</span>{% endif %}{% endwith %}{% endif %}</dd></div>
     {% if case.latitude %}<div><dt>ตำแหน่งที่แจ้ง</dt><dd><a href="https://www.google.com/maps?q={{ case.latitude }},{{ case.longitude }}" target="_blank" rel="noopener">เปิดแผนที่</a></dd></div>{% endif %}
     <div><dt>ยื่นเมื่อ</dt><dd class="num">{{ case.submitted_at|thai_datetime }}</dd></div>
@@ -77,7 +77,7 @@
       <div class="table-wrap">
         {% if case.kind == "withdrawal" %}
         <table>
-          <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอ</th><th scope="col" class="num">อนุมัติ</th><th scope="col" class="num">จ่ายแล้ว</th><th scope="col" class="num">เขตรับแล้ว</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างจ่าย</th></tr></thead>
+          <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอ</th><th scope="col" class="num">อนุมัติ</th><th scope="col" class="num">จ่ายแล้ว</th><th scope="col" class="num">หน่วยงาน (เขต/ฝ่าย)รับแล้ว</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างจ่าย</th></tr></thead>
           <tbody>
           {% for l in page.lines.lines %}
             <tr>
@@ -140,7 +140,7 @@
     {% if case.kind == "return" %}
     <section class="section" aria-labelledby="s-units" data-tour="units">
       <div class="section-head"><h2 id="s-units">ของที่รับคืนและการตรวจ</h2>{% if page.lines.no_source_document %}<span class="flag flag--info">ไม่มีเอกสารอ้างอิงการจ่าย</span>{% endif %}</div>
-      {% if page.lines.instructions %}<div class="notice notice--info mb-24">{% icon "info" %}<div class="notice__body"><strong>วิธีส่งคืนที่แจ้งเขต</strong>{{ page.lines.instructions }}</div></div>{% endif %}
+      {% if page.lines.instructions %}<div class="notice notice--info mb-24">{% icon "info" %}<div class="notice__body"><strong>วิธีส่งคืนที่แจ้งหน่วยงาน (เขต/ฝ่าย)</strong>{{ page.lines.instructions }}</div></div>{% endif %}
       {% if page.lines.units %}
       <div class="table-wrap"><table>
         <thead><tr><th scope="col">หน่วย</th><th scope="col">รายการ</th><th scope="col">เลขเครื่อง/จำนวน</th><th scope="col">สถานะ</th><th scope="col">หมายเหตุ</th></tr></thead>

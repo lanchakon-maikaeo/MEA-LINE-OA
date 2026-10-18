@@ -3,7 +3,7 @@
   {% if s.needs == "result" %}
     <label class="field"><span>ทำอะไรไปแล้ว <span class="req" aria-hidden="true">*</span></span><textarea name="result" rows="3" required></textarea></label>
   {% elif s.needs == "reason" %}
-    <label class="field"><span>เหตุผล <span class="req" aria-hidden="true">*</span></span><textarea name="reason" rows="2" required></textarea></label>
+    <label class="field"><span>เหตุผล (ไม่บังคับ)</span><textarea name="reason" rows="2"></textarea></label>
   {% elif s.needs == "person" %}
     <label class="field"><span>คนในกอง {{ order.division.code }}</span>
       <select name="person" required><option value="">เลือกคน</option>{% for p in people %}<option value="{{ p.pk }}"{% if order.assignee_id == p.pk %} selected{% endif %}>{{ p.staff_profile.display_name|default:p.username }}</option>{% endfor %}</select>

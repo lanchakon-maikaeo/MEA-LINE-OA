@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -245,12 +246,14 @@ def settings_page(request):
                 )
             elif post.get("action") == "codes":
                 reason = (post.get("reason") or "").strip()
-                if not reason:
-                    raise ValidationError("ระบุเหตุผลของการแก้รหัสทางการ")
-                for item in EquipmentType.objects.order_by("code"):
-                    value = post.get(f"code-{item.pk}")
-                    if value is not None and value.strip() != item.official_code:
-                        registry.set_official_code(request.user, item, value, reason)
+                with transaction.atomic():
+                    for item in EquipmentType.objects.order_by("code"):
+                        value = post.get(f"code-{item.pk}")
+                        if value is not None and value.strip() != item.official_code:
+                            registry.set_official_code(request.user, item, value, reason)
+                        group = post.get(f"group-{item.pk}")
+                        if group is not None:
+                            registry.set_line_group(request.user, item, group, reason)
             elif post.get("action") == "codes_file" and request.FILES.get("file"):
                 upload_file = request.FILES["file"]
                 count = registry.import_official_codes(
@@ -292,6 +295,7 @@ def settings_page(request):
             ],
             "places": "\n".join(" / ".join(p for p in pair if p) for pair in row.storage_locations),
             "items": EquipmentType.objects.order_by("code"),
+            "line_groups": EquipmentType.LineGroup.choices,
         },
     )
 

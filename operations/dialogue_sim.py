@@ -66,6 +66,7 @@ from operations.models import (
     ConversationMessage,
     Decision,
     District,
+    Division,
     Employee,
     EquipmentType,
     NotificationDelivery,
@@ -365,7 +366,7 @@ class Dialogue:
         if goal.actor == "registered":
             self._register_directly()
         if goal.actor == "newcomer":
-            self.employee = self._employee(goal.district)
+            self.employee = self._employee(goal.district, Division.objects.get(code="กคว."))
         if goal.kind:
             self._plan()
         goal.restart = goal.finish == "confirm" and rng.random() < 0.15
@@ -775,11 +776,13 @@ class Dialogue:
         prompt = Conversation.objects.filter(identity=row).values_list("prompt", flat=True).first()
         if prompt and prompt.startswith("reg_"):
             return prompt
-        if row.status == ChannelIdentity.Status.ACTIVE:
-            return "idle"
         pending = RegistrationRequest.objects.filter(
             identity=row, status=RegistrationRequest.Status.PENDING
         ).exists()
+        if pending and goal.registration == "other_way":
+            return "reg_pending"  # The review is pending even though problem reporting is enabled.
+        if row.status == ChannelIdentity.Status.ACTIVE:
+            return "idle"
         return "reg_pending" if pending else "start"
 
     def _observe_staff(self):
@@ -1318,14 +1321,23 @@ def i_press_category(d):
     line_ = _next_line(d)
     if line_ is None:
         return None
-    return d.press("press_category", conversation.CATEGORY_LABELS[line_["item"].category])
+    item = line_["item"]
+    if d.draft().data.get("equipment_menu"):
+        group = item.line_group or ("meter" if item.category == "meter" else "other")
+        return d.press("press_category", conversation.METER_GROUPS[group])
+    return d.press("press_category", conversation.CATEGORY_LABELS[item.category])
 
 
 def i_type_category_number(d):
     line_ = _next_line(d)
     if line_ is None or not _types(d):
         return None
-    number = str(conversation.CATEGORY_ORDER.index(line_["item"].category) + 1)
+    item = line_["item"]
+    if d.draft().data.get("equipment_menu"):
+        group = item.line_group or ("meter" if item.category == "meter" else "other")
+        number = str(list(conversation.METER_GROUPS).index(group) + 1)
+    else:
+        number = str(conversation.CATEGORY_ORDER.index(item.category) + 1)
     return d.text("type_category_number", d.digits(number), repair="press_category")
 
 
