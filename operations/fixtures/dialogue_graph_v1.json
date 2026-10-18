@@ -13,7 +13,7 @@
   },
   "steps": {
     "start": [["follow", 1]],
-    "reg_name": [["type_name", 1], ["press_anonymous", 1]],
+    "reg_kind": [["press_as_employee", 1], ["press_as_other", 1], ["press_anonymous_kind", 1]], "reg_name": [["type_name", 1], ["press_anonymous", 1]],
     "reg_district": [["press_district", 1]],
     "reg_employee": [["type_employee_id", 4], ["press_other_way", 1]],
     "reg_check": [["type_proof", 1]],

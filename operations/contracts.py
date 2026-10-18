@@ -108,6 +108,8 @@ STAFF_CHANNELS = frozenset(
     {Case.Channel.PHONE, Case.Channel.LETTER, Case.Channel.COUNTER, Case.Channel.FALLBACK_FORM}
 )
 ON_BEHALF_FIELDS = {"requester_id", "channel", "intake_note", "reported_at"}
+# เมนู LINE (15 ต.ค. 2569 Q20): the division the person chose in the menu, and the choice's name.
+MENU_FIELDS = {"division_code", "menu_label"}
 # เวลาแจ้งจริง may go back this far (an outage plus a weekend), never into the future.
 REPORTED_AT_MAX_AGE = timedelta(days=30)
 REPORTED_AT_SKEW = timedelta(minutes=5)
@@ -127,6 +129,7 @@ KIND_FIELDS = {
     },
 }
 LINE_FIELDS = {"item_code", "quantity", "serials"}
+NO_ITEM_TOPICS = {Case.Topic.USAGE, Case.Topic.SUGGESTION, Case.Topic.INQUIRY, Case.Topic.SYSTEM}
 ACTION_FIELDS = {"reason"}
 ACTION_EXTRA_FIELDS = {
     "assign": {"assignee_id"},
@@ -266,6 +269,8 @@ class Submission:
     channel: str
     intake_note: str
     reported_at: datetime | None = None
+    division_code: str = ""
+    menu_label: str = ""
 
 
 def parse_submission(payload, on_behalf):
@@ -276,7 +281,7 @@ def parse_submission(payload, on_behalf):
     if kind not in KIND_FIELDS:
         fail(ErrorCode.VALIDATION_ERROR, "kind must be withdrawal, return or problem.")
     spec = KIND_FIELDS[kind]
-    allowed = {"kind", "lines"} | spec["required"] | spec["optional"]
+    allowed = {"kind", "lines"} | spec["required"] | spec["optional"] | MENU_FIELDS
     if on_behalf:
         allowed |= ON_BEHALF_FIELDS
     _reject_unknown(payload, allowed, "payload")
@@ -307,7 +312,7 @@ def parse_submission(payload, on_behalf):
         if fields["topic"] not in ("", *Case.Topic.values):
             fail(
                 ErrorCode.VALIDATION_ERROR,
-                "topic must be meter, transformer, other, usage or suggestion.",
+                "topic must be one of: " + ", ".join(Case.Topic.values) + ".",
             )
 
     raw_lines = payload.get("lines") or []
@@ -332,7 +337,7 @@ def parse_submission(payload, on_behalf):
         if kind == Case.Kind.WITHDRAWAL and serials:
             fail(ErrorCode.VALIDATION_ERROR, "Serials are recorded at issue, not on request.")
         lines.append(LineInput(code.strip(), quantity, tuple(serials)))
-    if lines and fields.get("topic") in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
+    if lines and fields.get("topic") in NO_ITEM_TOPICS:
         fail(ErrorCode.VALIDATION_ERROR, "This topic lists no items.")
     if len({line.item_code for line in lines}) != len(lines):
         fail(ErrorCode.VALIDATION_ERROR, "Combine quantities of the same item into one line.")
@@ -355,7 +360,20 @@ def parse_submission(payload, on_behalf):
     related = ""
     if "related_case_number" in spec["optional"]:
         related = _text(payload, "related_case_number", False, 16)
-    return Submission(kind, tuple(lines), fields, related, requester_id, channel, note, reported_at)
+    division_code = _text(payload, "division_code", False, 16)
+    menu_label = _text(payload, "menu_label", False, 120)
+    return Submission(
+        kind,
+        tuple(lines),
+        fields,
+        related,
+        requester_id,
+        channel,
+        note,
+        reported_at,
+        division_code,
+        menu_label,
+    )
 
 
 def _location(payload):

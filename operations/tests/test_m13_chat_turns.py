@@ -50,6 +50,8 @@ class NameTests(LineTestCase):
 
     def start(self):
         self.say(self.event(ALICE, "follow"))
+        self.press(ALICE, "พนักงาน กฟน.")
+        self.press(ALICE, "ใช้วิธีอื่น")
 
     def test_greetings_requests_one_word_and_digits_are_not_names(self):
         self.start()
@@ -109,7 +111,7 @@ class InfoTests(InfoCase):
         reply = texts(self.type(ALICE, "สวัสดีครับ"))
         # "มีอัปเดตใหม่" already says it once; the reminder does not repeat it.
         self.assertEqual(reply.count("ขอทราบตำแหน่งตู้"), 1)
-        self.assertIn("พิมพ์ตอบในแชตนี้ได้เลย", reply)
+        self.assertIn("กรุณาแจ้งข้อมูลในแชทนี้", reply)
         reply = texts(self.type(ALICE, "ขอบคุณครับ"))
         self.assertIn(f"เจ้าหน้าที่รอข้อมูลเพิ่ม\n{case.number}: ขอทราบตำแหน่งตู้", reply)
         self.assertFalse(self.attached(case))
@@ -117,7 +119,7 @@ class InfoTests(InfoCase):
     def test_a_question_is_offered_before_it_reaches_staff(self):
         case = self.waiting()
         reply = self.type(ALICE, "ต้องส่งรูปตู้ด้วยไหมครับ")
-        self.assertIn(f"ข้อมูลที่เจ้าหน้าที่ขอสำหรับเรื่อง {case.number} ไหม", texts(reply))
+        self.assertIn(f"ข้อมูลที่เจ้าหน้าที่ขอสำหรับเรื่อง {case.number} หรือไม่", texts(reply))
         self.assertEqual(texts(reply).count("ขอทราบตำแหน่งตู้"), 1)
         self.assertFalse(self.attached(case))
         reply = self.press(ALICE, "ส่งถึงเจ้าหน้าที่")

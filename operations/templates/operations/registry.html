@@ -1,6 +1,6 @@
 {% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}กระทบยอดทะเบียน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}กระทบยอดทะเบียน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
@@ -10,7 +10,7 @@
   </div>
   <div class="page-head__actions">
     {% if full %}<a class="btn btn--secondary btn--sm" href="{% url 'registry-export' %}">ดาวน์โหลด CSV</a>{% endif %}
-    {% if is_admin %}<a class="btn btn--secondary btn--sm" href="{% url 'registry-settings' %}">ตั้งค่าการอ่านไฟล์ SAP</a>{% endif %}
+    {% if is_admin %}<a class="btn btn--secondary btn--sm" href="{% url 'registry-settings' %}">หมวด LINE / ทะเบียน</a>{% endif %}
   </div>
 </div>
 
@@ -90,7 +90,7 @@
             <span class="qrow__sub">{% if d.case %}เรื่อง {{ d.case.number }}{% else %}ไม่ผูกเรื่อง{% endif %}{% if d.record %} · {{ d.record.get_kind_display }} · บันทึกโดย {{ d.record.division.code }}{% endif %}</span>
           </div>
           <p class="qrow__summary">{{ d.detail }}</p>
-          {% if d.division_answer %}<p class="qrow__note">กอง {{ d.division.code }} ตอบ: {{ d.get_division_answer_display }} — {{ d.division_answer_note }}</p>{% endif %}
+          {% if d.division_answer %}<p class="qrow__note">กอง {{ d.division.code }} ตอบ: {{ d.get_division_answer_display }}: {{ d.division_answer_note }}</p>{% endif %}
         </div>
         <div class="qrow__meta">
           <span class="tag tag--muted">{{ d.get_status_display }}</span>
@@ -126,7 +126,7 @@
         <tr>
           <td>{{ i.get_kind_display }}</td>
           <td>{{ i.original_name }}</td>
-          <td>{% if i.period_from %}{{ i.period_from|thai_date }} – {{ i.period_to|thai_date }}{% else %}-{% endif %}</td>
+          <td>{% if i.period_from %}{{ i.period_from|thai_date }} ถึง {{ i.period_to|thai_date }}{% else %}-{% endif %}</td>
           <td>{{ i.exported_at|thai_short }}</td>
           <td class="num">{{ i.rows }}</td>
           <td class="muted">{% if i.kind == "balances" %}{{ i.summary.items }} รายการ{% else %}ส่วนต่างใหม่ {{ i.summary.new_total|default:0 }} · ปิดเอง {{ i.summary.resolved|default:0 }}{% endif %}</td>

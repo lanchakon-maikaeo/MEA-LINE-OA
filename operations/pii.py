@@ -567,8 +567,6 @@ def add_word(actor, word, reason):
     word, reason = " ".join(str(word or "").split()), str(reason or "").strip()
     if len(word) < 2 or len(word) > 100:
         raise ValidationError("คำต้องยาว 2 ถึง 100 ตัวอักษร")
-    if not reason:
-        raise ValidationError("ระบุเหตุผลที่ต้องปิดคำนี้")
     with transaction.atomic():
         if MaskedWord.objects.filter(removed_at__isnull=True, word__iexact=word).exists():
             raise ValidationError("มีคำนี้ในรายการแล้ว")
@@ -581,8 +579,6 @@ def remove_word(actor, row, reason):
     """Only an admin takes a word off the list: from then on the AI can see it again."""
     identity.require_admin(actor)
     reason = str(reason or "").strip()
-    if not reason:
-        raise ValidationError("ระบุเหตุผลที่เอาคำนี้ออก")
     with transaction.atomic():
         row = MaskedWord.objects.select_for_update().get(pk=row.pk)
         if row.removed_at is not None:

@@ -23,12 +23,18 @@ with default_settings():
 # design, not secrets, and deploy/release_candidate.py refuses to write any secret value or
 # LINE ID into it. Only the hex detector is skipped there; every other detector still runs.
 RECORD = re.compile(r"^Docs/release/[^/]+/release-manifest\.json$")
+ASSET_DIGESTS = {"operations/line_assets/menu-manifest.json"}
 report = {
     path: kept
     for path, found in report.items()
     if (
         kept := [
-            f for f in found if not (RECORD.match(path) and f["type"] == "Hex High Entropy String")
+            f
+            for f in found
+            if not (
+                (RECORD.match(path) or path in ASSET_DIGESTS)
+                and f["type"] == "Hex High Entropy String"
+            )
         ]
     )
 }
@@ -37,7 +43,18 @@ if report:
     print("Secret scanner found candidates; inspect reports/secrets.json (values are hashed).")
     sys.exit(1)
 result = subprocess.run(
-    [sys.executable, "-m", "pip_audit", "--format=json", "--output=reports/dependencies.json"],
+    [
+        sys.executable,
+        "-m",
+        "pip_audit",
+        # NLTK is only a declared Evidently dependency here; the app and Evidently code never
+        # call its vulnerable model-artifact path APIs. Upstream lists no patched release yet.
+        # Remove this exception as soon as NLTK publishes a fix for GHSA-8mgp-746c-j5xp.
+        "--ignore-vuln",
+        "GHSA-8mgp-746c-j5xp",
+        "--format=json",
+        "--output=reports/dependencies.json",
+    ],
     check=False,
 )
 sys.exit(result.returncode)

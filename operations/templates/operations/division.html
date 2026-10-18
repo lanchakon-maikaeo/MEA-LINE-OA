@@ -1,6 +1,6 @@
 {% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}{% if division %}คิว {{ division.code }}{% else %}คิวทุกกอง{% endif %} — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}{% if division %}คิว {{ division.code }}{% else %}คิวทุกกอง{% endif %} · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block page_id %}queue{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -14,6 +14,7 @@
     {% endif %}
   </div>
   <div class="page-head__actions">
+    {% if may_order %}<a class="btn btn--secondary" href="{% url 'order-new' %}{% if division %}?to=d:{{ division.pk }}{% endif %}">{% if division %}สั่งงานถึงกองนี้{% else %}สั่งงานใหม่{% endif %}</a>{% endif %}
     {% if nav.is_intake and division.is_intake or nav.is_intake and not nav.has_intake %}<a class="btn" href="{% url 'case-new' %}" data-tour="new-case-button">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
     <a class="btn btn--secondary" href="{% if division %}{% url 'division-export' division.code %}{% else %}{% url 'queue-all-export' %}{% endif %}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}" data-tour="export">ดาวน์โหลด CSV</a>
   </div>
@@ -21,6 +22,7 @@
 
 <form class="toolbar" method="get" data-autosubmit aria-label="ตัวกรองคิว" data-tour="queue-filters">
   <input type="hidden" name="tab" value="{{ tab }}">
+  {% if filters.preset %}<input type="hidden" name="preset" value="1">{% endif %}
   <div class="filters">
     <label class="visually-hidden" for="f-kind">ชนิดเรื่อง</label>
     <select id="f-kind" name="kind" class="pill-select{% if filters.kind %} is-set{% endif %}">
@@ -37,9 +39,9 @@
       <option value="">ทุกสถานะ</option>
       {% for value, label in statuses %}<option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
     </select>
-    <label class="visually-hidden" for="f-district">เขต</label>
+    <label class="visually-hidden" for="f-district">หน่วยงาน (เขต/ฝ่าย)</label>
     <select id="f-district" name="district" class="pill-select{% if filters.district %} is-set{% endif %}">
-      <option value="">ทุกเขต</option>
+      <option value="">ทุกหน่วยงาน (เขต/ฝ่าย)</option>
       {% for d in districts %}<option value="{{ d.pk }}"{% if filters.district == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.name }}</option>{% endfor %}
     </select>
     {% if sections %}
@@ -66,8 +68,8 @@
     <table>
       <thead><tr><th scope="col">ผู้ใช้</th><th scope="col">บทบาท</th></tr></thead>
       <tbody>
-        {% for grant in members %}
-          <tr><td>{{ grant.user.staff_profile.display_name|default:grant.user.username }}</td><td>{{ grant.get_role_display }}</td></tr>
+        {% for member in members %}
+          <tr><td>{{ member.name }}</td><td>{{ member.label }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

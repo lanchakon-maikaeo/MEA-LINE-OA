@@ -8,6 +8,7 @@ cases are audited (round 2 Q3). Actions on a case go through services.perform_ac
 import uuid
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -20,6 +21,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
 from operations import (
+    admin_nav,
     casepage,
     charts,
     identity,
@@ -31,12 +33,21 @@ from operations import (
     uploads,
     web_actions,
     wording,
+    work_orders,
     workflow,
 )
 from operations.contracts import Actor, CommandFailed, ErrorCode
-from operations.models import Case, District, Division, Priority, Role, RoleGrant
+from operations.models import Case, District, Division, Priority, Role, RoleGrant, WorkOrder
 
 ADMIN_URLS = ("admin-",)
+REFERENCE_URLS = {"pii", "routing-words", "duties"}
+ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
+ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
+
+
+def environment(request):
+    """Which kind of server this is, for the footer (15 ต.ค. 2569: production holds real data)."""
+    return {"app_env": settings.APP_ENV}
 
 
 def navigation(request):
@@ -47,31 +58,49 @@ def navigation(request):
     scope = identity.staff_scope(user)
     match = getattr(request, "resolver_match", None)
     name = match.url_name if match else ""
-    if name and name.startswith(ADMIN_URLS):
+    # An admin on a settings page gets the grouped admin menu (15 ต.ค. 2569); staff opening the
+    # pages they share (คำที่ระบบจำ, ปิดข้อมูลก่อนส่ง AI, หน้าที่ของกอง) are on a reference page.
+    admin_menu = (
+        admin_nav.menu(scope, name) if scope.is_admin and name in admin_nav.URL_NAMES else None
+    )
+    if admin_menu or (name and name.startswith(ADMIN_URLS)):
         section = "admin"
+    elif name in REFERENCE_URLS:
+        section = "reference"
     elif name in {"account", "password_change"}:
         section = "account"
     elif name in {"reports", "report-cases"}:
         section = "reports"
     elif name and name.startswith("registry"):
         section = "registry"
+    elif name in {"orders", "order-new", "order-detail"}:
+        section = "queue"
     else:
         section = "queue"
     profile = getattr(user, "staff_profile", None)
+    # The division switch shows the queue open now, else the one chosen last (15 ต.ค. 2569: on
+    # ทุกกอง it kept showing the division opened before).
+    code = match.kwargs.get("code") if match else None
+    remembered = request.session.get("division", "")
+    all_queue = scope.is_admin and (
+        name in ALL_QUEUE_URLS or (not code and remembered == ALL_QUEUE)
+    )
+    current = "" if all_queue or remembered == ALL_QUEUE else remembered
     return {
         "nav": {
             "scope": scope,
             "divisions": queues.own_divisions(scope) if scope.has_any_access else [],
             "section": section,
             "url_name": name,
-            "current": (match.kwargs.get("code") if match else None)
-            or request.session.get("division", ""),
+            "current": "" if name in ALL_QUEUE_URLS else (code or current),
+            "all_queue": all_queue,
             "name": profile.display_name if profile else user.username,
             "is_intake": _intake_member(scope),
             "has_intake": identity.intake_division() is not None,
             # ตัวเลือกระบบ (ADR 0009): a non-admin who may approve LINE registrations.
             "registrations": not scope.is_admin and identity.may_decide_registrations(user),
             "registry": registry.may_open(user),
+            "admin": admin_menu,
         }
     }
 
@@ -106,32 +135,85 @@ def start(request):
 @login_required
 @require_safe
 def home(request):
-    """ภาพรวม, one page with รายงาน since 10 Oct 2569 (the user): the work of each division the
-    account works in (every division for admins), then the report figures, chart and breakdowns.
-    Every card, number and bar opens the cases behind it."""
+    """ภาพรวม (redesigned 15 ต.ค. 2569, the user: modern, easy, nothing twice): what needs
+    attention now, four headline figures, the daily trend, each division's work in one table,
+    and where the open cases sit. Every figure still opens the cases behind it."""
     scope = _scope(request)
     if not scope.has_any_access:
         return render(request, "operations/console.html", {"scope": scope, "cards": []})
-    divisions = queues.own_divisions(scope)
+    context = _report_context(request)
+    link = _report_link(context["chosen"], context["days"])
+    compared = {row["division"].code: row for row in context["table"]}
     now = timezone.now()
     cards = []
-    for division in divisions:
+    for division in queues.own_divisions(scope):
         tally = queues.counts(request.user, division, now, ["host", "mine"])
-        roles = sorted(Role(r).label for r in scope.division_roles.get(division.pk, ()))
+        row = compared.get(division.code, {})
         cards.append(
             {
                 "division": division,
-                "roles": roles,
+                "roles": sorted(Role(r).label for r in scope.division_roles.get(division.pk, ())),
                 "open": tally["host"],
                 "mine": tally["mine"],
                 "overdue": queues.overdue_count(request.user, division, now),
+                "escalated": row.get("escalated"),
+                "avg_ack": row.get("avg_ack"),
+                "report_url": row.get("report_url")
+                or f"?{urlencode({'division': division.code, 'days': context['days']})}",
+                "escalated_url": row.get("links", {}).get("escalated", ""),
             }
         )
-    return render(
-        request,
-        "operations/console.html",
-        {"scope": scope, "cards": cards, **_report_context(request)},
+    busy = [c for c in cards if c["open"] or c["mine"] or c["overdue"] or c["escalated"]]
+    open_count = sum(
+        card["open"]
+        for card in cards
+        if context["chosen"] is None or card["division"] == context["chosen"]
     )
+    queue_link = (
+        reverse("division-detail", args=[context["chosen"].code])
+        if context["chosen"]
+        else reverse("queue-all")
+    )
+    context.update(
+        scope=scope,
+        cards=cards,
+        busy_cards=sorted(busy, key=lambda c: (-c["overdue"], -c["open"])),
+        quiet_cards=[c for c in cards if c not in busy],
+        attention=_attention(request.user, scope, context["report"], link),
+        open_link=queue_link,
+        open_count=open_count,
+        new_link=link("new", "window"),
+        ended_link=link("ended", "window"),
+        today=now,
+    )
+    return render(request, "operations/console.html", context)
+
+
+def _attention(user, scope, report, link):
+    """Only what is waiting now, most urgent first; nothing at zero (no wall of zeros)."""
+    items = []
+
+    def add(label, value, href, alert=False):
+        if value:
+            items.append({"label": label, "value": value, "href": href, "alert": alert})
+
+    approver = scope.is_admin or identity.may_decide_registrations(user)
+    waiting = admin_nav.badges() if approver else {}
+    add("เรื่องเกินกรอบเวลา", report["overdue"], link("overdue"), alert=True)
+    add("เรื่องถูกยกระดับ", report["escalated"], link("escalated"), alert=True)
+    if approver:
+        add("ผู้ใช้ LINE OA รอรับรอง", waiting["registrations"], reverse("admin-registrations"), True)
+    submitted = next(
+        (n for value, _, n in report["by_status"] if value == Case.Status.SUBMITTED), 0
+    )
+    add("เรื่องใหม่รอคัดกรอง", submitted, link("status", Case.Status.SUBMITTED))
+    add("รอหน่วยงาน (เขต/ฝ่าย)ตอบ", report["district"], link("district"))
+    add("งานย่อยค้าง", report["children"], link("children"))
+    if scope.is_admin:
+        add("การแจ้งเตือนที่ส่งไม่สำเร็จ", waiting["line"], reverse("admin-line"), alert=True)
+        add("คำถามที่บอทตอบไม่ได้", waiting["questions"], reverse("admin-questions"))
+        add("Monitoring มีเรื่องที่ควรดู", waiting["monitoring"], reverse("admin-monitoring"), True)
+    return items
 
 
 def _queue(request, division, admin_all=False):
@@ -152,9 +234,10 @@ def _queue(request, division, admin_all=False):
         number = int(request.GET.get("page", "1"))
     except ValueError:
         number = 1
-    items, pager = queues.page(cases, tab, number)
-    if division:
-        request.session["division"] = division.code
+    orders = queues.order_queryset(request.user, tab, division, now, filters)
+    items, pager = queues.page(cases, tab, number, orders)
+    if division or admin_all:
+        request.session["division"] = division.code if division else ALL_QUEUE
     context = {
         "division": division,
         "admin_all": admin_all,
@@ -167,22 +250,47 @@ def _queue(request, division, admin_all=False):
         "now": now,
         "kinds": Case.Kind.choices,
         "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "รอคัดกรอง")],
-        "statuses": Case.Status.choices,
+        "statuses": [
+            *Case.Status.choices,
+            *(
+                (value, label)
+                for value, label in WorkOrder.Status.choices
+                if value not in Case.Status.values
+            ),
+        ],
         "districts": District.objects.order_by("name"),
         "sections": list(division.sections.filter(is_active=True)) if division else [],
+        "may_order": division.pk in scope.overseen if division else bool(scope.overseen),
     }
     context["registry_count"] = _registry_count(request.user, division, admin_all)
     if _is_htmx(request):
         return render(request, "operations/_queue_body.html", context)
     if division:
-        context["members"] = (
-            RoleGrant.objects.filter(
-                division=division, revoked_at__isnull=True, user__is_active=True
-            )
-            .select_related("user__staff_profile")
-            .order_by("user__username", "role")
-        )
+        context["members"] = _members(division)
     return render(request, "operations/division.html", context)
+
+
+def _members(division):
+    """One row per person (16 Oct 2569 Q3): Supervisor ของกอง or สมาชิกกอง, or each duty when
+    the organisation splits the division's work."""
+    grants = (
+        RoleGrant.objects.filter(division=division, revoked_at__isnull=True, user__is_active=True)
+        .select_related("user__staff_profile")
+        .order_by("user__username", "role")
+    )
+    people = {}
+    for grant in grants:
+        people.setdefault(grant.user, set()).add(grant.role)
+    split = identity.work_is_split()
+    rows = []
+    for user, roles in people.items():
+        if split:
+            label = ", ".join(sorted(Role(r).label for r in roles))
+        else:
+            label = Role(Role.SUPERVISOR if Role.SUPERVISOR in roles else Role.STAFF).label
+        profile = getattr(user, "staff_profile", None)
+        rows.append({"name": profile.display_name if profile else user.username, "label": label})
+    return rows
 
 
 def _registry_count(user, division, admin_all):
@@ -399,20 +507,7 @@ def case_action(request, number, action):
                 )
                 payload["evidence"] = [str(a.pk) for a in stored]
             key = request.POST.get("idempotency_key", "")
-            priority = payload.pop("priority", None) if action == "complete_triage" else None
-            if priority:
-                # One submit, two decisions: the level, then the end of triage. A key is unique
-                # per action, so the same key makes a double submit replay both.
-                services.perform_action(
-                    Actor.staff(request.user),
-                    case.pk,
-                    "set_priority",
-                    expected_revision=revision,
-                    idempotency_key=key,
-                    payload={"priority": priority, **payload},
-                )
-                revision += 1
-            services.perform_action(
+            services.perform_form_action(
                 Actor.staff(request.user),
                 case.pk,
                 action,
@@ -468,12 +563,27 @@ def case_search(request):
         raise Http404
     query = (request.GET.get("q") or "").strip().upper()[:20]
     rows = []
+    order = work_orders.visible(request.user).filter(number=query).first() if query else None
+    if order is not None:  # งานสั่ง numbers (T69-000001) open the order
+        return redirect("order-detail", number=order.number)
     if query:
         cases = queues.visible(request.user).filter(number__icontains=query)
         exact = cases.filter(number=query).first()
         if exact is not None:
             return redirect("case-detail", number=exact.number)
-        found = list(queues.prefetch(cases).order_by("-submitted_at")[:30])
+        orders = (
+            work_orders.visible(request.user)
+            .filter(number__icontains=query)
+            .select_related("division", "assignee__staff_profile", "issued_by__staff_profile")
+        )
+        found = sorted(
+            [
+                *queues.prefetch(cases).order_by("-submitted_at")[:30],
+                *orders.order_by("-created_at")[:30],
+            ],
+            key=lambda item: item.created_at if isinstance(item, WorkOrder) else item.submitted_at,
+            reverse=True,
+        )[:30]
         rows = queues.build_rows(found, timezone.now())
     return render(request, "operations/search.html", {"query": query, "rows": rows})
 
@@ -550,7 +660,8 @@ def _export(request, division, admin_all=False):
     cases = queues.visible(request.user).filter(
         queues.tab_condition(tab, division, request.user, now, admin_all)
     )
-    cases = queues.ordered(queues.apply_filters(queues.prefetch(cases), filters), tab)
+    orders = queues.order_queryset(request.user, tab, division, now, filters)
+    cases = queues.ordered(queues.apply_filters(queues.prefetch(cases), filters), tab, orders)
     text, count, truncated = reports.export_csv(cases, now)
     identity.audit(
         request.user,
@@ -636,7 +747,7 @@ def _dashboard(report, link):
                 link("escalated"),
                 "alert" if report["escalated"] else "",
             ),
-            ("รอเขตตอบ", report["district"], link("district"), ""),
+            ("รอหน่วยงาน (เขต/ฝ่าย)ตอบ", report["district"], link("district"), ""),
             ("งานย่อยค้าง", report["children"], link("children"), ""),
         ],
         "trend": charts.trend(report["trend"], link),

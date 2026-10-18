@@ -19,6 +19,8 @@ from operations.models import (
     Case,
     ChannelIdentity,
     District,
+    Division,
+    Employee,
     NotificationDelivery,
     RegistrationRequest,
     Requester,
@@ -57,7 +59,13 @@ class PeopleTestCase(LineTestCase):
         )
 
     def register(self, user, name="พนักงานจำลอง หนึ่ง"):
+        """As an employee when the check asks for one (15 ต.ค. 2569 Q12), else name and เขต."""
         self.say(self.event(user, "follow"))
+        if "พนักงาน กฟน." in buttons(self.sent[-1]):
+            return self.press(user, "พนักงาน กฟน.")
+        return self.as_other(user, name)
+
+    def as_other(self, user, name="พนักงานจำลอง หนึ่ง"):
         self.type(user, name)
         return self.press(user, District.objects.get(code="D01").name)
 
@@ -71,6 +79,9 @@ class RegistrationTests(PeopleTestCase):
         self.assertNotIn("SYN10001", str(event.data))
 
     def test_a_matching_employee_is_approved_by_the_system(self):
+        Employee.objects.filter(employee_id="SYN10001").update(
+            division=Division.objects.get(code="กคว.")
+        )
         options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")
         reply = self.register(ALICE)
         self.assertIn("รหัสพนักงาน", texts(reply))
@@ -92,19 +103,24 @@ class RegistrationTests(PeopleTestCase):
         self.type(ALICE, "SYN10001")
         reply = self.type(ALICE, "31/12/2500")
         self.assertIn("ส่งให้เจ้าหน้าที่ตรวจแทน", texts(reply))
+        self.assertIn("พิมพ์ชื่อ-นามสกุล", texts(reply))  # a person checks: the name and เขต
+        self.as_other(ALICE)
         registration = RegistrationRequest.objects.get(identity__external_id=ALICE)
         self.assertEqual((registration.status, registration.employee), ("pending", None))
 
     def test_another_way_is_always_offered(self):
         options.change(None, options.REGISTRATION_CHECK, "employee_review", "ทดสอบ")
         self.register(ALICE)
-        reply = self.press(ALICE, "ใช้วิธีอื่น")
-        self.assertIn("รอเจ้าหน้าที่", texts(reply))
+        self.assertIn("พิมพ์ชื่อ-นามสกุล", texts(self.press(ALICE, "ใช้วิธีอื่น")))
+        reply = self.as_other(ALICE)
+        self.assertIn("ระหว่างรอแจ้งปัญหา", texts(reply))
         self.assertEqual(RegistrationRequest.objects.get().status, "pending")
 
     def test_a_location_is_kept_with_the_registration(self):
         options.change(None, options.REGISTRATION_LOCATION, "required", "ทดสอบ")
-        reply = self.register(BOB, "ผู้ลงทะเบียน ทดสอบ")
+        self.register(BOB)
+        self.press(BOB, "ใช้วิธีอื่น")
+        reply = self.as_other(BOB, "ผู้ลงทะเบียน ทดสอบ")
         items = [i["action"] for i in reply[-1]["quickReply"]["items"]]
         self.assertEqual(items[0]["type"], "location")
         self.say(self.location(BOB, 13.75, 100.52))
@@ -119,7 +135,7 @@ class AnonymousTests(PeopleTestCase):
     def test_an_unregistered_user_reports_a_suggestion_with_a_location(self):
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
         self.say(self.event(ALICE, "follow"))
-        self.press(ALICE, "แจ้งแบบไม่ระบุตัวตน")
+        self.press(ALICE, "ไม่ระบุตัวตน")
         self.press(ALICE, "ข้อเสนอแนะ")
         self.type(ALICE, "อยากให้มีที่จอดรถรับของ (ทดสอบ)")
         self.press(ALICE, "ข้าม")
@@ -212,17 +228,20 @@ class StaffLineTests(PeopleTestCase):
         self.linked(user)
         case = self.submit({"kind": "problem", "topic": "transformer", "description": "เสียงดัง"})
         reply = self.type(ALICE, "งานของกอง")
-        self.assertIn("กองอุปกรณ์ฯ: รอทำ 1 เรื่อง", texts(reply))
+        self.assertIn("งานของกอง 1 รายการ", texts(reply))
+        self.assertIn(case.number, buttons(reply))
+        options.change(None, options.STAFF_LINE_ACTIONS, "view", "ดูอย่างเดียว")
         detail = self.press(ALICE, case.number, reply)
         self.assertIn("เสียงดัง", texts(detail))
-        self.assertNotIn("รับงาน", buttons(detail))  # viewing only by default
-        options.change(None, options.STAFF_LINE_ACTIONS, "act", "ทดสอบ")
+        self.assertNotIn("เริ่มคัดกรอง", buttons(detail))
+        options.change(None, options.STAFF_LINE_ACTIONS, "act", "ทำใน LINE")  # the default
         detail = self.press(ALICE, case.number, reply)
-        self.press(ALICE, "เริ่มคัดกรอง", detail)
+        self.press(ALICE, "เริ่มคัดกรอง", detail)  # nothing to ask: one tap
         self.assertEqual(Case.objects.get(pk=case.pk).status, "triage")
         detail = self.press(ALICE, case.number, reply)
-        self.press(ALICE, "ขอข้อมูลเพิ่มจากเขต", detail)
+        self.press(ALICE, "ขอข้อมูลเพิ่ม", detail)
         self.type(ALICE, "ขอรูปหม้อแปลง")
+        self.press(ALICE, "บันทึก")
         self.assertEqual(Case.objects.get(pk=case.pk).status, "awaiting_info")
 
     def test_a_requester_line_can_also_be_staff(self):
@@ -261,7 +280,7 @@ class StaffLineTests(PeopleTestCase):
         user = self.head()
         self.linked(user)
         menu = self.type(ALICE, "งานของกอง")
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ", menu)
+        self.press(ALICE, "แจ้งปัญหา", menu)
         self.press(ALICE, "ข้อเสนอแนะ")
         self.type(ALICE, "ควรเพิ่มชั้นวางของในคลัง (ทดสอบ)")
         self.press(ALICE, "ข้าม")

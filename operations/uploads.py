@@ -46,8 +46,8 @@ def _clean_name(name):
     return name.strip()[:200] or "ไฟล์แนบ"
 
 
-def store(user, case, files, note=""):
-    """Store checked files as pending scan; returns the new attachments."""
+def store(user, case, files, note="", work_order=None):
+    """Store checked files as pending scan, on a case or a งานสั่ง; returns the new attachments."""
     stored = []
     for upload in files:
         data = upload.read()
@@ -61,6 +61,7 @@ def store(user, case, files, note=""):
         attachment = Attachment.objects.create(
             uploaded_by=user,
             case=case,
+            work_order=work_order,
             declared_name=_clean_name(upload.name),
             content_type=content_type,
             size=len(data),
@@ -69,12 +70,13 @@ def store(user, case, files, note=""):
             scan_status=Attachment.ScanStatus.PENDING_SCAN,
             note=note[:200],
         )
+        target = case or work_order
         identity.audit(
             user,
-            "case.attachment_added",
-            case,
+            "case.attachment_added" if case else "order.attachment_added",
+            target,
             note,
-            number=case.number,
+            number=target.number,
             attachment=str(attachment.pk),
             content_type=content_type,
             size=len(data),

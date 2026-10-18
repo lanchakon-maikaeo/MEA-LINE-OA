@@ -49,7 +49,7 @@ TERMINAL = frozenset({S.CLOSED, S.REJECTED, S.CANCELLED})
 READY, REPAIR, OTHER, PENDING = "ready", "repair", "other", "pending"
 OUTCOMES = {READY: "พร้อมใช้", REPAIR: "ต้องซ่อม", OTHER: "ดำเนินการอื่นตามระเบียบ"}
 TARGET = {READY: inventory.AVAILABLE, REPAIR: inventory.AWAITING_REPAIR, OTHER: None}
-STOP_CATEGORIES = {"not_returned": "เขตไม่คืน", "lost": "สูญหาย", "other": "อื่น ๆ"}
+STOP_CATEGORIES = {"not_returned": "หน่วยงาน (เขต/ฝ่าย)ไม่คืน", "lost": "สูญหาย", "other": "อื่น ๆ"}
 
 _lines = fulfilment._lines
 _ledger = fulfilment._ledger
@@ -416,7 +416,7 @@ def _text_split(split):
 
 def _check_inspectable(ctx, unit):
     if unit.status == U.Status.SENT_BACK:
-        fail(ErrorCode.VALIDATION_ERROR, "หน่วยนี้ส่งกลับเขตแล้ว")
+        fail(ErrorCode.VALIDATION_ERROR, "หน่วยนี้ส่งกลับหน่วยงาน (เขต/ฝ่าย)แล้ว")
     if unit.open_discrepancy:
         fail(ErrorCode.VALIDATION_ERROR, "บันทึกผลส่วนต่างการรับคืนก่อนตรวจสภาพ (Q3)")
     if identity.separated(ctx) and unit.arrival.received_by_id == ctx.user.pk:
@@ -485,8 +485,6 @@ def inspect(ctx, case, payload, reason, target):
     pending = PENDING in split
     if _manual() and not pending and not reference:
         fail(ErrorCode.VALIDATION_ERROR, "บันทึกเลขเอกสารผลตรวจจากระบบทะเบียนเดิม (manual_reference)")
-    if OTHER in split and not reason:
-        fail(ErrorCode.VALIDATION_ERROR, "ผลดำเนินการอื่นตามระเบียบต้องมีเหตุผล")
     grant = _require_certification(ctx, case, unit.item, unit) if split.get(READY) else None
     inventory.lock_items([unit.item_id])
     text = _text_split(split)
@@ -608,13 +606,16 @@ def resolve_return_discrepancy(ctx, case, payload, reason, target):
                 case,
                 ctx.user,
                 ctx.label,
-                f"ส่งกลับเขต {case.number}",
+                f"ส่งกลับหน่วยงาน (เขต/ฝ่าย) {case.number}",
                 out=FakeSerial.Status.ISSUED,
             )
         unit.placed, unit.status = {}, U.Status.SENT_BACK
     else:
         if unit.line_id is None:
-            fail(ErrorCode.VALIDATION_ERROR, "รายการนี้ไม่อยู่ในคำขอ ให้ส่งกลับเขตหรือยื่นเรื่องคืนใหม่")
+            fail(
+                ErrorCode.VALIDATION_ERROR,
+                "รายการนี้ไม่อยู่ในคำขอ ให้ส่งกลับหน่วยงาน (เขต/ฝ่าย)หรือยื่นเรื่องคืนใหม่",
+            )
         if duplicate and kind == U.Resolution.ACCEPTED:
             fail(ErrorCode.VALIDATION_ERROR, "เลขซ้ำต้องปรับในทะเบียนก่อน (registry_adjusted)")
         if kind == U.Resolution.REGISTRY_ADJUSTED and duplicate:
@@ -678,7 +679,7 @@ def _still_conflicting(case, unit):
 def terminate_return(ctx, case, payload, reason, target):
     """ยุติส่วนค้างส่งคืน by the owner division's supervisor; lost needs a registry document."""
     if ctx.requester is not None:
-        fail(ErrorCode.FORBIDDEN, "เฉพาะผู้กำกับงานของกองเจ้าภาพยุติส่วนค้างส่งคืน (Q11)")
+        fail(ErrorCode.FORBIDDEN, "เฉพาะ Supervisor ของกองเจ้าภาพยุติส่วนค้างส่งคืน (Q11)")
     lines = _lines(case)
     raw = payload.get("lines")
     if not isinstance(raw, list) or not raw:
@@ -688,7 +689,7 @@ def terminate_return(ctx, case, payload, reason, target):
         ctx,
         case,
         Role.SUPERVISOR,
-        "เฉพาะผู้กำกับงานของกองเจ้าภาพยุติส่วนค้างส่งคืน (Q11)",
+        "เฉพาะ Supervisor ของกองเจ้าภาพยุติส่วนค้างส่งคืน (Q11)",
         [line for line, _ in chosen],
     )
     category = payload.get("category")

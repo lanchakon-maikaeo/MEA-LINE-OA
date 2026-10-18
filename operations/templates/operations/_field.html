@@ -46,7 +46,7 @@
     <textarea id="af-{{ f.name }}" name="{{ f.name }}" rows="3"{% if f.required %} required{% endif %}>{{ f.value|default:'' }}</textarea>
   {% elif f.kind == "select" %}
     <select id="af-{{ f.name }}" name="{{ f.name }}"{% if f.required %} required{% endif %}>
-      {% if f.required %}<option value="">— เลือก —</option>{% endif %}
+      {% if f.required %}<option value="">เลือก</option>{% endif %}
       {% for value, title in f.choices %}<option value="{{ value }}"{% if value|stringformat:"s" == f.value|stringformat:"s" %} selected{% endif %}>{{ title }}</option>{% endfor %}
     </select>
   {% elif f.kind == "file" %}

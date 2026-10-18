@@ -4,6 +4,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 
 from operations.models import (
+    DUTY_ROLES,
     AIConfigVersion,
     AICredential,
     AIProfile,
@@ -14,7 +15,7 @@ from operations.models import (
     Role,
 )
 
-REASON = forms.CharField(label="เหตุผล", max_length=500, widget=forms.TextInput)
+REASON = forms.CharField(label="เหตุผล", max_length=500, widget=forms.TextInput, required=False)
 
 
 class StaffCreateForm(forms.Form):
@@ -24,16 +25,24 @@ class StaffCreateForm(forms.Form):
 
 
 class GrantRoleForm(forms.Form):
-    # ผู้ช่วยเหลือระบบ is granted on the host only (ADR 0007).
-    role = forms.ChoiceField(
-        label="บทบาท", choices=[c for c in Role.choices if c[0] != Role.SYSTEM_SUPPORT]
-    )
+    role = forms.ChoiceField(label="บทบาท")
     division = forms.ModelChoiceField(
-        label="กอง (เว้นว่างสำหรับบทบาทระดับระบบ)",
+        label="กอง (เว้นว่างสำหรับบทบาทระดับระบบและ Supervisor ระดับฝ่าย)",
         queryset=Division.objects.filter(is_active=True),
         required=False,
     )
     reason = forms.CharField(label="เหตุผล", max_length=500, required=False)
+
+    def __init__(self, *args, **kwargs):
+        from operations import identity  # local: identity reads options at request time
+
+        super().__init__(*args, **kwargs)
+        # ผู้ช่วยเหลือระบบ is granted on the host only (ADR 0007); the old duties are offered
+        # only while the organisation splits a division's work (16 Oct 2569 Q3).
+        hidden = {Role.SYSTEM_SUPPORT} | (set() if identity.work_is_split() else DUTY_ROLES)
+        self.fields["role"].choices = [("", "เลือกบทบาท")] + [
+            c for c in Role.choices if c[0] not in hidden
+        ]
 
 
 class ReasonForm(forms.Form):
@@ -57,9 +66,11 @@ class DivisionCreateForm(forms.Form):
 class RequesterCreateForm(forms.Form):
     display_name = forms.CharField(label="ชื่อ-นามสกุลผู้แจ้ง", max_length=200)
     district = forms.ModelChoiceField(
-        label="เขต", queryset=District.objects.filter(is_active=True), to_field_name="code"
+        label="หน่วยงาน (เขต/ฝ่าย)",
+        queryset=District.objects.filter(is_active=True),
+        to_field_name="code",
     )
-    reason = forms.CharField(label="เหตุผล (เช่น ไม่ใช้ LINE)", max_length=500)
+    reason = forms.CharField(label="เหตุผล (เช่น ไม่ใช้ LINE)", max_length=500, required=False)
 
 
 class AICredentialForm(forms.Form):
@@ -71,7 +82,7 @@ class AICredentialForm(forms.Form):
         label="API key (กรอกใหม่เท่านั้น ระบบไม่แสดงค่าเดิม)",
         widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "off"}),
     )
-    reason = forms.CharField(label="เหตุผล", max_length=500)
+    reason = forms.CharField(label="เหตุผล", max_length=500, required=False)
 
 
 class AIProfileForm(forms.Form):
@@ -86,7 +97,7 @@ class AIProfileForm(forms.Form):
     )
     use_json_schema = forms.BooleanField(
         label=(
-            "ให้ผู้ให้บริการบังคับ JSON schema (response_format) — เอาออกถ้าผู้ให้บริการไม่บังคับ "
+            "ให้ผู้ให้บริการบังคับ JSON schema (response_format) เอาออกถ้าผู้ให้บริการไม่บังคับ "
             "(เช่น OpenTyphoon) แล้วระบบจะใส่ schema ใน prompt แทน"
         ),
         required=False,
@@ -153,7 +164,7 @@ DATETIME_LOCAL = ["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d"]
 class PolicyActivateForm(forms.Form):
     approved_by_name = forms.CharField(label="ผู้รับรองกติกา (เจ้าของกติกา)", max_length=200)
     approval_reference = forms.CharField(label="เลขเอกสารหรืออ้างอิงการรับรอง", max_length=200)
-    reason = forms.CharField(label="เหตุผล", max_length=500)
+    reason = forms.CharField(label="เหตุผล", max_length=500, required=False)
 
 
 class AuthorityGrantForm(forms.Form):
@@ -200,7 +211,7 @@ class AuthorityGrantForm(forms.Form):
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
     )
     approval_reference = forms.CharField(label="ผู้รับรองหรือเลขเอกสารอำนาจ", max_length=200)
-    reason = forms.CharField(label="เหตุผล", max_length=500)
+    reason = forms.CharField(label="เหตุผล", max_length=500, required=False)
 
 
 class InventoryAdjustForm(forms.Form):
@@ -228,7 +239,7 @@ class InventoryAdjustForm(forms.Form):
     remove_serials = forms.CharField(
         label="นำเลขเครื่องออก (คั่นด้วยเว้นวรรค)", required=False, max_length=2000
     )
-    reason = forms.CharField(label="เหตุผล/เลขเอกสารอ้างอิง", max_length=500)
+    reason = forms.CharField(label="เหตุผล/เลขเอกสารอ้างอิง", max_length=500, required=False)
 
 
 class SnapshotImportForm(forms.Form):

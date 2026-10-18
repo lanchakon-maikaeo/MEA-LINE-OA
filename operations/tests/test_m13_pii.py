@@ -223,12 +223,14 @@ class PageTests(TestCase):
         self.assertContains(page, "ปิดไป: ชื่อคน 1 · เบอร์โทร 1")
         self.assertFalse(MaskCount.objects.exists())  # trying is not use
         self.assertFalse(AuditEvent.objects.filter(action__startswith="pii.").exists())
-        self.assertContains(self.client.get("/account/"), f'href="{PAGE}"')
-        # A link anyone sees without opening a menu: the overview page and the admin menu.
+        # 15 ต.ค. 2569 Q5: the links are for admins (overview, account menu, admin menu); the
+        # page itself still works for any staff member.
+        self.assertNotContains(self.client.get("/account/"), f'href="{PAGE}"')
+        self.assertNotContains(self.client.get("/console/"), f'href="{PAGE}"')
+        self.client.force_login(self.admin)
         self.assertContains(
             self.client.get("/console/"), f'class="btn btn--secondary" href="{PAGE}"'
         )
-        self.client.force_login(self.admin)
         self.assertContains(self.client.get("/console/admin/users/"), f'<a href="{PAGE}">')
 
     def test_staff_add_words_and_only_an_admin_removes_one(self):

@@ -9,13 +9,17 @@ from django.utils import timezone
 from operations import (
     ai_chat,
     ai_eval,
+    ai_keywords,
     ai_routing,
     attachments,
     conversation,
+    monitor_judge,
+    monitoring,
     notifications,
     orchestration,
     policy,
     staff_email,
+    work_orders,
 )
 from operations.models import FormSubmission, OutboxEvent, PostbackToken, WebhookInbox
 
@@ -37,8 +41,19 @@ class Command(BaseCommand):
 
     def handle(self, *args, once, interval, **options):
         if not once:
+            from operations import line_menu_release
+
+            threading.Thread(
+                target=line_menu_release.run_loop, name="line-menu", daemon=True
+            ).start()
             threading.Thread(target=ai_eval.job_loop, name="ai-eval", daemon=True).start()
+        next_approval_check = 0
         while True:
+            if time.monotonic() >= next_approval_check:
+                from operations import identity
+
+                identity.approve_verified_registrations()
+                next_approval_check = time.monotonic() + 300
             handled = run_once()
             HEARTBEAT.touch()
             if once:
@@ -56,6 +71,8 @@ def handle_event(event):
         ai_chat.start_loading(inbox_id)  # only when the message went to AI
     elif event.event_type == orchestration.EVENT_ROUTING_AI:
         ai_routing.process(event.payload["ai_routing_run_id"])  # ADR 0013
+    elif event.event_type == orchestration.EVENT_KEYWORDS_AI:
+        ai_keywords.process(event.payload["ai_keyword_run_id"])  # 15 ต.ค. 2569 Q9
     else:
         notifications.plan_for_event(event)
         staff_email.plan_for_event(event)  # M10: การแจ้งเตือนเจ้าหน้าที่
@@ -96,6 +113,9 @@ def run_once(limit=20):
     ai_chat.expire_waiting()
     conversation.expire_drafts()
     policy.sweep_clocks()  # M06: acknowledgement reminders and escalation
+    work_orders.remind()  # 16 ต.ค. 2569 Q14: งานสั่ง near and past its due date
+    monitoring.maybe_run()  # 15 ต.ค. 2569 Q43: yesterday's numbers after the set hour
+    monitor_judge.process_queued()  # 16 ต.ค. 2569 Q12: the judge's test on synthetic answers
     attachments.process_pending()
     attachments.purge_rejected()
     PostbackToken.objects.filter(

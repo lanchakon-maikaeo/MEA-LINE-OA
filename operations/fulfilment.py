@@ -58,8 +58,8 @@ AUTHORITY_ACTIONS = (
     "cancel",
 )
 CANCEL_RESOLUTIONS = {
-    "keep": "เขตเก็บไว้ใช้",
-    "will_return": "เขตจะส่งคืน (ยื่นเรื่องคืนอ้างเรื่องนี้เอง)",
+    "keep": "หน่วยงาน (เขต/ฝ่าย)เก็บไว้ใช้",
+    "will_return": "หน่วยงาน (เขต/ฝ่าย)จะส่งคืน (ยื่นเรื่องคืนอ้างเรื่องนี้เอง)",
     "adjusted": "ปรับในระบบทะเบียนเดิมแล้ว",
 }
 
@@ -210,8 +210,6 @@ def approve(ctx, case, payload, reason, target):
         if quantity > line.requested_quantity:
             fail(ErrorCode.VALIDATION_ERROR, "อนุมัติเกินจำนวนที่ขอไม่ได้ ต้องการเพิ่มให้ยื่นเรื่องใหม่ (Q13)")
         line_reason = clean_text(row, "reason", False) or reason
-        if quantity < line.requested_quantity and not line_reason:
-            fail(ErrorCode.VALIDATION_ERROR, f"อนุมัติรายการ {line.line_no} น้อยกว่าที่ขอ ต้องมีเหตุผล")
         grant = _require_grant(ctx, A.WITHDRAWAL_APPROVAL, case, line, quantity)
         line.approved_quantity, line.approval_reason = quantity, line_reason
         line.approved_by, line.approved_at = ctx.user, now
@@ -713,8 +711,6 @@ def terminate_outstanding(ctx, case, payload, reason, target):
 def cancel_after_approval(ctx, case, payload, reason):
     """Q7: only approval authority covering every line; goods already out need a resolution;
     stock is never put back here (ADR 0003)."""
-    if not reason:
-        fail(ErrorCode.VALIDATION_ERROR, "A reason is required.")
     lines = _lines(case)
     for line in lines:
         _require_grant(ctx, A.WITHDRAWAL_APPROVAL, case, line)
@@ -744,8 +740,6 @@ def close(ctx, case, payload, reason, target):
         fail(ErrorCode.ACTION_NOT_ENABLED, "close for this kind arrives with M08/M09.")
     if ctx.requester is not None or not _member(ctx, case.owner_division_id):
         fail(ErrorCode.FORBIDDEN, "สมาชิกกองเจ้าภาพเป็นผู้ปิดเรื่อง")
-    if not reason:
-        fail(ErrorCode.VALIDATION_ERROR, "A reason is required.")
     reference = clean_text(payload, "reference", True, 100)
     lines = _lines(case)
     if any(line.outstanding > 0 for line in lines):

@@ -72,7 +72,8 @@ def _requester_or_intake(ctx, case, payload):
         if identity.separated(ctx) and resolved and resolved.actor_id == ctx.user.pk:
             fail(
                 ErrorCode.FORBIDDEN,
-                "ผู้บันทึกผลการแก้ปัญหาบันทึกคำตอบแทนเขตของเรื่องเดียวกันไม่ได้ ให้เจ้าหน้าที่อีกคนในกองบันทึก",
+                "ผู้บันทึกผลการแก้ปัญหาบันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)ของเรื่องเดียวกันไม่ได้ "
+                "ให้เจ้าหน้าที่อีกคนในกองบันทึก",
             )
     channel = payload.get("channel")
     if channel not in STAFF_CHANNELS:
@@ -114,8 +115,6 @@ def close(ctx, case, payload, reason, target):
     """Q3: no answer for 7 days after the resolution; the owner division closes with a reason."""
     if ctx.requester is not None or not _member(ctx, case.owner_division_id):
         fail(ErrorCode.FORBIDDEN, "สมาชิกกองเจ้าภาพเป็นผู้ปิดเรื่อง")
-    if not reason:
-        fail(ErrorCode.VALIDATION_ERROR, "A reason is required.")
     asked = case.decisions.filter(action="resolve").order_by("-id").first()
     cutoff = timezone.now() - timedelta(days=settings.RECEIPT_NO_RESPONSE_DAYS)
     if asked is None or asked.created_at > cutoff:

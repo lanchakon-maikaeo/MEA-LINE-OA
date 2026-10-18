@@ -280,9 +280,6 @@ class ProblemTests(ProblemTestCase):
 
     def test_disputes_go_back_and_a_second_one_is_flagged(self):
         case = self.resolved()
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.req1, case, "dispute_resolution"
-        )
         result = self.act(self.req1, case, "dispute_resolution", {"reason": "ไฟยังดับ"})
         self.assertEqual(result.status, S.IN_PROGRESS)
         case.refresh_from_db()

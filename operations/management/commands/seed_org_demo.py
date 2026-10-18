@@ -31,7 +31,7 @@ ACCOUNTS = {
     "kcw": "กคว.",
     "kae": "กองอุปกรณ์ฯ",
     "ktf": "กตฟ.",
-    "kkm": "กองเครื่องมือฯ",
+    "kkm": "กคอ.",
     "sok": "ศอค.",
     "bt": "บท.",
     "faoj": "ฝอจ.",
@@ -98,6 +98,8 @@ CASES = [
 
 
 def _account(username, code, password):
+    if code == "กองอุปกรณ์ฯ" and Division.objects.filter(code="กอจ.").exists():
+        code = "กอจ."
     division = Division.objects.get(code=code)
     user, created = get_user_model().objects.get_or_create(username=username)
     if created or password:
@@ -121,16 +123,33 @@ class Command(DemoCommand):
 
     @transaction.atomic
     def handle_demo(self, *args, **options_):
+        # The synthetic intake desk has a unique constraint; release it before load_org marks
+        # the real intake division active.
+        Division.objects.filter(is_intake=True).update(is_intake=False)
         divisions, sections, _ = load_org.load(
             json.loads(load_org.DEFAULT.read_text(encoding="utf-8"))
         )
         self.stdout.write(f"Real units: {divisions} divisions, {sections} sections changed.")
-        version = policy.import_policy(policy.load_document(REAL_POLICY))
+        policy_document = policy.load_document(REAL_POLICY)
+        # The real local demo may already have the canonical short division code. The
+        # checked-in policy fixture stays compatible with test databases that still use
+        # the legacy code, so translate its owners only for this imported demo policy.
+        canonical_goc = Division.objects.filter(code="กอจ.").exists()
+        if canonical_goc:
+            changed_owner = False
+            for rule in policy_document.get("responsibility", []):
+                if rule.get("owner") == "กองอุปกรณ์ฯ":
+                    rule["owner"] = "กอจ."
+                    changed_owner = True
+            if changed_owner:
+                # The policy is immutable by code; this canonical-code revision needs
+                # its own version instead of colliding with an earlier FAJO-2 import.
+                policy_document["code"] = f"{policy_document['code']}+GOC"
+        version = policy.import_policy(policy_document)
         if version.status != PolicyVersion.Status.ACTIVE:
             policy.activate_policy(
                 None, version, "ผู้ใช้ (สาธิตบนเครื่อง)", "LOCAL-DEMO", "ใช้โครงสร้างจริงบนเครื่อง"
             )
-        Division.objects.filter(is_intake=True).update(is_intake=False)
         closed = Division.objects.filter(code__startswith="SIM-", is_active=True).update(
             is_active=False
         )
@@ -150,9 +169,12 @@ class Command(DemoCommand):
         for key, value in chosen.items():
             if options.get(key) != value:
                 options.change(None, key, value, "ค่าที่ผู้ใช้เลือก 10 ต.ค. 2569 (สาธิตบนเครื่อง)")
+        employee_csv = EMPLOYEES.read_text(encoding="utf-8")
+        if canonical_goc:
+            employee_csv = employee_csv.replace(",กองอุปกรณ์ฯ,", ",กอจ.,")
         employees.import_csv(
             None,
-            EMPLOYEES.read_text(encoding="utf-8"),
+            employee_csv,
             "วันเกิด (วว/ดด/ปปปป)",
             synthetic=True,
         )
@@ -162,7 +184,11 @@ class Command(DemoCommand):
             approve_as=identity.system_user(),
         )
         password = os.environ.get("DEMO_STAFF_PASSWORD", "")
-        users = [_account(name, code, password) for name, code in ACCOUNTS.items()]
+        accounts = {
+            name: ("กอจ." if canonical_goc and code == "กองอุปกรณ์ฯ" else code)
+            for name, code in ACCOUNTS.items()
+        }
+        users = [_account(name, code, password) for name, code in accounts.items()]
         for name, employee_id in EMPLOYEE_IDS.items():
             StaffProfile.objects.filter(user__username=name).update(employee_id=employee_id)
         suspended = (

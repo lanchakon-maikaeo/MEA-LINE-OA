@@ -86,18 +86,28 @@ class Role(models.TextChoices):
     # ADR 0007: one person (the system's designer) acts for every division, unbound by the
     # separation of duties; granted only on the host (manage.py system_support).
     SYSTEM_SUPPORT = "system_support", "ผู้ช่วยเหลือระบบ"
-    # Division roles. A role is a duty, not approval authority (AuthorityGrant is M06).
-    STAFF = "staff", "เจ้าหน้าที่กอง"
+    # 16 Oct 2569 (Q5): oversees every division (ผอ. ฝอจ. at first); assigns work anywhere.
+    DEPARTMENT_SUPERVISOR = "department_supervisor", "Supervisor ระดับฝ่าย"
+    # Division roles. With ตัวเลือก "หน้าที่ในกอง" = member (16 Oct 2569 Q3) every member does
+    # every step and holds the division's authority; the duties below matter only when the
+    # organisation splits them again.
+    STAFF = "staff", "สมาชิกกอง"
     APPROVER = "approver", "ผู้อนุมัติ"
     ISSUER = "issuer", "ผู้จ่าย"
     RECEIVER = "receiver", "ผู้รับคืน"
     INSPECTOR = "inspector", "ผู้ตรวจสภาพ"
     RESOLVER = "resolver", "ผู้แก้ปัญหา"
-    SUPERVISOR = "supervisor", "ผู้กำกับงานในกอง"
+    SUPERVISOR = "supervisor", "Supervisor ของกอง"
 
 
-GLOBAL_ROLES = frozenset({Role.ADMIN, Role.DEVELOPER_ADMIN, Role.SYSTEM_SUPPORT})
+GLOBAL_ROLES = frozenset(
+    {Role.ADMIN, Role.DEVELOPER_ADMIN, Role.SYSTEM_SUPPORT, Role.DEPARTMENT_SUPERVISOR}
+)
 DIVISION_ROLES = frozenset(set(Role) - GLOBAL_ROLES)
+# What a member does when the division's work is not split (16 Oct 2569 Q3).
+MEMBER_ROLES = frozenset(DIVISION_ROLES - {Role.SUPERVISOR})
+# The duties a split division hands out one by one; merged into สมาชิกกอง on 16 Oct 2569.
+DUTY_ROLES = frozenset(MEMBER_ROLES - {Role.STAFF})
 
 
 class StaffProfile(models.Model):
@@ -112,6 +122,7 @@ class StaffProfile(models.Model):
         Section, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     must_change_password = models.BooleanField(default=False)
+    notify_registrations = models.BooleanField(default=False)
     # Sessions authenticated before this instant are rejected (forced logout).
     sessions_valid_after = models.DateTimeField(null=True, blank=True)
 
@@ -205,6 +216,7 @@ class Requester(models.Model):
     # ผู้แจ้งภายใน (10 Oct 2569 Q8): a staff member reporting a problem or suggestion in LINE in the
     # name of their own division; problems and suggestions only.
     is_internal = models.BooleanField(default=False)
+    is_external = models.BooleanField(default=False)
     division = models.ForeignKey(
         "Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -294,6 +306,12 @@ class RegistrationRequest(models.Model):
     )
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    # How the employee proved who they are (15 ต.ค. 2569 Q24): shown to approvers and audited.
+    verified_by = models.CharField(
+        max_length=16,
+        blank=True,
+        choices=[("otp", "รหัส OTP ทางอีเมล"), ("email", "พิมพ์อีเมลตรงทะเบียน"), ("proof", "ข้อมูลยืนยัน")],
+    )
 
     class Meta:
         ordering = ["created_at"]
@@ -350,6 +368,14 @@ class EquipmentType(models.Model):
         TRANSFORMER = "transformer", "หม้อแปลง"
         OTHER = "other", "อุปกรณ์อื่น"
 
+    class LineGroup(models.TextChoices):
+        METER = "meter", "มิเตอร์"
+        CT = "ct", "CT"
+        VT = "vt", "VT"
+        OTHER = "other", "อุปกรณ์อื่น"
+
+    line_group = models.CharField(max_length=16, blank=True, choices=LineGroup.choices)
+
     code = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=200)
     category = models.CharField(max_length=16, choices=Category.choices)
@@ -393,7 +419,7 @@ class Case(models.Model):
         AWAITING_APPROVAL = "awaiting_approval", "รออนุมัติ"
         AWAITING_EXECUTION = "awaiting_execution", "รอดำเนินการ"
         IN_PROGRESS = "in_progress", "กำลังดำเนินการ"
-        AWAITING_CONFIRMATION = "awaiting_confirmation", "รอเขตยืนยัน"
+        AWAITING_CONFIRMATION = "awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย)ยืนยัน"
         AWAITING_INFO = "awaiting_info", "รอข้อมูลเพิ่ม"
         ON_HOLD = "on_hold", "พักเรื่อง"
         CLOSED = "closed", "ปิดเรื่อง"
@@ -406,6 +432,9 @@ class Case(models.Model):
         OTHER = "other", "อุปกรณ์อื่น"
         USAGE = "usage", "การใช้ไฟฟ้า"
         SUGGESTION = "suggestion", "ข้อเสนอแนะ"
+        # เมนู LINE (15 ต.ค. 2569 Q18, Q20): a question to a division, and a work system's problem.
+        INQUIRY = "inquiry", "สอบถาม/ติดตาม"
+        SYSTEM = "system", "ระบบงาน"
 
     class Channel(models.TextChoices):
         LINE = "line", "LINE"
@@ -462,6 +491,11 @@ class Case(models.Model):
     submitted_at = models.DateTimeField()
     updated_at = models.DateTimeField()
     ended_at = models.DateTimeField(null=True, blank=True)
+    # ตัวอย่าง (15 ต.ค. 2569 Q33): kept from the demo for staff to look at; in the queues with a
+    # tag, never in reports, deadlines or messages (purge_demo_data sets it).
+    is_example = models.BooleanField(default=False)
+    # The LINE menu choice the case came from, e.g. "ระบบ SMG, ระบบ AMR · การจัดทำบิล" (Q20).
+    menu_label = models.CharField(max_length=120, blank=True)
 
     class Meta:
         ordering = ["-submitted_at"]
@@ -788,6 +822,7 @@ class Conversation(models.Model):
     )
     prompt = models.CharField(max_length=32, blank=True)
     prompt_data = models.JSONField(default=dict, blank=True)
+    reply_choices = models.JSONField(default=dict, blank=True)
     # Case changes after this instant are shown as "มีอัปเดตใหม่" at the next turn (M04).
     updates_seen_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -866,6 +901,9 @@ class Attachment(models.Model):
     registry_record = models.ForeignKey(
         "RegistryRecord", null=True, blank=True, on_delete=models.PROTECT, related_name="evidence"
     )
+    work_order = models.ForeignKey(
+        "WorkOrder", null=True, blank=True, on_delete=models.PROTECT, related_name="attachments"
+    )
     declared_name = models.CharField(max_length=200, blank=True)
     content_type = models.CharField(max_length=64, blank=True)
     size = models.PositiveIntegerField(null=True, blank=True)
@@ -887,11 +925,10 @@ class Attachment(models.Model):
                 name="attachment_one_source",
                 condition=(
                     Q(identity__isnull=False, inbox__isnull=False, uploaded_by__isnull=True)
-                    | Q(
-                        identity__isnull=True,
-                        inbox__isnull=True,
-                        uploaded_by__isnull=False,
-                        case__isnull=False,
+                    # Staff uploads belong to a case or a งานสั่ง (16 Oct 2569 Q14).
+                    | (
+                        Q(identity__isnull=True, inbox__isnull=True, uploaded_by__isnull=False)
+                        & (Q(case__isnull=False) | Q(work_order__isnull=False))
                     )
                 ),
             )
@@ -936,6 +973,9 @@ class NotificationDelivery(models.Model):
     )
     registration = models.ForeignKey(
         RegistrationRequest, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    work_order = models.ForeignKey(
+        "WorkOrder", null=True, blank=True, on_delete=models.PROTECT, related_name="deliveries"
     )
     text = models.TextField()
     # The domain event that caused it: replanning the same event never notifies twice.
@@ -1041,10 +1081,11 @@ class AIConfigVersion(models.Model):
     """Primary model plus ordered fallbacks; one version per AI task is active at a time."""
 
     class Task(models.TextChoices):
-        EXTRACT = "extract", "สกัดร่างจากแชต (M05)"
-        TRIAGE = "triage", "เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (M06)"
-        ANSWER = "answer", "ตอบแชตผู้แจ้งจากคลังคำตอบ (ADR 0012)"
-        ROUTING = "routing", "เสนอกองจากหน้าที่ของกอง (ADR 0013)"
+        EXTRACT = "extract", "สกัดร่างจากแชต"
+        TRIAGE = "triage", "เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง"
+        ANSWER = "answer", "ตอบแชตผู้ใช้ LINE OA จากคลังคำตอบ"
+        ROUTING = "routing", "เสนอกองจากหน้าที่ของกอง"
+        KEYWORDS = "keywords", "ยกคำสำคัญให้ระบบจำ"
 
     class Status(models.TextChoices):
         CANDIDATE = "candidate", "รอทดสอบ/ประเมิน"
@@ -1287,6 +1328,12 @@ class AuthorityGrant(models.Model):
     # The approver or document behind the grant (G02 replaces synthetic grants).
     approval_reference = models.CharField(max_length=200)
     is_synthetic = models.BooleanField(default=False)
+    # 16 Oct 2569 Q4: authority that comes with membership of this division. It counts only
+    # while the person is still a member and the division's work is not split (ตัวเลือก
+    # "หน้าที่ในกอง"); empty for authority an admin granted on its own.
+    member_of = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     # Empty for synthetic demo seeds and ผู้ช่วยเหลือระบบ's own grants (made on the host, ADR 0007);
     # an admin never grants authority to themselves.
     granted_by = models.ForeignKey(
@@ -1820,7 +1867,7 @@ class StockMovement(AppendOnlyModel):
         ADJUST = "adjust", "ปรับยอด"
         RECEIVE = "receive", "รับของคืนรอตรวจ"
         INSPECT = "inspect", "ผลตรวจสภาพ"
-        RETURN_OUT = "return_out", "ส่งกลับเขต"
+        RETURN_OUT = "return_out", "ส่งกลับหน่วยงาน (เขต/ฝ่าย)"
 
     item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
     kind = models.CharField(max_length=16, choices=Kind.choices)
@@ -1905,18 +1952,18 @@ class ReturnUnit(models.Model):
         AWAITING = "awaiting", "รอตรวจ"
         FINAL = "final", "ตรวจแล้ว"
         CONFLICT = "conflict", "ผลตรวจขัดกัน"
-        SENT_BACK = "sent_back", "ส่งกลับเขต"
+        SENT_BACK = "sent_back", "ส่งกลับหน่วยงาน (เขต/ฝ่าย)"
 
     class Discrepancy(models.TextChoices):
         OUTSIDE_REQUEST = "outside_request", "ไม่อยู่ในคำขอ"
         EXCESS = "excess", "จำนวนเกินคำขอ"
         DUPLICATE_STORE = "duplicate_store", "เลขซ้ำกับของในคลัง"
         DUPLICATE_CASE = "duplicate_case", "เลขซ้ำกับของที่รับไว้แล้ว"
-        OTHER_DISTRICT = "other_district", "จ่ายให้เขตอื่น"
+        OTHER_DISTRICT = "other_district", "จ่ายให้หน่วยงาน (เขต/ฝ่าย)อื่น"
 
     class Resolution(models.TextChoices):
         ACCEPTED = "accepted", "นับเป็นของคืนของเรื่องนี้"
-        SENT_BACK = "sent_back", "ไม่รับ ส่งกลับเขต"
+        SENT_BACK = "sent_back", "ไม่รับ ส่งกลับหน่วยงาน (เขต/ฝ่าย)"
         REGISTRY_ADJUSTED = "registry_adjusted", "ปรับในทะเบียนแล้ว"
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="return_units")
@@ -2063,8 +2110,8 @@ class DeadlinePause(models.Model):
     information, or a pause a supervisor approved while the case is on hold."""
 
     class Kind(models.TextChoices):
-        AWAITING_INFO = "awaiting_info", "รอข้อมูลจากเขต"
-        SUPERVISOR = "supervisor", "ผู้กำกับงานอนุมัติพัก"
+        AWAITING_INFO = "awaiting_info", "รอข้อมูลจากหน่วยงาน (เขต/ฝ่าย)"
+        SUPERVISOR = "supervisor", "Supervisor อนุมัติพัก"
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="deadline_pauses")
     kind = models.CharField(max_length=16, choices=Kind.choices)
@@ -2129,13 +2176,25 @@ class StaffLinkCode(models.Model):
 
 class Employee(models.Model):
     """ทะเบียนพนักงาน for identity checks (10 Oct 2569 Q1, Q3), imported by an admin. The
-    proof value (e.g. a birth date) is kept only as a keyed hash, never in plain text."""
+    proof value (e.g. a birth date) is kept only as a keyed hash, never in plain text.
+
+    15 ต.ค. 2569 (Q10, Q16): the organisation's roster columns. `district` is the ฝ่าย as a
+    organisational unit (Q13); the e-mail is kept twice and never in plain text: a hash to compare
+    what someone types, and sealed with the server's PII key to send a one-time code. Phone
+    columns are never read."""
 
     employee_id = models.CharField(max_length=32, unique=True)
     name = models.CharField(max_length=200)
     district = models.ForeignKey(District, null=True, blank=True, on_delete=models.PROTECT)
     division = models.ForeignKey(Division, null=True, blank=True, on_delete=models.PROTECT)
     position = models.CharField(max_length=200, blank=True)
+    line_of_work = models.CharField(max_length=200, blank=True)  # สายงาน
+    department = models.CharField(max_length=200, blank=True)  # ฝ่าย as the file says it
+    division_name = models.CharField(max_length=200, blank=True)  # กอง
+    section_name = models.CharField(max_length=200, blank=True)  # แผนก
+    work_group = models.CharField(max_length=200, blank=True)  # กลุ่มงาน
+    email_hash = models.CharField(max_length=64, blank=True)
+    email_sealed = models.TextField(blank=True)
     check_label = models.CharField(max_length=100, blank=True)
     check_hash = models.CharField(max_length=128, blank=True)
     is_active = models.BooleanField(default=True)
@@ -2147,6 +2206,145 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} {self.name}"
+
+
+class AIKeywordRun(models.Model):
+    """AI ยกคำสำคัญ (15 ต.ค. 2569 Q9, Q34): up to three words from an unplaced case's masked
+    text, offered in ฝอจ.'s handoff form; the AI never chooses the division."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอ"
+        DONE = "done", "ได้คำ"
+        NONE = "none", "ไม่มีคำที่ใช้ได้"
+        FAILED = "failed", "AI ใช้ไม่ได้"
+        SKIPPED = "skipped", "ไม่ต้องถามแล้ว"
+
+    case = models.OneToOneField("Case", on_delete=models.PROTECT, related_name="+")
+    config_version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="+")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    keywords = models.JSONField(default=list, blank=True)
+    attempts = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+
+class LineMenuItem(models.Model):
+    """เมนู LINE (15 ต.ค. 2569 Q17–Q20, Q32): a tile or a bottom-bar button of the rich menu, or
+    a choice inside a tile. Admins change labels, destinations and order with a reason; the
+    rich menu on LINE changes only when an admin publishes it."""
+
+    class Place(models.TextChoices):
+        TILE = "tile", "ปุ่มใหญ่ของเมนู"
+        BAR = "bar", "แถบล่างของเมนู"
+        CHOICE = "choice", "ปุ่มย่อยในหัวข้อ"
+
+    class Tab(models.TextChoices):
+        # 16 Oct 2569 Q9, Q13, Q15: everyone sees แจ้งเรื่อง; staff who linked LINE also get
+        # งานของกอง, and Supervisors สั่งงาน, as tabs of their own rich menu.
+        REPORT = "report", "แจ้งเรื่อง"
+        GUEST = "guest", "ผู้แจ้งทั่วไป"
+        WORK = "work", "งานของกอง"
+        ORDER = "order", "สั่งงาน"
+
+    class Action(models.TextChoices):
+        REGISTER = "register", "ลงทะเบียนหรือยืนยันตัวตน"
+        TOPIC = "topic", "เปิดปุ่มย่อยของหัวข้อนี้"
+        TRACK = "track", "ติดตาม: แสดงเรื่องของผู้ใช้ ถ้าไม่มีให้ถามกองโดยตรง"
+        RETURN = "return", "เริ่มคำขอคืนส่งถึงกองนี้"
+        PROBLEM = "problem", "เริ่มแจ้งปัญหาส่งถึงกองนี้"
+        GENERAL = "general", "แจ้งปัญหาหรือข้อเสนอแนะ (กติกาเลือกกอง)"
+        NEW = "new", "ส่งเรื่องใหม่ (ผู้ใช้เลือกชนิดเอง)"
+        MINE = "mine", "เรื่องของฉัน"
+        FIND = "find", "ติดตามด้วยเลขเรื่อง"
+        WORK_NEW = "work_new", "งานใหม่ของกอง"
+        WORK_MINE = "work_mine", "เรื่องที่มอบให้ฉัน"
+        WORK_ORDERS = "work_orders", "งานสั่งที่ได้รับ"
+        WORK_DUE = "work_due", "งานใกล้หรือเกินกำหนด"
+        WORK_FIND = "work_find", "ค้นหาด้วยเลขเรื่องหรือเลขงาน"
+        OPEN_WEB = "open_web", "เปิดเว็บ"
+        ORDER_NEW = "order_new", "สั่งงานใหม่"
+        ORDER_ISSUED = "order_issued", "งานที่ฉันสั่งและความคืบหน้า"
+        ORDER_ASSIGN = "order_assign", "มอบเรื่องที่มีอยู่ให้คนในกอง"
+        ORDER_LATE = "order_late", "งานเกินกำหนดทุกกองที่ดูแล"
+        ORDER_TODAY = "order_today", "สรุปวันนี้"
+
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.CASCADE, related_name="choices"
+    )
+    place = models.CharField(max_length=8, choices=Place.choices)
+    tab = models.CharField(max_length=8, choices=Tab.choices, default=Tab.REPORT)
+    position = models.PositiveSmallIntegerField(default=0)
+    label = models.CharField(max_length=20)  # LINE allows 20 characters on a button
+    note = models.CharField(max_length=120, blank=True)  # the tile's second line, or a hint
+    action = models.CharField(max_length=16, choices=Action.choices)
+    division = models.ForeignKey(
+        "Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    kind = models.CharField(max_length=16, blank=True)  # which own cases "track" lists
+    topic = models.CharField(max_length=16, blank=True)  # the problem topic a choice starts
+    is_active = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tab", "place", "position", "pk"]
+
+
+class MonitoringDay(models.Model):
+    """One day of Monitoring (15 ต.ค. 2569 Q40–Q47): counts and rates only, never text or a
+    person; computed by operations/monitoring.py."""
+
+    day = models.DateField(unique=True)
+    metrics = models.JSONField(default=dict)
+    alerts = models.JSONField(default=list)
+    computed_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-day"]
+
+
+class RosterUpload(models.Model):
+    """A roster file between its preview and the import (15 ต.ค. 2569 Q27, Q28): the rows sealed
+    with the server's PII key, removed by the import or after an hour."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    filename = models.CharField(max_length=200)
+    rows = models.PositiveIntegerField(default=0)
+    sealed = models.TextField()
+
+
+class RosterSetting(models.Model):
+    """What the last roster import chose, offered again next time (Q27, Q28): which file column
+    is which field, and which หน่วยงาน (เขต/ฝ่าย)/หน่วยงาน each ฝ่าย is."""
+
+    columns = models.JSONField(default=dict)  # field → header as the file wrote it
+    units = models.JSONField(default=dict)  # ฝ่าย key → district code, or "" for none
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class EmailCode(models.Model):
+    """A one-time code sent to an employee's roster e-mail during LINE registration (Q24–Q26).
+    Only a keyed hash of the code is kept."""
+
+    identity = models.ForeignKey("ChannelIdentity", on_delete=models.PROTECT, related_name="+")
+    employee = models.ForeignKey(Employee, on_delete=models.PROTECT, related_name="+")
+    code_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    tries = models.PositiveSmallIntegerField(default=0)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 
 class SystemOption(models.Model):
@@ -2489,7 +2687,7 @@ class RoutingWord(models.Model):
     not route, with the division that took it, so the next such case with the word goes there."""
 
     class Source(models.TextChoices):
-        HANDOFF = "handoff", "ส่วนกลางเลือกตอนโอน"
+        HANDOFF = "handoff", "ฝอจ. เลือกตอนส่งต่อ"
         AI = "ai", "คำที่ AI ยกมา กองรับเรื่องแล้ว"
 
     word = models.CharField(max_length=40)
@@ -2624,3 +2822,109 @@ class AIRoutingRun(models.Model):
         ordering = ["-created_at"]
         # One ask per case: the case sits with ส่วนกลาง across many decisions (revisions).
         constraints = [models.UniqueConstraint(fields=["case"], name="routing_run_one_per_case")]
+
+
+# --- งานสั่ง (16 Oct 2569 Q6, Q14) ----------------------------------------------------------------
+
+
+class WorkOrder(models.Model):
+    """Work a Supervisor gives a division or one of its members: not a case, so it never counts
+    in the district reports. มอบหมาย → รับทราบ → กำลังทำ → เสร็จ; the assignee may send it back
+    with a reason, and a Supervisor closes or cancels it."""
+
+    class Status(models.TextChoices):
+        ASSIGNED = "assigned", "มอบหมายแล้ว"
+        ACKNOWLEDGED = "acknowledged", "รับทราบแล้ว"
+        IN_PROGRESS = "in_progress", "กำลังทำ"
+        DONE = "done", "ทำเสร็จแล้ว"
+        SENT_BACK = "sent_back", "ส่งกลับ"
+        CLOSED = "closed", "ปิดงาน"
+        CANCELLED = "cancelled", "ยกเลิก"
+
+    class Channel(models.TextChoices):
+        LINE = "line", "LINE"
+        WEB = "web", "เว็บ"
+
+    number = models.CharField(max_length=16, unique=True)
+    title = models.CharField(max_length=200)
+    detail = models.TextField(blank=True)
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="work_orders")
+    # Empty: anyone in the division does it (its Supervisor may name a person later).
+    assignee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    # Blank only for historical orders whose original channel was not recorded.
+    channel = models.CharField(
+        max_length=8, choices=Channel.choices, blank=True, default="", db_default=""
+    )
+    due_on = models.DateField(null=True, blank=True)
+    is_urgent = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ASSIGNED)
+    result = models.TextField(blank=True)  # what was done, written when finishing
+    reason = models.TextField(blank=True)  # the latest send-back or cancel reason
+    acknowledged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)  # closed or cancelled
+    # One reminder near the due date and one after it (Q14).
+    reminded_soon = models.BooleanField(default=False)
+    reminded_late = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["division", "status"], name="work_order_queue")]
+
+    OPEN = (Status.ASSIGNED, Status.ACKNOWLEDGED, Status.IN_PROGRESS)
+    ENDED = (Status.CLOSED, Status.CANCELLED)
+
+    def __str__(self):
+        return self.number
+
+
+class JudgeCalibration(models.Model):
+    """การทดสอบตัวตัดสินคำตอบแชต (16 Oct 2569 Q12): Evidently's judges on a frozen set of
+    synthetic good and bad answers, with one model. Only a model that scored at least 90% on
+    both faithfulness and relevance may judge real answers (monitor_judge)."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "รอคิว"
+        RUNNING = "running", "กำลังทดสอบ"
+        DONE = "done", "เสร็จ"
+        FAILED = "failed", "ทดสอบไม่สำเร็จ"
+
+    version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="+")
+    profile = models.ForeignKey(AIProfile, on_delete=models.PROTECT, related_name="+")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    faithful = models.FloatField(null=True, blank=True)  # share judged as labelled
+    relevant = models.FloatField(null=True, blank=True)
+    passed = models.BooleanField(default=False)
+    details = models.JSONField(default=list, blank=True)  # labels and verdicts, no text
+    error = models.CharField(max_length=200, blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class LineMenuRelease(models.Model):
+    """Durable publication progress so a failed LINE call resumes without losing menu IDs."""
+
+    digest = models.CharField(max_length=64, unique=True)
+    menus = models.JSONField(default=dict)
+    uploaded = models.JSONField(default=list)
+    previous = models.JSONField(default=dict)
+    audience_hash = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=16, default="pending")
+    error = models.CharField(max_length=200, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)

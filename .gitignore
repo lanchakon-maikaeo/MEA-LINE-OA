@@ -12,6 +12,7 @@ private-media/
 Docs/
 !Docs/
 Docs/*
+!Docs/line-agent-mcp.md
 !Docs/m05-security-review.md
 !Docs/ai-security-v3-independent-authoring.md
 !Docs/release/
@@ -37,3 +38,7 @@ archive/
 *.jpeg
 *.png
 !operations/line_assets/*.png
+
+!Docs/adr/0019-automatic-line-menus-and-confirmed-chat-orders.md
+
+!operations/line_assets/*.jpg

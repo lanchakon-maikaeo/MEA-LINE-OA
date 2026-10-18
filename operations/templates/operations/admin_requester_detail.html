@@ -1,19 +1,19 @@
 {% extends "operations/admin_base.html" %}
 {% load ui %}
-{% block title %}{{ requester.display_name }} — ผู้แจ้ง — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}{{ requester.display_name }} · ผู้ใช้ LINE OA · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
-    <span class="eyebrow">แอดมิน · ผู้แจ้ง</span>
+    <span class="eyebrow">แอดมิน · ผู้ใช้ LINE OA</span>
     <h1>{{ requester.display_name }}</h1>
-    <p class="lede">รหัสผู้แจ้ง {{ requester.pk }} · {{ row.where }} · <span class="tag{% if requester.status != 'active' %} tag--muted{% endif %}">{{ requester.get_status_display }}</span></p>
+    <p class="lede">รหัสผู้ใช้ {{ requester.pk }} · {{ row.where }} · <span class="tag{% if requester.status != 'active' %} tag--muted{% endif %}">{{ requester.get_status_display }}</span></p>
   </div>
-  <div class="page-head__actions"><a class="btn btn--outline" href="{% url 'admin-registrations' %}">กลับไปหน้ารับรองผู้แจ้ง</a></div>
+  <div class="page-head__actions"><a class="btn btn--outline" href="{% url 'admin-registrations' %}">กลับไปหน้าผู้ใช้ LINE OA</a></div>
 </div>
 
 <dl class="facts">
   <div><dt>ตัวตน</dt><dd>{{ row.proof }}</dd></div>
-  <div><dt>ตำแหน่งงาน</dt><dd>{{ row.position|default:"—" }}</dd></div>
+  <div><dt>ตำแหน่ง · ฝ่าย</dt><dd>{{ row.position|default:"—" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</dd></div>
   <div><dt>บทบาทในระบบ</dt><dd>{{ row.role }}</dd></div>
   <div><dt>ช่องทาง</dt><dd>{{ row.channel }}</dd></div>
   <div><dt>รับรองโดย</dt><dd>{{ requester.approved_by.staff_profile.display_name|default:requester.approved_by.username }} · {{ requester.approved_at|thai_datetime }}</dd></div>
@@ -22,10 +22,19 @@
 
 <section class="section" aria-labelledby="rq-messages">
   <div class="section-head"><h2 id="rq-messages">ข้อความที่พิมพ์มา</h2></div>
-  <p>{{ message_count }} ข้อความที่พิมพ์ในฐานะผู้แจ้งรายนี้ ไม่รวมข้อความตอนแจ้งแบบไม่ระบุตัวตน</p>
+  <p>{{ message_count }} ข้อความที่พิมพ์ในฐานะผู้ใช้รายนี้ ไม่รวมข้อความตอนแจ้งแบบไม่ระบุตัวตน</p>
   {% if message_count %}<p><a class="btn btn--sm" href="{% url 'admin-requester-messages' requester.pk %}">เปิดดูข้อความ</a></p>{% endif %}
   <p class="muted">ทุกครั้งที่เปิดดู ระบบบันทึกชื่อแอดมินและเวลาไว้ในประวัติด้านล่าง</p>
 </section>
+
+{% if managed and row.state == "verified" %}
+<section class="section" aria-labelledby="rq-role">
+  <details><summary id="rq-role">จัดการสิทธิ์เพิ่มเติม</summary><p>ระบบให้สิทธิ์สมาชิกกองตามทะเบียนอัตโนมัติแล้ว ถ้าไม่มีข้อมูลกองจะใช้งานในฐานะเจ้าหน้าที่ที่เบิก/คืนได้</p>
+  <form method="post" action="{% url 'admin-requester-action' requester.pk 'grant-role' %}">
+    {% csrf_token %}{{ grant_form.as_p }}<button type="submit">เพิ่มสิทธิ์</button>
+  </form></details>
+</section>
+{% endif %}
 
 <section class="section" aria-labelledby="rq-line">
   <div class="section-head"><h2 id="rq-line">บัญชี LINE</h2></div>
@@ -51,9 +60,9 @@
   {% endif %}
   {% if candidates %}
   <h3>พนักงานในทะเบียนที่ชื่อตรงกัน</h3>
-  <p class="muted">ตรวจกับตัวจริงก่อน เช่น โทรถามผู้แจ้งหรือถามหัวหน้าเขต แล้วกดยืนยันพร้อมเหตุผล ถ้าผู้แจ้งเลือกเขตผิดให้แก้เขตด้านล่าง ถ้าทะเบียนผิดให้แก้ไฟล์แล้วนำเข้าใหม่ ระบบจะผูกให้เอง</p>
+  <p class="muted">ตรวจกับตัวจริงก่อน เช่น โทรถามผู้ใช้หรือถามหัวหน้าหน่วยงาน (เขต/ฝ่าย) แล้วกดยืนยัน ถ้าผู้ใช้เลือกหน่วยงาน (เขต/ฝ่าย)ผิดให้แก้หน่วยงาน (เขต/ฝ่าย)ด้านล่าง ถ้าทะเบียนผิดให้แก้ไฟล์แล้วนำเข้าใหม่ ระบบจะผูกให้เอง</p>
   <div class="table-wrap"><table>
-    <thead><tr><th scope="col">รหัสพนักงาน</th><th scope="col">ชื่อในทะเบียน</th><th scope="col">เขตหรือกอง</th><th scope="col">ตำแหน่ง</th><th scope="col">หมายเหตุ</th><th scope="col">ยืนยัน</th></tr></thead>
+    <thead><tr><th scope="col">รหัสพนักงาน</th><th scope="col">ชื่อในทะเบียน</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)หรือกอง</th><th scope="col">ตำแหน่ง</th><th scope="col">หมายเหตุ</th><th scope="col">ยืนยัน</th></tr></thead>
     <tbody>
     {% for c in candidates %}
       <tr>
@@ -62,69 +71,69 @@
         <td>{{ c.place|default:"—" }}</td>
         <td>{{ c.employee.position|default:"—" }}</td>
         <td>{{ c.note|default:"—" }}</td>
-        <td><form class="inline" method="post" action="{% url 'admin-requester-action' requester.pk 'link-employee' %}">{% csrf_token %}<input type="hidden" name="employee_id" value="{{ c.employee.employee_id }}"><label>เหตุผล <input name="reason" maxlength="500" required></label><button type="submit">ยืนยันว่าเป็นคนนี้</button></form></td>
+        <td><form class="inline" method="post" action="{% url 'admin-requester-action' requester.pk 'link-employee' %}">{% csrf_token %}<input type="hidden" name="employee_id" value="{{ c.employee.employee_id }}"><button type="submit">รับรองพนักงานคนนี้</button></form></td>
       </tr>
     {% endfor %}
     </tbody>
   </table></div>
   {% endif %}
-  <div class="form-grid">
+  <details><summary>แก้ข้อมูลพนักงานหรือหน่วยงาน</summary><div class="form-grid">
     <form method="post" action="{% url 'admin-requester-action' requester.pk 'link-employee' %}">
       <fieldset><legend>{% if requester.employee %}เปลี่ยนเป็นรหัสพนักงานอื่น{% else %}ผูกด้วยรหัสพนักงาน{% endif %}</legend>{% csrf_token %}
-        <p class="helptext">ใช้เมื่อชื่อในทะเบียนสะกดต่างจากที่ผู้แจ้งพิมพ์ ระบบจึงหาไม่เจอ</p>
+        <p class="helptext">ใช้เมื่อชื่อในทะเบียนสะกดต่างจากที่ผู้ใช้พิมพ์ ระบบจึงหาไม่เจอ</p>
         <p><label for="rq-emp">รหัสพนักงาน</label> <input id="rq-emp" name="employee_id" maxlength="32" required></p>
-        <p><label for="rq-emp-reason">เหตุผล</label> <input id="rq-emp-reason" name="reason" maxlength="500" required></p>
+        <p><label for="rq-emp-reason">เหตุผล (ไม่บังคับ)</label> <input id="rq-emp-reason" name="reason" maxlength="500"></p>
         <button type="submit">บันทึก</button></fieldset>
     </form>
     {% if requester.employee %}
     <form method="post" action="{% url 'admin-requester-action' requester.pk 'unlink-employee' %}">
       <fieldset><legend>ยกเลิกการผูก</legend>{% csrf_token %}
         <p class="helptext">ใช้เมื่อผูกผิดคน ระบบจะไม่ผูกจากชื่อให้อีก</p>
-        <p><label for="rq-unlink-reason">เหตุผล</label> <input id="rq-unlink-reason" name="reason" maxlength="500" required></p>
+        <p><label for="rq-unlink-reason">เหตุผล (ไม่บังคับ)</label> <input id="rq-unlink-reason" name="reason" maxlength="500"></p>
         <button type="submit">ยกเลิกการผูก</button></fieldset>
     </form>
     {% endif %}
     {% if not requester.is_internal %}
     <form method="post" action="{% url 'admin-requester-action' requester.pk 'district' %}">
-      <fieldset><legend>แก้เขตของผู้แจ้ง</legend>{% csrf_token %}
-        <p class="helptext">ใช้เมื่อผู้แจ้งเลือกเขตผิดตอนลงทะเบียน เรื่องเดิมยังอยู่เขตเดิม เรื่องใหม่ใช้เขตนี้ แล้วระบบตรวจชื่อกับทะเบียนอีกครั้ง</p>
-        <p><label for="rq-district">เขต</label> <select id="rq-district" name="district" required>{% for d in districts %}<option value="{{ d.code }}"{% if d.pk == requester.district_id %} selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></p>
-        <p><label for="rq-district-reason">เหตุผล</label> <input id="rq-district-reason" name="reason" maxlength="500" required></p>
-        <button type="submit">แก้เขต</button></fieldset>
+      <fieldset><legend>แก้หน่วยงาน (เขต/ฝ่าย)ของผู้ใช้</legend>{% csrf_token %}
+        <p class="helptext">ใช้เมื่อผู้ใช้เลือกหน่วยงาน (เขต/ฝ่าย)ผิดตอนลงทะเบียน เรื่องเดิมยังอยู่หน่วยงาน (เขต/ฝ่าย)เดิม เรื่องใหม่ใช้หน่วยงาน (เขต/ฝ่าย)นี้ แล้วระบบตรวจชื่อกับทะเบียนอีกครั้ง</p>
+        <p><label for="rq-district">หน่วยงาน (เขต/ฝ่าย)</label> <select id="rq-district" name="district" required>{% for d in districts %}<option value="{{ d.code }}"{% if d.pk == requester.district_id %} selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></p>
+        <p><label for="rq-district-reason">เหตุผล (ไม่บังคับ)</label> <input id="rq-district-reason" name="reason" maxlength="500"></p>
+        <button type="submit">แก้หน่วยงาน (เขต/ฝ่าย)</button></fieldset>
     </form>
     {% endif %}
-  </div>
+  </div></details>
 </section>
 
 <section class="section" aria-labelledby="rq-manage">
   <div class="section-head"><h2 id="rq-manage">ระงับหรือถอนการรับรอง</h2></div>
-  <p class="muted">ไม่ลบข้อมูลใด ๆ เรื่องและข้อความเดิมอยู่ครบ ระบบไม่ส่งข้อความแจ้งผู้แจ้ง บอทจะบอกเองเมื่อเขาทักมาครั้งถัดไป</p>
+  <p class="muted">ไม่ลบข้อมูลใด ๆ เรื่องและข้อความเดิมอยู่ครบ ระบบไม่ส่งข้อความแจ้งผู้ใช้ ระบบจะแจ้งสถานะเมื่อผู้ใช้ติดต่อผ่านแชทครั้งถัดไป</p>
   <div class="form-grid">
     {% if requester.status == "active" %}
     <form method="post" action="{% url 'admin-requester-action' requester.pk 'suspend' %}">
       <fieldset><legend>ระงับชั่วคราว</legend>{% csrf_token %}
         <p class="helptext">LINE ยังผูกอยู่ แต่ยื่นหรือติดตามเรื่องไม่ได้จนกว่าแอดมินจะเปิดใช้อีกครั้ง</p>
-        <p><label for="rq-suspend-reason">เหตุผล</label> <input id="rq-suspend-reason" name="reason" maxlength="500" required></p>
+        <p><label for="rq-suspend-reason">เหตุผล (ไม่บังคับ)</label> <input id="rq-suspend-reason" name="reason" maxlength="500"></p>
         <button type="submit">ระงับ</button></fieldset>
     </form>
     {% else %}
     <form method="post" action="{% url 'admin-requester-action' requester.pk 'activate' %}">
       <fieldset><legend>เปิดใช้อีกครั้ง</legend>{% csrf_token %}
-        <p><label for="rq-activate-reason">เหตุผล</label> <input id="rq-activate-reason" name="reason" maxlength="500" required></p>
+        <p><label for="rq-activate-reason">เหตุผล (ไม่บังคับ)</label> <input id="rq-activate-reason" name="reason" maxlength="500"></p>
         <button type="submit">เปิดใช้</button></fieldset>
     </form>
     {% endif %}
     <form method="post" action="{% url 'admin-requester-action' requester.pk 'revoke' %}">
       <fieldset><legend>ถอนการรับรอง</legend>{% csrf_token %}
-        <p class="helptext">ถาวร ถ้าจะใช้ LINE อีกต้องลงทะเบียนใหม่และได้รหัสผู้แจ้งใหม่ ถ้า LINE นี้เชื่อมกับบัญชีเจ้าหน้าที่ การเชื่อมนั้นยังอยู่</p>
-        <p><label for="rq-revoke-reason">เหตุผล</label> <input id="rq-revoke-reason" name="reason" maxlength="500" required></p>
+        <p class="helptext">ถาวร ถ้าจะใช้ LINE อีกต้องลงทะเบียนใหม่และได้รหัสผู้ใช้ใหม่ ถ้า LINE นี้เชื่อมกับบัญชีเจ้าหน้าที่ การเชื่อมนั้นยังอยู่</p>
+        <p><label for="rq-revoke-reason">เหตุผล (ไม่บังคับ)</label> <input id="rq-revoke-reason" name="reason" maxlength="500"></p>
         <label class="choice"><input type="checkbox" name="confirm" value="1" required> <span>เข้าใจว่าถอนแล้วกลับคืนไม่ได้</span></label>
         <button type="submit">ถอนการรับรอง</button></fieldset>
     </form>
   </div>
 </section>
 {% else %}
-<div class="notice notice--info mb-24" role="status"><div class="notice__body">ผู้แจ้งรายนี้ถอนการรับรองแล้ว จัดการเพิ่มไม่ได้ ถ้าจะใช้ LINE อีกต้องลงทะเบียนใหม่</div></div>
+<div class="notice notice--info mb-24" role="status"><div class="notice__body">ผู้ใช้รายนี้ถอนการรับรองแล้ว จัดการเพิ่มไม่ได้ ถ้าจะใช้ LINE อีกต้องลงทะเบียนใหม่</div></div>
 {% endif %}
 
 <section class="section" aria-labelledby="rq-history">

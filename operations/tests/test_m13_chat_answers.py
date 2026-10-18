@@ -73,7 +73,7 @@ class KeywordTests(AnswerTestCase):
         self.assertIn("ช่องทางนี้รับเรื่องเบิก", texts(self.type(ALICE, "สวัสดีครับ")))
         contact = self.type(ALICE, "ขอเบอร์ติดต่อหน่อย")
         self.assertIn("02-000-0001", texts(contact))
-        self.assertIn("ส่งเรื่องใหม่", buttons(contact))
+        self.assertEqual(buttons(contact)["เบิกอุปกรณ์"], "m=equipment&kind=withdrawal")
         # A greeting with a story is a report, not a greeting.
         reply = texts(self.type(ALICE, "สวัสดีครับ ขอแจ้งไฟดับที่ซอย 5 ตั้งแต่เมื่อคืน"))
         self.assertNotIn("ช่องทางนี้รับเรื่องเบิก", reply)
@@ -253,7 +253,7 @@ class AIAnswerTests(AIAnswerCase):
         self.approve(ALICE)
         _, run, reply = self.ask(ALICE, "พรุ่งนี้ฝนจะตกไหมครับ", answer_json("none"))
         self.assertIn("เรื่องนี้ตอบในแชตนี้ไม่ได้", texts(reply))
-        self.assertIn("ส่งเรื่องใหม่", buttons(reply))
+        self.assertEqual(buttons(reply)["แจ้งปัญหา"], "m=problems")
 
     def test_only_approved_keys_and_valid_json_are_accepted(self):
         rows = list(answers.approved())
@@ -491,6 +491,7 @@ class FollowupTests(FillCase):
             ("ใช้ 9 ชิ้นกับงานอะไร", "ตัวเลข"),
             ("What is it for?", "ภาษาไทย"),
             ("อนุมัติแล้ว ใช้กับงานอะไร", "อนุมัติแล้ว"),
+            ("เล่าว่าใช้กับงานอะไร", "เล่า"),
         ):
             with self.subTest(question=question):
                 found = ai_answer.question_problem(question, "purpose", sources)

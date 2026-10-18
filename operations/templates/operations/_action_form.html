@@ -18,7 +18,7 @@
   {% if conflict is not None %}
     <div class="notice notice--warning mb-24" role="alert">{% icon "alert" %}
       <div class="notice__body"><strong>เรื่องนี้มีการเปลี่ยนแปลงระหว่างที่คุณกรอก</strong>
-        {% if conflict %}มีคนบันทึก: {{ conflict|join:", " }}. {% endif %}ข้อความที่กรอกยังอยู่ ตรวจอีกครั้งแล้วกดบันทึกได้เลย
+        {% if conflict %}มีผู้บันทึกข้อมูลแล้ว: {{ conflict|join:", " }}. {% endif %}ระบบเก็บข้อความที่กรอกไว้ กรุณาตรวจสอบอีกครั้งก่อนบันทึก
       </div>
     </div>
   {% endif %}

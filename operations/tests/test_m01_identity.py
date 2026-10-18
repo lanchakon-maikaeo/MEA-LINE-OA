@@ -202,9 +202,9 @@ class AdminGuardTests(IdentityTestCase):
         with self.assertRaises(ValidationError):
             identity.set_staff_active(self.root, self.root, False, "ไม่ใช้แล้ว")
 
-    def test_reason_is_required_and_audit_records_actor_without_secrets(self):
-        with self.assertRaises(ValidationError):
-            identity.revoke_sessions(self.admin, self.meter, "  ")
+    def test_reason_is_optional_and_audit_records_actor_without_secrets(self):
+        identity.revoke_sessions(self.admin, self.meter, "  ")
+        self.assertEqual(AuditEvent.objects.get(action="staff.sessions_revoked").reason, "")
         password = identity.reset_password(self.admin, self.meter, "ลืมรหัส")
         event = AuditEvent.objects.get(action="staff.password_reset")
         self.assertEqual((event.actor, event.reason), (self.admin, "ลืมรหัส"))
@@ -246,7 +246,7 @@ class AdminGuardTests(IdentityTestCase):
         ):
             with self.subTest(url=url):
                 self.assertEqual(client.get(url).status_code, 200)
-        self.assertContains(self.client_for(self.meter).get("/account/"), "เจ้าหน้าที่กอง")
+        self.assertContains(self.client_for(self.meter).get("/account/"), "สมาชิกกอง")
 
     def test_admin_actions_require_csrf_token(self):
         client = Client(enforce_csrf_checks=True)
@@ -321,8 +321,8 @@ class RegistrationTests(IdentityTestCase):
         requester = identity.approve_registration(self.admin, registration)
         self.assertEqual(identity.resolve_requester(LINE, "U-a"), requester)
         self.assertEqual(requester.district.code, "D01")
-        with self.assertRaises(ValidationError):
-            self.register("U-a")
+        self.assertTrue(requester.is_external)
+        self.assertEqual(self.register("U-a").status, "pending")
 
     def test_requesters_in_the_same_district_see_only_their_own(self):
         first = identity.approve_registration(self.admin, self.register("U-a", "ก"))
@@ -344,9 +344,7 @@ class RegistrationTests(IdentityTestCase):
         client = self.client_for(self.meter)
         response = client.post(f"/console/admin/registrations/{registration.pk}/approve/")
         self.assertEqual(response.status_code, 403)
-        with self.assertRaises(ValidationError):
-            identity.reject_registration(self.admin, registration, "")
-        identity.reject_registration(self.admin, registration, "ไม่ใช่พนักงานเขต")
+        identity.reject_registration(self.admin, registration, "")
         with self.assertRaises(ValidationError):
             identity.approve_registration(self.admin, registration)
         self.assertIsNone(identity.resolve_requester(LINE, "U-a"))

@@ -1,29 +1,82 @@
 {% extends "operations/admin_base.html" %}
-{% block title %}ทะเบียนพนักงาน — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}ทะเบียนพนักงาน · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
     <h1>ทะเบียนพนักงาน</h1>
-    <p class="lede">ใช้ยืนยันตัวตนตอนลงทะเบียนทาง LINE และตอนเจ้าหน้าที่เชื่อม LINE ระบบเก็บข้อมูลยืนยันแบบเข้ารหัสทางเดียว ไม่มีใครเปิดดูค่าจริงได้</p>
+    <p class="lede">ใช้ยืนยันตัวตนตอนลงทะเบียนทาง LINE และแสดงตำแหน่งกับฝ่ายของผู้ใช้ LINE OA ไฟล์ไม่ผ่าน AI อีเมลเก็บแบบเข้ารหัส และระบบไม่อ่านคอลัมน์เบอร์โทร</p>
   </div>
 </div>
 <dl class="facts">
   <div><dt>ใช้งานอยู่</dt><dd class="num">{{ active }} คน{% if synthetic %} <span class="muted">(มีข้อมูลจำลอง)</span>{% endif %}</dd></div>
+  <div><dt>มีอีเมล</dt><dd class="num">{{ with_email }} คน</dd></div>
   <div><dt>ปิดแล้ว</dt><dd class="num">{{ inactive }} คน</dd></div>
-  <div><dt>ข้อมูลที่ถามเพื่อยืนยัน</dt><dd>{{ label }}</dd></div>
   <div><dt>นำเข้าล่าสุด</dt><dd class="num">{% if latest %}{{ latest.imported_at|date:"Y-m-d H:i" }}{% else %}ยังไม่มี{% endif %}</dd></div>
-  <div><dt>การยืนยันตัวตนตอนลงทะเบียน</dt><dd>{{ check }} <a href="{% url 'admin-options' %}">เปลี่ยนในตัวเลือกระบบ</a></dd></div>
+  <div><dt>กุญแจเข้ารหัสอีเมล</dt><dd>{% if sealing %}พร้อม{% else %}<span class="tag tag--alert">ยังไม่ตั้ง</span> นำเข้าไม่ได้จนกว่าเซิร์ฟเวอร์จะมี PII_SECRET_KEY{% endif %}</dd></div>
+  <div><dt>ส่งรหัส OTP ทางอีเมล</dt><dd>{% if mail %}พร้อม{% else %}ยังไม่ได้ตั้งบัญชีส่งอีเมล ผู้ใช้จะยืนยันได้แบบพิมพ์อีเมลอย่างเดียว{% endif %}</dd></div>
+  <div><dt>การยืนยันตัวตนตอนลงทะเบียน</dt><dd>{{ check }} · {{ methods }} <a href="{% url 'admin-options' %}">เปลี่ยนในตัวเลือกระบบ</a></dd></div>
 </dl>
+
+{% if preview %}
+<section class="section" aria-labelledby="emp-preview">
+  <div class="section-head"><h2 id="emp-preview">ตรวจก่อนนำเข้า</h2><span class="muted">{{ upload.filename }} · {{ upload.rows }} แถว</span></div>
+  <form method="post">
+    {% csrf_token %}<input type="hidden" name="upload" value="{{ upload.pk }}">
+    <h3 class="mt-18">คอลัมน์ในไฟล์</h3>
+    <p class="muted">ระบบเดาจากหัวคอลัมน์ แก้ได้ คอลัมน์ที่ไม่ได้เลือก (เช่น เบอร์ภายใน เบอร์สวัสดิการ) ระบบไม่อ่านเลย การจับคู่นี้จะจำไว้ใช้ครั้งหน้า</p>
+    <div class="table-wrap"><table class="table--cards">
+      <thead><tr><th scope="col">ข้อมูล</th><th scope="col">คอลัมน์ในไฟล์</th></tr></thead>
+      <tbody>
+      {% for field, label, chosen in preview.fields %}
+        <tr><td>{{ label }}</td><td class="cell--wide"><label class="visually-hidden" for="col-{{ field }}">{{ label }}</label><select id="col-{{ field }}" name="col_{{ field }}"><option value="">ไม่ใช้</option>{% for h in preview.headers %}{% if h %}<option value="{{ h }}"{% if h == chosen %} selected{% endif %}>{{ h }}</option>{% endif %}{% endfor %}</select></td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+
+    {% if preview.missing %}<div class="notice notice--error mb-24" role="alert"><div class="notice__body">ต้องเลือกคอลัมน์ {{ preview.missing|join:" และ " }} ก่อนนำเข้า</div></div>{% endif %}
+    <dl class="facts">
+      <div><dt>นำเข้าได้</dt><dd class="num">{{ preview.usable }} คน</dd></div>
+      <div><dt>ขาดรหัสหรือชื่อ</dt><dd class="num">{{ preview.incomplete|length }} แถว{% if preview.incomplete %} <span class="muted">(แถว {{ preview.incomplete|slice:":10"|join:", " }}{% if preview.incomplete|length > 10 %} …{% endif %})</span>{% endif %}</dd></div>
+      <div><dt>รหัสซ้ำ</dt><dd class="num">{{ preview.duplicates|length }}{% if preview.duplicates %} <span class="muted">(ใช้แถวแรก)</span>{% endif %}</dd></div>
+      <div><dt>อีเมลรูปแบบไม่ถูก</dt><dd class="num">{{ preview.bad_email }} <span class="muted">(นำเข้าโดยไม่มีอีเมล)</span></dd></div>
+      <div><dt>ในระบบตอนนี้</dt><dd class="num">{{ preview.existing }} คน</dd></div>
+    </dl>
+
+    {% if preview.units %}
+    <h3 class="mt-18">จับคู่ฝ่ายกับหน่วยงาน (เขต/ฝ่าย)หรือหน่วยงาน</h3>
+    <p class="muted">ฝ่ายของพนักงานใช้เป็นหน่วยงาน (เขต/ฝ่าย)ของผู้ใช้ LINE OA ฝ่ายที่ยังไม่ตรงกับหน่วยงาน (เขต/ฝ่าย)ไหน ให้เลือกหน่วยงาน (เขต/ฝ่าย)ที่มีอยู่ เพิ่มเป็นหน่วยงานใหม่ หรือไม่ระบุ (ผู้ใช้จะเลือกหน่วยงาน (เขต/ฝ่าย)เองตอนลงทะเบียน)</p>
+    <div class="table-wrap"><table class="table--cards">
+      <thead><tr><th scope="col">ฝ่ายในไฟล์</th><th scope="col" class="num">คน</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)/หน่วยงาน</th></tr></thead>
+      <tbody>
+      {% for u in preview.units %}
+        <tr>
+          <td>{{ u.text }}</td>
+          <td class="num cell--end" data-label="คน">{{ u.count }}</td>
+          <td class="cell--wide">{% if u.match %}{{ u.match.name }} <span class="muted">(ตรงกันแล้ว)</span>{% else %}<input type="hidden" name="unit_key" value="{{ u.key }}"><label class="visually-hidden" for="unit-{{ forloop.counter }}">หน่วยงาน (เขต/ฝ่าย)ของ {{ u.text }}</label><select id="unit-{{ forloop.counter }}" name="unit_choice"><option value="{{ new_unit }}"{% if u.choice == new_unit %} selected{% endif %}>เพิ่มเป็นหน่วยงานใหม่</option><option value=""{% if u.choice == "" %} selected{% endif %}>ไม่ระบุ</option>{% for d in districts %}<option value="{{ d.code }}"{% if u.choice == d.code %} selected{% endif %}>{{ d.name }}</option>{% endfor %}</select>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% endif %}
+
+    <label class="choice"><input type="checkbox" name="deactivate_missing" value="1"> <span>ปิดคนที่ไม่อยู่ในไฟล์นี้ (ใช้เมื่อไฟล์เป็นรายชื่อทั้งหมด) ผู้ใช้ LINE ที่ผูกกับคนนั้นยังใช้งานได้ แต่ขึ้นป้าย "ไม่อยู่ในทะเบียนล่าสุด"</span></label>
+    <div class="field"><label for="emp-reason">เหตุผล (ไม่บังคับ)</label><input id="emp-reason" name="reason" maxlength="500" placeholder="เช่น ทะเบียนพนักงานประจำเดือนตุลาคม"></div>
+    <div class="cluster">
+      <button class="btn btn--secondary btn--sm" type="submit" name="action" value="preview">ตรวจอีกครั้ง</button>
+      <button class="btn btn--sm" type="submit" name="action" value="import"{% if preview.missing %} disabled{% endif %}>นำเข้า {{ preview.usable }} คน</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
 <section class="section" aria-labelledby="emp-import">
-  <div class="section-head"><h2 id="emp-import">นำเข้าไฟล์ CSV</h2></div>
-  <p class="muted">หัวคอลัมน์: <code>employee_id,name,district_code,division_code,position,check</code> โดย <code>check</code> คือข้อมูลที่ใช้ยืนยัน เช่น วันเกิด รหัสเขตเป็น D01–D18 รหัสกองตามระบบ (เว้นว่างได้) ไฟล์ UTF-8 ไม่เกิน 5 MB</p>
+  <div class="section-head"><h2 id="emp-import">{% if preview %}เลือกไฟล์อื่น{% else %}นำเข้าทะเบียนพนักงาน{% endif %}</h2></div>
+  <p class="muted">ไฟล์ .xlsx หรือ .csv ไม่เกิน 10 MB แผ่นงานแรก หัวคอลัมน์เช่น รหัสพนักงาน ชื่อ-สกุล ตำแหน่ง สายงาน ฝ่าย กอง แผนก กลุ่มงาน อีเมล ระบบอ่านไฟล์แล้วให้ตรวจก่อน ยังไม่บันทึกอะไรจนกว่าจะกดนำเข้า ไฟล์ที่ตรวจไว้ลบเองใน 1 ชั่วโมง</p>
   <form method="post" enctype="multipart/form-data">
-    {% csrf_token %}
-    <div class="field"><label for="emp-file">ไฟล์</label><input id="emp-file" type="file" name="file" accept=".csv,text/csv" required></div>
-    <div class="field"><label for="emp-label">ชื่อข้อมูลยืนยันที่ถามใน LINE</label><input id="emp-label" name="check_label" maxlength="100" required placeholder="วันเกิด (วว/ดด/ปปปป)"></div>
-    <label class="choice"><input type="checkbox" name="deactivate_missing" value="1"> <span>ปิดคนที่ไม่อยู่ในไฟล์นี้ (ใช้เมื่อไฟล์เป็นรายชื่อทั้งหมด)</span></label>
-    <button class="btn btn--sm" type="submit">นำเข้า</button>
+    {% csrf_token %}<input type="hidden" name="action" value="upload">
+    <div class="field"><label for="emp-file">ไฟล์</label><input id="emp-file" type="file" name="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></div>
+    <button class="btn btn--sm" type="submit">อ่านไฟล์</button>
   </form>
 </section>
 {% endblock %}

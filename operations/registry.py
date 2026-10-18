@@ -23,7 +23,7 @@ from django.db import connection, transaction
 from django.db.models import Exists, Max, OuterRef, Q
 from django.utils import timezone
 
-from operations import attachments, identity, inventory, policy
+from operations import attachments, identity, inventory, options, policy
 from operations.contracts import ErrorCode, fail
 from operations.models import (
     Attachment,
@@ -135,12 +135,19 @@ def per_division():
     return registry_division() is None
 
 
+def admins_only():
+    """ตัวเลือกระบบ registry_access (15 ต.ค. 2569 Q6): admins hold the registry, else divisions."""
+    return options.get(options.REGISTRY_ACCESS) == "admin"
+
+
 def is_registry_staff(user):
-    """Decides ส่วนต่างทะเบียน: the registry unit's staff, or (per division) any division's staff
-    for their own (see `may_decide`)."""
+    """Decides ส่วนต่างทะเบียน: the admins when the registry is admins only; else the registry
+    unit's staff, or (per division) any division's staff for their own (see `may_decide`)."""
     if not getattr(user, "is_authenticated", False):
         return False
     scope = identity.staff_scope(user)
+    if admins_only():
+        return scope.is_admin
     division = registry_division()
     if division is None:
         return scope.is_support or bool(scope.division_roles)
@@ -161,6 +168,8 @@ def may_decide(user, d):
     if not is_registry_staff(user):
         return False
     scope = identity.staff_scope(user)
+    if admins_only():
+        return True
     return (
         not per_division()
         or scope.is_support
@@ -233,8 +242,6 @@ def _codes(text):
 def update_config(actor, movement_types, column_aliases, storage_locations, reason):
     """Admin only, audited. Inputs are plain text from the settings form."""
     identity.require_admin(actor)
-    if not (reason or "").strip():
-        raise ValidationError("ระบุเหตุผลของการเปลี่ยนการตั้งค่า")
     types = {kind: _codes(movement_types.get(kind, "")) for kind in MOVEMENT_KINDS}
     seen = {}
     for kind, codes in types.items():
@@ -266,6 +273,19 @@ def update_config(actor, movement_types, column_aliases, storage_locations, reas
         aliases=sorted(names),
     )
     return row
+
+
+def set_line_group(actor, item, group, reason=""):
+    identity.require_admin(actor)
+    group = (group or "").strip()
+    if group and group not in EquipmentType.LineGroup.values:
+        raise ValidationError("เลือกหมวดเมนู LINE จากรายการ")
+    before = item.line_group
+    if before != group:
+        item.line_group = group
+        item.save(update_fields=["line_group"])
+        identity.audit(actor, "registry.line_group_set", item, reason, before=before, after=group)
+    return item
 
 
 def set_official_code(actor, item, code, reason=""):
@@ -1073,7 +1093,7 @@ def _locked(discrepancy_id):
 
 def _reason(text, message="ระบุเหตุผล"):
     text = (text or "").strip()
-    if not text:
+    if not text and message != "ระบุเหตุผล":
         raise ValidationError(message)
     return text[:2000]
 

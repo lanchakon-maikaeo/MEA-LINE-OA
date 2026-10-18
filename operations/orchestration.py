@@ -27,6 +27,7 @@ EVENT_NOTIFICATION = "notification.requested"
 EVENT_AI = "conversation.ai_requested"
 EVENT_TRIAGE_AI = "case.triage_ai_requested"  # M06: facts for routing (ADR 0002)
 EVENT_ROUTING_AI = "case.routing_ai_requested"  # ADR 0013: a division from the duties
+EVENT_KEYWORDS_AI = "case.keywords_ai_requested"  # 15 ต.ค. 2569 Q9: words for ฝอจ.'s handoff
 
 # One owner per event type (E.6: no second dispatcher competes for the same work).
 DJANGO_TYPES = frozenset(
@@ -36,10 +37,17 @@ DJANGO_TYPES = frozenset(
         EVENT_DECISION,
         EVENT_REGISTRATION,
         EVENT_ROUTING_AI,
+        EVENT_KEYWORDS_AI,
     }
 )
 N8N_TYPES = frozenset({EVENT_NOTIFICATION, EVENT_AI, EVENT_TRIAGE_AI})
-MAX_ATTEMPTS = {EVENT_NOTIFICATION: 8, EVENT_AI: 2, EVENT_TRIAGE_AI: 2, EVENT_ROUTING_AI: 2}
+MAX_ATTEMPTS = {
+    EVENT_NOTIFICATION: 8,
+    EVENT_AI: 2,
+    EVENT_TRIAGE_AI: 2,
+    EVENT_ROUTING_AI: 2,
+    EVENT_KEYWORDS_AI: 2,
+}
 DEFAULT_MAX_ATTEMPTS = 5
 LEASE_SECONDS = (10, 300)
 MAX_LEASE_AGE = timedelta(minutes=10)

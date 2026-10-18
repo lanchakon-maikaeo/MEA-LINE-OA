@@ -11,7 +11,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models import Prefetch, Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -23,18 +23,23 @@ from operations import (
     ai_eval,
     answers,
     attachments,
+    email_codes,
     employees,
     forms,
     identity,
     inventory,
+    monitoring,
     notifications,
     options,
     orchestration,
     policy,
     questions,
     queues,
+    roster,
+    sealing,
 )
 from operations.models import (
+    DUTY_ROLES,
     AIConfigVersion,
     AICredential,
     AIProfile,
@@ -59,6 +64,7 @@ from operations.models import (
     Requester,
     Role,
     RoleGrant,
+    RosterUpload,
     Section,
     StockMovement,
     StockSnapshot,
@@ -172,6 +178,14 @@ def _run(request, action, success):
 
 @admin_required
 @require_safe
+def admin_home(request):
+    """หน้าแรกแอดมิน (15 ต.ค. 2569): what waits for an admin, then every settings page by
+    group. The groups, hints and badges come from admin_nav through the navigation context."""
+    return render(request, "operations/admin_home.html")
+
+
+@admin_required
+@require_safe
 def admin_users(request):
     grants = RoleGrant.objects.filter(revoked_at__isnull=True).select_related("division")
     users = list(
@@ -179,10 +193,18 @@ def admin_users(request):
         .prefetch_related(Prefetch("role_grants", queryset=grants, to_attr="active_grants"))
         .order_by("username")
     )
+    split = identity.work_is_split()
     for user in users:
         codes = sorted({g.division.code for g in user.active_grants if g.division})
         user.division_codes = codes
-        user.roles_label = ", ".join(sorted({Role(g.role).label for g in user.active_grants}))
+        roles = {g.role for g in user.active_grants}
+        if not split:
+            # 16 Oct 2569 Q3: a member does every step and a Supervisor is a member too.
+            if roles & DUTY_ROLES:
+                roles = (roles - DUTY_ROLES) | {Role.STAFF}
+            if Role.SUPERVISOR in roles:
+                roles.discard(Role.STAFF)
+        user.roles_label = ", ".join(sorted({Role(r).label for r in roles}))
     divisions = sorted({code for u in users for code in u.division_codes})
     return render(
         request,
@@ -236,6 +258,7 @@ def admin_user_detail(request, pk):
             .order_by("division__code", "order"),
             "grant_form": forms.GrantRoleForm(),
             "move_form": forms.ChangeDivisionForm(),
+            "work_split": identity.work_is_split(),
         },
     )
 
@@ -257,6 +280,14 @@ def admin_user_action(request, pk, action):
             )
         else:
             messages.error(request, "ข้อมูลบทบาทไม่ถูกต้อง")
+    elif action == "registration-notifications":
+        from operations import admin_line
+
+        _run(
+            request,
+            lambda: admin_line.set_notifications(actor, target, data.get("enabled") == "1"),
+            "บันทึกผู้รับแจ้งการสมัครแล้ว",
+        )
     elif action == "revoke":
         grant_id = data.get("grant_id", "")
         if not grant_id.isdigit():
@@ -381,16 +412,14 @@ def admin_registrations(request):
             "audience": options.get(options.LINE_AUDIENCE),
             "audience_option": options.OPTIONS[options.LINE_AUDIENCE],
             "testers": len(settings.LINE_ALLOWED_RECIPIENTS),
-            "check_label": options.OPTIONS[options.REGISTRATION_CHECK].label_of(
-                options.get(options.REGISTRATION_CHECK)
-            ),
+            "check_label": "ยืนยันตัวตนและกองตามทะเบียน แล้วให้สมาชิกกองอัตโนมัติ",
             "approver_label": options.OPTIONS[options.REGISTRATION].label_of(
                 options.get(options.REGISTRATION)
             ),
             "requester_filters": [
                 (
                     "district",
-                    "เขต",
+                    "หน่วยงาน (เขต/ฝ่าย)",
                     list(
                         District.objects.filter(is_active=True)
                         .order_by("code")
@@ -449,9 +478,20 @@ def _requester_rows(requesters):
                 "same_name": found,
                 "proof": proof,
                 "channel": channel,
-                "position": employee.position if employee else "",
+                # ตำแหน่ง · ฝ่าย (15 ต.ค. 2569 Q15); a closed roster row is flagged (Q29).
+                "position": roster.employee_unit(employee) if employee else "",
+                "stale": employee is not None and not employee.is_active,
                 "role": " · ".join(
-                    ["ผู้แจ้งภายใน" if requester.is_internal else "ผู้แจ้ง", *roles[requester.pk]]
+                    [
+                        (
+                            "เจ้าหน้าที่ · เบิก/คืนได้"
+                            if state == "verified" and not requester.is_external
+                            else "ผู้ใช้ LINE OA (ภายใน)"
+                            if requester.is_internal
+                            else "ผู้ใช้ LINE OA"
+                        ),
+                        *roles[requester.pk],
+                    ]
                 ),
                 "where": requester.division.code
                 if requester.is_internal and requester.division_id
@@ -463,6 +503,7 @@ def _requester_rows(requesters):
 
 REQUESTER_MESSAGES = 300  # newest messages on one page
 REQUESTER_HISTORY = {
+    "requester.employee_access_restored": "ระบบให้สิทธิ์เบิก/คืนแก่พนักงานที่ยืนยันแล้ว",
     "registration.approved": "รับรองการลงทะเบียน",
     "registration.auto_approved": "ระบบรับรองเอง (ตรงทะเบียนพนักงาน)",
     "requester.created_direct": "แอดมินเพิ่มผู้แจ้งโดยตรง",
@@ -476,7 +517,7 @@ REQUESTER_HISTORY = {
     "requester.employee_linked": "แอดมินผูกทะเบียนพนักงาน",
     "requester.employee_confirmed": "แอดมินยืนยันว่าเป็นพนักงานที่ชื่อตรง",
     "requester.employee_unlinked": "แอดมินยกเลิกการผูกทะเบียนพนักงาน",
-    "requester.district_changed": "แอดมินแก้เขต",
+    "requester.district_changed": "แอดมินแก้หน่วยงาน (เขต/ฝ่าย)",
 }
 ACTOR_LABELS = {"system": "ระบบ", "line": "LINE", "manage.py": "คำสั่งของผู้ดูแลระบบ"}
 
@@ -537,6 +578,7 @@ def admin_requester_detail(request, pk):
         "operations/admin_requester_detail.html",
         {
             "requester": requester,
+            "grant_form": forms.GrantRoleForm(),
             "row": row,
             "candidates": candidates,
             "districts": District.objects.filter(is_active=True).order_by("code"),
@@ -610,7 +652,7 @@ def admin_requester_action(request, pk, action):
         _run(
             request,
             lambda: identity.set_requester_active(actor, requester, action == "activate", reason),
-            "เปิดใช้ผู้แจ้งแล้ว" if action == "activate" else "ระงับผู้แจ้งแล้ว",
+            "เปิดใช้ผู้ใช้แล้ว" if action == "activate" else "ระงับผู้ใช้แล้ว",
         )
     elif action == "revoke":
         if data.get("confirm") != "1":
@@ -621,13 +663,23 @@ def admin_requester_action(request, pk, action):
                 lambda: identity.revoke_requester(actor, requester, reason),
                 "ถอนการรับรองแล้ว ถ้าจะใช้ LINE ต่อต้องลงทะเบียนใหม่",
             )
+    elif action == "grant-role":
+        form = forms.GrantRoleForm(data)
+        if form.is_valid():
+            _run(
+                request,
+                lambda: identity.grant_requester_role(actor, requester, **form.cleaned_data),
+                "เพิ่มสิทธิ์เจ้าหน้าที่ให้ผู้ใช้ LINE แล้ว",
+            )
+        else:
+            messages.error(request, "ข้อมูลบทบาทไม่ถูกต้อง")
     elif action == "link-employee":
         _run(
             request,
             lambda: identity.link_requester_employee(
                 actor, requester, data.get("employee_id", ""), reason
             ),
-            "ผูกกับทะเบียนพนักงานแล้ว",
+            "รับรองพนักงานแล้ว เบิก/คืนได้",
         )
     elif action == "unlink-employee":
         _run(
@@ -641,10 +693,12 @@ def admin_requester_action(request, pk, action):
             lambda: identity.set_requester_district(
                 actor, requester, data.get("district", ""), reason
             ),
-            "แก้เขตแล้ว เรื่องเดิมยังอยู่เขตเดิม เรื่องใหม่ใช้เขตนี้",
+            "แก้หน่วยงาน (เขต/ฝ่าย)แล้ว เรื่องเดิมยังอยู่หน่วยงาน (เขต/ฝ่าย)เดิม เรื่องใหม่ใช้หน่วยงาน (เขต/ฝ่าย)นี้",
         )
     else:
         raise Http404
+    if data.get("next") == "registrations":
+        return redirect("admin-registrations")
     return redirect("admin-requester-detail", pk=requester.pk)
 
 
@@ -675,7 +729,7 @@ def admin_registration_action(request, pk, action):
         _run(
             request,
             lambda: identity.approve_registration(request.user, registration, reason),
-            "รับรองผู้แจ้งแล้ว",
+            "รับรองผู้ใช้แล้ว",
         )
     elif action == "reject":
         _run(
@@ -774,13 +828,11 @@ def admin_line(request):
 def admin_requeue(request, pk):
     event = get_object_or_404(OutboxEvent, pk=pk)
     reason = request.POST.get("reason", "").strip()
-    if not reason:
-        messages.error(request, "ต้องระบุเหตุผล")
-    elif orchestration.requeue(event):
+    if orchestration.requeue(event):
         identity.audit(request.user, "outbox.requeued", event, reason, event_type=event.event_type)
         messages.success(request, "ส่งงานกลับเข้าคิวแล้ว")
     else:
-        messages.error(request, "งานนี้ไม่ได้อยู่ใน dead-letter แล้ว")
+        messages.error(request, "งานนี้ไม่ได้อยู่ในรายการที่ส่งไม่สำเร็จแล้ว")
     return redirect("admin-line")
 
 
@@ -819,11 +871,12 @@ def admin_policy(request):
         {
             "versions": PolicyVersion.objects.select_related("activated_by"),
             "grants": AuthorityGrant.objects.select_related(
-                "user__staff_profile", "division", "item", "granted_by", "revoked_by"
+                "user__staff_profile", "division", "item", "granted_by", "revoked_by", "member_of"
             ),
             "activate_form": forms.PolicyActivateForm(),
             "grant_form": grant_form,
             "now": timezone.now(),
+            "work_split": identity.work_is_split(),
         },
     )
 
@@ -949,21 +1002,21 @@ def admin_inventory_action(request, action):
     return redirect("admin-inventory")
 
 
-# --- AI configuration (developer-admin only) ----------------------------------------------------
+# --- AI configuration (every admin looks; ตัวเลือกระบบ ai_editors decides who changes) -------------
 
 
-def developer_admin_required(view):
+def ai_editor_required(view):
     @login_required
     @wraps(view)
     def wrapper(request, *args, **kwargs):
-        if not identity.staff_scope(request.user).is_developer_admin:
+        if not identity.may_change_ai(request.user):
             raise PermissionDenied
         return view(request, *args, **kwargs)
 
     return wrapper
 
 
-@developer_admin_required
+@admin_required
 @require_safe
 def admin_ai(request):
     versions = list(
@@ -1006,6 +1059,8 @@ def admin_ai(request):
                 ("refused", "ถ้อยคำของ AI", [("yes", "มีที่ถูกตีกลับ"), ("no", "ไม่มีที่ถูกตีกลับ")]),
             ],
             "ai_enabled": settings.AI_ENABLED,
+            "agent_mcp_enabled": settings.AI_ENABLED and settings.AI_MCP_ENABLED,
+            "can_change": identity.may_change_ai(request.user),
             "credential_form": forms.AICredentialForm(),
             "profile_form": forms.AIProfileForm(),
             "version_form": forms.AIVersionForm(),
@@ -1013,7 +1068,81 @@ def admin_ai(request):
     )
 
 
-@developer_admin_required
+@admin_required
+def admin_monitoring(request):
+    """Monitoring (15 ต.ค. 2569 Q40–Q47): every admin looks; computing now follows the AI right."""
+    from operations import monitor_judge
+
+    if request.method == "POST":
+        if not identity.may_change_ai(request.user):
+            raise PermissionDenied
+        if request.POST.get("action") == "calibrate":
+            _run(
+                request,
+                lambda: monitor_judge.request_calibration(request.user),
+                "ส่งการทดสอบตัวตัดสินเข้าคิวแล้ว ผลขึ้นที่หน้านี้ภายในไม่กี่นาที",
+            )
+        else:
+            _run(request, lambda: monitoring.refresh(request.user), "คำนวณตัวเลขล่าสุดแล้ว")
+        return redirect("admin-monitoring")
+    try:
+        days = max(7, min(int(request.GET.get("days", 14)), 90))
+    except ValueError:
+        days = 14
+    view = monitoring.dashboard(days)
+    keys = (
+        options.MONITOR_ERROR,
+        options.MONITOR_P95,
+        options.MONITOR_UNANSWERED,
+        options.MONITOR_EMAIL,
+        options.MONITOR_TIME,
+        options.MONITOR_JUDGE,
+    )
+    _, judge_profile = monitor_judge.main_profile()
+    view.update(
+        {
+            "judge_on": options.get(options.MONITOR_JUDGE) == "on",
+            "judge_model": judge_profile.model_id if judge_profile else "",
+            "calibration": monitor_judge.latest_calibration(judge_profile)
+            if judge_profile
+            else None,
+            "judge_blocker": monitor_judge.blocker(),
+            "judge_pass": monitor_judge.PASS,
+            "judge_alert": monitor_judge.ALERT,
+            "days": days,
+            "periods": (7, 14, 30, 90),
+            "can_change": identity.may_change_ai(request.user),
+            "thresholds": [
+                (options.OPTIONS[k].label, options.OPTIONS[k].label_of(options.get(k)))
+                for k in keys
+            ],
+        }
+    )
+    return render(request, "operations/admin_monitoring.html", view)
+
+
+EVIDENTLY_CSP = (
+    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'unsafe-inline'; img-src data: blob:; font-src data:"
+)
+
+
+@admin_required
+@require_safe
+def admin_monitoring_report(request):
+    """Evidently's own report, alone on its page: its scripts run sandboxed (no cookies, no
+    calls out), the only page with a looser policy (Q40)."""
+    html = monitoring.full_report_html()
+    if html is None:
+        messages.info(request, "ข้อความยังน้อยเกินไปสำหรับรายงานเต็ม (ต้องมีอย่างน้อย 20 ข้อความทั้งสองช่วง)")
+        return redirect("admin-monitoring")
+    response = HttpResponse(html)
+    response["Content-Security-Policy"] = EVIDENTLY_CSP
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@ai_editor_required
 @require_POST
 def admin_ai_action(request, action, pk=None):
     actor, data = request.user, request.POST
@@ -1265,34 +1394,78 @@ def admin_questions(request):
     )
 
 
+def _staged(value):
+    try:
+        return RosterUpload.objects.filter(pk=value).first() if value else None
+    except ValidationError:  # not a UUID
+        return None
+
+
 @admin_required
 def admin_employees(request):
-    """ทะเบียนพนักงาน (ADR 0010): the list identity checks compare against; proof values are
-    hashed on import and never shown."""
+    """ทะเบียนพนักงาน (15 ต.ค. 2569 Q10, Q27–Q29): the owner uploads the organisation's roster
+    (.xlsx or .csv); a preview shows which column is which field and which unit each department
+    is, then the import. Names and e-mails never leave this page; no AI reads the file."""
+    upload, columns = None, None
     if request.method == "POST":
-        upload = request.FILES.get("file")
-        if upload is None or upload.size > 5 * 1024 * 1024:
-            messages.error(request, "เลือกไฟล์ CSV ขนาดไม่เกิน 5 MB")
-        else:
+        action = request.POST.get("action")
+        if action == "upload":
+            file = request.FILES.get("file")
+            if file is None or file.size > roster.MAX_BYTES:
+                messages.error(request, "เลือกไฟล์ .xlsx หรือ .csv ขนาดไม่เกิน 10 MB")
+                return redirect("admin-employees")
+            staged = _run(
+                request,
+                lambda: roster.stage(request.user, file.name, file.read()),
+                "อ่านไฟล์แล้ว ตรวจการจับคู่ด้านล่างก่อนนำเข้า",
+            )
+            if staged is None:
+                return redirect("admin-employees")
+            return redirect(f"{reverse('admin-employees')}?upload={staged.pk}")
+        upload = _staged(request.POST.get("upload"))
+        if upload is None:
+            messages.error(request, "ไม่พบไฟล์ที่ตรวจไว้ อัปโหลดใหม่")
+            return redirect("admin-employees")
+        columns = {field: request.POST.get(f"col_{field}", "") for field in roster.FIELDS}
+        if action == "import":
+            keys = request.POST.getlist("unit_key")
+            choices = dict(zip(keys, request.POST.getlist("unit_choice"), strict=False))
             summary = _run(
                 request,
-                lambda: employees.import_csv(
+                lambda: roster.import_upload(
                     request.user,
-                    upload.read(),
-                    request.POST.get("check_label", ""),
-                    deactivate_missing=request.POST.get("deactivate_missing") == "1",
+                    upload,
+                    columns,
+                    choices,
+                    request.POST.get("deactivate_missing") == "1",
+                    request.POST.get("reason", ""),
                 ),
                 "นำเข้าทะเบียนพนักงานแล้ว",
             )
             if summary:
                 messages.info(
                     request,
-                    f"เพิ่ม {summary['created']} แก้ {summary['updated']} "
-                    f"ปิด {summary['closed']} รายการ · ผูกผู้แจ้งจากชื่อ {summary['matched']} "
-                    f"ยกเลิกการผูกที่ชื่อไม่ตรงแล้ว {summary['unmatched']} "
+                    f"เพิ่ม {summary['created']} แก้ {summary['updated']} ปิด {summary['closed']} คน · "
+                    f"มีอีเมล {summary['emails']} คน · ผูกผู้ใช้ LINE จากชื่อ {summary['matched']} · "
                     f"ชื่อตรงแต่ต้องให้แอดมินตรวจ {summary['review']} ราย",
                 )
-        return redirect("admin-employees")
+                return redirect("admin-employees")
+    elif request.GET.get("upload"):
+        upload = _staged(request.GET["upload"])
+    preview = None
+    if upload is not None:
+        try:
+            headers, rows = roster.opened(upload)
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+            upload.delete()
+            return redirect("admin-employees")
+        columns = columns or roster.guess_columns(headers)
+        preview = roster.preview(headers, rows, columns)
+        preview["headers"] = headers
+        preview["fields"] = [
+            (field, label, columns.get(field, "")) for field, (label, _) in roster.FIELDS.items()
+        ]
     active = Employee.objects.filter(is_active=True)
     return render(
         request,
@@ -1300,11 +1473,18 @@ def admin_employees(request):
         {
             "active": active.count(),
             "inactive": Employee.objects.filter(is_active=False).count(),
-            "label": employees.check_label(),
+            "with_email": active.exclude(email_hash="").count(),
             "synthetic": active.filter(is_synthetic=True).exists(),
             "latest": Employee.objects.order_by("-imported_at").first(),
-            "check": options.OPTIONS[options.REGISTRATION_CHECK].label_of(
-                options.get(options.REGISTRATION_CHECK)
+            "sealing": sealing.available(),
+            "mail": email_codes.sending_ready(),
+            "check": "ยืนยันตัวตนและกองตามทะเบียน แล้วให้สมาชิกกองอัตโนมัติ",
+            "methods": options.OPTIONS[options.EMAIL_METHODS].label_of(
+                options.get(options.EMAIL_METHODS)
             ),
+            "upload": upload,
+            "preview": preview,
+            "districts": District.objects.filter(is_active=True).order_by("code"),
+            "new_unit": roster.NEW_UNIT,
         },
     )

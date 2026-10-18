@@ -92,7 +92,7 @@ def clean_base_url(url):
 @transaction.atomic
 def save_credential(actor, name, base_url, api_key, reason):
     """Create or rotate a provider credential. The key is write-only; audit keeps a hint."""
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     reason = identity._require_reason(reason)
     base_url = clean_base_url(base_url)
     key = (api_key or "").strip()
@@ -132,7 +132,7 @@ def create_profile(
     temperature="0.10",
     use_json_schema=True,
 ):
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     model_id = (model_id or "").strip()
     if not MODEL_ID.match(model_id):
         raise ValidationError("Model ID has unexpected characters.")
@@ -192,7 +192,7 @@ def preset_status():
 @transaction.atomic
 def create_preset_version(actor, key, pipeline, use_json_schema=True):
     """A candidate with the preset model as primary and the active chain as fallbacks."""
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     preset = PRESETS.get(key)
     if preset is None:
         raise ValidationError("Unknown preset.")
@@ -233,7 +233,7 @@ def create_version(
     task=AIConfigVersion.Task.EXTRACT,
 ):
     """A candidate: primary first, then up to three fallbacks in order."""
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     if task not in AIConfigVersion.Task.values:
         raise ValidationError("Unknown AI task.")
     profiles = list(profiles)
@@ -274,7 +274,7 @@ def create_version(
 @pii.counted_as("eval")
 def test_version(actor, version):
     """Connection + schema test of every model in the chain (network; outside transactions)."""
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     if version.task == AIConfigVersion.Task.TRIAGE:
         from operations import ai_triage
 
@@ -287,6 +287,10 @@ def test_version(actor, version):
         from operations import ai_routing
 
         return ai_routing.test_version(actor, version)
+    if version.task == AIConfigVersion.Task.KEYWORDS:
+        from operations import ai_keywords
+
+        return ai_keywords.test_version(actor, version)
     results = []
     for profile in version.chain():
         started = time.monotonic()
@@ -319,9 +323,11 @@ def test_version(actor, version):
 
 def record_eval(version, report):
     """Store an evaluation report; the primary must meet all thresholds, fallbacks safety ones."""
-    from operations import ai_answer, ai_eval, ai_routing, ai_triage
+    from operations import ai_answer, ai_eval, ai_keywords, ai_routing, ai_triage
 
-    if version.task == AIConfigVersion.Task.TRIAGE:
+    if version.task == AIConfigVersion.Task.KEYWORDS:
+        passed = ai_keywords.gate_passed(report, version)
+    elif version.task == AIConfigVersion.Task.TRIAGE:
         passed = ai_triage.gate_passed(report, version)
     elif version.task == AIConfigVersion.Task.ANSWER:
         passed = ai_answer.gate_passed(report, version)
@@ -370,6 +376,12 @@ def activation_blocker(version):
         if not ai_routing.gate_passed(version.eval_result, version):
             return "Routing evidence is missing, stale or failed, or the duties changed."
         return None
+    if version.task == AIConfigVersion.Task.KEYWORDS:
+        from operations import ai_keywords
+
+        if not ai_keywords.gate_passed(version.eval_result, version):
+            return "Keyword evidence is missing, stale or failed; evaluate again."
+        return None
     if version.eval_result.get("gate") != EVAL_GATE:
         return "The evaluation predates the current application/security gate; evaluate again."
     if version.pipeline == AIConfigVersion.Pipeline.HARNESS:
@@ -387,7 +399,7 @@ def activation_blocker(version):
 @transaction.atomic
 def activate(actor, version, reason):
     """Make a tested and evaluated version active (also how switching and rollback work)."""
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     reason = identity._require_reason(reason)
     version = AIConfigVersion.objects.select_for_update().get(pk=version.pk)
     blocker = activation_blocker(version)
@@ -417,7 +429,7 @@ def activate(actor, version, reason):
 
 @transaction.atomic
 def reject(actor, version, reason):
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     reason = identity._require_reason(reason)
     if version.status == AIConfigVersion.Status.ACTIVE:
         raise ValidationError("Activate another version before rejecting the active one.")
@@ -430,7 +442,7 @@ def stop(actor, task, reason):
     """Turn one AI task off from the web or `manage.py stop_ai` (RB02). The active version
     retires, so new work runs without AI; triage still waiting for its turn is closed. Turning
     the task on again is a switch to an evaluated version, so it needs evidence for this code."""
-    identity.require_developer_admin(actor)
+    identity.require_ai_editor(actor)
     reason = identity._require_reason(reason)
     version = (
         AIConfigVersion.objects.select_for_update()

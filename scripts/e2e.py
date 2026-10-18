@@ -20,6 +20,17 @@ REAL_SETUP = (
     "from operations.management.commands.seed_org_demo import _account\n"
     f"for name, code in {REAL_ACCOUNTS!r}.items():\n"
     "    _account(name, code, os.environ['E2E_PASSWORD'])\n"
+    "from django.contrib.auth import get_user_model\n"
+    "from operations import work_orders\n"
+    "from operations.models import Division, Role, RoleGrant, WorkOrder\n"
+    "actor = get_user_model().objects.get(username='e2e-kcw')\n"
+    "division = Division.objects.get(code='กคว.')\n"
+    "RoleGrant.objects.get_or_create(user=actor, role=Role.SUPERVISOR,\n"
+    "    division=division, revoked_at=None)\n"
+    "for channel in WorkOrder.Channel.values:\n"
+    "    title = 'E2E queue ' + channel\n"
+    "    if not WorkOrder.objects.filter(issued_by=actor, title=title).exists():\n"
+    "        work_orders.create(actor, title, division, actor, urgent=True, channel=channel)\n"
 )
 
 
@@ -94,7 +105,16 @@ def triage_to(browser, base_url, password, number, division, staff):
     intake = sign_in(browser, base_url, "e2e-intake", password)
     open_case(intake, base_url, number)
     act(intake, "เริ่มคัดกรอง")
-    act(intake, "ส่งต่อให้กองอื่น", [lambda f: f.locator("[name=to_division]").select_option(division)])
+
+    def choose_handoff(form):
+        target = form.locator("[name=to_division]")
+        proposal = target.input_value()
+        target.select_option(division)
+        if proposal != division:
+            form.locator("[name=reason_category]").select_option("wrong_division")
+            form.locator("[name=reason]").fill("ผลคัดกรองยืนยันว่ากองปลายทางรับผิดชอบ")
+
+    act(intake, "ส่งต่อให้กองอื่น", [choose_handoff])
     intake.context.close()
     owner = sign_in(browser, base_url, staff, password)
     open_case(owner, base_url, number)
@@ -189,7 +209,7 @@ def journeys(browser, base_url, password):
     form.locator("[name=to_division]").select_option("SIM-MTR")
     form.locator("[name=reason]").fill("ช่างกองมิเตอร์อยู่หน้างาน")
     form.get_by_role("button", name="บันทึก: ส่งต่อให้กองอื่น").click()
-    expect(intake.locator("#action-slot .notice--error")).to_contain_text("ต่างจากที่ระบบเสนอ")
+    expect(intake.locator("#action-slot .notice--error")).to_contain_text("เลือกประเภทการส่งต่อ")
     expect(form.locator("[name=reason]")).to_have_value("ช่างกองมิเตอร์อยู่หน้างาน")
     form = intake.locator("#action-slot form")
     form.locator("[name=to_division]").select_option("SIM-MTR")
@@ -235,7 +255,7 @@ def answer_for_district(page):
     """The district answered by phone (its requester has no LINE): the case closes."""
     act(
         page,
-        "บันทึกคำตอบแทนเขต",
+        "บันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)",
         [
             lambda f: f.locator("[name=channel]").select_option("phone"),
             lambda f: f.locator("[name=intake_note]").fill(f"e2e {RUN}: เขตโทรแจ้ง"),
@@ -317,6 +337,33 @@ def real_structure(browser, base_url, password):
     return meter, fuses, number
 
 
+def mixed_queue(browser, base_url, password):
+    """LINE/web orders share the normal queue; arrival is on the right on desktop."""
+    for phone in (False, True):
+        page = sign_in(browser, base_url, "e2e-kcw", password, phone=phone)
+        line = page.locator(".qrow[data-kind=work_order]").filter(has_text="E2E queue line")
+        web = page.locator(".qrow[data-kind=work_order]").filter(has_text="E2E queue web")
+        expect(line).to_be_visible()
+        expect(web).to_be_visible()
+        expect(line.locator(".qrow__note")).to_contain_text("สั่งโดย")
+        expect(line.locator(".qrow__note")).to_contain_text("ผ่าน LINE")
+        expect(web.locator(".qrow__note")).to_contain_text("ผ่าน เว็บ")
+        expect(line.locator(".qrow__meta time")).to_contain_text("เข้า")
+        expect(page.locator("nav a[href='/orders/']")).to_have_count(0)
+        expect(page.locator(".qrow:not([data-kind=work_order])").first).to_be_visible()
+        if not phone:
+            arrival = line.locator(".qrow__meta time").bounding_box()
+            main = line.locator(".qrow__main").bounding_box()
+            assert arrival["x"] > main["x"] + main["width"]
+        name = "phone" if phone else "desktop"
+        line.screenshot(path=f"reports/e2e-mixed-queue-{name}.png")
+        number = line.locator(".qrow__link").inner_text()
+        line.locator(".qrow__link").click()
+        expect(page.get_by_role("heading", name=number, exact=True)).to_be_visible()
+        expect(page.get_by_text("ผ่าน LINE", exact=False).first).to_be_visible()
+        page.context.close()
+
+
 with socket.socket() as sock:
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -384,13 +431,19 @@ with Path("reports/e2e-server.log").open("w") as log:
             # The SIM-* journeys are done; switch the same database to the real structure.
             demo = {k: v for k, v in env.items() if k != "DEMO_STAFF_PASSWORD"}
             for command in (["seed_org_demo"], ["shell", "-c", REAL_SETUP]):
-                subprocess.run(
+                completed = subprocess.run(
                     [sys.executable, "manage.py", *command],
                     env=demo,
-                    check=True,
                     capture_output=True,
+                    text=True,
                 )
+                if completed.returncode:
+                    raise RuntimeError(
+                        f"Demo setup command {command[0]!r} failed:\n"
+                        f"{completed.stdout}{completed.stderr}"
+                    )
             real_structure(browser, base_url, env["E2E_PASSWORD"])
+            mixed_queue(browser, base_url, env["E2E_PASSWORD"])
             browser.close()
         print("PASS Chromium: Thai landing, keyboard link, database readiness")
         print("PASS Chromium: keyboard login, own-division scope, admin denied, logout")
@@ -400,6 +453,9 @@ with Path("reports/e2e-server.log").open("w") as log:
             "PASS Chromium: M10 hazard problem, route chosen against the proposal (phone, keyboard)"
         )
         print("PASS Chromium: real structure, one request split per division, issued in its แผนก")
+        print(
+            "PASS Chromium: LINE/web orders in normal queue, issuer/source/arrival, desktop/phone"
+        )
         print(
             "PASS Chromium: real structure, electricity use to กตฟ., resolved (phone), scope, "
             "filing a case for another division"

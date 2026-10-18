@@ -262,7 +262,7 @@ def cancel_child_work(ctx, case, payload, reason, target):
 def pause_deadlines(ctx, case, payload, reason, target):
     """Q12: a hold stops work deadlines only when a supervisor of the owner division says so."""
     if ctx.requester is not None or not _member(ctx, case.owner_division_id, [Role.SUPERVISOR]):
-        fail(ErrorCode.FORBIDDEN, "เฉพาะผู้กำกับงานของกองเจ้าภาพพักกรอบเวลาได้ (Q12)")
+        fail(ErrorCode.FORBIDDEN, "เฉพาะ Supervisor ของกองเจ้าภาพพักกรอบเวลาได้ (Q12)")
     if DeadlinePause.objects.filter(case=case, ended_at__isnull=True).exists():
         fail(ErrorCode.VALIDATION_ERROR, "กรอบเวลาพักอยู่แล้ว")
     pause = DeadlinePause.objects.create(

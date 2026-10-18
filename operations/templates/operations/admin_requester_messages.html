@@ -1,16 +1,16 @@
 {% extends "operations/admin_base.html" %}
 {% load ui %}
-{% block title %}ข้อความของ {{ requester.display_name }} — แอดมิน — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}ข้อความของ {{ requester.display_name }} · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
-    <span class="eyebrow">แอดมิน · ผู้แจ้ง</span>
+    <span class="eyebrow">แอดมิน · ผู้ใช้ LINE OA</span>
     <h1>ข้อความที่พิมพ์มา</h1>
     <p class="lede">{{ requester.display_name }} · {{ total }} ข้อความ{% if total > rows|length %} แสดง {{ rows|length }} ข้อความล่าสุด{% endif %} · ไม่รวมข้อความตอนแจ้งแบบไม่ระบุตัวตน</p>
   </div>
-  <div class="page-head__actions"><a class="btn btn--outline" href="{% url 'admin-requester-detail' requester.pk %}">กลับไปหน้าผู้แจ้ง</a></div>
+  <div class="page-head__actions"><a class="btn btn--outline" href="{% url 'admin-requester-detail' requester.pk %}">กลับไปหน้าผู้ใช้รายนี้</a></div>
 </div>
-<p class="muted">การเปิดหน้านี้ถูกบันทึกไว้ในประวัติของผู้แจ้งแล้ว ใหม่สุดอยู่บน</p>
+<p class="muted">การเปิดหน้านี้ถูกบันทึกไว้ในประวัติของผู้ใช้แล้ว ใหม่สุดอยู่บน</p>
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">เวลา</th><th scope="col">ข้อความ</th><th scope="col">เกี่ยวกับ</th></tr></thead>
   <tbody>

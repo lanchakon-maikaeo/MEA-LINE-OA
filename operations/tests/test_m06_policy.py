@@ -431,14 +431,6 @@ class ProposalTests(PolicyTestCase):
             "record_facts",
             {"facts": {"severe_impact": True}, "reason": "หยุด"},
         )
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR,
-            self.act,
-            self.eqp_staff,
-            case,
-            "set_priority",
-            {"priority": "P2"},
-        )
         result = self.act(
             self.eqp_staff, case, "set_priority", {"priority": "P2", "reason": "มีอุปกรณ์สำรอง"}
         )
@@ -504,7 +496,6 @@ class HandoffTests(PolicyTestCase):
         submitted_at = case.submitted_at
         self.act(self.intake, case, "start_triage")
         self.act(self.intake, case, "request_handoff", {"to_division": "SIM-MTR"})
-        self.assertFails(ErrorCode.VALIDATION_ERROR, self.act, self.meter, case, "decline_handoff")
         self.act(self.meter, case, "decline_handoff", {"reason": "ไม่ใช่งานของกอง"})
         case.refresh_from_db()
         self.assertEqual(case.owner_division.code, "SIM-TRIAGE")
@@ -552,14 +543,6 @@ class HandoffTests(PolicyTestCase):
             {"division": "SIM-MTR", "reason": "ตัดสิน"},
         )
         self.grant(self.coordinator, A.ROUTING_DECISION)
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR,
-            self.act,
-            self.coordinator,
-            case,
-            "decide_routing",
-            {"division": "SIM-MTR"},
-        )
         self.act(
             self.coordinator,
             case,
@@ -583,9 +566,6 @@ class HandoffTests(PolicyTestCase):
         other = self.submit(withdrawal())
         self.act(self.intake, other, "start_triage")
         self.act(self.intake, other, "request_handoff", {"to_division": "SIM-MTR"})
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.meter, other, "request_routing_decision"
-        )
         self.act(self.meter, other, "request_routing_decision", {"reason": "งานนี้ควรอยู่กองไหน"})
         self.assertEqual(Handoff.objects.get(case=other).status, Handoff.Status.WITHDRAWN)
         self.assertEqual(RoutingReview.objects.get(case=other).trigger, "requested")

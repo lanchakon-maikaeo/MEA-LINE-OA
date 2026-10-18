@@ -1,0 +1,118 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}{{ order.number }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block page_id %}order{% endblock %}
+{% block content %}
+<ol class="crumbs">
+  <li><a href="{% url 'division-detail' order.division.code %}">คิว {{ order.division.code }}</a></li>
+  <li aria-current="page">{{ order.number }}</li>
+</ol>
+
+<div class="case-head">
+  <span class="eyebrow">งานสั่ง · สั่งโดย {{ order.issued_by.staff_profile.display_name|default:order.issued_by.username }}{% if order.channel %} · ผ่าน {{ order.get_channel_display }}{% endif %}</span>
+  <div class="case-head__title">
+    <h1>{{ order.number }}</h1>
+    {% if order.is_urgent %}<span class="prio prio--P0">ด่วน</span>{% endif %}
+    <span class="tag{% if order.status == 'closed' %} tag--closed{% elif order.status == 'cancelled' %} tag--muted{% elif order.status == 'sent_back' %} tag--alert{% endif %}">{{ order.get_status_display }}</span>
+  </div>
+  <p class="lede">{{ order.title }}</p>
+  <dl class="facts">
+    <div><dt>สั่งถึง</dt><dd>{{ order.division.code }} {{ order.division.name }}</dd></div>
+    <div><dt>คนทำ</dt><dd>{% if order.assignee %}{{ order.assignee.staff_profile.display_name|default:order.assignee.username }}{% else %}<span class="muted">ทั้งกอง (ยังไม่ระบุคน)</span>{% endif %}</dd></div>
+    <div><dt>สั่งเมื่อ</dt><dd class="num">{{ order.created_at|thai_datetime }}</dd></div>
+    <div><dt>กำหนดเสร็จ</dt><dd class="num">{% if order.due_on %}{% if late %}<span class="due due--over">{{ order.due_on|thai_date }} (เกินกำหนด)</span>{% else %}{{ order.due_on|thai_date }}{% endif %}{% else %}<span class="muted">ไม่กำหนด</span>{% endif %}</dd></div>
+    {% if order.acknowledged_at %}<div><dt>รับทราบ</dt><dd>{{ order.acknowledged_by.staff_profile.display_name|default:order.acknowledged_by.username }}<br><span class="muted num">{{ order.acknowledged_at|thai_datetime }}</span></dd></div>{% endif %}
+    {% if order.done_at %}<div><dt>ทำเสร็จ</dt><dd class="num">{{ order.done_at|thai_datetime }}</dd></div>{% endif %}
+    {% if order.ended_at %}<div><dt>{{ order.get_status_display }}เมื่อ</dt><dd class="num">{{ order.ended_at|thai_datetime }}</dd></div>{% endif %}
+  </dl>
+  <ol class="journey" aria-label="ขั้นของงาน">
+    {% for j in journey %}<li class="journey__step is-{{ j.state }}"{% if j.state == "current" or j.state == "stopped" %} aria-current="step"{% endif %}>{{ j.label }}{% if j.note %}<span class="journey__note">{{ j.note }}</span>{% endif %}</li>{% endfor %}
+  </ol>
+</div>
+
+<div class="detail">
+  <div class="detail__main">
+    {% if order.detail %}
+    <section class="section" aria-labelledby="s-detail">
+      <div class="section-head"><h2 id="s-detail">รายละเอียด</h2></div>
+      <div class="prose-block">{{ order.detail }}</div>
+    </section>
+    {% endif %}
+    {% if order.reason and order.status == "sent_back" or order.reason and order.status == "cancelled" %}
+    <section class="section" aria-labelledby="s-reason">
+      <div class="section-head"><h2 id="s-reason">{% if order.status == "sent_back" %}เหตุผลที่ส่งกลับ{% else %}เหตุผลที่ยกเลิก{% endif %}</h2></div>
+      <div class="prose-block">{{ order.reason }}</div>
+    </section>
+    {% endif %}
+    {% if order.result %}
+    <section class="section" aria-labelledby="s-result">
+      <div class="section-head"><h2 id="s-result">ผลการทำ</h2></div>
+      <div class="prose-block">{{ order.result }}</div>
+    </section>
+    {% endif %}
+
+    <section class="section" aria-labelledby="s-files">
+      <div class="section-head"><h2 id="s-files">ไฟล์แนบ</h2><span class="muted">{{ files|length }} ไฟล์</span></div>
+      {% if files %}
+        <ul class="files">
+          {% for a in files %}
+            <li class="file">{% icon "clip" %}
+              {% if a.scan_status == "clean" %}<a href="{% url 'order-file' order.number a.pk %}">{{ a.declared_name|default:"ไฟล์แนบ" }}</a>{% else %}<span>{{ a.declared_name|default:"ไฟล์แนบ" }}</span>{% endif %}
+              <span class="muted">{{ a.get_scan_status_display }}{% if a.size %} · {{ a.size|filesizeformat }}{% endif %}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}<p class="muted">ไม่มีไฟล์แนบ</p>{% endif %}
+      {% if may_attach %}
+        <form class="upload mt-18" method="post" action="{% url 'order-upload' order.number %}" enctype="multipart/form-data">
+          {% csrf_token %}
+          <label class="visually-hidden" for="upload-files">เลือกไฟล์</label>
+          <input id="upload-files" name="files" type="file" multiple accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" required>
+          <label class="visually-hidden" for="upload-note">คำอธิบายไฟล์</label>
+          <input id="upload-note" name="note" placeholder="คำอธิบายสั้น ๆ (ไม่บังคับ)" maxlength="200">
+          <button class="btn--sm" type="submit">{% icon "clip" "sm" %} แนบไฟล์</button>
+        </form>
+      {% endif %}
+    </section>
+
+    <section class="section" aria-labelledby="s-timeline">
+      <details class="disclosure" open>
+        <summary id="s-timeline">ไทม์ไลน์ ({{ timeline|length }})</summary>
+        <div class="disclosure__body">
+          <ol class="timeline">
+            {% for e in timeline %}
+              <li>
+                <time datetime="{{ e.at|date:'c' }}">{{ e.at|thai_datetime }}</time>
+                <div>
+                  <div class="timeline__what">{{ e.what }}</div>
+                  <div class="timeline__who">{{ e.who }}{% if e.status %} · {{ e.status }}{% endif %}</div>
+                  {% if e.why %}<p class="timeline__why">{{ e.why }}</p>{% endif %}
+                </div>
+              </li>
+            {% endfor %}
+          </ol>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <aside class="detail__aside" aria-label="สิ่งที่ทำได้">
+    <section class="panel" aria-labelledby="a-steps">
+      <div class="panel__head"><h2 id="a-steps">สิ่งที่ทำได้</h2></div>
+      {% if steps %}
+        <div class="stack">
+        {% for s in steps %}{% if not s.tucked %}{% include "operations/_order_step.html" %}{% endif %}{% endfor %}
+        </div>
+        {% if tucked %}
+        <details class="more mt-18">
+          <summary class="muted">ตัวเลือกอื่น</summary>
+          <div class="stack mt-18">{% for s in steps %}{% if s.tucked %}{% include "operations/_order_step.html" %}{% endif %}{% endfor %}</div>
+        </details>
+        {% endif %}
+      {% else %}
+        <p class="muted">{% if order.status == "closed" or order.status == "cancelled" %}งานนี้จบแล้ว{% elif order.status == "done" %}รอผู้สั่งปิดงาน{% elif order.status == "sent_back" %}รอผู้สั่งสั่งใหม่หรือยกเลิก{% else %}ตอนนี้คุณไม่มีขั้นที่ต้องทำในงานนี้{% endif %}</p>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+{% endblock %}

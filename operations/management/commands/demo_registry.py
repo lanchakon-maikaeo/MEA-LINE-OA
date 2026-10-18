@@ -19,6 +19,7 @@ from django.test.utils import override_settings
 from django.utils import timezone
 
 from operations import attachments, registry, services
+from operations import options as system_options
 from operations.contracts import Actor, CommandFailed
 from operations.management.commands.demo_withdrawal import STAFF, _grant, _user
 from operations.management.demo import DemoCommand
@@ -54,6 +55,10 @@ class Command(DemoCommand):
             call_command(command, stdout=quiet)
         users = {name: _user(name, roles) for name, roles in STAFF.items()}
         users["sim-reg"] = _user("sim-reg", [(Role.STAFF, "SIM-REG")])
+        if registry.admins_only():  # the demo shows the registry unit at work
+            system_options.change(
+                None, system_options.REGISTRY_ACCESS, "staff", "สาธิต: หน่วยทะเบียนจำลองทำงานเอง"
+            )
         _grant(users["sim-approver"], AuthorityGrant.Activity.WITHDRAWAL_APPROVAL)
         _grant(users["sim-allocator"], AuthorityGrant.Activity.ALLOCATION)
         admin = (

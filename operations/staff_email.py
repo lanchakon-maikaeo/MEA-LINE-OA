@@ -124,6 +124,8 @@ def plan(kind, key, case, users, detail="", text=None):
     with a linked LINE get the important ones there too (ADR 0010), whether email is on or not."""
     from operations import staff_line  # local: staff_line reads subjects from this module
 
+    if case is not None and case.is_example:
+        return []  # ตัวอย่าง (15 ต.ค. 2569 Q33): no email or LINE about it
     staff_line.plan(kind, key, case, users)
     if not enabled():
         return []
@@ -270,6 +272,10 @@ def _problem(delivery):
 
         if not registry.is_registry_staff(user):
             return "recipient is no longer registry staff"
+    if delivery.work_order_id is not None:
+        from operations import work_orders  # local: work_orders plans through this module
+
+        return work_orders.recipient_problem(delivery)
     if delivery.case_id is not None:
         try:
             visible = services.visible_cases(Actor.staff(user)).filter(pk=delivery.case_id)
@@ -287,7 +293,7 @@ def send(delivery_id, now=None):
     with transaction.atomic():
         delivery = (
             N.objects.select_for_update(of=("self",))
-            .select_related("recipient_user", "case")
+            .select_related("recipient_user", "case", "work_order")
             .get(pk=delivery_id)
         )
         if delivery.status != N.Status.PLANNED:
@@ -299,9 +305,14 @@ def send(delivery_id, now=None):
             return SendResult("skipped")
         delivery.attempts += 1
         delivery.save(update_fields=["attempts"])
-        subject = f"[ฝอจ.] {SUBJECTS.get(delivery.kind, 'แจ้งเตือน')}"
+        from operations.work_orders import SUBJECTS as ORDER_SUBJECTS
+
+        title = SUBJECTS.get(delivery.kind) or ORDER_SUBJECTS.get(delivery.kind, "แจ้งเตือน")
+        subject = f"[ฝอจ.] {title}"
         if delivery.case_id:
             subject += f" {delivery.case.number}"
+        elif delivery.work_order_id:
+            subject += f" {delivery.work_order.number}"
         to, body = delivery.email, delivery.text
     try:
         send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [to])

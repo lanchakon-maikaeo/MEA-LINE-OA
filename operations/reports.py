@@ -1,7 +1,8 @@
 """Division reports and the scoped CSV export (M10 round 1 Q12, Q13).
 
-Both start from services.visible_cases through queues, so a report or a file never holds
-another division's cases. Durations are service minutes on the active calendar (emergencies counted
+Reports start from services.visible_cases through queues; queue CSV also accepts scoped work
+orders. A report or file never expands the viewer's access. Durations are service minutes on
+the active calendar (emergencies counted
 continuously), averaged over the last 30 days; all figures come from synthetic data until the
 pilot.
 """
@@ -59,7 +60,7 @@ class _Sets:
         self.user, self.division, self.now, self.days = user, division, now, days
         self.admin_all = division is None
         self.since = now - timedelta(days=days)
-        self.visible = queues.visible(user)
+        self.visible = queues.visible(user).exclude(is_example=True)  # ตัวอย่าง: never counted
         self.owned = (
             self.visible if division is None else self.visible.filter(owner_division=division)
         )
@@ -129,7 +130,10 @@ class _Sets:
         return cases
 
     def day(self, field, value):
-        """Cases whose `field` (submitted_at or ended_at) falls on a Bangkok date."""
+        """Cases whose `field` (submitted_at or ended_at) falls on a Bangkok date; the value
+        "window" is the whole period (the overview's เรื่องเข้า/เรื่องจบ totals)."""
+        if value == "window":
+            return self.owned.filter(**{f"{field}__gte": self.since})
         try:
             day = date.fromisoformat(value)
         except (TypeError, ValueError):
@@ -143,7 +147,7 @@ METRICS = {
     "open": ("เรื่องที่ต้องทำ", "host"),
     "overdue": ("เรื่องที่เกินกรอบเวลา", None),
     "escalated": ("เรื่องที่ถูกยกระดับ", None),
-    "district": ("เรื่องที่รอเขตตอบ", "district"),
+    "district": ("เรื่องที่รอหน่วยงาน (เขต/ฝ่าย)ตอบ", "district"),
     "children": ("เรื่องที่มีงานย่อยค้าง", "child"),
     "level": ("เรื่องที่เปิดอยู่ ระดับ{value}", None),
     "kind": ("เรื่องที่เปิดอยู่ ชนิด{value}", None),
@@ -199,7 +203,7 @@ def drilldown(user, division, metric, value, now=None, days=WINDOW_DAYS):
         cases = sets.owned_open.filter(lines__item__code=value).distinct()
     elif metric in ("new", "ended"):
         cases = sets.day("submitted_at" if metric == "new" else "ended_at", value)
-        shown = _thai_day(value)
+        shown = f"{sets.days} วันล่าสุด" if value == "window" else _thai_day(value)
     elif metric == "ack":
         cases = sets.visible.filter(pk__in=sets.ack_clocks().values("case"))
     elif metric == "resolve":
@@ -352,6 +356,8 @@ def _person(user):
 def _when(value):
     if value is None:
         return ""
+    if not isinstance(value, datetime):
+        return f"{value.day:02d}/{value.month:02d}/{value.year + 543}"
     local = timezone.localtime(value)
     return f"{local.day:02d}/{local.month:02d}/{local.year + 543} {local:%H:%M}"
 
@@ -361,7 +367,7 @@ HEADER = [
     "ชนิด",
     "สถานะ",
     "ระดับ",
-    "เขต",
+    "หน่วยงาน (เขต/ฝ่าย)",
     "กองเจ้าภาพ",
     "ผู้รับผิดชอบ",
     "ยื่นเมื่อ",
@@ -371,6 +377,8 @@ HEADER = [
     "ครบกำหนด",
     "เกินกรอบเวลา",
     "รายการของ",
+    "ผู้สั่ง",
+    "ช่องทาง",
 ]
 
 
@@ -385,6 +393,32 @@ def export_csv(cases, now=None):
     writer = csv.writer(buffer)
     writer.writerow(HEADER)
     for row in rows:
+        if row.order is not None:
+            order = row.order
+            writer.writerow(
+                [
+                    _cell(value)
+                    for value in (
+                        order.number,
+                        "งานสั่ง",
+                        order.get_status_display(),
+                        queues.level_name(row.level),
+                        "",
+                        order.division.code,
+                        _person(order.assignee),
+                        _when(order.created_at),
+                        "",
+                        _when(order.ended_at),
+                        "",
+                        _when(order.due_on),
+                        "ใช่" if row.overdue else "",
+                        "",
+                        _person(order.issued_by),
+                        order.get_channel_display() if order.channel else "ไม่ระบุช่องทาง",
+                    )
+                ]
+            )
+            continue
         case = row.case
         assignee = case.assignee
         writer.writerow(
@@ -405,6 +439,8 @@ def export_csv(cases, now=None):
                     _when(row.clock.due_at) if row.clock else "",
                     "ใช่" if row.overdue else "",
                     _lines(case),
+                    "",
+                    case.get_channel_display(),
                 )
             ]
         )

@@ -66,6 +66,7 @@ from operations.models import (
     ConversationMessage,
     Decision,
     District,
+    Division,
     Employee,
     EquipmentType,
     NotificationDelivery,
@@ -82,7 +83,17 @@ K = Case.Kind
 ACTORS = {"registered", "anonymous", "newcomer", "staff"}
 TERMINAL = {"submitted", "discarded", "reg_pending", "staff_done", "info_sent"}
 # Steps where the bot asks for a choice: its reply must carry buttons.
-CHOICE_STEPS = {"kind", "topic", "category", "item", "more", "summary", "location", "reg_district"}
+CHOICE_STEPS = {
+    "kind",
+    "topic",
+    "category",
+    "item",
+    "more",
+    "summary",
+    "location",
+    "reg_district",
+    "reg_kind",
+}
 EQUIPMENT = ("meter", "transformer", "other")
 STORY_TOPICS = (Case.Topic.USAGE, Case.Topic.SUGGESTION)
 TO_THAI = str.maketrans("0123456789", "๐๑๒๓๔๕๖๗๘๙")
@@ -355,7 +366,7 @@ class Dialogue:
         if goal.actor == "registered":
             self._register_directly()
         if goal.actor == "newcomer":
-            self.employee = self._employee(goal.district)
+            self.employee = self._employee(goal.district, Division.objects.get(code="กคว."))
         if goal.kind:
             self._plan()
         goal.restart = goal.finish == "confirm" and rng.random() < 0.15
@@ -765,11 +776,13 @@ class Dialogue:
         prompt = Conversation.objects.filter(identity=row).values_list("prompt", flat=True).first()
         if prompt and prompt.startswith("reg_"):
             return prompt
-        if row.status == ChannelIdentity.Status.ACTIVE:
-            return "idle"
         pending = RegistrationRequest.objects.filter(
             identity=row, status=RegistrationRequest.Status.PENDING
         ).exists()
+        if pending and goal.registration == "other_way":
+            return "reg_pending"  # The review is pending even though problem reporting is enabled.
+        if row.status == ChannelIdentity.Status.ACTIVE:
+            return "idle"
         return "reg_pending" if pending else "start"
 
     def _observe_staff(self):
@@ -1207,6 +1220,23 @@ def i_follow(d):
     return Move("follow", d.event("follow"), "[เพิ่มเพื่อน]")
 
 
+def i_press_as_employee(d):
+    """ลงทะเบียนในฐานะ (15 ต.ค. 2569 Q12): an employee, or one who will pick another way there."""
+    if d.goal.actor != "newcomer" or d.goal.registration not in ("employee", "other_way"):
+        return None
+    return d.press("press_as_employee", "พนักงาน กฟน.")
+
+
+def i_press_as_other(d):
+    if d.goal.actor != "newcomer" or d.goal.registration in ("employee", "other_way"):
+        return None
+    return d.press("press_as_other", "อื่น ๆ")
+
+
+def i_press_anonymous_kind(d):
+    return d.press("press_anonymous_kind", "ไม่ระบุตัวตน") if d.goal.actor == "anonymous" else None
+
+
 def i_type_name(d):
     return d.text("type_name", d._name()) if d.goal.actor == "newcomer" else None
 
@@ -1291,14 +1321,23 @@ def i_press_category(d):
     line_ = _next_line(d)
     if line_ is None:
         return None
-    return d.press("press_category", conversation.CATEGORY_LABELS[line_["item"].category])
+    item = line_["item"]
+    if d.draft().data.get("equipment_menu"):
+        group = item.line_group or ("meter" if item.category == "meter" else "other")
+        return d.press("press_category", conversation.METER_GROUPS[group])
+    return d.press("press_category", conversation.CATEGORY_LABELS[item.category])
 
 
 def i_type_category_number(d):
     line_ = _next_line(d)
     if line_ is None or not _types(d):
         return None
-    number = str(conversation.CATEGORY_ORDER.index(line_["item"].category) + 1)
+    item = line_["item"]
+    if d.draft().data.get("equipment_menu"):
+        group = item.line_group or ("meter" if item.category == "meter" else "other")
+        number = str(list(conversation.METER_GROUPS).index(group) + 1)
+    else:
+        number = str(conversation.CATEGORY_ORDER.index(item.category) + 1)
     return d.text("type_category_number", d.digits(number), repair="press_category")
 
 

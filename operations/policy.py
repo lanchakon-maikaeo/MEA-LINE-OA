@@ -17,6 +17,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -39,6 +40,7 @@ from operations.models import (
     PolicyVersion,
     Priority,
     Recommendation,
+    RoleGrant,
     RoutingReview,
     Section,
 )
@@ -243,7 +245,11 @@ def activate_policy(actor, version, approved_by_name, approval_reference, reason
         identity.require_admin(actor)
     reason = identity._require_reason(reason)
     approved_by_name = identity._require_reason(approved_by_name)
+    if not approved_by_name:
+        raise ValidationError("ระบุผู้อนุมัติ")
     approval_reference = identity._require_reason(approval_reference)
+    if not approval_reference:
+        raise ValidationError("ระบุเอกสารอ้างอิงการอนุมัติ")
     with transaction.atomic():
         version = PolicyVersion.objects.select_for_update().get(pk=version.pk)
         if version.status == PolicyVersion.Status.ACTIVE:
@@ -916,7 +922,7 @@ def refresh(case, trigger, now=None):
     result = evaluate(policy, facts, case.owner_division.code, now)
     learned = policy is not None and policy.units.get("intake") is None
     if learned:
-        from operations import ai_routing, routing_words  # local: both read this module
+        from operations import ai_keywords, ai_routing, routing_words  # local: they read this
 
         result = routing_words.apply(case, result)  # คำที่ระบบจำ for an R10 case (ADR 0013)
         result = ai_routing.apply(case, result)  # then the routing AI's proposal (Q15)
@@ -969,6 +975,7 @@ def refresh(case, trigger, now=None):
     maybe_request_ai(case, now)
     if learned:
         ai_routing.maybe_request(case, result, now)
+        ai_keywords.maybe_request(case, result, now)  # 15 ต.ค. 2569 Q9: words for the handoff
     return changed
 
 
@@ -1253,6 +1260,7 @@ def sweep_clocks(now=None):
         due = (
             AckClock.objects.select_for_update(skip_locked=True)
             .filter(stopped_at__isnull=True, due_at__lte=now, paused_at__isnull=True)
+            .exclude(case__is_example=True)  # ตัวอย่าง: no reminders or escalations
             .select_related("case", "division")
         )
         for clock in due:
@@ -1312,15 +1320,23 @@ def sweep_clocks(now=None):
 
 
 def active_grants(user, activity, now=None):
+    """Authority an admin granted, plus what membership brings (16 Oct 2569 Q4) while the
+    person is still an active member and the division's work is not split."""
     now = now or timezone.now()
     if not getattr(user, "is_authenticated", False) or not user.is_active:
         return AuthorityGrant.objects.none()
-    return AuthorityGrant.objects.filter(
+    grants = AuthorityGrant.objects.filter(
         user=user,
         activity=activity,
         revoked_at__isnull=True,
         valid_from__lte=now,
     ).exclude(valid_until__lte=now)
+    if identity.work_is_split():
+        return grants.filter(member_of__isnull=True)
+    memberships = RoleGrant.objects.filter(
+        user=user, revoked_at__isnull=True, division__is_active=True
+    ).values("division")
+    return grants.filter(Q(member_of__isnull=True) | Q(member_of__in=memberships))
 
 
 def has_authority(user, activity, division_id, now=None):
@@ -1378,6 +1394,8 @@ def grant_authority(
         raise ValidationError("Grant authority to active staff only.")
     reason = identity._require_reason(reason)
     approval_reference = identity._require_reason(approval_reference)
+    if not approval_reference:
+        raise ValidationError("ระบุเอกสารอ้างอิงการอนุมัติ")
     valid_from = valid_from or timezone.now()
     if valid_until is not None and valid_until <= valid_from:
         raise ValidationError("The end must be after the start.")

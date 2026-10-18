@@ -10,6 +10,7 @@
   <script src="{% static 'operations/htmx.min.js' %}" defer></script>
   <script src="{% static 'operations/app.js' %}" defer></script>
   <script src="{% static 'operations/tour.js' %}" defer></script>
+  {% block scripts %}{% endblock %}
 </head>
 <body data-page="{% block page_id %}{% endblock %}" data-kind="{% block page_kind %}{% endblock %}">
   <a class="skip-link" href="#main">ข้ามไปเนื้อหา</a>
@@ -26,12 +27,14 @@
             <p class="drawer__group">อื่น ๆ</p>
             {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน (SAP)</a>{% endif %}
             {% if nav.is_intake %}<a href="{% url 'case-new' %}">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
-            {% if nav.registrations %}<a href="{% url 'admin-registrations' %}">รับรองผู้แจ้ง</a>{% endif %}
-            {% if nav.scope.is_admin %}<a href="{% url 'admin-users' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>ตั้งค่าระบบ (แอดมิน)</a>{% endif %}
+            {% if nav.registrations %}<a href="{% url 'admin-registrations' %}">ผู้ใช้ LINE OA</a>{% endif %}
+            {% if nav.scope.is_admin %}<a href="{% url 'admin-home' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>ตั้งค่าระบบ (แอดมิน)</a>{% endif %}
             <p class="drawer__group">บัญชี</p>
+            {% if nav.scope.is_admin %}{# ข้อมูลประกอบงาน: admins only (15 ต.ค. 2569 Q5) #}
             <a href="{% url 'duties' %}"{% if nav.url_name == 'duties' %} aria-current="page"{% endif %}>หน้าที่ของกอง</a>
             <a href="{% url 'routing-words' %}"{% if nav.url_name == 'routing-words' %} aria-current="page"{% endif %}>คำที่ระบบจำ (ส่งกอง)</a>
             <a href="{% url 'pii' %}"{% if nav.url_name == 'pii' %} aria-current="page"{% endif %}>ปิดข้อมูลก่อนส่ง AI</a>
+            {% endif %}
             <a href="{% url 'account' %}">บัญชีของฉัน</a>
           </nav>
         </details>
@@ -44,10 +47,10 @@
         <nav class="mainnav" aria-label="เมนูหลัก" data-tour="nav">
           <a href="{% url 'console' %}"{% if nav.url_name == 'console' or nav.section == 'reports' %} aria-current="page"{% endif %}>ภาพรวมและรายงาน</a>
           {% with first=nav.divisions.0 %}
-          <a href="{% if nav.current %}{% url 'division-detail' nav.current %}{% elif first %}{% url 'division-detail' first.code %}{% else %}{% url 'console' %}{% endif %}"{% if nav.section == 'queue' and nav.url_name != 'console' %} aria-current="page"{% endif %} data-tour-link="queue">คิวงาน</a>
+          <a href="{% if nav.all_queue %}{% url 'queue-all' %}{% elif nav.current %}{% url 'division-detail' nav.current %}{% elif first %}{% url 'division-detail' first.code %}{% else %}{% url 'console' %}{% endif %}"{% if nav.section == 'queue' and nav.url_name != 'console' %} aria-current="page"{% endif %} data-tour-link="queue">คิวงาน</a>
           {% endwith %}
           {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน</a>{% endif %}
-          {% if nav.scope.is_admin %}<a href="{% url 'admin-users' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>แอดมิน</a>{% elif nav.registrations %}<a href="{% url 'admin-registrations' %}"{% if nav.url_name == 'admin-registrations' %} aria-current="page"{% endif %}>รับรองผู้แจ้ง</a>{% endif %}
+          {% if nav.scope.is_admin %}<a href="{% url 'admin-home' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>แอดมิน</a>{% elif nav.registrations %}<a href="{% url 'admin-registrations' %}"{% if nav.url_name == 'admin-registrations' %} aria-current="page"{% endif %}>ผู้ใช้ LINE OA</a>{% endif %}
         </nav>
         <div class="topbar__tools">
           <button class="chip tour-start js-only" type="button" data-tour-start data-tour="tour-start" aria-haspopup="dialog">{% icon "spark" "sm" %} <span class="tour-start__label">สาธิตการใช้งาน</span></button>
@@ -58,7 +61,7 @@
           </form>
           {% if nav.divisions|length > 1 or nav.scope.is_admin %}
             <details class="menu division-switch" data-tour="division-switch">
-              <summary class="chip" aria-label="เลือกกอง"><span class="chip__label">{{ nav.current|default:"เลือกกอง" }}</span> {% icon "grid" "sm" %}</summary>
+              <summary class="chip" aria-label="เลือกกอง"><span class="chip__label">{% if nav.all_queue %}ทุกกอง{% else %}{{ nav.current|default:"เลือกกอง" }}{% endif %}</span> {% icon "grid" "sm" %}</summary>
               <div class="menu__panel">
                 <p class="menu__label">คิวงานของกอง</p>
                 {% if nav.scope.is_admin %}<a class="menu__item" href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
@@ -73,9 +76,11 @@
               <div class="menu__sep"></div>
               <a class="menu__item" href="{% url 'account' %}">{% icon "user" "sm" %} บัญชีของฉัน</a>
               <a class="menu__item" href="{% url 'password_change' %}">{% icon "key" "sm" %} เปลี่ยนรหัสผ่าน</a>
+              {% if nav.scope.is_admin %}
               <a class="menu__item" href="{% url 'duties' %}">{% icon "info" "sm" %} หน้าที่ของกอง</a>
               <a class="menu__item" href="{% url 'routing-words' %}">{% icon "grid" "sm" %} คำที่ระบบจำ (ส่งกอง)</a>
               <a class="menu__item" href="{% url 'pii' %}">{% icon "lock" "sm" %} ปิดข้อมูลก่อนส่ง AI</a>
+              {% endif %}
               <div class="menu__sep"></div>
               <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="menu__item" type="submit">{% icon "logout" "sm" %} ออกจากระบบ</button></form>
             </div>
@@ -90,6 +95,7 @@
   </header>
   {% block subnav %}{% endblock %}
   {% block before_main %}{% endblock %}
+  {% if nav.admin and not nav.admin.home %}<div class="admin-shell">{% include "operations/_admin_menu.html" %}{% endif %}
   <main id="main" class="page {% block page_class %}{% endblock %}" tabindex="-1">
     {% if messages %}
       <div class="messages" role="status">
@@ -103,9 +109,10 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  {% if nav.admin and not nav.admin.home %}</div>{% endif %}
   <footer class="footer">
     <div class="footer__inner">
-      <span>ระบบต้นแบบ ฝอจ. · ข้อมูลกอง กติกา และยอดคลังเป็นข้อมูลจำลอง ยังไม่ใช่ระเบียบหรือมาตรฐานบริการจริง</span>
+      {% if app_env == "production" %}<span>ระบบรับเรื่อง ฝอจ. · กติกาและกรอบเวลาเป็นฉบับทดลองใช้ ยังไม่ใช่มาตรฐานบริการทางการ</span>{% else %}<span>ระบบทดสอบ · ข้อมูลกอง กติกา และยอดคลังในเครื่องนี้เป็นข้อมูลจำลอง</span>{% endif %}
       <span>วันเวลาเป็นเวลาไทย ปี พ.ศ.</span>
     </div>
   </footer>

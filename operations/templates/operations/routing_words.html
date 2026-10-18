@@ -1,40 +1,40 @@
 {% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}คำที่ระบบจำ — ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}คำที่ระบบจำ · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">การส่งกอง</span>
     <h1>คำที่ระบบจำ</h1>
-    <p class="lede">เมื่อกติกาบอกไม่ได้ว่าเรื่องเป็นของกองไหน เรื่องจะไปส่วนกลางก่อน ถ้าส่วนกลางโอนต่อพร้อมใส่คำสำคัญ และกองปลายทางรับเรื่อง ระบบจะจำคำนั้นไว้ เรื่องประเภทเดียวกันครั้งหน้าที่มีคำนี้จะไปกองนั้นเอง กติกาหลักยังมาก่อนเสมอ</p>
+    <p class="lede">เมื่อกติกาบอกไม่ได้ว่าเรื่องเป็นของกองไหน เรื่องจะไป ฝอจ. ก่อน ถ้า ฝอจ. ส่งต่อพร้อมใส่คำสำคัญ และกองปลายทางรับเรื่อง ระบบจะจำคำนั้นไว้ เรื่องประเภทเดียวกันครั้งหน้าที่มีคำนี้จะไปกองนั้นเอง กติกาหลักยังมาก่อนเสมอ</p>
   </div>
 </div>
 <section class="section" aria-labelledby="rw-mode">
   <div class="section-head"><h2 id="rw-mode">ตอนนี้ระบบใช้คำที่จำอย่างไร</h2></div>
   <p>{{ mode }}{% if is_admin %} (<a href="{% url 'admin-options' %}#opt-learned_routes">เปลี่ยน</a>){% endif %}</p>
-  <p class="muted">ถ้ากองที่ได้รับเรื่องเพราะคำนี้โอนต่อด้วยเหตุผล "ส่งผิดกอง" และกองใหม่รับเรื่อง คำจะย้ายไปกองใหม่เอง คำที่ย้ายตั้งแต่ 2 ครั้งขึ้นป้าย "ย้ายบ่อย" ถ้าข้อความมีคำที่จำไว้หลายคำแต่ชี้ไปคนละกอง เรื่องจะไปส่วนกลาง{% if not manage %} หน้านี้แสดงเฉพาะคำที่ชี้มากองของคุณ{% endif %}</p>
+  <p class="muted">ถ้ากองที่ได้รับเรื่องเพราะคำนี้ส่งต่อด้วยเหตุผล "ส่งผิดกอง" และกองใหม่รับเรื่อง คำจะย้ายไปกองใหม่เอง คำที่ย้ายตั้งแต่ 2 ครั้งขึ้นป้าย "ย้ายบ่อย" ถ้าข้อความมีคำที่จำไว้หลายคำแต่ชี้ไปคนละกอง เรื่องจะไป ฝอจ.{% if not manage %} หน้านี้แสดงเฉพาะคำที่ชี้มากองของคุณ{% endif %}</p>
 </section>
 <section class="section" aria-labelledby="rw-list">
   <div class="section-head"><h2 id="rw-list">คำทั้งหมด</h2><span class="muted">{{ rows|length }} คำ</span></div>
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="table--cards">
     <thead><tr><th scope="col">คำ</th><th scope="col">ประเภทเรื่อง</th><th scope="col">ส่งไปกอง</th><th scope="col">ที่มา</th><th scope="col">สอนจากเรื่อง</th><th scope="col" class="num">ส่งเรื่องแล้ว</th>{% if manage %}<th scope="col">แก้ไข</th>{% endif %}</tr></thead>
     <tbody>
     {% for item in rows %}{% with w=item.row %}
       <tr>
         <td><strong>{{ w.word }}</strong>{% if item.often %} <span class="tag tag--outline">ย้ายบ่อย</span>{% endif %}{% if item.in_rules %} <span class="tag tag--muted">ซ้ำกับกติกา</span>{% endif %}</td>
-        <td>{{ w.get_kind_display }}</td>
-        <td>{{ w.division.code }}</td>
-        <td>{{ w.get_source_display }}{% if w.taught_by %}<br><span class="muted">โดย {{ w.taught_by.staff_profile.display_name|default:w.taught_by.username }}</span>{% endif %}</td>
-        <td class="nowrap"><a href="{% url 'case-detail' w.learned_from.number %}">{{ w.learned_from.number }}</a><br><span class="muted">{{ w.updated_at|thai_datetime }}</span></td>
-        <td class="num">{{ w.uses }}</td>
+        <td data-label="ประเภทเรื่อง">{{ w.get_kind_display }}</td>
+        <td class="cell--end" data-label="ส่งไปกอง">{{ w.division.code }}</td>
+        <td data-label="ที่มา">{{ w.get_source_display }}{% if w.taught_by %}<br><span class="muted">โดย {{ w.taught_by.staff_profile.display_name|default:w.taught_by.username }}</span>{% endif %}</td>
+        <td class="nowrap" data-label="สอนจากเรื่อง"><a href="{% url 'case-detail' w.learned_from.number %}">{{ w.learned_from.number }}</a><br><span class="muted">{{ w.updated_at|thai_datetime }}</span></td>
+        <td class="num" data-label="ส่งเรื่องแล้ว">{{ w.uses }}</td>
         {% if manage %}
-        <td>
+        <td class="cell--wide">
           <form method="post" class="stack-sm">
             {% csrf_token %}<input type="hidden" name="word_id" value="{{ w.pk }}">
             <label class="visually-hidden" for="rw-div-{{ w.pk }}">ย้ายไปกอง</label>
             <select id="rw-div-{{ w.pk }}" name="division">{% for d in divisions %}<option value="{{ d.code }}"{% if d.pk == w.division_id %} selected{% endif %}>{{ d.code }}</option>{% endfor %}</select>
-            <label class="visually-hidden" for="rw-reason-{{ w.pk }}">เหตุผล</label>
-            <input id="rw-reason-{{ w.pk }}" name="reason" maxlength="500" required placeholder="เหตุผล">
+            <label class="visually-hidden" for="rw-reason-{{ w.pk }}">เหตุผล (ไม่บังคับ)</label>
+            <input id="rw-reason-{{ w.pk }}" name="reason" maxlength="500" placeholder="เหตุผล">
             <button class="btn btn--sm btn--secondary" type="submit" name="action" value="move">ย้ายกอง</button>
             <button class="btn btn--sm btn--ghost" type="submit" name="action" value="cancel">ยกเลิกคำ</button>
           </form>

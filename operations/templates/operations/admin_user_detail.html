@@ -1,6 +1,6 @@
 {% extends "operations/admin_base.html" %}
 {% block content %}
-<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · ผู้ใช้</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · บัญชีเจ้าหน้าที่</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>
 
 <h2>บทบาท</h2>
 <div class="table-wrap"><table>
@@ -14,7 +14,7 @@
       <td>{% if not grant.revoked_at %}
         <form class="inline" method="post" action="{% url 'admin-user-action' target.pk 'revoke' %}">
           {% csrf_token %}<input type="hidden" name="grant_id" value="{{ grant.pk }}">
-          <label>เหตุผล <input name="reason" required></label><button type="submit">ถอน</button>
+          <label>เหตุผล <input name="reason"></label><button type="submit">ถอน</button>
         </form>{% endif %}</td>
     </tr>
   {% empty %}
@@ -24,30 +24,40 @@
 </table></div>
 
 <div class="form-grid">
+    <form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">
+  <fieldset><legend>แจ้งการสมัครผ่าน LINE แอดมิน</legend>{% csrf_token %}
+    <p>บัญชีผู้รับต้องเป็นแอดมินและเชื่อม LINE แล้ว ระบบตรวจสิทธิ์อีกครั้งก่อนส่ง</p>
+    <label><input type="checkbox" name="enabled" value="1"{% if target.staff_profile.notify_registrations %} checked{% endif %}> รับแจ้งคำขอลงทะเบียนและผลการอนุมัติ</label>
+    <button type="submit">บันทึกผู้รับแจ้ง</button>
+  </fieldset>
+</form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'grant' %}">
-  <fieldset><legend>เพิ่มบทบาท</legend>{% csrf_token %}{{ grant_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
+  <fieldset><legend>เพิ่มบทบาท</legend>{% csrf_token %}
+{% if work_split %}<p class="helptext">ตอนนี้แยกหน้าที่ย่อยในกอง แต่ละคนทำได้เฉพาะหน้าที่ที่ได้รับ</p>
+    {% else %}<p class="helptext">สมาชิกกองทำได้ทุกขั้นตอนของกองและมีอำนาจของกองติดมาด้วย Supervisor ของกองสั่งงานและมอบงานในกองนั้นได้เพิ่ม ส่วน Supervisor ระดับฝ่ายดูแลทุกกอง (เว้นช่องกองว่าง)</p>{% endif %}
+    {{ grant_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'employee-id' %}">
   <fieldset><legend>รหัสพนักงาน (ใช้เชื่อม LINE ด้วยการยืนยันกับทะเบียนพนักงาน)</legend>{% csrf_token %}
     <p><label for="u-emp">รหัสพนักงาน</label> <input id="u-emp" name="employee_id" maxlength="32" value="{{ target.staff_profile.employee_id }}"></p>
-    <p><label for="u-emp-reason">เหตุผล</label> <input id="u-emp-reason" name="reason" maxlength="500"></p>
+    <p><label for="u-emp-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-emp-reason" name="reason" maxlength="500"></p>
     <button type="submit">บันทึก</button></fieldset>
 </form>
 <p>LINE: {% if line %}เชื่อมแล้ว {{ line.staff_linked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่ได้เชื่อม{% endif %}</p>
-{% if line %}<form method="post" action="{% url 'admin-user-action' target.pk 'line-unlink' %}">{% csrf_token %}<label>เหตุผล <input name="reason" required></label><button type="submit">เลิกเชื่อม LINE ของบัญชีนี้</button></form>{% endif %}
-<form method="post" action="{% url 'admin-user-action' target.pk 'full-division' %}">
+{% if line %}<form method="post" action="{% url 'admin-user-action' target.pk 'line-unlink' %}">{% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">เลิกเชื่อม LINE ของบัญชีนี้</button></form>{% endif %}
+{% if work_split %}<form method="post" action="{% url 'admin-user-action' target.pk 'full-division' %}">
   <fieldset><legend>ทำได้ทุกงานในกอง (ทุกบทบาทและอำนาจของกองในครั้งเดียว)</legend>{% csrf_token %}
     <p class="helptext">ให้ทีละรายการ จึงถอนบางบทบาทหรืออำนาจภายหลังได้เมื่อจะแยกหน้าที่ ถ้าต้องการให้คนเดียวทำต่อกันได้ทุกขั้น ให้ปิดการแยกหน้าที่ในตัวเลือกระบบด้วย</p>
     <p><label for="u-full-division">กอง</label> <select id="u-full-division" name="division" required>{% for d in active_divisions %}<option value="{{ d.pk }}">{{ d.code }} {{ d.name }}</option>{% endfor %}</select></p>
-    <p><label for="u-full-reason">เหตุผล</label> <input id="u-full-reason" name="reason" maxlength="500" required></p>
+    <p><label for="u-full-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-full-reason" name="reason" maxlength="500"></p>
     <p><label for="u-full-ref">เลขอ้างอิงการมอบอำนาจ</label> <input id="u-full-ref" name="approval_reference" maxlength="200" required></p>
     <button type="submit">ให้ทำได้ทุกงานในกองนี้</button></fieldset>
-</form>
+</form>{% endif %}
 {% if sections %}
 <form method="post" action="{% url 'admin-user-action' target.pk 'section' %}">
   <fieldset><legend>แผนก (ใช้แยกคิวและรายงาน ไม่เปลี่ยนสิทธิ์)</legend>{% csrf_token %}
-    <p><label for="u-section">แผนก</label> <select id="u-section" name="section"><option value="">— ไม่สังกัดแผนก —</option>{% for s in sections %}<option value="{{ s.pk }}"{% if target.staff_profile.section_id == s.pk %} selected{% endif %}>{{ s.division.code }} · {{ s.name }}</option>{% endfor %}</select></p>
-    <p><label for="u-section-reason">เหตุผล</label> <input id="u-section-reason" name="reason" maxlength="500"></p>
+    <p><label for="u-section">แผนก</label> <select id="u-section" name="section"><option value="">ไม่สังกัดแผนก</option>{% for s in sections %}<option value="{{ s.pk }}"{% if target.staff_profile.section_id == s.pk %} selected{% endif %}>{{ s.division.code }} · {{ s.name }}</option>{% endfor %}</select></p>
+    <p><label for="u-section-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-section-reason" name="reason" maxlength="500"></p>
     <button type="submit">บันทึกแผนก</button></fieldset>
 </form>
 {% endif %}
@@ -56,15 +66,15 @@
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk target.is_active|yesno:'suspend,activate' %}">
   <fieldset><legend>{{ target.is_active|yesno:"ระงับบัญชี,เปิดใช้บัญชี" }}</legend>{% csrf_token %}
-    <label>เหตุผล <input name="reason" required></label> <button type="submit">ยืนยัน</button></fieldset>
+    <label>เหตุผล <input name="reason"></label> <button type="submit">ยืนยัน</button></fieldset>
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'revoke-sessions' %}">
   <fieldset><legend>บังคับออกจากระบบทุกเครื่อง</legend>{% csrf_token %}
-    <label>เหตุผล <input name="reason" required></label> <button type="submit">ยืนยัน</button></fieldset>
+    <label>เหตุผล <input name="reason"></label> <button type="submit">ยืนยัน</button></fieldset>
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'reset-password' %}">
   <fieldset><legend>ตั้งรหัสผ่านชั่วคราว</legend>{% csrf_token %}
-    <label>เหตุผล <input name="reason" required></label> <button type="submit">ยืนยัน</button></fieldset>
+    <label>เหตุผล <input name="reason"></label> <button type="submit">ยืนยัน</button></fieldset>
 </form>
 </div>
 {% endblock %}

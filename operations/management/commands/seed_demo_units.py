@@ -23,7 +23,13 @@ class Command(DemoCommand):
         units += [(row, Division.Kind.COORDINATION) for row in data["coordination_roles"]]
         for row, kind in units:
             Division.objects.update_or_create(
-                code=row["id"], defaults={"name": row["name"], "kind": kind, "is_synthetic": True}
+                code=row["id"],
+                defaults={
+                    "name": row["name"],
+                    "kind": kind,
+                    "is_active": True,
+                    "is_synthetic": True,
+                },
             )
         # The synthetic intake desk owns new cases unless an admin already chose another unit.
         if not Division.objects.filter(is_intake=True).exists():

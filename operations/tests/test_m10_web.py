@@ -21,6 +21,7 @@ import operations
 from operations import (
     attachments,
     casepage,
+    charts,
     identity,
     notifications,
     orchestration,
@@ -270,9 +271,11 @@ class GuardTests(WebTestCase):
                 self.assertEqual(response.status_code, 403)
                 self.assertContains(response, "ไม่มีสิทธิ์เข้าหน้านี้", status_code=403)
 
-    def test_ai_settings_link_only_for_developer_admin(self):
+    def test_ai_settings_link_for_every_admin(self):
+        # 15 ต.ค. 2569 Q7/Q23: every admin opens the AI page; changing it is a separate right.
         page = self.client_for(self.admin).get("/console/admin/users/")
-        self.assertNotContains(page, "/console/admin/ai/")
+        self.assertContains(page, "/console/admin/ai/")
+        self.assertNotContains(self.client_for(self.meter).get("/console/"), "/console/admin/ai/")
         root = make_staff("root", (Role.ADMIN, None), (Role.DEVELOPER_ADMIN, None))
         self.assertContains(
             self.client_for(root).get("/console/admin/users/"), "/console/admin/ai/"
@@ -560,16 +563,13 @@ class FriendlyFlowTests(WebTestCase):
         )
         self.assertEqual(policy.state_for(case).confirmed_priority, "P2")
 
-    def test_a_refused_level_keeps_triage_and_explains_in_thai(self):
+    def test_triage_accepts_a_level_change_without_an_edit_reason(self):
         case = self.at_owner()
-        before = case.revision
         response = self.post(self.trf_staff, case, "complete_triage", {"priority": "P0"})
-        self.assertContains(response, "notice--error", status_code=400)
-        self.assertContains(response, "ข้อเท็จจริงใหม่", status_code=400)
-        self.assertNotContains(response, "Give the new facts", status_code=400)
+        self.assertRedirects(response, f"/cases/{case.number}/")
         case.refresh_from_db()
-        self.assertEqual((case.status, case.revision), (S.TRIAGE, before))
-        self.assertFalse(case.decisions.filter(action="set_priority").exists())
+        self.assertEqual(case.status, S.IN_PROGRESS)
+        self.assertTrue(case.decisions.filter(action="set_priority", reason="").exists())
 
     def test_once_the_level_is_confirmed_the_form_does_not_ask_again(self):
         case = self.at_owner()
@@ -595,7 +595,7 @@ class FriendlyFlowTests(WebTestCase):
         page = self.client_for(self.trf_staff).get(f"/cases/{case.number}/")
         self.assertContains(page, "ปิดเรื่องเองได้ตั้งแต่")
         self.assertContains(page, "ผู้แจ้งไม่ได้ผูก LINE ไว้")
-        self.assertContains(page, "SIM-TRIAGE กด “บันทึกคำตอบแทนเขต”")
+        self.assertContains(page, "SIM-TRIAGE กด “บันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)”")
         self.assertIn("confirm", dict(self.offers(self.intake, case)))
         case.decisions.filter(action="resolve").update(
             created_at=timezone.now() - timedelta(days=8)
@@ -899,6 +899,45 @@ class FileForRequesterTests(WebTestCase):
 
 
 # --- Foundation (round 1 Q2, Q3) ------------------------------------------------------------
+
+
+class NavigationTests(WebTestCase):
+    def test_the_division_switch_shows_every_division_after_choosing_it(self):
+        # 15 ต.ค. 2569: on ทุกกอง the switch kept showing the division opened before.
+        client = self.client_for(self.admin)
+        client.get("/divisions/SIM-MTR/")
+        page = client.get("/queue/")
+        self.assertTrue(page.context["nav"]["all_queue"])
+        self.assertEqual(page.context["nav"]["current"], "")
+        self.assertContains(page, '<span class="chip__label">ทุกกอง</span>')
+        later = client.get("/console/")
+        self.assertTrue(later.context["nav"]["all_queue"])
+        self.assertContains(later, 'href="/queue/" data-tour-link="queue"')
+        client.get("/divisions/SIM-MTR/")
+        again = client.get("/console/")
+        self.assertFalse(again.context["nav"]["all_queue"])
+        self.assertEqual(again.context["nav"]["current"], "SIM-MTR")
+
+    def test_reference_links_are_for_admins(self):
+        # 15 ต.ค. 2569 Q5: ข้อมูลประกอบงาน is hidden from other staff; the pages keep their rights.
+        links = ('href="/duties/"', 'href="/routing/words/"', 'href="/console/pii/"')
+        staff = self.client_for(self.meter).get("/console/")
+        admin = self.client_for(self.admin).get("/console/")
+        for link in links:
+            self.assertNotContains(staff, link)
+            self.assertContains(admin, link)
+        self.assertEqual(self.client_for(self.meter).get("/duties/").status_code, 200)
+
+    def test_trend_lines_add_up_over_the_period(self):
+        # 15 ต.ค. 2569 Q8: cumulative lines; each day keeps its own counts for the table.
+        days = [timezone.localdate() - timedelta(days=n) for n in (2, 1, 0)]
+        points = list(zip(days, (2, 0, 3), (0, 1, 2), strict=True))
+        trend = charts.trend(points, lambda metric, day: f"/{metric}/{day}")
+        self.assertEqual([c["new_total"] for c in trend["columns"]], [2, 2, 5])
+        self.assertEqual([c["ended_total"] for c in trend["columns"]], [0, 1, 3])
+        self.assertEqual([c["new"] for c in trend["columns"]], [2, 0, 3])
+        self.assertEqual((trend["total_new"], trend["total_ended"]), (5, 3))
+        self.assertEqual(trend["ends"][0]["y"], trend["top"])  # the new line ends at the top
 
 
 class FoundationTests(TestCase):

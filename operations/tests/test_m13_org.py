@@ -36,7 +36,6 @@ from operations import (
 from operations.contracts import Actor, CommandFailed, ErrorCode
 from operations.management.commands import load_org, seed_org_demo
 from operations.models import (
-    DIVISION_ROLES,
     AckClock,
     AuditEvent,
     AuthorityGrant,
@@ -277,6 +276,7 @@ class OwnerDeskTests(OrgTestCase):
         return Case.objects.get(pk=case.pk)
 
     def test_another_member_records_the_districts_answer_not_the_resolver(self):
+        options.change(self.admin, options.SEPARATION, "on", "")
         case = self.resolved()
         answer = {"channel": "phone", "intake_note": "เขตโทรแจ้งว่าเรียบร้อย"}
         with self.assertRaises(CommandFailed) as caught:
@@ -376,23 +376,22 @@ class SectionTests(OrgTestCase):
 
 class OptionsTests(OrgTestCase):
     def test_options_start_safe_and_change_only_by_admin_with_a_reason(self):
-        self.assertEqual(options.get(options.SEPARATION), "on")
+        # 16 Oct 2569 Q4: separation is off by default; members do every step of their division.
+        self.assertEqual(options.get(options.SEPARATION), "off")
         self.assertEqual(options.get(options.REGISTRATION), "admin")
         with self.assertRaises(PermissionDenied):
-            options.change(self.kcw, options.SEPARATION, "off", "อยากทำเอง")
-        with self.assertRaises(ValidationError):
-            options.change(self.admin, options.SEPARATION, "off", "")
+            options.change(self.kcw, options.SEPARATION, "on", "อยากแยก")
         with self.assertRaises(ValidationError):
             options.change(self.admin, options.SEPARATION, "maybe", "ค่าแปลก")
-        options.change(self.admin, options.SEPARATION, "off", "กองละหนึ่งบัญชี")
-        self.assertEqual(options.get(options.SEPARATION), "off")
+        options.change(self.admin, options.SEPARATION, "on", "")
+        self.assertEqual(options.get(options.SEPARATION), "on")
         event = AuditEvent.objects.get(action="option.changed")
-        self.assertEqual((event.data["previous"], event.data["value"]), ("on", "off"))
+        self.assertEqual((event.data["previous"], event.data["value"]), ("off", "on"))
         client = Client()
         client.force_login(self.admin)
         page = client.get("/console/admin/options/")
         self.assertContains(page, "การแยกหน้าที่ในเรื่องเดียวกัน")
-        self.assertContains(page, "กองละหนึ่งบัญชี")
+        self.assertEqual(event.reason, "")
         client.post(
             "/console/admin/options/",
             {"key": options.REGISTRATION, "value": "staff", "reason": "สะดวก"},
@@ -401,17 +400,17 @@ class OptionsTests(OrgTestCase):
 
     def test_one_account_does_every_step_of_its_division(self):
         solo = make_staff("solo")
+        # 16 Oct 2569 Q3: one membership brings every step and the division's authority.
         roles, grants = identity.grant_full_division(
             self.admin, solo, Division.objects.get(code="กองอุปกรณ์ฯ"), "บัญชีเดียวของกอง", "REF-1"
         )
-        self.assertEqual((roles, grants), (len(DIVISION_ROLES), len(identity.DIVISION_AUTHORITY)))
+        self.assertEqual((roles, grants), (1, len(identity.DIVISION_AUTHORITY)))
         self.assertEqual(
             identity.grant_full_division(
                 self.admin, solo, Division.objects.get(code="กองอุปกรณ์ฯ"), "ซ้ำ", "REF-1"
             ),
             (0, 0),
         )
-        options.change(self.admin, options.SEPARATION, "off", "กองละหนึ่งบัญชี")
         _, case = self.submit({"kind": "problem", "topic": "transformer", "description": "ดับ"})
         self.act(solo, case, "start_triage")
         self.act(solo, case, "set_priority", {"priority": "P2", "reason": "ทดสอบ"})
@@ -456,7 +455,26 @@ class OptionsTests(OrgTestCase):
 
 
 class RegistryTests(OrgTestCase):
+    def test_the_registry_is_for_admins_only_by_default(self):
+        # 15 ต.ค. 2569 Q6: admins hold the registry; ตัวเลือกระบบ gives it back to divisions.
+        _, meter = self.submit(withdrawal(("MTR_SYN_A", "1")))
+        d = RegistryDiscrepancy.objects.create(
+            kind="not_found", case=meter, document_number="49001", opened_at=timezone.now()
+        )
+        self.assertTrue(registry.admins_only())
+        self.assertFalse(registry.may_open(self.kcw))
+        self.assertFalse(registry.may_decide(self.kcw, d))
+        self.assertTrue(registry.may_decide(self.admin, d))
+        client = Client()
+        client.force_login(self.kcw)
+        self.assertNotContains(client.get("/console/"), 'href="/registry/"')
+        options.change(self.admin, options.REGISTRY_ACCESS, "staff", "แต่ละกองตัดสินเอง")
+        self.assertTrue(registry.may_decide(self.kcw, d))
+        self.assertFalse(registry.may_decide(self.admin, d))  # admins read only then
+        self.assertContains(client.get("/console/"), 'href="/registry/"')
+
     def test_each_division_sees_and_decides_its_own_discrepancies(self):
+        options.change(self.admin, options.REGISTRY_ACCESS, "staff", "แต่ละกองตัดสินเอง")
         self.assertTrue(registry.per_division())
         _, meter = self.submit(withdrawal(("MTR_SYN_A", "1")))
         _, trf = self.submit(withdrawal(("TRF_SYN_A", "1")))
@@ -516,7 +534,7 @@ class LineTopicTests(LineTestCase):
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
         self.assertIn("4. การใช้ไฟฟ้า (ลักใช้ไฟ ไฟแพง ร้องเรียน)", texts(self.sent[-1]))
         self.press(ALICE, "การใช้ไฟฟ้า")
-        self.assertIn("เล่าเรื่องที่พบ", texts(self.sent[-1]))
+        self.assertIn("แจ้งเรื่องที่พบ", texts(self.sent[-1]))
         self.type(ALICE, "สงสัยมีการลักใช้ไฟ (ข้อมูลทดสอบ)")
         self.press(ALICE, "ข้าม")
         summary = self.press(ALICE, "ข้าม")
@@ -531,7 +549,7 @@ class LineTopicTests(LineTestCase):
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
         self.press(ALICE, "ข้อเสนอแนะ")
-        self.assertIn("พิมพ์ข้อเสนอแนะได้เลย", texts(self.sent[-1]))
+        self.assertIn("กรุณาแจ้งข้อเสนอแนะ", texts(self.sent[-1]))
         self.type(ALICE, "อยากให้แจ้งเวลารับของล่วงหน้า (ทดสอบ)")
         self.press(ALICE, "ข้าม")
         summary = self.press(ALICE, "ข้าม")
@@ -563,7 +581,7 @@ class LineTopicTests(LineTestCase):
         self.press(ALICE, "MTR_SYN_A")
         self.type(ALICE, "1")
         self.press(ALICE, "เพิ่มรายการ")
-        self.press(ALICE, "หม้อแปลง")
+        self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "TRF_SYN_A")
         self.type(ALICE, "1")
         self.press(ALICE, "ไปต่อ")

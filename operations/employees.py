@@ -58,7 +58,14 @@ def check_label():
 
 
 def has_directory():
-    return Employee.objects.filter(is_active=True).exclude(check_hash="").exists()
+    """A roster someone can prove themselves against: a proof value or a roster e-mail."""
+    from django.db.models import Q
+
+    return (
+        Employee.objects.filter(is_active=True)
+        .filter(~Q(check_hash="") | ~Q(email_hash=""))
+        .exists()
+    )
 
 
 @transaction.atomic
@@ -94,7 +101,7 @@ def import_csv(actor, data, check_label_text, deactivate_missing=False, syntheti
         district_code = (row.get("district_code") or "").strip()
         division_code = (row.get("division_code") or "").strip()
         if district_code and district_code not in districts:
-            problems.append(f"แถว {number}: ไม่รู้จักเขต {district_code}")
+            problems.append(f"แถว {number}: ไม่รู้จักหน่วยงาน (เขต/ฝ่าย) {district_code}")
             continue
         if division_code and division_code not in divisions:
             problems.append(f"แถว {number}: ไม่รู้จักกอง {division_code}")
@@ -261,6 +268,36 @@ def failed_today(identity_row, now=None):
     ).count()
 
 
+def proves(employee, proof):
+    """The proof value of the old lists, or the roster e-mail typed (15 ต.ค. 2569 Q24)."""
+    from operations import roster
+
+    if employee.check_hash and hmac.compare_digest(employee.check_hash, digest(proof)):
+        return True
+    return bool(employee.email_hash) and hmac.compare_digest(
+        employee.email_hash, roster.email_digest(proof)
+    )
+
+
+def lookup(identity_row, employee_id, now=None):
+    """(employee, "") for an active employee with something to prove against; otherwise (None,
+    reason): "locked" after the day's failures, or "no_match" (counted as a failure, so the list
+    cannot be walked through LINE)."""
+    from operations import identity
+
+    if failed_today(identity_row, now) >= MAX_FAILED:
+        return None, "locked"
+    employee = (
+        Employee.objects.filter(employee_id=(employee_id or "").strip(), is_active=True)
+        .select_related("district")
+        .first()
+    )
+    if employee is None or not (employee.check_hash or employee.email_hash):
+        identity.audit(None, "identity.employee_check_failed", identity_row, actor_label="line")
+        return None, "no_match"
+    return employee, ""
+
+
 def verify(identity_row, employee_id, proof, district=None, now=None):
     """(employee, "") when the ID and proof match an active employee (and their district, when
     the list has one); otherwise (None, reason): "locked", "no_match" or "district"."""
@@ -271,7 +308,7 @@ def verify(identity_row, employee_id, proof, district=None, now=None):
     employee = Employee.objects.filter(
         employee_id=(employee_id or "").strip(), is_active=True
     ).first()
-    matched = employee is not None and hmac.compare_digest(employee.check_hash or "", digest(proof))
+    matched = employee is not None and proves(employee, proof)
     reason = "" if matched else "no_match"
     if matched and district is not None and employee.district_id not in (None, district.pk):
         reason = "district"

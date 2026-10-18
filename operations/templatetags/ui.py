@@ -146,6 +146,13 @@ def status_tag(case):
 
 
 @register.filter
+def lines(values):
+    """One value per line for a textarea. Django tags cannot span lines, so the old
+    `join:"<newline>"` left the tag itself in the box (and a save would store it)."""
+    return "\n".join(str(value) for value in values or [])
+
+
+@register.filter
 def initial(text):
     # Skip Thai leading vowels (เ แ โ ใ ไ) so "เมธี" shows ม, not เ.
     text = (text or "").strip().lstrip("เแโใไ")

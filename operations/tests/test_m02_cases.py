@@ -16,7 +16,7 @@ from django.db import IntegrityError, OperationalError, connection, transaction
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
-from operations import identity, services, workflow
+from operations import identity, options, services, workflow
 from operations.contracts import Actor, CommandFailed, ErrorCode, contract_document
 from operations.models import (
     ActionReceipt,
@@ -32,6 +32,7 @@ from operations.models import (
     Role,
     RoleGrant,
     StaffProfile,
+    SystemOption,
 )
 
 User = get_user_model()
@@ -92,6 +93,10 @@ def make_staff(username, *roles):
 
 def setup_world(target):
     """Shared reference data for TestCase and TransactionTestCase classes."""
+    # The SIM world keeps the design before 16 Oct 2569 Q3: each division's work is split into
+    # duties and consecutive steps need different people, so the duty tests test that mode.
+    for key, value in ((options.DIVISION_WORK, "roles"), (options.SEPARATION, "on")):
+        SystemOption.objects.update_or_create(key=key, defaults={"value": value})
     call_command("load_districts", stdout=StringIO())
     call_command("seed_demo_units", stdout=StringIO())
     for code, category, unit, serialized, divisible in ITEMS:
@@ -515,11 +520,9 @@ class OnBehalfSubmissionTests(CaseTestCase):
         )
 
     def test_requester_without_line_is_created_by_admin_and_served_by_intake(self):
-        with self.assertRaises(ValidationError):
-            identity.create_requester(self.admin, "คุณสมชาย", "D05", "")
         with self.assertRaises(PermissionDenied):
             identity.create_requester(self.meter, "คุณสมชาย", "D05", "ไม่ใช้ LINE")
-        requester = identity.create_requester(self.admin, " คุณสมชาย  ใจดี ", "D05", "ไม่ใช้ LINE")
+        requester = identity.create_requester(self.admin, " คุณสมชาย  ใจดี ", "D05", "")
         self.assertEqual(requester.display_name, "คุณสมชาย ใจดี")
         self.assertFalse(requester.channelidentity_set.exists())
         self.assertTrue(
@@ -740,9 +743,6 @@ class ScopeAndPermissionTests(CaseTestCase):
 
         started = self.make_case(K.WITHDRAWAL, S.AWAITING_EXECUTION)
         self.assertFails(ErrorCode.FORBIDDEN, self.act, self.as_requester(), started, "cancel")
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.as_staff(self.meter), started, "cancel"
-        )
         cancelled = self.act(self.as_staff(self.meter), started, "cancel", payload={"reason": "ซ้ำ"})
         self.assertEqual(cancelled.status, S.CANCELLED)
 
@@ -814,9 +814,6 @@ class ScopeAndPermissionTests(CaseTestCase):
     def test_triage_can_decline_with_a_reason(self):
         case = self.submit()
         self.act(self.as_staff(self.intake), case, "start_triage", 1)
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.as_staff(self.intake), case, "decline"
-        )
         result = self.act(
             self.as_staff(self.intake), case, "decline", payload={"reason": "ซ้ำกับเรื่องเดิม"}
         )

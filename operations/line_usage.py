@@ -99,7 +99,10 @@ def recommend(months):
         reasons.append(f"คาดการณ์เกิน {int(WARN_SHARE * 100)}% ของโควตาฟรี ({free}) สองเดือนติดกัน")
     projected = max((m["forecast_all_districts"] or 0 for m in months), default=0)
     if projected > free:
-        reasons.append(f"คาดการณ์เมื่อเปิดครบ {ALL_DISTRICTS} เขต {projected} ข้อความต่อเดือน เกินโควตาฟรี")
+        reasons.append(
+            f"คาดการณ์เมื่อเปิดครบ {ALL_DISTRICTS} หน่วยงาน (เขต/ฝ่าย) "
+            f"{projected} ข้อความต่อเดือน เกินโควตาฟรี"
+        )
     if not reasons:
         return {"plan": "free", "reasons": ["ยังอยู่ในโควตาฟรีตามเกณฑ์ C.2.3"], "budget": free}
     plan, quota = next(
