@@ -104,7 +104,8 @@ class WorkTabTests(StaffChatTestCase):
 
     def test_the_web_button_opens_the_site(self):
         self.link(self.head, ALICE)
-        reply = self.tile(A.OPEN_WEB)
+        with self.settings(STAFF_WEB_BASE_URL="https://faoj.example.test"):
+            reply = self.tile(A.OPEN_WEB)
         self.assertTrue(any(v.startswith("http") for v in buttons(reply).values()))
 
     def test_people_who_did_not_link_staff_get_a_plain_answer(self):
