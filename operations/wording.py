@@ -146,7 +146,7 @@ EXACT = {
     "Give the new facts behind this level.": "ระบุข้อเท็จจริงใหม่ประกอบการเปลี่ยนระดับ",
     "equipment is a list of {category, item}.": FACTS,
     "equipment rows are {category, item}.": FACTS,
-    "Unknown category.": "เลือกหมวดของ",
+    "Unknown category.": "เลือกหมวดอุปกรณ์",
     "Give facts to confirm or names to clear.": "เลือกข้อเท็จจริงที่จะยืนยันหรือล้างอย่างน้อยหนึ่งข้อ",
     "severe_impact is true, false or null (not stated).": FACTS,
     "A handoff or routing decision is still open.": (

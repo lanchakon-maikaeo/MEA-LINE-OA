@@ -82,7 +82,7 @@ class EmployeeApprovalTests(PeopleTestCase):
         user = identity.grant_requester_role(self.admin, requester, Role.SUPERVISOR, division)
         registration.identity.refresh_from_db()
         self.assertEqual(registration.identity.staff_user_id, user.pk)
-        self.assertEqual(line_menu.page_for_identity(registration.identity), "sup-work")
+        self.assertEqual(line_menu.page_for_identity(registration.identity), "sup-report")
         self.assertTrue(
             RoleGrant.objects.filter(
                 user=user, role=Role.SUPERVISOR, division=division, revoked_at__isnull=True

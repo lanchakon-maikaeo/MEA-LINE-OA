@@ -125,7 +125,7 @@ class KeywordTests(AnswerTestCase):
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "หม้อแปลง")
+        self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "ไม่ระบุรุ่น")
         reply = texts(self.type(ALICE, "หม้อแปลงมีควันออกมาตอนนี้"))
         self.assertIn("ออกห่างจากจุดนั้นก่อน", reply)

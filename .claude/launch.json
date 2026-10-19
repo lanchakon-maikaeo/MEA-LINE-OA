@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "url": "http://127.0.0.1:8010",
+      "port": 8010
+    },
+    {
+      "name": "ux",
+      "url": "http://127.0.0.1:8011",
+      "port": 8011
+    }
+  ]
+}

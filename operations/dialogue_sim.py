@@ -50,6 +50,7 @@ from operations import (
     employees,
     identity,
     line,
+    line_menu_catalog,
     options,
     policy,
     services,
@@ -302,7 +303,7 @@ class Goal:
     actor: str
     kind: str = ""
     topic: str = ""  # the truth: meter / transformer / other / usage / suggestion / none
-    choose: str = "topic"  # "topic" or "unsure" (the person presses ไม่แน่ใจ)
+    choose: str = "topic"
     lines: list = field(default_factory=list)  # [{"item", "quantity", "serials"}]
     fields: dict = field(default_factory=dict)  # name → planned text, or None to skip
     hazard: bool = False
@@ -419,9 +420,7 @@ class Dialogue:
                     goal.lines.append(self._line(item))
         else:
             topics = [
-                t
-                for t in scenario.get("topics", [])
-                if t not in EQUIPMENT or self.world.items[t] or goal.choose == "unsure"
+                t for t in scenario.get("topics", []) if t not in EQUIPMENT or self.world.items[t]
             ]
             goal.topic = rng.choice(topics)
             if goal.topic in EQUIPMENT and goal.choose == "topic" and self.world.items[goal.topic]:
@@ -614,8 +613,6 @@ class Dialogue:
                 if e["category"] in named - truth and e["term"].lower() in text.lower()
             )
             return f"มีคำของอุปกรณ์หมวดอื่น ({', '.join(other)})"
-        if goal.choose == "unsure" and goal.topic in EQUIPMENT and not named:
-            return "กดไม่แน่ใจแต่ข้อความไม่บอกอุปกรณ์"
         return ""
 
     def digits(self, text):
@@ -773,6 +770,8 @@ class Dialogue:
         draft = self.draft()
         if draft is not None:
             return draft.step
+        if self.flags.get("usage_choice_pending"):
+            return "usage_menu"
         prompt = Conversation.objects.filter(identity=row).values_list("prompt", flat=True).first()
         if prompt and prompt.startswith("reg_"):
             return prompt
@@ -1000,12 +999,22 @@ class Dialogue:
                 expected = conversation._parse_date(typed).isoformat()
             if stored[name] != expected:
                 self.fail("case", f"ช่อง {name} ไม่ตรง: '{stored[name]}' / '{expected}'")
-        topic = goal.topic if goal.choose == "topic" and goal.kind == K.PROBLEM else ""
+        topic = self._submitted_topic()
         if case.kind != goal.kind or case.topic != topic:
             self.fail(
                 "case", f"ประเภท/หัวข้อไม่ตรง: {case.kind}/{case.topic} ต้องการ {goal.kind}/{topic}"
             )
         self.passed("case")
+
+    def _submitted_topic(self):
+        goal = self.goal
+        if goal.kind != K.PROBLEM or goal.choose != "topic":
+            return ""
+        if goal.lines or goal.topic not in EQUIPMENT:
+            return goal.topic
+        # The general menu deliberately groups transformers with other equipment.  If the
+        # requester skips the catalogue item, the selected group is the only known topic.
+        return "meter" if goal.topic == "meter" else "other"
 
     def _owner_outcome(self):
         goal = self.goal
@@ -1013,7 +1022,7 @@ class Dialogue:
             if goal.lines:
                 category, item = goal.lines[0]["item"].category, goal.lines[0]["item"].code
             else:
-                category, item = (goal.topic if goal.topic != "none" else ""), None
+                category, item = (self._submitted_topic(), None)
             wanted = {expected_owner(self.doc, K.PROBLEM, category, item)}
         else:
             wanted = {
@@ -1277,10 +1286,16 @@ def i_skip_location(d):
 
 
 def i_press_new(d):
+    if d.goal.kind == K.PROBLEM and d.goal.topic == Case.Topic.USAGE:
+        d.flags["usage_choice_pending"] = True
+        return d.postback("press_new", "m=problem&topic=usage", "[กด] แจ้งปัญหาการใช้ไฟฟ้า")
     return d.postback("press_new", "m=new", "[กด] ส่งเรื่องใหม่")
 
 
 def i_type_new(d):
+    if d.goal.kind == K.PROBLEM and d.goal.topic == Case.Topic.USAGE:
+        d.flags["usage_choice_pending"] = True
+        return d.postback("type_new", "m=problem&topic=usage", "แจ้งปัญหาการใช้ไฟฟ้า")
     return d.text("type_new", "ส่งเรื่องใหม่", repair="press_new")
 
 
@@ -1298,19 +1313,31 @@ def i_type_kind_number(d):
 def i_press_topic(d):
     if d.goal.choose != "topic":
         return None
-    return d.press("press_topic", conversation.TOPIC_LABELS[d.goal.topic])
+    return d.press("press_topic", conversation._topic_menu_label(_topic_choice(d.goal)))
 
 
 def i_type_topic_number(d):
     topics = conversation._topics()
-    if d.goal.choose != "topic" or d.goal.topic not in topics or not _types(d):
+    choice = _topic_choice(d.goal)
+    if d.goal.choose != "topic" or choice not in topics or not _types(d):
         return None
-    number = str(topics.index(d.goal.topic) + 1)
+    number = str(topics.index(choice) + 1)
     return d.text("type_topic_number", d.digits(number), repair="press_topic")
 
 
-def i_press_unsure(d):
-    return d.press("press_unsure", "ไม่แน่ใจ") if d.goal.choose == "unsure" else None
+def _topic_choice(goal):
+    if goal.topic in EQUIPMENT:
+        return "meter" if goal.topic == "meter" else "other"
+    return goal.topic
+
+
+def i_press_usage_choice(d):
+    labels = [
+        label for label in d.buttons(d.last) if label not in {"ย้อนกลับ", "หน้าหลัก", "ติดตามเรื่อง"}
+    ]
+    if not labels:
+        return None
+    return d.press("press_usage_choice", labels[0])
 
 
 def i_press_discard(d):
@@ -1322,10 +1349,8 @@ def i_press_category(d):
     if line_ is None:
         return None
     item = line_["item"]
-    if d.draft().data.get("equipment_menu"):
-        group = item.line_group or ("meter" if item.category == "meter" else "other")
-        return d.press("press_category", conversation.METER_GROUPS[group])
-    return d.press("press_category", conversation.CATEGORY_LABELS[item.category])
+    group = item.line_group or ("meter" if item.category == "meter" else "other")
+    return d.press("press_category", conversation.METER_GROUPS[group])
 
 
 def i_type_category_number(d):
@@ -1333,11 +1358,8 @@ def i_type_category_number(d):
     if line_ is None or not _types(d):
         return None
     item = line_["item"]
-    if d.draft().data.get("equipment_menu"):
-        group = item.line_group or ("meter" if item.category == "meter" else "other")
-        number = str(list(conversation.METER_GROUPS).index(group) + 1)
-    else:
-        number = str(conversation.CATEGORY_ORDER.index(item.category) + 1)
+    group = item.line_group or ("meter" if item.category == "meter" else "other")
+    number = str(list(conversation.METER_GROUPS).index(group) + 1)
     return d.text("type_category_number", d.digits(number), repair="press_category")
 
 
@@ -1833,6 +1855,8 @@ class World:
         wanted = (graph or {}).get("catalogue", {}).get("at_least", {})
         for category, count in wanted.items():
             self._pad(category, count)
+        line_menu_catalog.sync()
+        self.policy = policy.current_policy()
         self.items = {
             c: list(EquipmentType.objects.filter(category=c, is_active=True).order_by("code"))
             for c in EQUIPMENT

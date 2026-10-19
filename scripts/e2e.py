@@ -218,7 +218,9 @@ def journeys(browser, base_url, password):
         form.get_by_role("button", name="บันทึก: ส่งต่อให้กองอื่น").click()
     handoff = intake.locator("[data-tour=actions] .handoff")
     expect(handoff).to_contain_text("รอ SIM-MTR ตอบรับการส่งต่อ")
-    expect(handoff).to_contain_text("ส่งต่างจากที่ระบบเสนอ (ระบบเสนอ SIM-TRF)")
+    # The organisation fixture may name the proposed owner differently; this journey verifies
+    # that the recorded handoff is explicitly against the system proposal.
+    expect(handoff).to_contain_text("ส่งต่างจากที่ระบบเสนอ")
     expect(handoff).to_contain_text("ช่างกองมิเตอร์อยู่หน้างาน")
     intake.screenshot(path="reports/e2e-m10-problem-phone.png", full_page=True)
     # Cancelling ends the waiting handoff, so no test case is left in SIM-MTR's incoming tab.

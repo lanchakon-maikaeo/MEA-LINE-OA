@@ -18,6 +18,8 @@
 #   deploy/e5-move.sh s3-test      does the backup key work? (OCI's error code only)
 #   deploy/e5-move.sh diagnose     why a deploy's smoke failed (status, smoke, n8n import, logs)
 #   deploy/e5-move.sh deploy       build the current source and `faoj deploy` it (empty database)
+#   deploy/e5-move.sh line-menu    publish the Rich Menu from the release already running on E5;
+#                                  it does not copy source, build, migrate, or restart services
 #   deploy/e5-move.sh cutover      the move itself, RPO 0 (ADR 0015 Q4/Q14): both sides stop
 #                                  taking writes, the Mac data is restored on E5, move_manifest
 #                                  must match, then ngrok starts on E5. A mismatch stops here.
@@ -39,6 +41,10 @@ umask 077
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 STATE=${E5_STATE:-$HOME/.config/faoj/e5}
 KEY=${E5_KEY:-$HOME/.ssh/faoj_oci_ed25519}
+# A Bastion session may be authorized with a different operator key from the
+# key installed for the Ubuntu account.  Keep the old one-key setup as the
+# default, while allowing the two hops to be configured independently.
+BASTION_KEY=${E5_BASTION_KEY:-$KEY}
 BASTION=${E5_BASTION:-ocid1.bastion.oc1.ap-singapore-1.amaaaaaazvo2bmqaz5ywe3sdzbvzyddhhahkrur22kf6idmw4sxcwzwvz3rq}
 TARGET_IP=${E5_PRIVATE_IP:-10.20.1.194}
 PUBLIC_HOST=${E5_PUBLIC_HOST:-168-107-70-170.sslip.io}
@@ -55,7 +61,7 @@ mkdir -p "$STATE"
 say() { echo "[$(date +%H:%M:%S)] $*" >&2; }
 die() { echo "e5-move: $*" >&2; exit 1; }
 SSH_OPTS=(-i "$KEY" -p "$PORT" -o UserKnownHostsFile="$STATE/known_hosts"
-  -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o BatchMode=yes)
+  -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o BatchMode=yes -o IdentitiesOnly=yes)
 on_e5() { ssh "${SSH_OPTS[@]}" ubuntu@127.0.0.1 "$@"; }
 
 tunnel() {
@@ -68,7 +74,7 @@ tunnel() {
   if [ "$state" != ACTIVE ]; then
     say "Bastion session (port 22 of $TARGET_IP, 3 hours)"
     sid=$(oci bastion session create-port-forwarding --bastion-id "$BASTION" --display-name e5-move \
-      --target-private-ip "$TARGET_IP" --target-port 22 --ssh-public-key-file "$KEY.pub" \
+      --target-private-ip "$TARGET_IP" --target-port 22 --ssh-public-key-file "$BASTION_KEY.pub" \
       --session-ttl 10800 --query data.id --raw-output)
     for _ in $(seq 1 40); do
       state=$(oci bastion session get --session-id "$sid" --query 'data."lifecycle-state"' --raw-output)
@@ -83,8 +89,8 @@ tunnel() {
   fi
   host="host.bastion.$REGION.oci.oraclecloud.com"
   # -E keeps the tunnel's own messages: the first place to look when E5 does not answer.
-  ssh -i "$KEY" -f -N -E "$STATE/tunnel.log" -o UserKnownHostsFile="$STATE/known_hosts" \
-    -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes \
+  ssh -i "$BASTION_KEY" -f -N -E "$STATE/tunnel.log" -o UserKnownHostsFile="$STATE/known_hosts" \
+    -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes -o IdentitiesOnly=yes \
     -L "127.0.0.1:$PORT:$TARGET_IP:22" -p 22 "$sid@$host" || die "ssh to the Bastion failed: $(tail -3 "$STATE/tunnel.log")"
   local err=""
   for _ in $(seq 1 24); do
@@ -461,6 +467,12 @@ dc run --rm -T migrate /app/.venv/bin/python manage.py "$@"
 EOF
 }
 
+line_menu_e5() {
+  tunnel
+  say "publishing the Rich Menu from the current E5 release; application services stay running"
+  manage_e5 setup_line_rich_menu
+}
+
 pii_key() {  # 15 Oct 2026 Q16/Q36: the key that seals roster e-mails lives on the server
   local standby="$HOME/faoj-standby/env/app.secret.env"
   cat <<'EOF' | as_root
@@ -566,6 +578,7 @@ case "${1:-}" in
   s3-test) s3_test;;
   diagnose) diagnose;;
   deploy) deploy_e5;;
+  line-menu) line_menu_e5;;
   cutover) cutover;;
   back-to-mac) back_to_mac;;
   purge-demo) shift; purge_demo "$@";;

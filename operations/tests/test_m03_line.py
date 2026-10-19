@@ -483,7 +483,8 @@ class DraftConversationTests(LineTestCase):
 
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "ไม่แน่ใจ")
+        self.press(ALICE, "อุปกรณ์อื่น")
+        self.press(ALICE, "ไม่ระบุรุ่น")
         self.type(ALICE, "หม้อแปลงมีเสียงดัง")
         reply = self.press(ALICE, "ข้าม")
         options = buttons(reply)

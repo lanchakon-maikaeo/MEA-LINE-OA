@@ -179,6 +179,17 @@ class ServiceMenuFlowTests(MenuTestCase):
         draft.refresh_from_db()
         self.assertEqual(draft.data["line"]["category"], "meter")
 
+    def test_every_equipment_service_uses_the_same_four_groups(self):
+        from operations import line_menu_catalog
+
+        line_menu_catalog.sync()
+        for label in ("Meter, CT, VT", "หม้อแปลง LBS RMU", "เครื่องมือและอุปกรณ์"):
+            with self.subTest(label=label):
+                self.open(label)
+                reply = self.press(ALICE, "เบิกอุปกรณ์")
+                self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
+                self.press(ALICE, "ยกเลิกร่าง")
+
     def test_meter_groups_click_type_search_and_back(self):
         from operations.models import EquipmentType
 

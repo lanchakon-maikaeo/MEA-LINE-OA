@@ -60,9 +60,8 @@ THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 KIND_LABELS = {K.WITHDRAWAL: "เบิก", K.RETURN: "ส่งคืน", K.PROBLEM: "แจ้งปัญหา/ข้อเสนอแนะ"}
 KIND_SHORT = {K.WITHDRAWAL: "เบิก", K.RETURN: "คืน", K.PROBLEM: "ปัญหา/ข้อเสนอแนะ"}
 KIND_ORDER = [K.WITHDRAWAL, K.RETURN, K.PROBLEM]
-# หมวดเรื่อง of แจ้งปัญหา/ข้อเสนอแนะ (real structure Q3; 10 Oct 2569 Q1): equipment topics lead to
-# the items, การใช้ไฟฟ้า and ข้อเสนอแนะ straight to the story. A topic shows only while the
-# policy names an owner for it, so the list follows the rules (ADR 0009).
+# หมวดเรื่องจริงของ Case ใช้ส่งต่อและแสดงผลภายหลัง ส่วนเมนูเริ่มต้นของ LINE ใช้
+# METER_GROUPS ด้านล่างเพื่อให้ทุกบริการอุปกรณ์มีตัวเลือกชุดเดียวกัน.
 TOPIC_LABELS = {
     "meter": "มิเตอร์",
     "transformer": "หม้อแปลง",
@@ -70,7 +69,6 @@ TOPIC_LABELS = {
     "usage": "การใช้ไฟฟ้า",
     "suggestion": "ข้อเสนอแนะ",
 }
-TOPIC_NOTES = {"usage": " (ลักใช้ไฟ ไฟแพง ร้องเรียน)"}
 SUGGESTION_FIELDS = [
     ("description", "กรุณาแจ้งข้อเสนอแนะ", True),
     ("impact", "ถ้ามีรายละเอียดเพิ่ม เช่น สถานที่หรืองานที่เกี่ยวข้อง พิมพ์ต่อได้ หรือกดข้าม", False),
@@ -95,7 +93,6 @@ CATEGORY_LABELS = {
     EquipmentType.Category.TRANSFORMER: "หม้อแปลง",
     EquipmentType.Category.OTHER: "อุปกรณ์อื่น",
 }
-CATEGORY_ORDER = list(CATEGORY_LABELS)
 METER_GROUPS = {"meter": "มิเตอร์", "ct": "CT", "vt": "VT", "other": "อุปกรณ์อื่น"}
 # Per-kind fields after the item lines: (name, question, required).
 FIELDS = {
@@ -1655,10 +1652,10 @@ def _menu_item(turn, pk):
             ):
                 return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนเบิกของ")
             draft = _menu_draft(turn, item, K.WITHDRAWAL, "category")
-            if item.topic == "meter":
-                return _set(turn, draft, "meter_group", equipment_menu="meter")
             if item.topic in CATEGORY_LABELS:
-                return _set(turn, draft, "item", line={"category": item.topic})
+                # All equipment services use the same four LINE groups.  The service
+                # division remains on the draft and the selected item keeps its registry type.
+                return _set(turn, draft, "meter_group", equipment_menu="equipment")
             return _ask(turn, draft)
         return _start_new(turn)
     if action == A.MINE:
@@ -1676,16 +1673,14 @@ def _menu_item(turn, pk):
         if only_problems:
             return _menu(turn, "บัญชีเจ้าหน้าที่แจ้งได้เฉพาะปัญหาและข้อเสนอแนะ")
         draft = _menu_draft(turn, item, K.RETURN, "category")
-        if item.topic == "meter":
-            return _set(turn, draft, "meter_group", equipment_menu="meter")
         if item.topic in CATEGORY_LABELS:
-            return _set(turn, draft, "item", line={"category": item.topic})
+            return _set(turn, draft, "meter_group", equipment_menu="equipment")
         return _ask(turn, draft)
     if action == A.PROBLEM:
         topic = item.topic or Case.Topic.OTHER
         draft = _menu_draft(turn, item, K.PROBLEM, "topic", topic=topic)
         if topic in CATEGORY_LABELS:
-            return _set(turn, draft, "item", line={"category": topic})
+            return _set(turn, draft, "meter_group", equipment_menu="equipment")
         return _set(turn, draft, _next_field(draft))
     # GENERAL: a problem or suggestion; the rules choose the division.
     return _ask(turn, _menu_draft(turn, item, K.PROBLEM, "topic", division=""))
@@ -2060,14 +2055,13 @@ def _ask_question(turn, draft):
         )
     elif step == "topic":
         topics = _topics()
-        lines = [f"{n}. {TOPIC_LABELS[t]}{TOPIC_NOTES.get(t, '')}" for n, t in enumerate(topics, 1)]
+        lines = [f"{n}. {_topic_menu_label(t)}" for n, t in enumerate(topics, 1)]
         turn.say(
             "เรื่องนี้เกี่ยวกับอะไร\n" + "\n".join(lines),
-            [b(TOPIC_LABELS[t], "topic", {"topic": t}, draft) for t in topics]
-            + [b("ไม่แน่ใจ", "lines_done", draft=draft)]  # the text and the rules decide
+            [b(_topic_menu_label(t), "topic", {"topic": t}, draft) for t in topics]
             + [b("ยกเลิกร่าง", "discard", draft=draft)],
         )
-    elif step == "meter_group" or (step == "category" and data.get("equipment_menu")):
+    elif step in {"meter_group", "category"}:
         buttons = [
             b(label, "equipment_group", {"group": group}, draft)
             for group, label in METER_GROUPS.items()
@@ -2078,15 +2072,6 @@ def _ask_question(turn, draft):
             "เลือกหมวดอุปกรณ์\n1. มิเตอร์\n2. CT\n3. VT\n4. อุปกรณ์อื่น",
             buttons,
         )
-    elif step == "category":
-        buttons = [
-            b(CATEGORY_LABELS[c], "category", {"category": c}, draft) for c in CATEGORY_ORDER
-        ]
-        if draft.kind == K.PROBLEM or data["lines"]:
-            buttons.append(
-                b("ข้าม (ไม่ระบุของ)" if not data["lines"] else "ไปต่อ", "lines_done", draft=draft)
-            )
-        turn.say("เลือกหมวดของ\n1. มิเตอร์\n2. หม้อแปลง\n3. อุปกรณ์อื่น", buttons)
     elif step == "item":
         items = list(_items(data["line"]["category"], data["line"].get("group", "")))
         skip = _skip_model(turn, draft)
@@ -2199,18 +2184,21 @@ def _summary(draft):
     return "\n".join(lines)
 
 
-def _offered(topic):
-    """Whether the policy names an owner for a problem of this topic."""
-    from operations import policy  # local: policy builds on workflow, not on this module
-
-    current = policy.current_policy()
-    rules = current.doc.get("responsibility", []) if current else []
-    return any(r.get("category") == topic and K.PROBLEM in r.get("kinds", []) for r in rules)
-
-
 def _topics():
-    """Equipment topics always (unknown ones go to people), story topics while owned."""
-    return [t for t in TOPIC_LABELS if t in CATEGORY_LABELS or _offered(t)]
+    """The concise first menu for a general problem report."""
+    return [*METER_GROUPS, Case.Topic.SUGGESTION]
+
+
+def _topic_menu_label(topic):
+    label = METER_GROUPS.get(topic)
+    return label if label is not None else TOPIC_LABELS[topic]
+
+
+def _returns_to_topic_menu(draft):
+    """Whether Back returns to the general five-choice problem menu."""
+    return draft.kind == K.PROBLEM and (
+        draft.data.get("problem_topic_menu") or not draft.data.get("equipment_menu")
+    )
 
 
 def _kind_label(kind, topic=""):
@@ -2266,7 +2254,7 @@ def _draft_button(turn, draft, action, value):
                 "more"
                 if data["lines"]
                 else "topic"
-                if draft.kind == K.PROBLEM and not data.get("equipment_menu")
+                if _returns_to_topic_menu(draft)
                 else "category",
             )
         previous = fields[index - 1]
@@ -2307,13 +2295,24 @@ def _draft_button(turn, draft, action, value):
         topic = value.get("topic")
         if topic not in _topics():
             return _ask(turn, draft)
+        if topic in METER_GROUPS:
+            category = "other" if topic == "other" else "meter"
+            return _set(
+                turn,
+                draft,
+                "item",
+                equipment_menu="equipment",
+                problem_topic_menu=True,
+                topic=category,
+                line={"category": category, "group": topic},
+            )
         if topic in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
             keep = {"anonymous": True} if data.get("anonymous") else {}
             draft.data = {"lines": [], "fields": {}, "topic": topic, **keep}
             return _set(turn, draft, _next_field(draft))
         draft.data = dict(data, topic=topic)
         return _set(turn, draft, "item", line={"category": topic})
-    if action == "equipment_group" and data.get("equipment_menu"):
+    if action == "equipment_group" and draft.step in {"meter_group", "category"}:
         group = value.get("group")
         if group not in METER_GROUPS:
             return _ask(turn, draft)
@@ -2323,14 +2322,8 @@ def _draft_button(turn, draft, action, value):
             "item",
             line={"category": "other" if group == "other" else "meter", "group": group},
         )
-    if action == "category":
-        return _set(turn, draft, "item", line={"category": value["category"]})
     if action == "back_category":
-        back = (
-            "topic"
-            if draft.kind == K.PROBLEM and not data["lines"] and not data.get("equipment_menu")
-            else "category"
-        )
+        back = "topic" if not data["lines"] and _returns_to_topic_menu(draft) else "category"
         return _set(turn, draft, back, line={})
     if action == "item":
         return _choose_item(turn, draft, value["code"])
@@ -2480,12 +2473,17 @@ def _draft_text(turn, draft, text):
     if step == "kind" and text.translate(THAI_DIGITS) in {"1", "2", "3"}:
         kind = KIND_ORDER[int(text.translate(THAI_DIGITS)) - 1]
         return _draft_button(turn, draft, "kind", {"kind": kind})
-    if step == "topic" and text.translate(THAI_DIGITS).isdigit():
+    if step == "topic":
+        raw = text.translate(THAI_DIGITS)
         topics = _topics()
-        number = int(text.translate(THAI_DIGITS))
-        if 1 <= number <= len(topics):
-            return _draft_button(turn, draft, "topic", {"topic": topics[number - 1]})
-    if step == "meter_group" or (step == "category" and data.get("equipment_menu")):
+        if raw.isdigit():
+            number = int(raw)
+            if 1 <= number <= len(topics):
+                return _draft_button(turn, draft, "topic", {"topic": topics[number - 1]})
+        for topic in topics:
+            if raw.casefold() == _topic_menu_label(topic).casefold():
+                return _draft_button(turn, draft, "topic", {"topic": topic})
+    if step in {"meter_group", "category"}:
         raw = text.translate(THAI_DIGITS)
         groups = list(METER_GROUPS)
         if raw in {"1", "2", "3", "4"}:
@@ -2493,13 +2491,6 @@ def _draft_text(turn, draft, text):
         for group, label in METER_GROUPS.items():
             if raw.casefold() == label.casefold():
                 return _draft_button(turn, draft, "equipment_group", {"group": group})
-    if (
-        step == "category"
-        and not data.get("equipment_menu")
-        and text.translate(THAI_DIGITS) in {"1", "2", "3"}
-    ):
-        category = CATEGORY_ORDER[int(text.translate(THAI_DIGITS)) - 1]
-        return _draft_button(turn, draft, "category", {"category": category})
     # Free text where a button is expected: how to answer, then the question again.
     turn.say(CHOICE_HINTS.get(step, "เลือกจากปุ่มด้านล่าง"))
     return _ask(turn, draft)
@@ -2507,7 +2498,7 @@ def _draft_text(turn, draft, text):
 
 CHOICE_HINTS = {
     "kind": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
-    "topic": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ ถ้าไม่แน่ใจกด 'ไม่แน่ใจ'",
+    "topic": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อหรือชื่อหมวด",
     "category": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
     "location": "กด 'ส่งตำแหน่ง' ด้านล่าง",
 }

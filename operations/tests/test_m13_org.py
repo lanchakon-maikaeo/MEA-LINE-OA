@@ -41,6 +41,7 @@ from operations.models import (
     AuthorityGrant,
     Case,
     CaseTriage,
+    ConversationDraft,
     District,
     Division,
     EquipmentType,
@@ -50,7 +51,7 @@ from operations.models import (
     Section,
 )
 from operations.tests.test_m02_cases import ITEMS, make_staff
-from operations.tests.test_m03_line import ALICE, LineTestCase, texts
+from operations.tests.test_m03_line import ALICE, LineTestCase, buttons, texts
 
 S = Case.Status
 A = AuthorityGrant.Activity
@@ -528,21 +529,21 @@ class LineTopicTests(LineTestCase):
         super().setUpTestData()
         real_world(cls)
 
-    def test_the_requester_chooses_usage_and_it_reaches_ktf(self):
+    def test_the_general_problem_menu_uses_the_four_equipment_groups(self):
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.assertIn("4. การใช้ไฟฟ้า (ลักใช้ไฟ ไฟแพง ร้องเรียน)", texts(self.sent[-1]))
-        self.press(ALICE, "การใช้ไฟฟ้า")
-        self.assertIn("แจ้งเรื่องที่พบ", texts(self.sent[-1]))
-        self.type(ALICE, "สงสัยมีการลักใช้ไฟ (ข้อมูลทดสอบ)")
-        self.press(ALICE, "ข้าม")
-        summary = self.press(ALICE, "ข้าม")
-        self.assertIn("สรุปเรื่อง: การใช้ไฟฟ้า", texts(summary))
-        reply = self.press(ALICE, "ยืนยันส่งเรื่อง")
-        case = Case.objects.get()
-        self.assertEqual((case.owner_division.code, case.topic), ("กตฟ.", "usage"))
-        self.assertIn(case.number, texts(reply))
+        reply = self.sent[-1]
+        self.assertIn(
+            "เรื่องนี้เกี่ยวกับอะไร\n1. มิเตอร์\n2. CT\n3. VT\n4. อุปกรณ์อื่น\n5. ข้อเสนอแนะ",
+            texts(reply),
+        )
+        self.assertEqual(list(buttons(reply))[:5], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น", "ข้อเสนอแนะ"])
+        self.assertNotIn("หม้อแปลง", texts(reply))
+        self.assertNotIn("การใช้ไฟฟ้า", texts(reply))
+        self.type(ALICE, "2")
+        draft = ConversationDraft.objects.get(status="open")
+        self.assertEqual((draft.data["line"]["group"], draft.data["topic"]), ("ct", "meter"))
 
     def test_a_suggestion_reaches_the_coordinator_and_is_acknowledged(self):
         self.approve(ALICE)
@@ -560,18 +561,14 @@ class LineTopicTests(LineTestCase):
         self.assertEqual(problems.categories_for(case), ["considered", "adopted", "not_feasible"])
         self.assertEqual(problem_chat.labels(case), ("รับทราบ", "มีข้อมูลเพิ่ม"))
 
-    def test_an_equipment_problem_picks_the_topic_then_may_skip_the_item(self):
+    def test_an_equipment_problem_uses_its_selected_item_for_the_case_topic(self):
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "หม้อแปลง")
-        self.press(ALICE, "ไม่ระบุรุ่น")
-        self.type(ALICE, "หม้อแปลงมีเสียงดัง (ทดสอบ)")
-        self.press(ALICE, "ข้าม")
-        self.press(ALICE, "ข้าม")
-        self.press(ALICE, "ยืนยันส่งเรื่อง")
-        case = Case.objects.get()
-        self.assertEqual((case.owner_division.code, case.topic), ("กองอุปกรณ์ฯ", "transformer"))
+        self.press(ALICE, "อุปกรณ์อื่น")
+        self.press(ALICE, "TRF_SYN_A")
+        draft = ConversationDraft.objects.get(status="open")
+        self.assertEqual((draft.kind, draft.data["topic"]), ("problem", "transformer"))
 
     def test_a_mixed_request_lists_every_number(self):
         self.approve(ALICE)
@@ -600,6 +597,4 @@ class LineTopicTests(LineTestCase):
             patch.object(ai_chat.ai, "active_version", return_value=object()),
         ):
             self.assertFalse(ai_chat.wants_ai(None, None, "ร้องเรียนค่าไฟแพงผิดปกติ"))
-        self.assertEqual(
-            conversation._topics(), ["meter", "transformer", "other", "usage", "suggestion"]
-        )
+        self.assertEqual(conversation._topics(), ["meter", "ct", "vt", "other", "suggestion"])

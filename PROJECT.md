@@ -24,6 +24,24 @@
 
 การปรับรอบนี้ตรวจบนเครื่องแล้ว: ชุดทดสอบที่ได้รับผลกระทบ 102 กรณีและขอบเขต anonymous/เมนูเพิ่ม 6 กรณีผ่าน, หน้าเว็บ 5 หน้าบนคอมและมือถือผ่าน, Docker build ผ่านพร้อมภาพเมนูทั้งหก Deploy บน OCI E5 แล้ว 17 ต.ค. 2569: release `817ebea96344`, migration ถึง 0052, health และ smoke ผ่าน, signed empty webhook ตอบ 200, LINE release `complete` ตรวจภาพ 6 หน้า/alias 5 รายการ/default ตรงกัน บัญชีจำลอง n8n/AI/RAG 4 บัญชีถูกนำออกจากรายการผู้ติดตามพร้อม audit เพื่อไม่ให้ขัดการตรวจเมนู (ไม่ลบข้อมูล) บัญชีจริง 2 บัญชีตรวจเมนูผ่าน ระบบยังไม่มีแอดมินเชื่อม LINE: ผู้รับแจ้งต้องเชื่อมจากหน้าบัญชีของฉันแล้วพิมพ์ `รับแจ้งสมัคร เปิด` หรือกำหนดผ่านหน้าแอดมิน
 
+## เผยแพร่ Rich Menu เท่านั้น
+
+เมื่อเมนูใน LINE OA ยังเป็นรุ่นเก่า แต่ release บน OCI E5 มีภาพและผังถูกต้องแล้ว ให้รันจาก Local:
+
+```bash
+oci session authenticate --region ap-singapore-1 --profile-name faoj
+export E5_STATE="$HOME/.config/faoj/e5-codex-deploy2" # ใช้เฉพาะเมื่อ state directory นี้ถูกใช้งานอยู่
+# ระบุบรรทัดนี้เฉพาะเมื่อกุญแจ Bastion ต่างจากกุญแจของ Ubuntu บน E5
+export E5_BASTION_KEY="$HOME/.ssh/id_ed25519"
+./deploy/e5-move.sh line-menu
+```
+
+คำสั่งนี้เปิด Bastion tunnel แล้วรัน `setup_line_rich_menu` บน release ที่กำลังทำงานอยู่เพื่ออัปโหลดภาพ สลับ alias/default และตรวจการผูกเมนูตามสิทธิ์ ไม่คัดลอก source, ไม่สร้าง image, ไม่รัน migration, ไม่ restart web/worker/n8n และไม่แก้ข้อมูลเรื่อง ผู้ใช้ หรือคลังอุปกรณ์ นอกจากประวัติการเผยแพร่ Rich Menu ที่ระบบต้องบันทึก `E5_BASTION_KEY` ไม่จำเป็นถ้ากุญแจ Bastion และกุญแจ `E5_KEY` เป็นไฟล์เดียวกัน
+
+ก่อนรัน ต้องเพิ่ม public IP ของ Local (`curl -4 https://api.ipify.org` แล้วตามด้วย `/32`) ใน Client CIDR allowlist ของ OCI Bastion หาก IP เปลี่ยน แล้วลบออกเมื่อทำงานเสร็จ ไม่ต้องเปิดพอร์ต SSH ใน NSG หรือ security list ของ E5
+
+หากแก้ภาพหรือปุ่ม Rich Menu ใน Local ให้รัน `python3 -m uv run --locked --env-file .env python manage.py build_line_menu_images` แล้ว deploy รุ่นปกติก่อน จากนั้นค่อยรัน `line-menu` เพราะ worker จะตรวจและ sync จาก release ที่กำลังทำงานทุก 5 นาที ส่วนการแก้ข้อความหรือขั้นตอนสนทนา LINE ต้อง deploy รุ่นปกติเสมอ คำสั่ง `line-menu` เปลี่ยนเฉพาะ Rich Menu ที่ LINE แสดง
+
 ## ผัง LINE OA ฉบับปัจจุบัน
 
 ดู [ผังบริการและสิทธิ์ LINE OA / เว็บ](Docs/flows/line-oa.md) สำหรับข้อสรุปล่าสุด ผู้ใช้สั่ง deploy จาก local ทั้งหมดแล้ว ระบบใช้ release `669abf70b213` พร้อมเมนูแบบกระชับและข้อความทางการ
