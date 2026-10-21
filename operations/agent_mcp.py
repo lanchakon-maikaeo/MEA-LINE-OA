@@ -35,9 +35,16 @@ TOOLS = [
     types.Tool(
         name="list_cases",
         description=(
-            "List own cases, or staff cases within current division permissions. Open cases first."
+            "List own cases, or staff cases within current division permissions, newest first. "
+            "Filters: kind (withdrawal = เบิก, return = คืน, problem = แจ้งปัญหา/ข้อเสนอแนะ) "
+            "and state (open = ยังไม่จบ, the default; closed = จบแล้ว; all)."
         ),
-        inputSchema=schema(page=PAGE, scope={"type": "string", "enum": ["own", "staff"]}),
+        inputSchema=schema(
+            page=PAGE,
+            scope={"type": "string", "enum": ["own", "staff"]},
+            kind={"type": "string", "enum": ["withdrawal", "return", "problem"]},
+            state={"type": "string", "enum": ["open", "closed", "all"]},
+        ),
     ),
     types.Tool(
         name="get_case",
@@ -73,6 +80,23 @@ TOOLS = [
         inputSchema={**schema(command=TEXT), "required": ["command"]},
     ),
 ]
+
+
+def function_tools(exclude=()):
+    """The MCP tools as OpenAI-style function definitions, the format the agent prompt shows
+    (and the one native tool calling takes)."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.inputSchema,
+            },
+        }
+        for tool in TOOLS
+        if tool.name not in exclude
+    ]
 
 
 class Tools:
@@ -152,11 +176,19 @@ class Tools:
                 if row is None:
                     raise PermissionDenied("ไม่พบเรื่องนี้ในสิทธิ์ของคุณ")
                 return {"kind": "case", "scope": scope, "number": row.number, "id": str(row.pk)}
-            rows = rows.filter(status__in=workflow.OPEN)
+            state = args.get("state", "open")
+            if state == "open":
+                rows = rows.filter(status__in=workflow.OPEN)
+            elif state == "closed":
+                rows = rows.exclude(status__in=workflow.OPEN)
+            if args.get("kind"):
+                rows = rows.filter(kind=args["kind"])
             page = Paginator(rows, 5).get_page(args.get("page", 1))
             return {
                 "kind": "cases",
                 "scope": scope,
+                "state": state,
+                "case_kind": args.get("kind", ""),
                 "page": page.number,
                 "pages": page.paginator.num_pages,
                 "total": page.paginator.count,

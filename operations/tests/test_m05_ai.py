@@ -1284,3 +1284,138 @@ class SwitchTests(AITestCase):
         self.assertIn("FUSE_SYN_A", call["body"]["messages"][0]["content"])
         self.assertEqual(call["url"], "https://api.opentyphoon.ai/v1/chat/completions")
         self.assertNotEqual(call["key"], RAW_KEY)  # its own key, not ThaiLLM's
+
+
+# --- JSON schema calls (Typhoon 2.5, JSON schema + temperature 0.4, 21 Oct 2569) ------------------
+
+
+class JSONSchemaCallTests(AITestCase):
+    def typhoon(self, **values):
+        credential = ai.save_credential(
+            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
+        )
+        defaults = ai.PRESETS["typhoon-v2.5-30b"]["profile"]
+        return ai.create_profile(
+            self.dev,
+            credential,
+            "typhoon-v2.5-30b-a3b-instruct",
+            **{**defaults, **values},
+        )
+
+    def test_typhoon_preset_is_json_schema_at_temperature_point_four(self):
+        ai.save_credential(
+            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
+        )
+        version = ai.create_preset_version(self.dev, "typhoon-v2.5-30b", "harness")
+        profile = version.chain()[0]
+        self.assertEqual(
+            (profile.temperature, profile.use_json_schema, profile.max_tokens),
+            (Decimal("0.40"), True, 1200),
+        )
+        self.assertEqual(profile.timeout_seconds, 15)
+        # The same preset again reuses that profile instead of adding another.
+        again = ai.create_preset_version(self.dev, "typhoon-v2.5-30b", "harness")
+        self.assertEqual(again.chain()[0].pk, profile.pk)
+
+    def test_typhoon_gets_response_format_and_the_schema_in_the_prompt(self):
+        profile = self.typhoon()
+        ai.extract_with(profile, "ขอเบิกฟิวส์ 2 ชิ้น", None, ai._catalog(), 10)
+        body = self.llm.calls[-1]["body"]
+        self.assertEqual(body["temperature"], 0.4)
+        self.assertEqual(body["max_tokens"], 1200)
+        self.assertEqual(body["response_format"]["type"], "json_schema")
+        self.assertTrue(body["response_format"]["json_schema"]["strict"])
+        # OpenTyphoon ignores response_format, so the model reads the same schema in the prompt.
+        self.assertIn("matches this JSON Schema", body["messages"][0]["content"])
+        self.assertIn('"requests"', body["messages"][0]["content"])
+
+    def test_a_host_that_enforces_the_schema_gets_response_format_only(self):
+        ai.extract("ขอเบิกฟิวส์ 2 ชิ้น", None, self.version)
+        body = self.llm.calls[-1]["body"]
+        self.assertIn("response_format", body)
+        self.assertNotIn("matches this JSON Schema", body["messages"][0]["content"])
+        with override_settings(AI_SCHEMA_ENFORCED_HOSTS=frozenset()):
+            ai.extract("ขอเบิกฟิวส์ 2 ชิ้น", None, self.version)
+        self.assertIn(
+            "matches this JSON Schema", self.llm.calls[-1]["body"]["messages"][0]["content"]
+        )
+
+    def test_cut_off_answer_is_asked_again_with_more_tokens(self):
+        profile = self.typhoon(max_tokens=600)
+        cut = {
+            "choices": [{"message": {"content": '{"requests": [{"inte'}, "finish_reason": "length"}]
+        }
+        self.llm.by_model[profile.model_id] = [
+            cut,
+            answer(request("withdrawal", ("FUSE_SYN_A", 2, "ฟิวส์"))),
+        ]
+        extraction, _ = ai.extract_with(profile, "ขอเบิกฟิวส์ 2 ชิ้น", None, ai._catalog(), 10)
+        self.assertEqual(extraction.requests[0].items[0].code, "FUSE_SYN_A")
+        self.assertEqual([c["body"]["max_tokens"] for c in self.llm.calls[-2:]], [600, 1200])
+
+    def test_answer_cut_off_at_the_limit_moves_to_the_next_model(self):
+        profile = self.typhoon(max_tokens=2048)
+        cut = {"choices": [{"message": {"content": '{"requests": ['}, "finish_reason": "length"}]}
+        self.llm.by_model[profile.model_id] = cut
+        with self.assertRaises(ai.Truncated):
+            ai.extract_with(profile, "ขอเบิกฟิวส์ 2 ชิ้น", None, ai._catalog(), 10)
+        version = ai.create_version(self.dev, [profile, self.profiles[0]])
+        extraction, attempts = ai.extract("ขอเบิกฟิวส์ 2 ชิ้น", None, version)
+        self.assertEqual(extraction.requests[0].intent, "withdrawal")
+        self.assertIn("Truncated", attempts[0]["outcome"])
+        self.assertEqual(attempts[1]["model"], "primary-model")
+
+    def test_text_around_the_json_object_is_dropped_before_validation(self):
+        good = json.dumps({"requests": [request("return", ("FUSE_SYN_A", 3, "ฟิวส์"))]})
+        for content in (f"นี่คือผลลัพธ์\n{good}", f"{good}\n{good}", good):
+            with self.subTest(content=content[:20]):
+                self.assertEqual(ai.first_json(content), good)
+        self.assertEqual(ai.first_json("ไม่ใช่ JSON"), "ไม่ใช่ JSON")
+        self.assertEqual(ai.first_json("null"), "null")
+        self.llm.default = answer(content=f"ผลการสกัด: {good}")
+        extraction, _ = ai.extract("คืนฟิวส์ 3 ชิ้น", None, self.version)
+        self.assertEqual(extraction.requests[0].intent, "return")
+
+    def test_chat_answer_preset_runs_single_with_the_answer_chain_as_fallbacks(self):
+        from operations import ai_answer
+
+        ai.save_credential(
+            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
+        )
+        version = ai.create_preset_version(
+            self.dev, "typhoon-v2.5-30b", "harness", task=AIConfigVersion.Task.ANSWER
+        )
+        self.assertEqual(
+            (version.task, version.pipeline, version.few_shot), ("answer", "single", 0)
+        )
+        self.llm.default = {
+            "choices": [{"message": {"content": '{"answer": "none", "reply": null}'}}]
+        }
+        ai_answer.call(version.chain()[0], [{"role": "system", "content": "s"}], ["greeting"], 10)
+        body = self.llm.calls[-1]["body"]
+        self.assertEqual(
+            (body["temperature"], body["response_format"]["json_schema"]["name"]),
+            (0.4, "chat_answer"),
+        )
+        self.assertIn("matches this JSON Schema", body["messages"][0]["content"])
+
+    def test_admin_page_makes_a_chat_answer_version_from_the_preset(self):
+        ai.save_credential(
+            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
+        )
+        client = Client()
+        client.force_login(self.dev)
+        html = client.get("/console/admin/ai/").content.decode()
+        self.assertIn("temperature 0.40", html)
+        client.post(
+            "/console/admin/ai/preset/",
+            {
+                "preset": "typhoon-v2.5-30b",
+                "pipeline": "harness",
+                "use_json_schema": "on",
+                "task": "answer",
+            },
+        )
+        version = AIConfigVersion.objects.latest("number")
+        self.assertEqual((version.task, version.pipeline), ("answer", "single"))
+        self.assertEqual(version.chain()[0].temperature, Decimal("0.40"))

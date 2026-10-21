@@ -167,7 +167,8 @@ def create_profile(
 
 
 # Ready-made models the admin page offers. The API key is never part of a preset: an admin
-# enters it once in the credential form (encrypted, write-only).
+# enters it once in the credential form (encrypted, write-only). `profile` is what a new
+# profile gets; the user chose JSON schema with temperature 0.4 for Typhoon (21 Oct 2569).
 PRESETS = {
     "typhoon-v2.5-30b": {
         "label": "Typhoon 2.5 30B A3B Instruct (OpenTyphoon)",
@@ -177,6 +178,7 @@ PRESETS = {
         "limits": "5 ครั้ง/วินาที, 200 ครั้ง/นาที, context 128K",
         "docs_url": "https://docs.opentyphoon.ai/en/models/",
         "key_url": "https://playground.opentyphoon.ai/api-key",
+        "profile": {"timeout_seconds": 15, "max_tokens": 1200, "temperature": "0.40"},
     },
 }
 
@@ -190,35 +192,49 @@ def preset_status():
 
 
 @transaction.atomic
-def create_preset_version(actor, key, pipeline, use_json_schema=True):
-    """A candidate with the preset model as primary and the active chain as fallbacks."""
+def create_preset_version(
+    actor, key, pipeline, use_json_schema=True, task=AIConfigVersion.Task.EXTRACT
+):
+    """A candidate with the preset model as primary and that task's active chain as fallbacks.
+    Extraction keeps the chosen pipeline and few-shot count; the other tasks run single."""
     identity.require_ai_editor(actor)
     preset = PRESETS.get(key)
     if preset is None:
         raise ValidationError("Unknown preset.")
+    if task not in AIConfigVersion.Task.values:
+        raise ValidationError("Unknown AI task.")
     credential = AICredential.objects.filter(name=preset["credential"]).first()
     if credential is None or credential.base_url != preset["base_url"]:
         raise ValidationError(
             f"Add the API key first: credential '{preset['credential']}' with base URL "
             f"{preset['base_url']}."
         )
+    defaults = preset.get("profile", {})
     profile = (
         AIProfile.objects.filter(
             credential=credential,
             model_id=preset["model_id"],
             use_json_schema=bool(use_json_schema),
+            **{
+                name: Decimal(value) if name == "temperature" else value
+                for name, value in defaults.items()
+            },
         )
         .order_by("-pk")
         .first()
-    ) or create_profile(actor, credential, preset["model_id"], use_json_schema=use_json_schema)
-    active = active_version()
+    ) or create_profile(
+        actor, credential, preset["model_id"], use_json_schema=use_json_schema, **defaults
+    )
+    active = active_version(task)
     fallbacks = [p for p in (active.chain() if active else []) if p.pk != profile.pk]
+    extract = task == AIConfigVersion.Task.EXTRACT
     return create_version(
         actor,
         [profile, *fallbacks[: MAX_CHAIN - 1]],
         f"preset {key}" + ("" if use_json_schema else " (no JSON schema)"),
-        active.few_shot if active else 3,
-        pipeline,
+        (active.few_shot if active else 3) if extract else 0,
+        pipeline if extract else AIConfigVersion.Pipeline.SINGLE,
+        task=task,
     )
 
 
@@ -852,13 +868,52 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
     )
 
 
-def call_model(profile, messages, catalog, timeout):
-    """One chat call with the agreed JSON schema: returns (content, usage, latency_ms)."""
-    credential = profile.credential
-    schema = response_schema([i.code for i in catalog] if len(catalog) <= 300 else [])
+class Truncated(SchemaError):
+    """The answer stopped at max_tokens (finish_reason "length"), so its JSON is incomplete."""
+
+
+# A cut-off answer is asked once more with twice the tokens, up to the profile limit.
+TRUNCATED_RETRY_MAX_TOKENS = 2048
+
+
+def schema_in_prompt(profile):
+    """Whether the system prompt must carry the JSON schema. OpenTyphoon accepts
+    response_format and ignores it (checked 7 Oct and again 21 Oct 2569, json_schema and
+    json_object alike), so the model only follows a schema it can read. Hosts listed in
+    AI_SCHEMA_ENFORCED_HOSTS enforce response_format and get it alone."""
     if not profile.use_json_schema:
-        # The provider does not enforce response_format (OpenTyphoon accepts and ignores it):
-        # describe the schema in the prompt instead; validation stays exactly as strict.
+        return True
+    host = (urlsplit(profile.credential.base_url).hostname or "").lower()
+    return host not in settings.AI_SCHEMA_ENFORCED_HOSTS
+
+
+def first_json(content):
+    """The JSON text in an answer: all of it when it parses, else the object that starts at
+    the first "{" (models add a sentence before it, or print the object twice)."""
+    try:
+        json.loads(content)
+        return content
+    except (ValueError, RecursionError):
+        pass
+    start = content.find("{")
+    if start == -1:
+        return content
+    try:
+        _, end = json.JSONDecoder().raw_decode(content, start)
+    except (ValueError, RecursionError):
+        return content
+    return content[start:end]
+
+
+def chat_json(profile, messages, schema, name, timeout, task, max_tokens=None):
+    """One chat call that must answer with one JSON object for `schema`:
+    (content, usage, latency_ms). Every task's own validator still checks the content.
+
+    With use_json_schema the provider gets response_format (strict) and, unless it enforces
+    it, the prompt describes the same schema. Temperature, tokens and timeout come from the
+    profile. A cut-off answer is retried once with more tokens while the timeout allows,
+    otherwise Truncated is raised (a SchemaError: the chain moves on)."""
+    if schema_in_prompt(profile):
         described = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
         messages = [
             {
@@ -871,18 +926,41 @@ def call_model(profile, messages, catalog, timeout):
     body = {
         "model": profile.model_id,
         "messages": messages,
-        "max_tokens": profile.max_tokens,
+        "max_tokens": max_tokens or profile.max_tokens,
         "temperature": float(profile.temperature),
     }
     if profile.use_json_schema:
         body["response_format"] = {
             "type": "json_schema",
-            "json_schema": {"name": "extraction", "strict": True, "schema": schema},
+            "json_schema": {"name": name, "strict": True, "schema": schema},
         }
+    credential = profile.credential
+    url, key = f"{credential.base_url}/chat/completions", decrypt_key(credential)
     started = time.monotonic()
-    url = f"{credential.base_url}/chat/completions"
-    data = post(url, decrypt_key(credential), body, timeout, "extract")
-    return _content(data), data.get("usage") or {}, int((time.monotonic() - started) * 1000)
+    while True:
+        data = post(url, key, body, max(timeout - (time.monotonic() - started), 1), task)
+        usage = (data.get("usage") or {}) if isinstance(data, dict) else {}
+        if _finish_reason(data) != "length":
+            break
+        more = min(body["max_tokens"] * 2, TRUNCATED_RETRY_MAX_TOKENS)
+        if more <= body["max_tokens"] or timeout - (time.monotonic() - started) < 2:
+            raise Truncated(f"Answer cut off at max_tokens={body['max_tokens']}.")
+        body = {**body, "max_tokens": more}
+    latency = int((time.monotonic() - started) * 1000)
+    return first_json(_content(data)), usage, latency
+
+
+def _finish_reason(data):
+    try:
+        return data["choices"][0].get("finish_reason")
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
+def call_model(profile, messages, catalog, timeout):
+    """One extraction call with the agreed JSON schema: returns (content, usage, latency_ms)."""
+    schema = response_schema([i.code for i in catalog] if len(catalog) <= 300 else [])
+    return chat_json(profile, messages, schema, "extraction", timeout, "extract")
 
 
 def extract_with(profile, text, draft_context, catalog, timeout, examples=()):

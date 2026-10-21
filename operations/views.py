@@ -1205,7 +1205,13 @@ def admin_ai_action(request, action, pk=None):
             d = form.cleaned_data
             version = _run(
                 request,
-                lambda: ai.create_preset_version(actor, key, d["pipeline"], d["use_json_schema"]),
+                lambda: ai.create_preset_version(
+                    actor,
+                    key,
+                    d["pipeline"],
+                    d["use_json_schema"],
+                    d["task"] or AIConfigVersion.Task.EXTRACT,
+                ),
                 "สร้างรุ่นใหม่จากโมเดลสำเร็จรูปแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อ → ประเมิน → เปลี่ยน",
             )
             if version is not None:

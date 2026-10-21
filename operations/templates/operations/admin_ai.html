@@ -46,7 +46,8 @@
   <fieldset><legend>{{ p.label }}</legend>{% csrf_token %}<input type="hidden" name="preset" value="{{ p.key }}">
   <p>Model ID <code>{{ p.model_id }}</code> · {{ p.base_url }} · {{ p.limits }} · <a href="{{ p.docs_url }}" rel="noopener noreferrer" target="_blank">เอกสาร</a></p>
   {% if p.credential_ready %}
-    <p>สร้างรุ่นใหม่: โมเดลนี้เป็นโมเดลหลัก ตามด้วยลำดับโมเดลของรุ่นที่ใช้อยู่เป็นสำรอง และใช้จำนวนตัวอย่างเท่ารุ่นที่ใช้อยู่ จากนั้นกดทดสอบ → ประเมิน → เปลี่ยน</p>
+    <p>สร้างรุ่นใหม่ของงานที่เลือก: โมเดลนี้เป็นโมเดลหลัก ตามด้วยลำดับโมเดลของรุ่นที่ใช้อยู่ของงานนั้นเป็นสำรอง งานสกัดร่างใช้จำนวนตัวอย่างเท่ารุ่นที่ใช้อยู่ จากนั้นกดทดสอบ → ประเมิน → เปลี่ยน</p>
+    {% if p.profile %}<p>ค่าโปรไฟล์: temperature {{ p.profile.temperature }} · max tokens {{ p.profile.max_tokens }} · timeout {{ p.profile.timeout_seconds }} วินาที</p>{% endif %}
     {{ preset_form.as_p }}
     <button type="submit">สร้างรุ่นใช้โมเดลนี้</button>
   {% else %}

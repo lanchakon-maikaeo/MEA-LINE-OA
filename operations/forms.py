@@ -97,8 +97,8 @@ class AIProfileForm(forms.Form):
     )
     use_json_schema = forms.BooleanField(
         label=(
-            "ให้ผู้ให้บริการบังคับ JSON schema (response_format) เอาออกถ้าผู้ให้บริการไม่บังคับ "
-            "(เช่น OpenTyphoon) แล้วระบบจะใส่ schema ใน prompt แทน"
+            "ส่ง JSON schema ให้ผู้ให้บริการ (response_format) ถ้าผู้ให้บริการไม่บังคับ "
+            "เช่น OpenTyphoon ระบบใส่ schema เดียวกันใน prompt ด้วย และตรวจคำตอบทุกครั้ง"
         ),
         required=False,
         initial=True,
@@ -106,6 +106,16 @@ class AIProfileForm(forms.Form):
 
 
 class AIPresetForm(forms.Form):
+    task = forms.ChoiceField(
+        label="งานของ AI",
+        choices=[
+            (t, AIConfigVersion.Task(t).label)
+            for t in (AIConfigVersion.Task.EXTRACT, AIConfigVersion.Task.ANSWER)
+        ],
+        initial=AIConfigVersion.Task.EXTRACT,
+        required=False,
+        widget=forms.RadioSelect,
+    )
     pipeline = forms.ChoiceField(
         label="รูปแบบการทำงานรอบโมเดล",
         choices=AIConfigVersion.Pipeline.choices,
