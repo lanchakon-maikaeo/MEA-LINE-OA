@@ -60,7 +60,7 @@ AUTHORITY_ACTIONS = (
 CANCEL_RESOLUTIONS = {
     "keep": "หน่วยงาน (เขต/ฝ่าย)เก็บไว้ใช้",
     "will_return": "หน่วยงาน (เขต/ฝ่าย)จะส่งคืน (ยื่นเรื่องคืนอ้างเรื่องนี้เอง)",
-    "adjusted": "ปรับในระบบทะเบียนเดิมแล้ว",
+    "adjusted": "ปรับใน SAP แล้ว",
 }
 
 
@@ -353,7 +353,7 @@ def issue(ctx, case, payload, reason, target):
     document = clean_text(payload, "document_number", False, 64)
     mode = inventory.mode()
     if mode == inventory.MANUAL and not document:
-        fail(ErrorCode.VALIDATION_ERROR, "บันทึกเลขเอกสารจ่ายจากระบบทะเบียนเดิม (manual_reference)")
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขเอกสารจ่าย SAP")
     if mode == inventory.FAKE and document:
         fail(ErrorCode.VALIDATION_ERROR, "คลังจำลองออกเลขเอกสารจ่ายเอง")
     lines = _lines(case)
@@ -599,7 +599,7 @@ def resolve_discrepancy(ctx, case, payload, reason, target):
     reference = clean_text(payload, "reference", False, 100)
     needs_reference = kind == Delivery.Resolution.LOST or inventory.mode() == inventory.MANUAL
     if needs_reference and not reference:
-        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขเอกสารจากระบบทะเบียนเดิม")
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขเอกสาร SAP")
     lines = _lines(case)
     corrections = []
     if kind == Delivery.Resolution.ISSUE_ERROR:
@@ -722,7 +722,7 @@ def cancel_after_approval(ctx, case, payload, reason):
                 ErrorCode.VALIDATION_ERROR, "เลือกการจัดการของที่จ่ายแล้ว: keep, will_return หรือ adjusted"
             )
         if resolution == "adjusted" and not reference:
-            fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขเอกสารการปรับในระบบทะเบียนเดิม")
+            fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขเอกสารการปรับใน SAP")
     elif resolution:
         fail(ErrorCode.VALIDATION_ERROR, "ยังไม่มีการจ่าย ไม่ต้องระบุการจัดการของ")
     terminated = _terminate(ctx, case, lines, reason)

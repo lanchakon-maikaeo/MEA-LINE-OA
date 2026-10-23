@@ -172,7 +172,7 @@ class MaterialGroupTests(registry_tests.RegistryTestCase):
         client = Client()
         client.force_login(self.admin)
         response = client.post(
-            "/registry/settings/",
+            "/console/admin/items/",
             {"action": "codes", f"group-{item.pk}": "ct", f"code-{item.pk}": ""},
         )
         self.assertEqual(response.status_code, 302)
@@ -182,7 +182,7 @@ class MaterialGroupTests(registry_tests.RegistryTestCase):
         )
         self.assertIn(item, conversation._items("meter", "ct"))
         self.assertNotIn(item, conversation._items("meter", "vt"))
-        self.assertContains(client.get("/registry/settings/"), "หมวดเมนู LINE")
+        self.assertContains(client.get("/console/admin/items/"), "หมวดเมนู LINE")
         with self.assertRaises(PermissionDenied):
             registry.set_line_group(self.reg, item, "vt")
         with self.assertRaises(ValidationError):
@@ -193,7 +193,7 @@ class MaterialGroupTests(registry_tests.RegistryTestCase):
         client = Client()
         client.force_login(self.admin)
         client.post(
-            "/registry/settings/",
+            "/console/admin/items/",
             {"action": "codes", f"group-{items[0].pk}": "ct", f"group-{items[1].pk}": "invalid"},
         )
         items[0].refresh_from_db()

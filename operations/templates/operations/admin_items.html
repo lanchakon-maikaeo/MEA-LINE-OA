@@ -1,0 +1,32 @@
+{% extends "operations/admin_base.html" %}
+{% block title %}รายการอุปกรณ์ · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>รายการอุปกรณ์</h1>
+    <p class="lede">หมวดในเมนู LINE และรหัสพัสดุ SAP ของแต่ละรายการ รหัส SAP เว้นว่างได้ ทุกการเปลี่ยนมีบันทึกไว้ เหตุผลไม่บังคับ</p>
+  </div>
+</div>
+
+<section class="section" aria-labelledby="t-codes">
+  <div class="section-head"><h2 id="t-codes">หมวดและรหัสพัสดุ</h2><span class="muted">ของหนึ่งชนิดต่อหนึ่งรหัส ไม่ซ้ำกัน</span></div>
+  <form method="post">
+    {% csrf_token %}<input type="hidden" name="action" value="codes">
+    <div class="table-wrap"><table class="table--cards">
+      <thead><tr><th scope="col">รหัสในระบบ</th><th scope="col">ชื่อ</th><th scope="col">หน่วย</th><th scope="col">หมวดเมนู LINE</th><th scope="col">รหัสพัสดุ SAP</th></tr></thead>
+      <tbody>
+        {% for item in items %}<tr><td>{{ item.code }}</td><td class="cell--wide" data-label="ชื่อ">{{ item.name }}</td><td class="cell--end" data-label="หน่วย">{{ item.unit }}</td><td class="cell--wide" data-label="หมวดเมนู LINE"><label class="visually-hidden" for="group-{{ item.pk }}">หมวด LINE ของ {{ item.code }}</label><select id="group-{{ item.pk }}" name="group-{{ item.pk }}"><option value="">ตามหมวดเดิม</option>{% for code, label in line_groups %}<option value="{{ code }}"{% if item.line_group == code %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></td><td class="cell--wide" data-label="รหัสพัสดุ SAP"><label class="visually-hidden" for="code-{{ item.pk }}">รหัสพัสดุของ {{ item.code }}</label><input id="code-{{ item.pk }}" name="code-{{ item.pk }}" value="{{ item.official_code }}" maxlength="40" autocomplete="off"></td></tr>{% empty %}<tr><td colspan="5">ยังไม่มีรายการ</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+    <div class="field mt-18"><label for="t-creason">เหตุผล <span class="muted">(ไม่บังคับ)</span></label><input id="t-creason" name="reason" autocomplete="off"></div>
+    <div class="form-actions"><button class="btn btn--sm" type="submit">บันทึกหมวดและรหัส</button></div>
+  </form>
+  <form class="upload mt-18" method="post" enctype="multipart/form-data">
+    {% csrf_token %}<input type="hidden" name="action" value="codes_file">
+    <label for="t-cfile">หรือนำเข้าจากไฟล์ (คอลัมน์ <code>code</code> และ <code>รหัสพัสดุ</code>)</label>
+    <input id="t-cfile" name="file" type="file" accept=".csv,.xlsx" required>
+    <button class="btn--sm" type="submit">นำเข้าไฟล์รหัส</button>
+  </form>
+</section>
+{% endblock %}

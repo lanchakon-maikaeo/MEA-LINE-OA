@@ -36,7 +36,7 @@
 </form>
 {% endif %}
 <form method="post" action="{% url 'admin-inventory-action' 'import' %}">
-  <fieldset><legend>นำเข้ายอดจากระบบทะเบียน (โหมดอ้างเลขเอกสาร)</legend>{% csrf_token %}{{ import_form.as_p }}<button type="submit">นำเข้า</button></fieldset>
+  <fieldset><legend>นำเข้ายอดจาก SAP (โหมดอ้างเลขเอกสาร)</legend>{% csrf_token %}{{ import_form.as_p }}<button type="submit">นำเข้า</button></fieldset>
 </form>
 
 <h2>ความเคลื่อนไหวคลังจำลองล่าสุด</h2>

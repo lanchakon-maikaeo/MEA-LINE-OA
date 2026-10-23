@@ -194,11 +194,11 @@
 
     {% if page.registry %}
     <section class="section" aria-labelledby="s-registry">
-      <div class="section-head"><h2 id="s-registry">เอกสารทะเบียน (SAP)</h2><span class="muted">{{ page.registry|length }} รายการ</span></div>
+      <div class="section-head"><h2 id="s-registry">เลขเอกสาร SAP</h2><span class="muted">{{ page.registry|length }} รายการ</span></div>
       <ul class="stack-sm">
         {% for f in page.registry %}
           <li class="card">
-            <div class="cluster"><span class="strong">{{ f.record.get_kind_display }} · เอกสาร {{ f.record.document_number }}</span><span class="tag {{ f.tone }}">{{ f.label }}</span></div>
+            <div class="cluster"><span class="strong">{{ f.record.get_kind_display }} · เอกสาร {{ f.record.document_number }}</span>{% if f.label %}<span class="tag {{ f.tone }}">{{ f.label }}</span>{% endif %}</div>
             <p class="muted">บันทึกโดย {{ f.record.recorded_by.staff_profile.display_name|default:f.record.recorded_by.username }} ({{ f.record.division.code }}) · {{ f.record.recorded_at|thai_short }}</p>
             {% for d in f.open %}<p class="flag"><a href="{% url 'registry-discrepancy' d.pk %}">{{ d.get_kind_display }}</a> · {{ d.get_status_display }}</p>{% endfor %}
             {% if f.evidence %}<ul class="files mt-8">{% for a in f.evidence %}<li class="file">{% icon "clip" %}{% if a.scan_status == "clean" %}<a href="{% url 'attachment-download' a.pk %}">{{ a.declared_name }}</a>{% else %}<span>{{ a.declared_name }}</span>{% endif %}<span class="muted">หลักฐาน · {{ a.get_scan_status_display }}</span></li>{% endfor %}</ul>{% endif %}

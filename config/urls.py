@@ -4,6 +4,7 @@ from django.urls import path
 from operations import (
     duties_web,
     internal_api,
+    items_web,
     line,
     orders_web,
     pii_web,
@@ -112,6 +113,7 @@ urlpatterns = [
         name="admin-policy-action",
     ),
     path("console/admin/inventory/", views.admin_inventory, name="admin-inventory"),
+    path("console/admin/items/", items_web.admin_items, name="admin-items"),
     path(
         "console/admin/inventory/<slug:action>/",
         views.admin_inventory_action,

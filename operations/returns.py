@@ -274,7 +274,7 @@ def receive(ctx, case, payload, reason, target):
     carrier = clean_text(payload, "carrier_name", True, 200)
     document = clean_text(payload, "document_number", False, 64)
     if _manual() and not document:
-        fail(ErrorCode.VALIDATION_ERROR, "บันทึกเลขเอกสารรับจากระบบทะเบียนเดิม (manual_reference)")
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขเอกสารรับคืน SAP")
     rows = _arrival_rows(payload)
     lines = _lines(case)
     by_item = {line.item_id: line for line in lines}
@@ -484,7 +484,7 @@ def inspect(ctx, case, payload, reason, target):
     reference = clean_text(payload, "reference", False, 100)
     pending = PENDING in split
     if _manual() and not pending and not reference:
-        fail(ErrorCode.VALIDATION_ERROR, "บันทึกเลขเอกสารผลตรวจจากระบบทะเบียนเดิม (manual_reference)")
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขเอกสารผลตรวจ SAP")
     grant = _require_certification(ctx, case, unit.item, unit) if split.get(READY) else None
     inventory.lock_items([unit.item_id])
     text = _text_split(split)
@@ -532,7 +532,7 @@ def decide_inspection(ctx, case, payload, reason, target):
     split = _split(payload, unit, allow_pending=False)
     reference = clean_text(payload, "reference", False, 100)
     if _manual() and not reference:
-        fail(ErrorCode.VALIDATION_ERROR, "บันทึกเลขเอกสารผลตรวจจากระบบทะเบียนเดิม (manual_reference)")
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขเอกสารผลตรวจ SAP")
     inventory.lock_items([unit.item_id])
     text = _text_split(split)
     inspection = Inspection.objects.create(

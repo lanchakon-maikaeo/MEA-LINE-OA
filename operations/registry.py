@@ -135,6 +135,12 @@ def per_division():
     return registry_division() is None
 
 
+def enabled():
+    """ตัวเลือกระบบ registry_access: "off" (the default since 23 Oct 2569) means no registry menu
+    and no comparing with SAP files. The SAP document numbers staff type are still recorded."""
+    return options.get(options.REGISTRY_ACCESS) != "off"
+
+
 def admins_only():
     """ตัวเลือกระบบ registry_access (15 ต.ค. 2569 Q6): admins hold the registry, else divisions."""
     return options.get(options.REGISTRY_ACCESS) == "admin"
@@ -143,7 +149,7 @@ def admins_only():
 def is_registry_staff(user):
     """Decides ส่วนต่างทะเบียน: the admins when the registry is admins only; else the registry
     unit's staff, or (per division) any division's staff for their own (see `may_decide`)."""
-    if not getattr(user, "is_authenticated", False):
+    if not getattr(user, "is_authenticated", False) or not enabled():
         return False
     scope = identity.staff_scope(user)
     if admins_only():
@@ -189,7 +195,7 @@ def case_condition(divisions):
     """Registry staff read (never act on) cases whose facts cite SAP or that a discrepancy
     names, so they can check them; other units get nothing from this."""
     home = registry_division()
-    if home is None or home.pk not in divisions:
+    if not enabled() or home is None or home.pk not in divisions:
         return Q(pk__in=[])
     return Q(Exists(RegistryRecord.objects.filter(case=OuterRef("pk")))) | Q(
         Exists(RegistryDiscrepancy.objects.filter(case=OuterRef("pk")))
@@ -197,12 +203,12 @@ def case_condition(divisions):
 
 
 def may_open(user):
-    """The registry page: registry staff, or an admin (read-only)."""
-    return is_registry_staff(user) or identity.staff_scope(user).is_admin
+    """The registry page: registry staff, or an admin (read-only); nobody when it is off."""
+    return enabled() and (is_registry_staff(user) or identity.staff_scope(user).is_admin)
 
 
 def may_import(user):
-    return is_registry_staff(user) or identity.staff_scope(user).is_admin
+    return enabled() and (is_registry_staff(user) or identity.staff_scope(user).is_admin)
 
 
 def _require(allowed, message):
@@ -678,10 +684,13 @@ def import_balances(actor, name, data, exported_at):
 
 
 def take_evidence(ctx, case, payload):
-    """1–5 files this person just attached to this case, not yet evidence of another fact."""
+    """Up to 5 files this person just attached to this case, not yet evidence of another fact.
+    Optional (user, 23 Oct 2569): the SAP document number is what staff must give."""
     ids = payload.get("evidence") or []
-    if not isinstance(ids, list) or not ids:
-        fail(ErrorCode.VALIDATION_ERROR, "แนบหลักฐานเอกสารจากระบบทะเบียนเดิม (manual_reference)")
+    if not isinstance(ids, list):
+        fail(ErrorCode.VALIDATION_ERROR, "ไฟล์เอกสาร SAP ไม่ถูกต้อง แนบใหม่อีกครั้ง")
+    if not ids:
+        return []
     if len(ids) > MAX_EVIDENCE:
         fail(ErrorCode.VALIDATION_ERROR, f"แนบหลักฐานได้ไม่เกิน {MAX_EVIDENCE} ไฟล์")
     files = list(
@@ -1248,8 +1257,9 @@ def add_evidence(actor, record_id, files):
 
 
 def after_scan(attachment):
-    """Evidence that failed its scan opens a discrepancy (Q13); a clean replacement closes it."""
-    if attachment.registry_record_id is None:
+    """Evidence that failed its scan opens a discrepancy (Q13); a clean replacement closes it.
+    Without the registry menu nobody would see one, so none opens."""
+    if attachment.registry_record_id is None or not enabled():
         return
     S = Attachment.ScanStatus
     with transaction.atomic():
@@ -1286,6 +1296,8 @@ def after_scan(attachment):
 def visible_discrepancies(user):
     """Registry staff and admins see all; another division sees what was sent to it. Per
     division (ADR 0008) each division sees every discrepancy of its own facts and cases."""
+    if not enabled():
+        return D.objects.none()
     divisions = list(identity.staff_scope(user).division_roles)
     if per_division() and may_open(user):
         own = own_divisions(user)

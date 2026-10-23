@@ -456,12 +456,23 @@ class OptionsTests(OrgTestCase):
 
 
 class RegistryTests(OrgTestCase):
-    def test_the_registry_is_for_admins_only_by_default(self):
-        # 15 ต.ค. 2569 Q6: admins hold the registry; ตัวเลือกระบบ gives it back to divisions.
+    def test_the_registry_menu_is_off_by_default_then_for_admins_or_divisions(self):
+        # 23 ต.ค. 2569: no registry menu unless switched on; 15 ต.ค. Q6: then admins hold it,
+        # and ตัวเลือกระบบ gives it back to divisions.
         _, meter = self.submit(withdrawal(("MTR_SYN_A", "1")))
         d = RegistryDiscrepancy.objects.create(
             kind="not_found", case=meter, document_number="49001", opened_at=timezone.now()
         )
+        admin = Client()
+        admin.force_login(self.admin)
+        self.assertFalse(registry.enabled())
+        self.assertFalse(registry.may_open(self.admin))
+        self.assertFalse(registry.may_decide(self.admin, d))
+        self.assertNotContains(admin.get("/console/"), 'href="/registry/"')
+        for page in ("/registry/", f"/registry/{d.pk}/", "/registry/settings/"):
+            self.assertEqual(admin.get(page).status_code, 404)
+        self.assertEqual(admin.get("/console/admin/items/").status_code, 200)
+        options.change(self.admin, options.REGISTRY_ACCESS, "admin", "เทียบกับไฟล์ SAP")
         self.assertTrue(registry.admins_only())
         self.assertFalse(registry.may_open(self.kcw))
         self.assertFalse(registry.may_decide(self.kcw, d))

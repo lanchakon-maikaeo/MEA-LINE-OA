@@ -67,6 +67,7 @@ GROUPS = (
                 ("admin-policy-action",),
             ),
             Page("admin-inventory", "คลังของ", "รายการของและยอดคลัง", ("admin-inventory-action",)),
+            Page("admin-items", "รายการอุปกรณ์", "หมวดเมนู LINE และรหัสพัสดุ SAP ของแต่ละรายการ"),
         ),
     ),
     Group(

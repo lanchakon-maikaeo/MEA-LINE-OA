@@ -340,7 +340,9 @@ REGISTRY_STATES = {
 
 
 def registry_facts(case):
-    """M11: the SAP documents this case's facts cite, their evidence and reconciliation state."""
+    """M11: the SAP documents this case's facts cite, their evidence and reconciliation state.
+    With the registry menu off (23 Oct 2569) there is nothing to compare with: the typed
+    numbers and their files only."""
     records = list(
         case.registry_records.select_related("division", "recorded_by__staff_profile")
         .prefetch_related("evidence", "discrepancies")
@@ -348,19 +350,23 @@ def registry_facts(case):
     )
     if not records:
         return []
-    docs = registry.documents([r.document_number for r in records])
-    spans = registry.coverage()
+    compared = registry.enabled()
+    docs = registry.documents([r.document_number for r in records]) if compared else {}
+    spans = registry.coverage() if compared else []
     facts = []
     for record in records:
-        state = registry.record_state(record, docs, spans)
-        label, tone = REGISTRY_STATES[state]
+        label, tone = (
+            REGISTRY_STATES[registry.record_state(record, docs, spans)] if compared else ("", "")
+        )
         facts.append(
             {
                 "record": record,
                 "label": label,
                 "tone": tone,
                 "evidence": list(record.evidence.all()),
-                "open": [d for d in record.discrepancies.all() if d.status != "resolved"],
+                "open": [d for d in record.discrepancies.all() if d.status != "resolved"]
+                if compared
+                else [],
             }
         )
     return facts

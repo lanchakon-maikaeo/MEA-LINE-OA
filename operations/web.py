@@ -298,6 +298,8 @@ def _registry_count(user, division, admin_all):
     and those sent to this division for checking; None hides the chip."""
     from operations.models import RegistryDiscrepancy as RD
 
+    if not registry.enabled():
+        return None
     home = registry.registry_division()
     if admin_all or (division is not None and home is not None and division.pk == home.pk):
         return RD.objects.filter(status=RD.Status.OPEN).count()
