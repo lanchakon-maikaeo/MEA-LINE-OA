@@ -187,11 +187,10 @@ class Requester(models.Model):
         REVOKED = "revoked", "ถอนแล้ว"
 
     class EmployeeLink(models.TextChoices):
-        """How `employee` was set. Only a verified or admin link counts as proof of who this is;
-        a name match only shows the position (user, 14 Oct 2569)."""
+        """How `employee` was set: the person proved the employee ID, or an admin linked it.
+        The roster has no names (user, 23 Oct 2569), so nothing is linked by a name any more."""
 
         VERIFIED = "verified", "ยืนยันด้วยรหัสพนักงาน"
-        NAME = "name", "ชื่อตรงทะเบียนพนักงาน"
         ADMIN = "admin", "แอดมินผูก"
         UNLINKED = "unlinked", "แอดมินยกเลิกการผูก"
 
@@ -221,7 +220,6 @@ class Requester(models.Model):
         "Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     # ทะเบียนพนักงาน behind this person, for the position and staff roles on the requester list.
-    # Empty `employee_link`: not decided yet, so a unique name match may still fill it.
     employee = models.ForeignKey(
         "Employee", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -2181,10 +2179,13 @@ class Employee(models.Model):
     15 ต.ค. 2569 (Q10, Q16): the organisation's roster columns. `district` is the ฝ่าย as a
     organisational unit (Q13); the e-mail is kept twice and never in plain text: a hash to compare
     what someone types, and sealed with the server's PII key to send a one-time code. Phone
-    columns are never read."""
+    columns are never read. 23 ต.ค. 2569: names are not read either; a verified employee is
+    shown by the employee ID (employees.label)."""
 
     employee_id = models.CharField(max_length=32, unique=True)
-    name = models.CharField(max_length=200)
+    # Emptied and never read or written since 23 ต.ค. 2569; kept one release so the previous
+    # release still runs during a deploy, then dropped.
+    name = models.CharField(max_length=200, blank=True, default="", db_default="")
     district = models.ForeignKey(District, null=True, blank=True, on_delete=models.PROTECT)
     division = models.ForeignKey(Division, null=True, blank=True, on_delete=models.PROTECT)
     position = models.CharField(max_length=200, blank=True)
@@ -2205,7 +2206,7 @@ class Employee(models.Model):
         ordering = ["employee_id"]
 
     def __str__(self):
-        return f"{self.employee_id} {self.name}"
+        return self.employee_id
 
 
 class AIKeywordRun(models.Model):

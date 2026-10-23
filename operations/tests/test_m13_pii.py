@@ -209,6 +209,19 @@ class TaskTests(AITestCase):
         counts = dict(MaskCount.objects.filter(kind="phone").values_list("task", "count"))
         self.assertEqual(counts, {"answer": 1, "triage": 1, "screen": 1, "eval": 1})
 
+    def test_an_employee_label_is_no_name_to_mask(self):
+        # 23 Oct 2569: a verified employee is "พนักงาน <รหัส>", which must not make the word
+        # พนักงาน a first name that every message loses to the mask.
+        staff = make_staff("line-employee-77")
+        staff.staff_profile.display_name = "พนักงาน 510077"
+        staff.staff_profile.save()
+        self.alice.display_name = "พนักงาน 510078"
+        self.alice.save()
+        masker = pii.Masker.for_ai()
+        typed = "พนักงานช่างแจ้งว่ามิเตอร์ชำรุด พนักงานคนใหม่ไปตรวจแล้ว"
+        self.assertEqual(masker.mask(typed), typed)
+        self.assertNotIn("510077", masker.mask("พนักงาน 510077 ไปตรวจแล้ว"))  # IDs still are
+
 
 class PageTests(TestCase):
     def setUp(self):

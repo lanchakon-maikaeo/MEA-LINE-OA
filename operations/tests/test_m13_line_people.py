@@ -74,6 +74,7 @@ class RegistrationTests(PeopleTestCase):
     def test_the_directory_keeps_only_a_hash_of_the_proof(self):
         row = employees.Employee.objects.get(employee_id="SYN10001")
         self.assertNotIn("2530", row.check_hash)
+        self.assertNotIn("พนักงานจำลอง หนึ่ง", str(list(Employee.objects.values())))  # no names
         self.assertEqual(row.check_hash, employees.digest("๐๑/๐๑/๒๕๓๐"))
         event = AuditEvent.objects.get(action="employees.imported")
         self.assertNotIn("SYN10001", str(event.data))
@@ -93,6 +94,23 @@ class RegistrationTests(PeopleTestCase):
         registration = RegistrationRequest.objects.get(identity=line)
         self.assertEqual(registration.decided_by.username, identity.SYSTEM_USERNAME)
         self.assertTrue(AuditEvent.objects.filter(action="registration.auto_approved").exists())
+
+    def test_an_employee_is_shown_by_the_id_and_has_no_name_to_correct(self):
+        options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")
+        self.register(ALICE)
+        self.type(ALICE, "SYN20002")  # the roster gives no unit, so it is asked
+        reply = self.type(ALICE, "06/06/2516")
+        self.assertIn("พนักงาน SYN20002", texts(reply))
+        self.assertNotIn("แก้ชื่อ", buttons(reply))
+        again = self.type(ALICE, "ไม่แน่ใจว่าอยู่หน่วยงานไหน")  # typed: the list again
+        self.assertIn("เลือกหน่วยงาน", texts(again))
+        self.assertNotIn("แก้ชื่อ", buttons(again))
+        self.press(ALICE, District.objects.get(code="D01").name)
+        requester = ChannelIdentity.objects.get(external_id=ALICE).requester
+        self.assertEqual(requester.display_name, "พนักงาน SYN20002")
+        self.assertEqual(
+            (requester.employee.employee_id, requester.employee_link), ("SYN20002", "verified")
+        )
 
     def test_wrong_proofs_stop_and_go_to_a_person(self):
         options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")

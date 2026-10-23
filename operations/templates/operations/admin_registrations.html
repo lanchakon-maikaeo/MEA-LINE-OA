@@ -34,10 +34,7 @@
 
 <section class="section" aria-labelledby="reg-people">
   <div class="section-head"><h2 id="reg-people">ผู้ใช้ที่ลงทะเบียนแล้ว</h2></div>
-<p class="muted">ตำแหน่งและฝ่ายมาจากทะเบียนพนักงาน ผู้ใช้ที่ไม่ได้ยืนยันด้วยรหัสพนักงาน ระบบผูกให้เมื่อชื่อตรงกับพนักงานคนเดียวในทะเบียน{% if is_admin %} กดชื่อเพื่อดูข้อความที่พิมพ์มา ยืนยันตัวตน ระงับ หรือถอนการรับรอง{% endif %}</p>
-{% if is_admin and to_review or is_admin and to_confirm %}
-<div class="notice notice--info mb-24" role="status"><div class="notice__body">{% if to_review %}<strong>ต้องตรวจ {{ to_review }} ราย</strong> ชื่อตรงพนักงานในทะเบียนแต่ระบบไม่ผูกให้ เพราะชื่อซ้ำหลายคนหรือทะเบียนระบุหน่วยงาน (เขต/ฝ่าย)อื่น{% endif %}{% if to_review and to_confirm %} · {% endif %}{% if to_confirm %}<strong>รอยืนยัน {{ to_confirm }} ราย</strong> ระบบผูกจากชื่อ แสดงตำแหน่งได้แต่ยังไม่นับเป็นการยืนยันตัวตน{% endif %} เลือกตัวกรอง "ตัวตน" เพื่อดูเฉพาะกลุ่ม แล้วกดชื่อเพื่อตรวจ</div></div>
-{% endif %}
+<p class="muted">ตำแหน่งและฝ่ายมาจากทะเบียนพนักงาน ผูกกับทะเบียนได้เมื่อผู้ใช้ยืนยันด้วยรหัสพนักงาน หรือแอดมินผูกให้{% if is_admin %} กดชื่อเพื่อดูข้อความที่พิมพ์มา ผูกรหัสพนักงาน ระงับ หรือถอนการรับรอง{% endif %}</p>
 {% include "operations/_list_tools.html" with list="requesters" placeholder="ค้นหาชื่อ รหัสพนักงาน ตำแหน่ง หรือบทบาท" filters=requester_filters %}
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ตัวตน</th><th scope="col">ตำแหน่ง · ฝ่าย</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)</th><th scope="col">บทบาทในระบบ</th><th scope="col">สถานะ</th>{% if is_admin %}<th scope="col">รับรอง</th>{% endif %}</tr></thead>
@@ -46,14 +43,12 @@
     <tr data-item data-district="{{ requester.district.code }}" data-status="{{ requester.status }}" data-identity="{{ row.state }}" data-search="{{ requester.display_name|lower }} {{ row.where|lower }} {{ row.proof|lower }} {{ row.position|lower }} {{ row.role|lower }}">
       <td class="cell--end" data-label="รหัส">{{ requester.pk }}</td>
       <td class="cell--title">{% if is_admin %}<a href="{% url 'admin-requester-detail' requester.pk %}">{{ requester.display_name }}</a>{% else %}{{ requester.display_name }}{% endif %}</td>
-      <td class="cell--wide" data-label="ตัวตน">{% if row.state == "review" %}<span class="tag tag--alert">ต้องตรวจ</span> {{ row.note }}{% else %}{{ row.proof }}{% if row.state == "name" %} <span class="tag tag--outline">รอยืนยัน</span>{% endif %}{% endif %}<br><span class="muted">{{ row.channel }}</span></td>
+      <td class="cell--wide" data-label="ตัวตน">{{ row.proof }}<br><span class="muted">{{ row.channel }}</span></td>
       <td data-label="ตำแหน่ง · ฝ่าย">{{ row.position|default:"—" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</td>
       <td class="cell--two" data-label="หน่วยงาน (เขต/ฝ่าย)">{{ row.where }}</td>
       <td data-label="บทบาท">{{ row.role }}</td>
       <td class="cell--two" data-label="สถานะ">{% if requester.status == "active" %}{{ requester.get_status_display }}{% else %}<span class="tag tag--muted">{{ requester.get_status_display }}</span>{% endif %}</td>
-      {% if is_admin %}<td>{% if row.state == "name" and requester.status == "active" %}
-        <form method="post" action="{% url 'admin-requester-action' requester.pk 'link-employee' %}">{% csrf_token %}<input type="hidden" name="next" value="registrations"><input type="hidden" name="employee_id" value="{{ requester.employee.employee_id }}"><button type="submit">รับรองพนักงาน</button></form>
-      {% elif row.state == "review" %}<a href="{% url 'admin-requester-detail' requester.pk %}">ตรวจตัวตน</a>{% elif row.state == "verified" %}ยืนยันแล้ว{% else %}—{% endif %}</td>{% endif %}
+      {% if is_admin %}<td>{% if row.state == "verified" %}ยืนยันแล้ว{% else %}—{% endif %}</td>{% endif %}
     </tr>
   {% endwith %}{% empty %}<tr><td colspan="{% if is_admin %}8{% else %}7{% endif %}">ยังไม่มี</td></tr>{% endfor %}
   </tbody>

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from django.core.management import call_command
 from django.test import TestCase
 
-from operations import options, staff_work
+from operations import employees, options, staff_work
 from operations.models import Case, ConversationDraft, LineMenuItem, WorkOrder
 from operations.tests.test_m03_line import ALICE, buttons, texts
 from operations.tests.test_m10_web import FriendlyFlowTests, WebTestCase
@@ -120,7 +120,7 @@ class RegistrationRedesignTests(StaffChatTestCase):
         registration = identity.submit_registration(
             "line",
             row.external_id,
-            employee.name,
+            employees.label(employee),
             "D01",
             employee=employee,
             verified_by="otp",
@@ -147,7 +147,7 @@ class RegistrationRedesignTests(StaffChatTestCase):
         registration = identity.submit_registration(
             "line",
             row.external_id,
-            employee.name,
+            employees.label(employee),
             "D01",
             employee=employee,
             verified_by="otp",

@@ -821,12 +821,15 @@ def _registration(turn):
         data["district"] = token.value["code"]
         return _registration_next(turn, data)
     if prompt == "reg_district" and token is not None and token.action == "reg_rename":
+        if data.get("employee"):
+            return _ask_district(turn, data.pop("name", ""), **data)
         turn.set_prompt("reg_name")
         turn.say(f"พิมพ์ชื่อและนามสกุลใหม่ เว้นวรรคระหว่างกัน {NAME_EXAMPLE}")
         return
     text = _event_text(turn)
     if prompt == "reg_district" and text is not None and data.get("name"):
-        return _ask_district(turn, data["name"])  # typed instead of choosing: the list again
+        # Typed instead of choosing: the list again, keeping what the steps so far gave.
+        return _ask_district(turn, data.pop("name"), **data)
     if prompt == "reg_external_name":
         if not text or not 2 <= len(text.strip()) <= 200:
             turn.say("พิมพ์ชื่อ 2–200 ตัวอักษร")
@@ -1070,15 +1073,16 @@ def _failed(turn, data, reason, message, again):
 
 
 def _employee_proved(turn, data, employee, method):
-    """The name and unit come from the roster; the unit is asked only when the roster
-    gives none."""
+    """The employee ID stands for the name (the roster has none, 23 Oct 2569) and the unit
+    comes from the roster; the unit is asked only when the roster gives none."""
+    from operations import employees
+
     data = {k: v for k, v in data.items() if k not in ("employee_try", "employee_id", "name")}
     data.update(checked=True, employee=employee.pk, method=method)
+    name = employees.label(employee)
     if employee.district_id and employee.district.is_active:
-        return _registration_next(
-            turn, {**data, "name": employee.name, "district": employee.district.code}
-        )
-    return _ask_district(turn, employee.name, **data)
+        return _registration_next(turn, {**data, "name": name, "district": employee.district.code})
+    return _ask_district(turn, name, **data)
 
 
 def _ask_name(turn, text):
@@ -1119,15 +1123,18 @@ def _not_a_name(turn, text):
 
 
 def _ask_district(turn, name, **data):
-    """The district list, with 'แก้ชื่อ' in case the name was typed wrong."""
+    """The district list, with 'แก้ชื่อ' in case the name was typed wrong. A proved employee
+    typed no name (the employee ID stands for it), so there is nothing to correct."""
     turn.set_prompt("reg_district", **data, name=name)
     districts = District.objects.filter(is_active=True).order_by("code")
-    turn.say(f"ชื่อ: {name}\nเลือกหน่วยงาน (เขต/ฝ่าย)การไฟฟ้าที่คุณสังกัด")
+    employee = bool(data.get("employee"))
+    turn.say(f"{name if employee else f'ชื่อ: {name}'}\nเลือกหน่วยงาน (เขต/ฝ่าย)การไฟฟ้าที่คุณสังกัด")
     message = button_list(
         "เลือกหน่วยงาน (เขต/ฝ่าย)การไฟฟ้า",
         [turn.button(d.name, "reg_district", {"code": d.code}) for d in districts],
     )
-    message["quickReply"] = {"items": [_postback(*turn.button("แก้ชื่อ", "reg_rename"))]}
+    if not employee:
+        message["quickReply"] = {"items": [_postback(*turn.button("แก้ชื่อ", "reg_rename"))]}
     turn.replies.append(message)
 
 

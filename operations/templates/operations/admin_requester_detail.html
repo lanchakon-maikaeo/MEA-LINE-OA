@@ -52,35 +52,11 @@
 {% if managed %}
 <section class="section" aria-labelledby="rq-employee">
   <div class="section-head"><h2 id="rq-employee">ตรวจตัวตนกับทะเบียนพนักงาน</h2></div>
-  <p>{% if requester.employee %}ผูกกับ {{ requester.employee.employee_id }} {{ requester.employee.name }}{% if requester.employee.position %} · {{ requester.employee.position }}{% endif %} ({{ requester.get_employee_link_display }}){% else %}ยังไม่ผูก{% if requester.employee_link == "unlinked" %} แอดมินยกเลิกการผูกไว้ ระบบจะไม่ผูกจากชื่อให้อีก{% endif %}{% endif %}</p>
-  {% if row.state == "review" %}
-  <div class="notice notice--warning mb-24" role="status"><div class="notice__body"><strong>ต้องตรวจ</strong> {{ row.note }} ระบบจึงไม่ผูกให้เอง</div></div>
-  {% elif row.state == "name" %}
-  <div class="notice notice--info mb-24" role="status"><div class="notice__body"><strong>รอยืนยัน</strong> ระบบผูกจากชื่อ จึงแสดงตำแหน่งงานได้ แต่ยังไม่นับเป็นการยืนยันตัวตนและไม่ใช้หาบทบาทเจ้าหน้าที่</div></div>
-  {% endif %}
-  {% if candidates %}
-  <h3>พนักงานในทะเบียนที่ชื่อตรงกัน</h3>
-  <p class="muted">ตรวจกับตัวจริงก่อน เช่น โทรถามผู้ใช้หรือถามหัวหน้าหน่วยงาน (เขต/ฝ่าย) แล้วกดยืนยัน ถ้าผู้ใช้เลือกหน่วยงาน (เขต/ฝ่าย)ผิดให้แก้หน่วยงาน (เขต/ฝ่าย)ด้านล่าง ถ้าทะเบียนผิดให้แก้ไฟล์แล้วนำเข้าใหม่ ระบบจะผูกให้เอง</p>
-  <div class="table-wrap"><table>
-    <thead><tr><th scope="col">รหัสพนักงาน</th><th scope="col">ชื่อในทะเบียน</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)หรือกอง</th><th scope="col">ตำแหน่ง</th><th scope="col">หมายเหตุ</th><th scope="col">ยืนยัน</th></tr></thead>
-    <tbody>
-    {% for c in candidates %}
-      <tr>
-        <td>{{ c.employee.employee_id }}</td>
-        <td>{{ c.employee.name }}</td>
-        <td>{{ c.place|default:"—" }}</td>
-        <td>{{ c.employee.position|default:"—" }}</td>
-        <td>{{ c.note|default:"—" }}</td>
-        <td><form class="inline" method="post" action="{% url 'admin-requester-action' requester.pk 'link-employee' %}">{% csrf_token %}<input type="hidden" name="employee_id" value="{{ c.employee.employee_id }}"><button type="submit">รับรองพนักงานคนนี้</button></form></td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
-  {% endif %}
+  <p>{% if requester.employee %}ผูกกับรหัสพนักงาน {{ requester.employee.employee_id }}{% if requester.employee.position %} · {{ requester.employee.position }}{% endif %} ({{ requester.get_employee_link_display }}){% else %}ยังไม่ผูก{% if requester.employee_link == "unlinked" %} แอดมินยกเลิกการผูกไว้{% endif %}{% endif %}</p>
   <details><summary>แก้ข้อมูลพนักงานหรือหน่วยงาน</summary><div class="form-grid">
     <form method="post" action="{% url 'admin-requester-action' requester.pk 'link-employee' %}">
       <fieldset><legend>{% if requester.employee %}เปลี่ยนเป็นรหัสพนักงานอื่น{% else %}ผูกด้วยรหัสพนักงาน{% endif %}</legend>{% csrf_token %}
-        <p class="helptext">ใช้เมื่อชื่อในทะเบียนสะกดต่างจากที่ผู้ใช้พิมพ์ ระบบจึงหาไม่เจอ</p>
+        <p class="helptext">ใช้เมื่อตรวจกับตัวจริงแล้วว่าเป็นพนักงานคนนี้ เช่น ผู้ใช้ยืนยันทาง LINE ไม่ได้</p>
         <p><label for="rq-emp">รหัสพนักงาน</label> <input id="rq-emp" name="employee_id" maxlength="32" required></p>
         <p><label for="rq-emp-reason">เหตุผล (ไม่บังคับ)</label> <input id="rq-emp-reason" name="reason" maxlength="500"></p>
         <button type="submit">บันทึก</button></fieldset>

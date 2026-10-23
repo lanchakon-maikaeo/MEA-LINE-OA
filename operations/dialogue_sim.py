@@ -392,7 +392,6 @@ class Dialogue:
         proof = f"{rng.randint(1, 28):02d}/{rng.randint(1, 12):02d}/25{rng.randint(10, 45)}"
         row = Employee.objects.create(
             employee_id=f"SIM{rng.randint(10**5, 10**6 - 1)}",
-            name=self._name(),
             district=district,
             division=division,
             check_label="วันเกิด (วว/ดด/ปปปป)",

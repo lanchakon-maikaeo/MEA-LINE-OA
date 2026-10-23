@@ -393,7 +393,6 @@ def admin_registrations(request):
     )
     requesters = _requester_rows(people.exclude(status=Requester.Status.REVOKED)[:100])
     revoked = _requester_rows(people.filter(status=Requester.Status.REVOKED)[:100])
-    states = [row["state"] for row in requesters]
     is_admin = identity.staff_scope(request.user).is_admin
     return render(
         request,
@@ -405,8 +404,6 @@ def admin_registrations(request):
             "recent": recent,
             "requesters": requesters,
             "revoked": revoked,
-            "to_review": states.count("review"),
-            "to_confirm": states.count("name"),
             # Who may talk to the bot (user, 14 Oct 2569: "ให้แสดงในหน้ารับรองด้วย").
             "is_production": settings.APP_ENV == "production",
             "audience": options.get(options.LINE_AUDIENCE),
@@ -443,7 +440,6 @@ def _requester_rows(requesters):
     are, their position from ทะเบียนพนักงาน, and their role in the system."""
     requesters = list(requesters)
     roles = identity.requester_roles(requesters)
-    people = employees.name_index()
     lines = defaultdict(list)
     for line in ChannelIdentity.objects.filter(requester__in=requesters):
         lines[line.requester_id].append(line)
@@ -462,20 +458,15 @@ def _requester_rows(requesters):
         employee = requester.employee
         if employee is None:
             proof = "ยังไม่ผูกทะเบียนพนักงาน"
-        elif requester.employee_link == link.NAME:
-            proof = f"ชื่อตรงทะเบียน {employee.employee_id} (ยังไม่ได้ยืนยัน)"
         elif requester.employee_link == link.ADMIN:
             proof = f"แอดมินผูกรหัสพนักงาน {employee.employee_id}"
         else:
             proof = f"ยืนยันรหัสพนักงาน {employee.employee_id}"
-        found = employees.same_name(requester, people)
-        state = employees.identity_state(requester, found)
+        state = employees.identity_state(requester)
         rows.append(
             {
                 "requester": requester,
                 "state": state,
-                "note": employees.review_note(requester, found) if state == "review" else "",
-                "same_name": found,
                 "proof": proof,
                 "channel": channel,
                 # ตำแหน่ง · ฝ่าย (15 ต.ค. 2569 Q15); a closed roster row is flagged (Q29).
@@ -544,18 +535,6 @@ def admin_requester_detail(request, pk):
         .order_by("-pk")[:50]
     )
     row = _requester_rows([requester])[0]
-    # Employees with the same name, for an admin to confirm (user, 14 Oct 2569): while the
-    # link is not proved, whether the system tied one by name or left it to an admin.
-    candidates = [
-        {
-            "employee": e,
-            "place": e.district.name
-            if e.district_id
-            else (e.division.code if e.division_id else ""),
-            "note": _candidate_note(requester, e, row["same_name"]),
-        }
-        for e in (row["same_name"] if row["state"] != "verified" else [])
-    ]
     history = []
     for event in events:
         actor = event.actor
@@ -580,7 +559,6 @@ def admin_requester_detail(request, pk):
             "requester": requester,
             "grant_form": forms.GrantRoleForm(),
             "row": row,
-            "candidates": candidates,
             "districts": District.objects.filter(is_active=True).order_by("code"),
             "lines": ChannelIdentity.objects.filter(requester=requester).select_related(
                 "staff_user__staff_profile"
@@ -591,20 +569,6 @@ def admin_requester_detail(request, pk):
             "managed": requester.status != Requester.Status.REVOKED,
         },
     )
-
-
-def _candidate_note(requester, employee, found):
-    """Why the system did not tie this employee by itself, for the admin who checks."""
-    if employee.pk == requester.employee_id:
-        return "ผูกจากชื่ออยู่ตอนนี้ ยังไม่ได้ยืนยัน"
-    notes = []
-    if len(found) > 1:
-        notes.append(f"ชื่อนี้มี {len(found)} คนในทะเบียน")
-    if employee.district_id not in (None, requester.district_id):
-        notes.append(f"ทะเบียนระบุ{employee.district.name}")
-    if requester.employee_link == Requester.EmployeeLink.UNLINKED:
-        notes.append("แอดมินเคยยกเลิกการผูก")
-    return " · ".join(notes)
 
 
 @admin_required
@@ -1411,7 +1375,8 @@ def _staged(value):
 def admin_employees(request):
     """ทะเบียนพนักงาน (15 ต.ค. 2569 Q10, Q27–Q29): the owner uploads the organisation's roster
     (.xlsx or .csv); a preview shows which column is which field and which unit each department
-    is, then the import. Names and e-mails never leave this page; no AI reads the file."""
+    is, then the import. The file's names are never read (23 Oct 2569) and e-mails never
+    leave this page; no AI reads the file."""
     upload, columns = None, None
     if request.method == "POST":
         action = request.POST.get("action")
@@ -1452,8 +1417,7 @@ def admin_employees(request):
                 messages.info(
                     request,
                     f"เพิ่ม {summary['created']} แก้ {summary['updated']} ปิด {summary['closed']} คน · "
-                    f"มีอีเมล {summary['emails']} คน · ผูกผู้ใช้ LINE จากชื่อ {summary['matched']} · "
-                    f"ชื่อตรงแต่ต้องให้แอดมินตรวจ {summary['review']} ราย",
+                    f"มีอีเมล {summary['emails']} คน",
                 )
                 return redirect("admin-employees")
     elif request.GET.get("upload"):

@@ -35,7 +35,7 @@ class PurgeTests(OrgTestCase):
         self.fake = Requester.objects.create(
             display_name="ผู้แจ้งจำลอง", district=self.req1.district, approved_by=self.admin
         )
-        Employee.objects.create(employee_id="SYN1", name="พนักงานจำลอง", is_synthetic=True)
+        Employee.objects.create(employee_id="SYN1", is_synthetic=True)
         ChatAnswer.objects.create(
             key="contact",
             title="ติดต่อ",

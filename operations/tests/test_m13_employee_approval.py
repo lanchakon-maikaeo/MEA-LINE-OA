@@ -2,7 +2,7 @@
 
 from django.core.exceptions import ValidationError
 
-from operations import identity, line_menu, services
+from operations import employees, identity, line_menu, services
 from operations.contracts import Actor
 from operations.models import (
     AuditEvent,
@@ -24,7 +24,7 @@ class EmployeeApprovalTests(PeopleTestCase):
         return identity.submit_registration(
             "line",
             external_id,
-            employee.name,
+            employees.label(employee),
             "D01",
             employee=employee,
             verified_by=verified_by,
@@ -110,7 +110,7 @@ class EmployeeApprovalTests(PeopleTestCase):
     def test_confirming_an_external_reporter_uses_roster_unit_and_allows_withdrawal(self):
         employee = Employee.objects.get(employee_id="SYN10001")
         line = ChannelIdentity.objects.create(channel="line", external_id="external-to-employee")
-        requester = identity.external_requester(line, employee.name)
+        requester = identity.external_requester(line, employees.label(employee))
         requester = identity.link_requester_employee(
             self.admin, requester, employee.employee_id, ""
         )

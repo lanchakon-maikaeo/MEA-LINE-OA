@@ -1,6 +1,6 @@
 """Administrative chat commands never inherit permissions from a menu or notification."""
 
-from operations import admin_line, identity, staff_line
+from operations import admin_line, employees, identity, staff_line
 from operations.models import ChannelIdentity, NotificationDelivery, RegistrationRequest
 from operations.tests.test_m03_line import ALICE, BOB, texts
 from operations.tests.test_m13_staff_chat import StaffChatTestCase
@@ -62,7 +62,12 @@ class AdminLineTests(StaffChatTestCase):
         employee.division = self.kae
         employee.save()
         registration = identity.submit_registration(
-            "line", "verified-applicant", employee.name, "D01", employee=employee, verified_by="otp"
+            "line",
+            "verified-applicant",
+            employees.label(employee),
+            "D01",
+            employee=employee,
+            verified_by="otp",
         )
         return identity.auto_approve_registration(registration)
 
