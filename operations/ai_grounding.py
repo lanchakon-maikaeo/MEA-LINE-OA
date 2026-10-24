@@ -8,7 +8,7 @@ import re
 from decimal import Decimal
 
 from operations.conversation import CATEGORY_LABELS, THAI_DIGITS, _parse_date
-from operations.typed_lines import NUMBERED
+from operations.typed_lines import NUMBERED, SAP_NUMBER
 
 NUMBER = r"\d+(?:,\d{3})*(?:\.\d+)?"
 AUTHORITY = re.compile(
@@ -428,6 +428,24 @@ def _ground_size(item, text, original_text):
         item.rejected.append("size")
     else:
         item.size = copied
+
+
+SLIP_NUMBER = re.compile(
+    rf"{SLIP_LABEL}\s*(?:เลขที่|หมายเลข|เลข|no\.?)?\s*[:：]?\s*([a-z0-9-]+)", re.IGNORECASE
+)
+
+
+def labelled_slip(text):
+    """The one SAP slip number the requester labelled ("ใบเบิก 4500012345", "เลขใบเบิก
+    WD-2568-0107"), as written, or "" when there is none or more than one. The model sometimes
+    leaves a plainly labelled number out (typed-v1, 24 Oct 2569); two labelled numbers, as when
+    a message slips in a second one, are left for the chat to ask."""
+    found = {}
+    for match in SLIP_NUMBER.finditer(text.translate(THAI_DIGITS)):
+        number = match[1].strip("-")
+        if SAP_NUMBER.match(number) and any(c.isdigit() for c in number):
+            found.setdefault(number.casefold(), number)
+    return next(iter(found.values())) if len(found) == 1 else ""
 
 
 def _ground_sap(proposal, text):

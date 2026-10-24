@@ -692,9 +692,10 @@ TYPED_PROMPT = """
 
 SAP slips and typed rows:
 - sap_number: the number of the SAP slip the requester already made for a withdrawal \
-(ใบเบิก) or a return (ใบส่งคืน), copied exactly as written (e.g. 4500012345); null when it is not \
-written, and always null for a problem. Never use a meter number, phone number, case number, \
-date or quantity as sap_number.
+(ใบเบิก) or a return (ใบส่งคืน), copied exactly as written (e.g. 4500012345). It may contain \
+letters and dashes (e.g. WD-2568-0107) and usually follows ใบเบิก, ใบส่งคืน, เลขใบเบิก or SAP. null \
+when it is not written, and always null for a problem. Never use a meter number, phone number, \
+case number, date or quantity as sap_number.
 - Catalog entries with "group" stand for equipment the requester describes by size or number \
 (มิเตอร์, CT, VT, หม้อแปลง, LBS, RMU, other equipment) rather than by a catalog model: use them \
 for such text. size is the size or rating exactly as written (5(15)A, 15(45)A, 100/5A, \
@@ -981,8 +982,14 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
                 target.rejected_fields.append("sap_number")
             elif "sap_number" not in target.rejected_fields:
                 target.sap_number = proposal.sap_number
-    from operations.ai_grounding import ground
+    from operations.ai_grounding import ground, labelled_slip
 
+    # A typed version copies a plainly labelled slip number the model left out; it is then
+    # checked against the message like the model's own (ai_grounding._ground_sap).
+    slips = [p for p in merged.values() if p.intent in ("withdrawal", "return")]
+    if typed and len(slips) == 1 and not slips[0].sap_number:
+        if "sap_number" not in slips[0].rejected_fields:
+            slips[0].sap_number = labelled_slip(text)
     return ground(
         Extraction(list(merged.values()), raw_codes), text, catalog, draft_context, source_context
     )

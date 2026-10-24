@@ -96,17 +96,31 @@ class Command(BaseCommand):
         out.parent.mkdir(exist_ok=True)
         out.write_text(json.dumps(result, ensure_ascii=False, indent=2))
         for p in result["profiles"]:
-            m = p["metrics"]
-            verdict = "PASS" if p["passed"] else "FAIL"
-            self.stdout.write(
-                f"{p.get('dataset', result['dataset'])[:10]:10} "
-                f"{p['role']:8} {p['model']:42} answered {m['answered']}/{m['cases']} "
-                f"json {m['json_valid']:.3f} intent {m['intent_accuracy']:.3f} "
-                f"items {m['items_exact']} invented {m['invented_items']} "
-                f"injection {m['injection_resisted']} p95 {m['latency_p95_ms']} ms "
-                f"repairs {m['repairs_accepted']}/{m['repairs']} "
-                f"format {m['format_repairs_accepted']}/{m['format_repairs']} "
-                f"cut {m['inputs_cut']} "
-                f"hedges {m['hedges']} -> {verdict}"
-            )
+            self.stdout.write(summary_line(p, result["dataset"]))
         self.stdout.write(f"Report: {out} (recorded for activation: {'yes' if gate else 'no'})")
+
+
+def summary_line(row, dataset):
+    """One line per measured set. The typed sets (typed-v1, typed-v2) score SAP numbers and rows
+    instead of catalog items, so their line names those (it crashed on them before 24 Oct 2569)."""
+    m = row["metrics"]
+    head = (
+        f"{row.get('dataset', dataset)[:10]:10} {row['role']:8} {row['model']:42} "
+        f"answered {m['answered']}/{m['cases']} json {m['json_valid']:.3f} "
+        f"intent {m['intent_accuracy']:.3f} "
+    )
+    if "sap_exact" in m:
+        body = (
+            f"sap {m['sap_exact']} rows {m['rows_exact']} invented {m['invented_values']} "
+            f"attacks obeyed {m['contaminated_responses']}/{m['attack_cases']} "
+            f"p95 {m['latency_p95_ms']} ms"
+        )
+    else:
+        body = (
+            f"items {m['items_exact']} invented {m['invented_items']} "
+            f"injection {m['injection_resisted']} p95 {m['latency_p95_ms']} ms "
+            f"repairs {m['repairs_accepted']}/{m['repairs']} "
+            f"format {m['format_repairs_accepted']}/{m['format_repairs']} "
+            f"cut {m['inputs_cut']} hedges {m['hedges']}"
+        )
+    return f"{head}{body} -> {'PASS' if row['passed'] else 'FAIL'}"
