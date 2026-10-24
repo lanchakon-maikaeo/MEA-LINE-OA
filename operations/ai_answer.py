@@ -327,37 +327,9 @@ def call(profile, messages, keys, timeout):
 
 
 def _call_schema(profile, messages, schema, timeout):
-    if not profile.use_json_schema:
-        described = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
-        messages = [
-            {
-                "role": "system",
-                "content": f"{messages[0]['content']}\n\nOutput exactly one JSON object, with no "
-                f"other text or code fence, that matches this JSON Schema:\n{described}",
-            },
-            *messages[1:],
-        ]
-    body = {
-        "model": profile.model_id,
-        "messages": messages,
-        "max_tokens": profile.max_tokens,
-        "temperature": float(profile.temperature),
-    }
-    if profile.use_json_schema:
-        body["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {"name": "chat_answer", "strict": True, "schema": schema},
-        }
-    started = time.monotonic()
-    credential = profile.credential
-    data = ai.post(
-        f"{credential.base_url}/chat/completions",
-        ai.decrypt_key(credential),
-        body,
-        timeout,
-        "answer",
-    )
-    return ai._content(data), int((time.monotonic() - started) * 1000)
+    """One JSON-schema call (ai.chat_json): returns (content, latency_ms)."""
+    content, _, latency = ai.chat_json(profile, messages, schema, "chat_answer", timeout, "answer")
+    return content, latency
 
 
 def reply_problem(reply, sources, own_numbers):

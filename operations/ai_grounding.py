@@ -8,6 +8,7 @@ import re
 from decimal import Decimal
 
 from operations.conversation import CATEGORY_LABELS, THAI_DIGITS, _parse_date
+from operations.typed_lines import NUMBERED
 
 NUMBER = r"\d+(?:,\d{3})*(?:\.\d+)?"
 AUTHORITY = re.compile(
@@ -54,20 +55,54 @@ def safe_text(value):
     )
 
 
+# The plain words of a typed group (typed_lines) name its shared item; a longer catalog name
+# still matches first. The other-equipment group has no word: its name is the requester's own.
+GROUP_WORDS = {
+    "meter": ("มิเตอร์", "เครื่องวัด", "meter"),
+    "ct": ("ct", "ซีที"),
+    "vt": ("vt", "วีที"),
+    "transformer": ("หม้อแปลง", "transformer"),
+    "lbs": ("lbs",),
+    "rmu": ("rmu",),
+}
+# A group word right after these is part of another word (a label or another thing).
+NOT_GROUP_AFTER = ("เลข", "กล่อง", "ฝา", "ซีล", "ตู้")
+# Words a typed row counts in, whatever its group's unit ("2 อัน", "3 ลูก").
+COUNT_WORDS = "อัน|ชิ้น|ตัว|เครื่อง|ลูก|ชุด|หน่วย|ม้วน|เส้น|กล่อง|คู่"
+# A size or rating ("5a", "220v", "11kv"), never a meter number.
+SIZE_LIKE = re.compile(r"\d+(?:\.\d+)?(?:a|v|kv|va|kva|w|kw)")
+
+
+def _alias_pattern(name, group_word):
+    pattern = re.escape(name)
+    if re.fullmatch(r"[a-z]{1,3}", name):
+        # A short Latin word ("ct") is a whole word, never part of another ("connect").
+        pattern = rf"(?<![a-z0-9]){pattern}(?![a-z0-9])"
+    if group_word:
+        # "เลขมิเตอร์" labels numbers and "กล่องมิเตอร์" is other equipment, not a meter.
+        pattern = "".join(f"(?<!{w})" for w in NOT_GROUP_AFTER) + pattern
+    return pattern
+
+
 def mentions(text, catalog):
     """Catalog-derived names and unique category labels; ambiguous names require a choice."""
     aliases = {}
     for item in catalog:
         names = {item.code, item.name, re.split("รุ่น|จำลอง", item.name)[0].strip()}
-        if item.category in ("meter", "transformer"):
+        if item.category in ("meter", "transformer") and not getattr(item, "entry_group", ""):
             names.add(CATEGORY_LABELS[item.category])
         for name in names:
             if name:
                 aliases.setdefault(normalise(name), set()).add(item.code)
+    words = set()
+    for item in catalog:
+        for word in GROUP_WORDS.get(getattr(item, "entry_group", ""), ()):
+            aliases[normalise(word)] = {item.code}
+            words.add(normalise(word))
     unique = {name: next(iter(codes)) for name, codes in aliases.items() if len(codes) == 1}
     if not unique:
         return []
-    pattern = "|".join(re.escape(n) for n in sorted(unique, key=len, reverse=True))
+    pattern = "|".join(_alias_pattern(n, n in words) for n in sorted(unique, key=len, reverse=True))
     return [(m.start(), m.end(), unique[m.group()]) for m in re.finditer(pattern, text)]
 
 
@@ -84,15 +119,25 @@ def item_spans(text, catalog, draft):
     return spans
 
 
-def quantities(spans, unit, previous=None, correcting=False):
+def quantities(spans, unit, previous=None, correcting=False, typed=False):
     values, corrections = set(), set()
     for span in spans:
         # Never take a date, serial, rating, reference or another item's number.
         pattern = rf"(?<![a-z0-9_./-])({NUMBER})\s*{re.escape(normalise(unit))}(?![a-z0-9_])"
         numbers = re.findall(pattern, span)
+        if typed:
+            # A typed row says its count after its size ("ขนาด 16 sq.mm. 2 อัน", "จำนวน 5"); a
+            # number before a size word ("1 เฟส") is not a count.
+            numbers += re.findall(rf"จำนวน\s*({NUMBER})(?![\d.,/])", span)
+            numbers += re.findall(
+                rf"(?<![a-z0-9_./(-])({NUMBER})\s*(?:{COUNT_WORDS})(?![a-z0-9_])", span
+            )
         direct = re.match(rf"\s*(?:จำนวน\s*|อย่างละ\s*)?({NUMBER})(?=\s|$)", span)
-        if direct and not re.match(
-            r"\s*(?:โวลต์|แอมป์|kv|kva|volt|amp)\b", span[direct.end() :], re.I
+        # A typed row's bare number may be a meter number or a size: never its count.
+        if (
+            direct
+            and not typed
+            and not re.match(r"\s*(?:โวลต์|แอมป์|kv|kva|volt|amp)\b", span[direct.end() :], re.I)
         ):
             numbers.append(direct[1])
         values.update(Decimal(n.replace(",", "")) for n in numbers)
@@ -318,24 +363,29 @@ def negated_codes(text, catalog):
     }
 
 
-def labelled_serials(source):
+SERIAL_LABEL = r"(?:หมายเลข|เลขเครื่อง|serials?|s/n)"
+SLIP_LABEL = r"(?:ใบเบิก|ใบส่งคืน|ใบคืน|เอกสาร|sap)"
+# A typed meter row also labels its numbers as the meter's ("เลขมิเตอร์", "หมายเลขเครื่องวัด").
+METER_LABEL = r"(?:หมายเลข(?:เครื่องวัด|มิเตอร์|เครื่อง)?|เลข(?:เครื่องวัด|มิเตอร์|เครื่อง)|serials?|s/n)"
+
+
+def labelled_serials(source, label=SERIAL_LABEL):
     """Identifiers the requester labelled as serial numbers ("หมายเลขเครื่อง X Y")."""
     labelled = []
     for group in re.findall(
-        r"(?:หมายเลข|เลขเครื่อง|serials?|s/n)\s*[:：]?\s*([a-z0-9_-]+(?:[ ,]+[a-z0-9_-]+)*)",
+        rf"{label}\s*[:：]?\s*([a-z0-9_-]+(?:[ ,]+[a-z0-9_-]+)*)",
         " ".join(source),
     ):
         labelled += [t for t in re.findall(r"[a-z0-9_-]+", group) if t not in labelled]
     return labelled
 
 
-def serial_tokens(source):
+def serial_tokens(source, label=SERIAL_LABEL):
     text = " ".join(source)
     # Numeric-only identifiers need a serial label, otherwise counts/dates could become serials.
     labelled = set()
     for group in re.findall(
-        r"(?:หมายเลข|เลขเครื่อง|serials?|s/n)\s*[:：]?\s*"
-        r"([a-z0-9_-]+(?:[ ,]+[a-z0-9_-]+)*)",
+        rf"{label}\s*[:：]?\s*([a-z0-9_-]+(?:[ ,]+[a-z0-9_-]+)*)",
         text,
     ):
         labelled.update(re.findall(r"[a-z0-9_-]+", group))
@@ -345,6 +395,57 @@ def serial_tokens(source):
         if any(c.isalpha() for c in token) and any(c.isdigit() for c in token)
     }
     return labelled | mixed
+
+
+def _named(text, name, catalog):
+    """Where the requester names other equipment in their own words (the other-equipment
+    group): the text after the name up to the next catalog mention, or nothing."""
+    name = normalise(name or "")
+    at = text.find(name) if len(name) >= 2 else -1
+    if at < 0:
+        return []
+    end = at + len(name)
+    stop = min((start for start, _, _ in mentions(text, catalog) if start >= end), default=None)
+    return [text[end:stop]]
+
+
+def _copied(original, value):
+    """The requester's own characters for a value the model copied (case and Thai digits may
+    differ), or None when it is not in the message."""
+    probe = original.translate(THAI_DIGITS).casefold()
+    at = probe.find(value.translate(THAI_DIGITS).casefold())
+    return original[at : at + len(value)] if at >= 0 and value else None
+
+
+def _ground_size(item, text, original_text):
+    """A typed row's size must be written in the (screened) message; the original spelling is
+    kept. Otherwise it is asked."""
+    if not item.size:
+        return
+    copied = _copied(original_text, item.size)
+    if normalise(item.size) not in text or copied is None or not safe_text(copied):
+        item.size = ""
+        item.rejected.append("size")
+    else:
+        item.size = copied
+
+
+def _ground_sap(proposal, text):
+    """The SAP slip number must stand alone in the (screened) message and not be a number the
+    requester labelled as a meter's or a serial; otherwise the chat asks for it."""
+    number = normalise(proposal.sap_number)
+    if not number:
+        return
+    # "ใบเบิกหมายเลข 4500012345" labels the slip, not a meter.
+    slips = set(
+        re.findall(rf"{SLIP_LABEL}\s*(?:เลขที่|หมายเลข|เลข|no\.?)?\s*[:：]?\s*([a-z0-9-]+)", text)
+    )
+    labelled = set(labelled_serials([text], METER_LABEL)) - slips
+    serials = {normalise(s) for i in proposal.items for s in i.serials}
+    alone = re.search(rf"(?<![a-z0-9-]){re.escape(number)}(?![a-z0-9-])", text)
+    if alone is None or number in labelled | serials:
+        proposal.sap_number = ""
+        proposal.rejected_fields.append("sap_number")
 
 
 def ground(extraction, text, catalog, draft=None, source_context=None):
@@ -365,15 +466,19 @@ def ground(extraction, text, catalog, draft=None, source_context=None):
         dates = moved
     negated = negated_codes(text, catalog)
     for proposal in extraction.requests:
+        _ground_sap(proposal, text)
         retained = []
         for item in proposal.items:
             equipment = by_code.get(item.code)
+            group = getattr(equipment, "entry_group", "") if equipment is not None else ""
             old = (
                 old_items.get(item.code, {})
                 if proposal.intent == (draft or {}).get("intent")
                 else {}
             )
             source = spans.get(item.code, [])
+            if group == "other" and not source:
+                source = _named(text, item.text, catalog)
             if equipment is not None and not source and not old:
                 continue  # A catalog entry is not evidence that the requester asked for it.
             if item.code in negated:
@@ -381,7 +486,7 @@ def ground(extraction, text, catalog, draft=None, source_context=None):
             if equipment is not None and item.quantity is not None:
                 previous = old.get("quantity")
                 correcting = bool(old) and bool(re.match(r"^(?:ขอ)?(?:แก้|เปลี่ยน)|^จากเดิม", text))
-                values = quantities(source, equipment.unit, previous, correcting)
+                values = quantities(source, equipment.unit, previous, correcting, typed=bool(group))
                 unchanged = (
                     previous not in (None, "")
                     and Decimal(str(previous)) == item.quantity
@@ -390,10 +495,18 @@ def ground(extraction, text, catalog, draft=None, source_context=None):
                 if values != {item.quantity} and not unchanged:
                     item.quantity = None
                     item.rejected.append("quantity")
+            if group:
+                _ground_size(item, text, original_text)
             if equipment is not None:
                 original = list(item.serials)
                 inherited = old.get("serials", [])
-                tokens = serial_tokens(source)
+                label = METER_LABEL if group in NUMBERED else SERIAL_LABEL
+                tokens = serial_tokens(source, label)
+                if group:
+                    # A typed row's size or the request's SAP slip number is not a meter number.
+                    tokens = {t for t in tokens if not SIZE_LIKE.fullmatch(t)}
+                    tokens -= set(re.findall(r"[a-z0-9_-]+", normalise(item.size)))
+                    tokens.discard(normalise(proposal.sap_number))
                 item.serials = list(
                     dict.fromkeys(
                         s
@@ -414,13 +527,13 @@ def ground(extraction, text, catalog, draft=None, source_context=None):
                 if tokens and set(item.serials) != set(inherited):
                     if {normalise(s) for s in item.serials} != tokens:
                         item.serials = []
-                written = labelled_serials(source)
+                written = labelled_serials(source, label)
                 count = item.quantity if item.quantity is not None else old.get("quantity")
                 if (
                     not item.serials
                     and not inherited
                     and equipment.is_serialized
-                    and proposal.intent != "withdrawal"
+                    and (proposal.intent != "withdrawal" or group in NUMBERED)
                     and written
                     and count not in (None, "")
                     and len(written) == Decimal(str(count))

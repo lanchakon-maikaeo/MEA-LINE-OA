@@ -55,7 +55,7 @@ class Command(DemoCommand):
             call_command(command, stdout=quiet)
         users = {name: _user(name, roles) for name, roles in STAFF.items()}
         users["sim-reg"] = _user("sim-reg", [(Role.STAFF, "SIM-REG")])
-        if registry.admins_only():  # the demo shows the registry unit at work
+        if not registry.enabled() or registry.admins_only():  # the registry unit at work
             system_options.change(
                 None, system_options.REGISTRY_ACCESS, "staff", "สาธิต: หน่วยทะเบียนจำลองทำงานเอง"
             )

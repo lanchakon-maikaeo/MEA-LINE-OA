@@ -113,7 +113,8 @@ class ChatTests(MenuTestCase):
     def test_a_return_starts_with_the_division_set(self):
         self.open("หม้อแปลง, LBS, RMU")
         reply = self.press(ALICE, "ส่งคืน")
-        self.assertIn("เลือกหมวดของ", texts(reply))
+        self.assertIn("เลือกหมวดอุปกรณ์", texts(reply))
+        self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
         draft = ConversationDraft.objects.get(status="open")
         self.assertEqual((draft.kind, draft.data["division"]), ("return", "กองอุปกรณ์ฯ"))
 
@@ -183,6 +184,19 @@ class StaffMenuTests(MenuTestCase):
         self.assertTrue(all(a["bounds"]["y"] >= line_menu.TAB_H for a in tiles))
         user = line_menu.rich_menu("user")
         self.assertFalse([a for a in user["areas"] if a["action"]["type"] == "richmenuswitch"])
+        self.assertEqual(
+            [a["action"]["displayText"] for a in user["areas"]],
+            [
+                "Meter, CT, VT",
+                "หม้อแปลง LBS RMU",
+                "เครื่องมือและอุปกรณ์",
+                "ระบบ SMG, AMR",
+                "ตรวจสอบการใช้ไฟฟ้า",
+                "ปัญหา/ข้อเสนอแนะ",
+                "เรื่องของฉัน",
+                "ติดตามเลขเรื่อง",
+            ],
+        )
         self.assertEqual(set(line_menu.drawing()["pages"]), set(line_menu.PAGES))
 
     def test_every_page_limits_buttons_and_service_pages_have_personal_tracking(self):
@@ -197,13 +211,23 @@ class StaffMenuTests(MenuTestCase):
                     for a in line_menu.rich_menu(page)["areas"]
                     if a["action"]["type"] == "postback"
                 ]
-                self.assertEqual(len(nav), 3 if page == "user" else 4)
-                if page.endswith("report"):
+                if page == "user" or page.endswith("report"):
+                    self.assertEqual(len(nav), 8)
                     self.assertEqual(
-                        [(a["displayText"], a["data"]) for a in nav],
-                        list(line_menu.SERVICE_BUTTONS),
+                        [a["displayText"] for a in nav],
+                        [
+                            "Meter, CT, VT",
+                            "หม้อแปลง LBS RMU",
+                            "เครื่องมือและอุปกรณ์",
+                            "ระบบ SMG, AMR",
+                            "ตรวจสอบการใช้ไฟฟ้า",
+                            "ปัญหา/ข้อเสนอแนะ",
+                            "เรื่องของฉัน",
+                            "ติดตามเลขเรื่อง",
+                        ],
                     )
-                elif page != "user":
+                else:
+                    self.assertEqual(len(nav), 4)
                     self.assertEqual(nav[-1]["data"], "m=roles")
                 if page.startswith(("staff-", "sup-")):
                     self.assertEqual(drawing[page][0]["label"], "บริการ")
@@ -222,7 +246,7 @@ class StaffMenuTests(MenuTestCase):
                 self.boss, member, Role.SUPERVISOR, Division.objects.get(code="กองอุปกรณ์ฯ"), "หัวหน้า"
             )
         self.assertIn(
-            (f"/v2/bot/user/{line.external_id}/richmenu/menu-of-faoj-sup-work", "POST", None),
+            (f"/v2/bot/user/{line.external_id}/richmenu/menu-of-faoj-sup-report", "POST", None),
             self.calls,
         )
         self.calls.clear()

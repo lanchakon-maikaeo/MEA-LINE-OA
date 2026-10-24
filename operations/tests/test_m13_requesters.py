@@ -2,13 +2,14 @@
 
 The user asked for: suspend or revoke a requester (no data deleted, admins only, nothing pushed),
 read what they typed, and see on the list who each person is, their position from ทะเบียนพนักงาน
-("map จากรายชื่อในอนาคต": tied by a name that matches one employee) and their role in the system
-("user, user และ admin").
+and their role in the system ("user, user และ admin"). 23 Oct 2569: the roster has no names, so
+nobody is tied to it by a name any more; the employee ID ties them.
 
 Acceptance → tests: the list shows proof, position and role, without anonymous reporters, and
-only admins can open a requester (RequesterListTests); a name that matches exactly one employee
-gives the position only; a shared name or another district waits for an admin, who confirms an
-employee, corrects the district or fixes a link (EmployeeMatchTests); an admin suspends,
+only admins can open a requester (RequesterListTests); a typed name never links anyone, an admin
+links by employee ID, corrects the district or removes a link, imports keep it, and the
+migration turns names copied from the roster into the employee label (EmployeeLinkTests); an
+admin suspends,
 opens again or revokes with a reason, nothing is deleted or pushed, and a revoked LINE account
 registers again (SuspendRevokeTests); an admin reads what was typed as this requester, never
 what the same LINE account typed anonymously, and every opening is audited (MessagesTests).
@@ -96,86 +97,36 @@ class RequesterListTests(RequesterTestCase):
         self.assertFalse(AuditEvent.objects.filter(action="requester.messages_viewed").exists())
 
 
-class EmployeeMatchTests(RequesterTestCase):
-    def test_a_name_matching_one_employee_gives_the_position_but_no_role(self):
-        requester = identity.create_requester(
-            self.admin, "นายพนักงานจำลอง   หนึ่ง", "D01", "ไม่ใช้ LINE"
-        )
-        self.assertEqual(
-            (requester.employee.employee_id, requester.employee_link), ("SYN10001", "name")
-        )
+class EmployeeLinkTests(RequesterTestCase):
+    def test_a_typed_name_never_links_and_an_admin_links_by_employee_id(self):
+        requester = identity.create_requester(self.admin, "พนักงานจำลอง หนึ่ง", "D01", "ทดสอบ")
+        self.assertEqual((requester.employee, requester.employee_link), (None, ""))
         boss = make_staff("boss", (Role.ADMIN, None))
         boss.staff_profile.employee_id = "SYN10001"
         boss.staff_profile.save()
         self.assertEqual(identity.requester_roles([requester])[requester.pk], [])
-        detail = self.client.get(page(requester.pk))
-        self.assertContains(detail, "ชื่อตรงทะเบียน SYN10001 (ยังไม่ได้ยืนยัน)")
-        self.assertContains(detail, "พนักงานช่าง")
-        self.assertContains(detail, "รอยืนยัน")
-        self.assertContains(detail, "รับรองพนักงานคนนี้")
-        self.assertContains(self.client.get(LIST), 'data-identity="name"')
+        self.assertContains(self.client.get(LIST), 'data-identity="none"')
 
-        # Case 2: an admin checks the person, then confirms the employee the name matched.
         self.act(requester, "link-employee", employee_id="SYN10001", reason="โทรถามแล้ว")
         requester.refresh_from_db()
         self.assertEqual(requester.employee_link, "admin")
         self.assertEqual(identity.requester_roles([requester])[requester.pk], ["แอดมินระบบ"])
-        event = AuditEvent.objects.get(action="requester.employee_confirmed")
+        event = AuditEvent.objects.get(action="requester.employee_linked")
         self.assertEqual((event.reason, event.data["employee"]), ("โทรถามแล้ว", "SYN10001"))
-        identity.link_requester_employee(self.admin, requester, "SYN10001", "ซ้ำ")
+        detail = self.client.get(page(requester.pk))
+        self.assertContains(detail, "ผูกกับรหัสพนักงาน SYN10001 · พนักงานช่าง")
+        self.assertNotContains(detail, "ชื่อในทะเบียน")
         self.assertContains(self.client.get(LIST), 'data-identity="verified"')
 
-    def test_no_match_for_a_shared_name_or_another_district(self):
-        requester = identity.create_requester(self.admin, "พนักงานจำลอง หนึ่ง", "D01", "ทดสอบ")
-        elsewhere = identity.create_requester(self.admin, "พนักงานจำลอง สาม", "D01", "ทดสอบ")
-        self.assertEqual(requester.employee_link, "name")
-        more = (
-            "employee_id,name,district_code,division_code,position,check\n"
-            "SYN10003,พนักงานจำลอง หนึ่ง,D02,,พนักงานธุรการ,02/02/2530\n"
-            "SYN10004,พนักงานจำลอง สาม,D03,,พนักงานช่าง,03/03/2530\n"
-        )
-        summary = employees.import_csv(None, more, "วันเกิด", synthetic=True)
-        self.assertEqual((summary["matched"], summary["unmatched"], summary["review"]), (0, 1, 2))
-        requester.refresh_from_db()
-        elsewhere.refresh_from_db()
-        self.assertEqual((requester.employee, requester.employee_link), (None, ""))
-        self.assertEqual((elsewhere.employee, elsewhere.employee_link), (None, ""))
-        self.assertTrue(AuditEvent.objects.filter(action="requester.employee_unmatched").exists())
-
-        # Case 1: both wait for an admin, with why, and every employee with the name to choose.
-        listing = self.client.get(LIST)
-        self.assertContains(listing, "ต้องตรวจ 2 ราย")
-        self.assertContains(listing, 'data-identity="review"', count=2)
-        self.assertContains(listing, "ชื่อนี้มี 2 คนในทะเบียน")
-        d03 = District.objects.get(code="D03").name
-        self.assertContains(listing, f"ทะเบียนระบุ{d03}")
-        shared = self.client.get(page(requester.pk))
-        self.assertContains(shared, "SYN10001")
-        self.assertContains(shared, "SYN10003")
-        self.act(elsewhere, "link-employee", employee_id="SYN10004", reason="ย้ายมาจากเขตอื่น")
-        elsewhere.refresh_from_db()
-        self.assertEqual(
-            (elsewhere.employee.employee_id, elsewhere.employee_link), ("SYN10004", "admin")
-        )
-
-    def test_an_admin_corrects_a_wrong_district_and_the_name_is_checked_again(self):
-        more = (
-            "employee_id,name,district_code,division_code,position,check\n"
-            "SYN10004,พนักงานจำลอง สาม,D03,,พนักงานช่าง,03/03/2530\n"
-        )
-        employees.import_csv(None, more, "วันเกิด", synthetic=True)
+    def test_an_admin_corrects_a_wrong_district(self):
         requester = identity.create_requester(self.admin, "พนักงานจำลอง สาม", "D01", "ทดสอบ")
-        self.assertIsNone(requester.employee)
         with self.assertRaises(ValidationError):
             identity.set_requester_district(self.admin, requester, "D01", "เขตเดิม")
         with self.assertRaises(PermissionDenied):
             identity.set_requester_district(self.meter, requester, "D03", "ไม่ใช่แอดมิน")
         self.act(requester, "district", district="D03", reason="")
         requester.refresh_from_db()
-        self.assertEqual(requester.district.code, "D03")
-        self.assertEqual(
-            (requester.employee.employee_id, requester.employee_link), ("SYN10004", "name")
-        )
+        self.assertEqual((requester.district.code, requester.employee), ("D03", None))
         event = AuditEvent.objects.get(action="requester.district_changed")
         self.assertEqual((event.data["previous"], event.data["district"]), ("D01", "D03"))
         self.assertContains(
@@ -194,6 +145,7 @@ class EmployeeMatchTests(RequesterTestCase):
         requester = identity.create_requester(self.admin, "พนักงานจำลอง หนึ่ง", "D01", "ทดสอบ")
         with self.assertRaises(ValidationError):
             identity.link_requester_employee(self.admin, requester, "NOPE", "ผิดรหัส")
+        self.act(requester, "link-employee", employee_id="SYN10001", reason="ตรวจแล้ว")
         self.act(requester, "unlink-employee", reason="คนละคน")
         requester.refresh_from_db()
         self.assertEqual((requester.employee, requester.employee_link), (None, "unlinked"))
@@ -209,6 +161,55 @@ class EmployeeMatchTests(RequesterTestCase):
         history = self.client.get(page(requester.pk))
         self.assertContains(history, "แอดมินยกเลิกการผูกทะเบียนพนักงาน")
         self.assertContains(history, "คนละคน")
+
+    def test_the_migration_turns_names_copied_from_the_roster_into_the_label(self):
+        from operations.models import RegistrationRequest, StaffProfile
+
+        convert = import_module("operations.migrations.0056_roster_without_names").convert
+        employee = Employee.objects.get(employee_id="SYN10001")
+        copied = identity.create_requester(self.admin, "นายสมชาย  ใจดี", "D01", "ทดสอบ")
+        typed = identity.create_requester(self.admin, "สมชาย ใจดี", "D01", "ทดสอบ")
+        by_name = identity.create_requester(self.admin, "สมชาย ใจดี", "D02", "ทดสอบ")
+        Requester.objects.filter(pk=copied.pk).update(employee=employee, employee_link="verified")
+        Requester.objects.filter(pk=typed.pk).update(employee=employee, employee_link="admin")
+        Requester.objects.filter(pk=by_name.pk).update(employee=employee, employee_link="name")
+        line = ChannelIdentity.objects.create(channel="line", external_id="U" + "e" * 32)
+        registration = RegistrationRequest.objects.create(
+            identity=line,
+            submitted_name="นายสมชาย ใจดี",
+            requested_district=District.objects.get(code="D01"),
+            employee=employee,
+            verified_by="otp",
+        )
+        staff = make_staff(f"line-employee-{employee.pk}")
+        StaffProfile.objects.filter(user=staff).update(
+            display_name="นายสมชาย ใจดี", employee_id="SYN10001"
+        )
+        internal = Requester.objects.create(
+            display_name="นายสมชาย ใจดี (กคว.)",
+            district=District.objects.get(code="D01"),
+            approved_by=self.admin,
+            is_internal=True,
+        )
+
+        convert(
+            Requester,
+            RegistrationRequest,
+            StaffProfile,
+            {employee.pk: ("SYN10001", "นายสมชาย ใจดี")},
+        )
+
+        def name_of(row):
+            row.refresh_from_db()
+            return getattr(row, "display_name", None) or row.submitted_name
+
+        self.assertEqual(name_of(copied), "พนักงาน SYN10001")
+        self.assertEqual(name_of(typed), "สมชาย ใจดี")  # an admin link keeps the typed name
+        by_name.refresh_from_db()
+        self.assertEqual((by_name.employee, by_name.employee_link), (None, ""))
+        self.assertEqual(name_of(registration), "พนักงาน SYN10001")
+        self.assertEqual(StaffProfile.objects.get(user=staff).display_name, "พนักงาน SYN10001")
+        self.assertEqual(name_of(internal), "พนักงาน SYN10001 (กคว.)")
 
 
 class LineAudienceTests(RequesterTestCase):

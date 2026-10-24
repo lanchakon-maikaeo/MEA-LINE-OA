@@ -11,7 +11,7 @@
 <p>คัดกรองเรื่อง: {% if active_triage %}<strong>v{{ active_triage.number }}</strong> · {% for e in active_triage.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_triage.activated_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เปิดใช้ (ข้อเสนอใช้กติกาและธงจากคำเท่านั้น){% endif %}</p>
 <p>สกัดร่างจากแชต:</p>
 {% if active %}
-<p><strong>v{{ active.number }}</strong> · {{ active.get_pipeline_display }} · {% for e in active.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %}{% if active.few_shot %} · ตัวอย่างที่ค้นมา {{ active.few_shot }}{% endif %} · เปิดใช้ {{ active.activated_at|date:"Y-m-d H:i" }}</p>
+<p><strong>v{{ active.number }}</strong> · {{ active.get_pipeline_display }} · {% for e in active.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %}{% if active.few_shot %} · ตัวอย่างที่ค้นมา {{ active.few_shot }}{% endif %}{% if active.typed_fields %} · อ่านเลข SAP และช่องที่พิมพ์{% endif %} · เปิดใช้ {{ active.activated_at|date:"Y-m-d H:i" }}</p>
 {% else %}
 <p>ยังไม่มีรุ่นที่เปิดใช้ แชตจะถามทีละช่องโดยไม่ใช้ AI</p>
 {% endif %}
@@ -19,7 +19,7 @@
   <fieldset><legend>เปลี่ยนรุ่นที่ใช้งาน</legend>{% csrf_token %}
   {% if switchable %}
     <p><label>เปลี่ยนไปใช้
-      <select name="version" required>{% for v in switchable %}<option value="{{ v.pk }}">v{{ v.number }} · {{ v.get_task_display }} · {{ v.get_pipeline_display }} · {% for e in v.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %}{% if v.few_shot %} · ตัวอย่าง {{ v.few_shot }}{% endif %}</option>{% endfor %}</select>
+      <select name="version" required>{% for v in switchable %}<option value="{{ v.pk }}">v{{ v.number }} · {{ v.get_task_display }} · {{ v.get_pipeline_display }} · {% for e in v.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %}{% if v.few_shot %} · ตัวอย่าง {{ v.few_shot }}{% endif %}{% if v.typed_fields %} · เลข SAP{% endif %}</option>{% endfor %}</select>
     </label></p>
     <p><label>เหตุผล <input name="reason"></label> <button type="submit">เปลี่ยน</button></p>
     <p>มีผลกับข้อความใหม่ทันที ข้อความที่กำลังเรียก AI อยู่ใช้รุ่นเดิมจนจบ เปลี่ยนกลับได้จากเมนูนี้</p>
@@ -46,7 +46,8 @@
   <fieldset><legend>{{ p.label }}</legend>{% csrf_token %}<input type="hidden" name="preset" value="{{ p.key }}">
   <p>Model ID <code>{{ p.model_id }}</code> · {{ p.base_url }} · {{ p.limits }} · <a href="{{ p.docs_url }}" rel="noopener noreferrer" target="_blank">เอกสาร</a></p>
   {% if p.credential_ready %}
-    <p>สร้างรุ่นใหม่: โมเดลนี้เป็นโมเดลหลัก ตามด้วยลำดับโมเดลของรุ่นที่ใช้อยู่เป็นสำรอง และใช้จำนวนตัวอย่างเท่ารุ่นที่ใช้อยู่ จากนั้นกดทดสอบ → ประเมิน → เปลี่ยน</p>
+    <p>สร้างรุ่นใหม่ของงานที่เลือก: โมเดลนี้เป็นโมเดลหลัก ตามด้วยลำดับโมเดลของรุ่นที่ใช้อยู่ของงานนั้นเป็นสำรอง งานสกัดร่างใช้จำนวนตัวอย่างเท่ารุ่นที่ใช้อยู่ จากนั้นกดทดสอบ → ประเมิน → เปลี่ยน</p>
+    {% if p.profile %}<p>ค่าโปรไฟล์: temperature {{ p.profile.temperature }} · max tokens {{ p.profile.max_tokens }} · timeout {{ p.profile.timeout_seconds }} วินาที</p>{% endif %}
     {{ preset_form.as_p }}
     <button type="submit">สร้างรุ่นใช้โมเดลนี้</button>
   {% else %}
@@ -65,7 +66,7 @@
     <tr id="v{{ v.number }}">
       <td>v{{ v.number }}</td>
       <td>{{ v.get_status_display }}{% if v.activated_at %}<br>{{ v.activated_at|date:"Y-m-d H:i" }}{% endif %}{% if v.status == "candidate" or v.status == "retired" %}<br>{% if v.blocker %}ยังเปลี่ยนไปใช้ไม่ได้{% else %}พร้อมเปลี่ยนไปใช้{% endif %}{% endif %}</td>
-      <td><strong>{{ v.get_task_display }}</strong><br>{% if v.task == "extract" %}{{ v.get_pipeline_display }}{% else %}คัดกรองข้อความ + ข้อเท็จจริงพร้อมคำอ้าง{% endif %}<br>{% for e in v.entries.all %}{% if forloop.first %}<strong>{{ e.profile.model_id }}</strong>{% else %} → {{ e.profile.model_id }}{% endif %}{% endfor %}{% if v.few_shot %}<br>ตัวอย่างที่ค้นมาใส่ prompt: {{ v.few_shot }}{% endif %}{% if v.screen_profile %}<br>คัดกรองข้อความด้วย: {{ v.screen_profile.model_id }}{% endif %}</td>
+      <td><strong>{{ v.get_task_display }}</strong><br>{% if v.task == "extract" %}{{ v.get_pipeline_display }}{% else %}คัดกรองข้อความ + ข้อเท็จจริงพร้อมคำอ้าง{% endif %}<br>{% for e in v.entries.all %}{% if forloop.first %}<strong>{{ e.profile.model_id }}</strong>{% else %} → {{ e.profile.model_id }}{% endif %}{% endfor %}{% if v.few_shot %}<br>ตัวอย่างที่ค้นมาใส่ prompt: {{ v.few_shot }}{% endif %}{% if v.screen_profile %}<br>คัดกรองข้อความด้วย: {{ v.screen_profile.model_id }}{% endif %}{% if v.typed_fields %}<br>อ่านเลขใบเบิก/ใบส่งคืน SAP และช่องที่พิมพ์ของมิเตอร์ CT VT{% endif %}</td>
       <td>{% if v.test_passed is None %}ยังไม่ทดสอบ{% else %}{{ v.test_passed|yesno:"ผ่าน,ไม่ผ่าน" }}{% for p in v.test_result.profiles %}<br>{{ p.model }}: {{ p.ok|yesno:"ok,fail" }} {{ p.latency_ms }} ms{% endfor %}{% endif %}</td>
       <td>{% if v.last_job and v.last_job.status == "queued" or v.last_job.status == "running" %}{{ v.last_job.get_status_display }} (ขอเมื่อ {{ v.last_job.created_at|date:"H:i" }}){% elif v.eval_passed is None %}ยังไม่ประเมิน{% else %}{{ v.eval_passed|yesno:"ผ่าน,ไม่ผ่าน" }}{% if v.eval_passed and v.eval_result.gate != gate %}<br>ประเมินก่อนเกณฑ์ปัจจุบัน ต้องประเมินใหม่{% endif %}{% if v.eval_result.security %}<br>Security tests: {{ v.eval_result.security.tests }} ({{ v.eval_result.security.passed|yesno:"ผ่าน,ไม่ผ่าน" }}){% endif %}{% for r in v.eval_result.runs %}<br>รอบ {{ forloop.counter }}: {{ r.passed|yesno:"ผ่าน,ไม่ผ่าน" }} (พลาดอันตราย {{ r.metrics.hazard_missed }}, ธงเกิน {{ r.metrics.hazard_over_rate }}, อุปกรณ์ {{ r.metrics.equipment_accuracy }}, ผลกระทบ {{ r.metrics.severe_impact_accuracy }}, ทะเบียน {{ r.metrics.registry_only_accuracy }}, red-team {{ r.metrics.redteam_violations }}, p95 {{ r.metrics.latency_p95_ms }} ms){% endfor %}{% for p in v.eval_result.profiles %}<br>{% if p.dataset %}[{{ p.dataset }}] {% endif %}{% if p.role == "application" %}ร่างที่ผู้แจ้งตรวจ{% elif p.role == "system" %}สายโมเดล{% else %}{{ p.model }}{% endif %}: {{ p.passed|yesno:"ผ่าน,ไม่ผ่าน" }} (intent {{ p.metrics.intent_accuracy }}, items {{ p.metrics.items_exact }}, ร่างไม่ปนเปื้อน {{ p.metrics.injection_resisted }}, p95 {{ p.metrics.latency_p95_ms }} ms){% endfor %}{% endif %}{% if v.last_job.status == "failed" %}<br>การประเมินล่าสุดล้มเหลว: {{ v.last_job.error }}{% endif %}</td>
       <td>

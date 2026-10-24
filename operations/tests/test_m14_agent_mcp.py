@@ -14,7 +14,7 @@ from operations.tests.test_m03_line import ALICE, BOB, buttons, texts
 from operations.tests.test_m05_ai import AITestCase
 
 
-class MCPTests(AITestCase):
+class AgentTestCase(AITestCase):
     def setUp(self):
         super().setUp()
         setting = override_settings(AI_MCP_ENABLED=True)
@@ -27,6 +27,8 @@ class MCPTests(AITestCase):
     def tools(self):
         return agent_mcp.Tools(self.line.pk)
 
+
+class MCPTests(AgentTestCase):
     def agent_reply(self, message, selected):
         self.llm.default = {
             "choices": [{"message": {"content": json.dumps(selected, ensure_ascii=False)}}]
@@ -127,10 +129,10 @@ class MCPTests(AITestCase):
         written = "พบรายการมิเตอร์ตามข้อมูลในระบบ สามารถเลือกรายการที่ต้องการได้"
 
         def respond(body):
-            payload = json.loads(body["messages"][1]["content"])
+            payload = json.loads(body["messages"][-1]["content"])
             selected = (
                 {"reply": written}
-                if "result" in payload
+                if "tool_result" in payload
                 else {"tool": "list_equipment", "arguments": {"search": "มิเตอร์"}}
             )
             return {"choices": [{"message": {"content": json.dumps(selected, ensure_ascii=False)}}]}
@@ -406,3 +408,162 @@ class MCPTests(AITestCase):
         self.assertIn("ขั้นตอนเปลี่ยน", texts(self.say(self.postback(ALICE, buttons(reply)["ยืนยัน"]))))
         run.refresh_from_db()
         self.assertNotIn("agent_decision", run.result)
+
+
+def step(**decision):
+    """One agent step in the JSON-schema shape: every field present, unused ones null."""
+    full = {"action": "tool", "reply": None, "tool": None, "arguments": {}, **decision}
+    return {"choices": [{"message": {"content": json.dumps(full, ensure_ascii=False)}}]}
+
+
+class AgentLoopTests(AgentTestCase):
+    """The agent as an LLM with tools in a loop (the course notebook's run_agent), kept to
+    read tools, a few steps and the person's confirmation for every change."""
+
+    def plan(self, message):
+        self.type(ALICE, message)
+        run = AIRun.objects.latest("pk")
+        self.llm.calls.clear()
+        trace = []
+        result, attempts = agent_chat.plan(run, message, 20, trace.append)
+        return result, attempts, trace
+
+    def test_tools_are_offered_as_functions_and_steps_use_the_json_schema(self):
+        tools = agent_mcp.function_tools(exclude={"get_context"})
+        self.assertEqual(
+            {t["function"]["name"] for t in tools},
+            {t.name for t in agent_mcp.TOOLS} - {"get_context"},
+        )
+        self.assertTrue(all(t["type"] == "function" for t in tools))
+        self.llm.default = step(action="intake")
+        result, attempts, _ = self.plan("ขอเบิกฟิวส์ 2 ตัว")
+        self.assertIsNone(result)
+        self.assertEqual(attempts[-1]["outcome"], "mcp: intake flow")
+        body = self.llm.calls[0]["body"]
+        schema = body["response_format"]["json_schema"]["schema"]
+        self.assertEqual(body["response_format"]["json_schema"]["name"], "line_agent")
+        self.assertEqual(schema["properties"]["action"]["enum"], ["reply", "tool", "intake"])
+        self.assertIn("list_cases", schema["properties"]["tool"]["enum"])
+        self.assertEqual(
+            set(schema["properties"]["arguments"]["required"]),
+            {"page", "scope", "kind", "state", "number", "view", "search", "command"},
+        )
+        self.assertEqual(body["temperature"], float(self.profiles[0].temperature))
+        self.assertIn('"type": "function"', body["messages"][0]["content"])
+
+    def test_lookup_with_filters_then_reply_is_two_steps_and_read_only(self):
+        mine = services.submit_case(
+            Actor.for_requester(self.requester),
+            idempotency_key="loop-closed-1",
+            payload=withdrawal(),
+        )
+        Case.objects.filter(pk=mine.case_id).update(status=Case.Status.CLOSED)
+        number = Case.objects.get(pk=mine.case_id).number
+        self.llm.by_model[self.models[0]] = [
+            step(
+                tool="list_cases", arguments={"state": "closed", "kind": "withdrawal", "page": None}
+            ),
+            step(action="reply", reply=f"เรื่องเบิกที่จบแล้วมี 1 เรื่อง คือ {number}"),
+        ]
+        result, attempts, trace = self.plan("เรื่องเบิกที่จบแล้วของฉันมีอะไรบ้าง")
+        self.assertEqual(result["kind"], "cases")
+        self.assertEqual([row["number"] for row in result["rows"]], [number])
+        self.assertEqual(result["reply"], f"เรื่องเบิกที่จบแล้วมี 1 เรื่อง คือ {number}")
+        self.assertEqual([a["outcome"] for a in attempts], ["mcp: read", "agent: reply"])
+        self.assertEqual([t["action"] for t in trace], ["tool", "reply"])
+        # The second step sees the tool result as data, without internal IDs.
+        seen = json.loads(self.llm.calls[1]["body"]["messages"][-1]["content"])["tool_result"]
+        self.assertEqual(seen["tool"], "list_cases")
+        self.assertNotIn(str(mine.case_id), json.dumps(seen))
+        self.assertEqual(seen["result"]["rows"][0]["number"], number)
+
+    def test_refused_tool_goes_back_to_the_model_which_explains(self):
+        self.llm.by_model[self.models[0]] = [
+            step(tool="list_cases", arguments={"scope": "staff"}),
+            step(action="reply", reply="บัญชีนี้ดูได้เฉพาะเรื่องที่ท่านแจ้งเอง"),
+        ]
+        result, attempts, _ = self.plan("ขอดูงานของกองทั้งหมด")
+        self.assertEqual(result, {"kind": "reply", "text": "บัญชีนี้ดูได้เฉพาะเรื่องที่ท่านแจ้งเอง"})
+        self.assertEqual(attempts[0]["outcome"], "mcp: refused")
+        seen = json.loads(self.llm.calls[1]["body"]["messages"][-1]["content"])["tool_result"]
+        self.assertIn("error", seen["result"])
+
+    def test_loop_stops_at_the_step_limit_and_shows_server_rows(self):
+        self.llm.by_model[self.models[0]] = [
+            step(tool="list_equipment", arguments={"search": "ฟิวส์"}),
+            step(tool="list_equipment", arguments={"search": "มิเตอร์"}),
+            step(tool="list_equipment", arguments={"search": "สายไฟ"}),
+            step(tool="list_equipment", arguments={"search": "เบรกเกอร์"}),
+        ]
+        result, attempts, _ = self.plan("มีอุปกรณ์อะไรบ้าง")
+        self.assertEqual(len(self.llm.calls), agent_chat.MAX_STEPS)
+        self.assertEqual(result["kind"], "equipment")
+        self.assertNotIn("reply", result)
+        self.assertEqual(attempts[-1]["outcome"], "mcp: prepared")
+
+    def test_repeated_tool_call_ends_the_loop(self):
+        self.llm.default = step(tool="list_equipment", arguments={"search": "ฟิวส์"})
+        result, attempts, _ = self.plan("ค้นฟิวส์")
+        self.assertEqual(len(self.llm.calls), 2)
+        self.assertEqual(result["kind"], "equipment")
+        self.assertIn("agent: repeated tool call", [a["outcome"] for a in attempts])
+
+    def test_invalid_step_answer_falls_back_to_the_next_model(self):
+        self.llm.by_model[self.models[0]] = step(action="reply", reply="อนุมัติแล้ว")
+        self.llm.by_model[self.models[1]] = step(action="reply", reply="เลือกบริการที่ต้องการจากเมนู")
+        result, attempts, _ = self.plan("ต้องทำอย่างไรต่อ")
+        self.assertEqual(result["text"], "เลือกบริการที่ต้องการจากเมนู")
+        self.assertEqual(
+            [a["outcome"] for a in attempts], ["agent: unavailable or invalid", "agent: reply"]
+        )
+
+    def test_prepare_action_still_ends_the_turn_with_a_confirmation(self):
+        self.llm.default = step(tool="prepare_action", arguments={"command": "ยืนยันส่งเรื่อง"})
+        self.line.staff_user = make_staff("loop-employee", (Role.STAFF, "SIM-MTR"))
+        self.line.save(update_fields=["staff_user"])
+        with override_settings(AI_ENABLED=False):
+            self.withdraw(ALICE)
+        result, attempts, _ = self.plan("ช่วยส่งเรื่องนี้ให้หน่อย")
+        self.assertEqual(result, {"kind": "proposal", "command": "ยืนยันส่งเรื่อง"})
+        self.assertEqual(len(self.llm.calls), 1)
+        self.assertFalse(Case.objects.exists())
+
+    def test_case_filters_scope_and_paging_keep_them(self):
+        for i, kind in enumerate(("withdrawal", "withdrawal", "problem")):
+            submitted = services.submit_case(
+                Actor.for_requester(self.requester),
+                idempotency_key=f"loop-filter-{i}",
+                payload=withdrawal(),
+            )
+            Case.objects.filter(pk=submitted.case_id).update(kind=kind)
+        tools = self.tools()
+        self.assertEqual(tools.invoke("list_cases", {"kind": "problem"})["total"], 1)
+        self.assertEqual(tools.invoke("list_cases", {"state": "closed"})["total"], 0)
+        self.assertEqual(tools.invoke("list_cases", {"state": "all"})["total"], 3)
+        with self.assertRaises(PermissionDenied):
+            tools.invoke("list_cases", {"state": "deleted"})
+        result = tools.invoke("list_cases", {"kind": "withdrawal", "state": "all"})
+        self.assertEqual((result["state"], result["case_kind"]), ("all", "withdrawal"))
+
+    def test_walkthrough_prints_each_step_and_keeps_nothing(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from operations.models import Requester
+
+        self.llm.by_model[self.models[0]] = [
+            step(tool="list_equipment", arguments={"search": "มิเตอร์"}),
+            step(action="reply", reply="พบมิเตอร์ตามข้อมูลในระบบ"),
+        ]
+        before = (Requester.objects.count(), AIRun.objects.count(), Case.objects.count())
+        out = StringIO()
+        call_command("agent_walkthrough", "--message", "ช่วยค้นรายการมิเตอร์", stdout=out)
+        printed = out.getvalue()
+        self.assertIn("[step 0] → list_equipment(search='มิเตอร์')", printed)
+        self.assertIn("[step 1] → reply", printed)
+        self.assertIn("ตอบ: พบมิเตอร์ตามข้อมูลในระบบ", printed)
+        self.assertIn("Rolled back", printed)
+        self.assertEqual(
+            (Requester.objects.count(), AIRun.objects.count(), Case.objects.count()), before
+        )

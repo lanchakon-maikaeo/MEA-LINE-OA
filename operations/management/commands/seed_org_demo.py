@@ -16,7 +16,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from operations import answers, employees, identity, options, policy, services
-from operations.contracts import Actor
+from operations.contracts import Actor, CommandFailed, ErrorCode
 from operations.management.commands import load_org
 from operations.management.demo import DemoCommand
 from operations.models import Division, PolicyVersion, Requester, StaffProfile
@@ -53,6 +53,7 @@ EARLIER = (
     "bt-staff",
     "faoj-exec",
 )
+# Withdrawals to divisions that follow SAP slips carry an invented SAP number (23 Oct 2569).
 CASES = [
     (
         "org-demo-1",
@@ -60,6 +61,7 @@ CASES = [
         {
             "kind": "withdrawal",
             "purpose": "เปลี่ยนมิเตอร์ชำรุด (จำลอง)",
+            "sap_number": "4500900001",
             "lines": [{"item_code": "MTR_SYN_A", "quantity": "2"}],
         },
     ),
@@ -69,6 +71,7 @@ CASES = [
         {
             "kind": "withdrawal",
             "purpose": "งานขยายเขต (จำลอง) ขอมิเตอร์และหม้อแปลง",
+            "sap_number": "4500900002",
             "lines": [
                 {"item_code": "MTR_SYN_A", "quantity": "1"},
                 {"item_code": "TRF_SYN_A", "quantity": "1"},
@@ -201,9 +204,15 @@ class Command(DemoCommand):
             requester = Requester.objects.filter(display_name=f"ผู้แจ้งจำลอง {district}").first()
             if requester is None:
                 continue
-            services.submit_case(
-                Actor.for_requester(requester), idempotency_key=key, payload=payload
-            )
+            try:
+                services.submit_case(
+                    Actor.for_requester(requester), idempotency_key=key, payload=payload
+                )
+            except CommandFailed as error:
+                # An earlier seed filed this example before its payload changed; keep that one.
+                if error.code != ErrorCode.IDEMPOTENCY_CONFLICT:
+                    raise
+                continue
             made += 1
         self.stdout.write(
             f"Policy {version.code} active; central intake ended; {closed} SIM-* units closed; "

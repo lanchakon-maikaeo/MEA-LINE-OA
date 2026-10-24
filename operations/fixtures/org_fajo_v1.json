@@ -8,6 +8,7 @@
   "divisions": [
     {
       "code": "กคอ.",
+      "requires_sap": true,
       "name": "กองเครื่องมือเครื่องใช้และอุปกรณ์",
       "sections": [
         {
@@ -23,6 +24,7 @@
     },
     {
       "code": "กองอุปกรณ์ฯ",
+      "requires_sap": true,
       "provisional": true,
       "name": "กองอุปกรณ์การจำหน่าย",
       "sections": [
@@ -53,7 +55,8 @@
         {
           "name": "แผนกทดสอบเครื่องวัด"
         }
-      ]
+      ],
+      "requires_sap": true
     },
     {
       "code": "กตฟ.",

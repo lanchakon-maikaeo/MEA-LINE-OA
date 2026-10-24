@@ -24,12 +24,20 @@ from django.db.models import Max
 from django.test.utils import override_settings
 from django.utils import timezone
 
-from operations import ai, ai_chat, conversation, line, line_api, orchestration, services
+from operations import (
+    ai,
+    ai_chat,
+    conversation,
+    line,
+    line_api,
+    line_menu_catalog,
+    orchestration,
+    services,
+)
 from operations import identity as identity_services
 from operations.contracts import Actor, CommandFailed
 from operations.management.commands.demo_withdrawal import _grant, _user
 from operations.management.commands.run_worker import handle_event
-from operations.management.commands.setup_line_rich_menu import AREAS, IMAGE
 from operations.models import (
     AIRun,
     AuthorityGrant,
@@ -38,6 +46,7 @@ from operations.models import (
     ChannelIdentity,
     EquipmentType,
     FakeSerial,
+    LineMenuItem,
     NotificationDelivery,
     OutboxEvent,
     Role,
@@ -50,7 +59,10 @@ OA_NAME = "ฝอจ. รับเรื่อง"
 REQUESTER = "สมใจ ทดสอบ"
 DISTRICT = "D02"
 TEMPLATE = Path(__file__).resolve().parent / "line_assets" / "mockup.html"
-MENU = {label: data for data, label in AREAS}
+# The role menus replaced the single rich menu (f0cdae1): its words still open the same chat
+# steps, and the mockup shows the user menu's picture.
+MENU = dict(conversation.MENU)
+IMAGE = Path(__file__).resolve().parent / "line_assets" / "user.jpg"
 LINE = ChannelIdentity.Channel.LINE
 STAFF = {
     "sim-intake": [(Role.STAFF, "SIM-TRIAGE")],
@@ -235,8 +247,9 @@ class Recorder:
         user = {"type": "tap", "label": label, "where": where, "display": display}
         self._step(say, user, replies, loading=loading, note=note)
 
-    def menu(self, label, say, note=None):
-        event = self._event("postback", postback={"data": MENU[label]})
+    def menu(self, label, say, note=None, data=None):
+        """A rich menu tap: the fixed areas by label, or `data` for a tile of the menu catalog."""
+        event = self._event("postback", postback={"data": data or MENU[label]})
         replies, loading = self._send(event)
         user = {"type": "tap", "label": label, "where": "menu", "display": label}
         self._step(say, user, replies, loading=loading, note=note)
@@ -367,7 +380,7 @@ def register(r, w):
 def withdrawal(r, w):
     meter = EquipmentType.objects.get(code="MTR_SYN_A")
     r.menu("ส่งเรื่องใหม่", "กดเมนู 'ส่งเรื่องใหม่' ระบบถามประเภทเรื่อง ตอบด้วยปุ่มได้ทุกข้อ")
-    r.tap("เบิก", "เลือก 'เบิก' แล้วเลือกหมวดของ")
+    r.tap("เบิก", "เลือก 'เบิก' แล้วเลือกหมวดอุปกรณ์")
     r.tap("มิเตอร์", "ระบบแสดงรายการของในหมวดมิเตอร์")
     r.tap(meter.name, "เลือกรุ่นแล้ว ระบบถามจำนวน")
     r.type("3", "พิมพ์จำนวนเป็นตัวเลข จะมีหน่วยต่อท้ายหรือใช้เลขไทยก็ได้")
@@ -449,6 +462,40 @@ def withdrawal(r, w):
     r.tap(case.number, "รายละเอียดแสดงจำนวนขอ อนุมัติ จ่าย รับ แยกกัน พร้อมเหตุผลที่ไม่อนุมัติ")
 
 
+def kcw(r, w):
+    """ปุ่ม Meter, CT, VT (23 Oct 2569): the equipment first, the SAP slip number, typed rows."""
+    line_menu_catalog.sync()  # the tiles as the release sets them up (rolled back afterwards)
+    # Withdrawals need a verified employee; the mockup registers without the roster.
+    w.requester.is_external = False
+    w.requester.save(update_fields=["is_external"])
+    tile = LineMenuItem.objects.get(place="tile", label="Meter, CT, VT")
+    r.menu(
+        "Meter, CT, VT",
+        "กดปุ่ม Meter, CT, VT บน Rich Menu ระบบแสดงการ์ดให้เลือกอุปกรณ์ก่อน",
+        data=f"m=item&id={tile.pk}",
+    )
+    r.tap("มิเตอร์", "เลือกมิเตอร์ แล้วเลือกสิ่งที่ต้องการในการ์ดที่ 2")
+    r.tap("ติดตามใบเบิก", "เลือกติดตามใบเบิก ระบบขอเลขใบเบิก SAP ก่อนทุกอย่าง")
+    r.type(
+        "4500012345",
+        "พิมพ์เลขใบเบิกที่ทำไว้ใน SAP ระบบไม่รับเลขที่อยู่ในเรื่องที่ยังไม่จบ",
+    )
+    r.type(
+        "12345678 12345679 / 5(100)A / 2",
+        "พิมพ์หมายเลขเครื่องวัด ขนาด และจำนวนในบรรทัดเดียวคั่นด้วย / (หรือพิมพ์ทีละช่องก็ได้)",
+    )
+    r.tap("เพิ่มรายการ", "ใบเบิกเดียวกันมี CT ด้วย กดเพิ่มรายการแล้วเลือกอุปกรณ์")
+    r.tap("CT", "เลือก CT ระบบถามขนาดและจำนวน")
+    r.type("100/5A / 3", "ขนาด 100/5A มี / อยู่ในตัว ระบบยังแยกขนาดกับจำนวนได้")
+    r.tap("ไปต่อ", "ไม่เพิ่มรายการแล้ว ระบบถามวัตถุประสงค์")
+    r.type(
+        "ติดตั้งมิเตอร์ผู้ใช้ไฟรายใหม่ 2 ราย และชุดวัด CT อาคารตัวอย่าง",
+        "พิมพ์วัตถุประสงค์ ระบบถามวันที่ต้องการใช้ (ข้ามได้)",
+    )
+    r.tap("ข้าม", "สรุปแสดงเลขใบเบิก SAP และรายการที่พิมพ์ทั้งสองบรรทัดให้ตรวจก่อนยืนยัน")
+    r.tap("ยืนยันส่งเรื่อง", "ยืนยันแล้วได้เลขเรื่อง เรื่องส่งถึง กคว. พร้อมเลขใบเบิก SAP")
+
+
 # A meter out at the district that no other case holds (the demo database keeps other returns).
 RETURNED = "MTR_SYN_021"
 TYPED = "ขอเบิกฟิวส์ 20 ชิ้น กับสายไฟ 50 เมตร ใช้ซ่อมตู้จ่ายไฟชุมชนริมคลองที่ชำรุด"
@@ -511,7 +558,7 @@ def return_case(r, w):
     meter = EquipmentType.objects.get(code="MTR_SYN_A")
     r.menu("ส่งเรื่องใหม่", "เริ่มเรื่องใหม่จากเมนู")
     r.tap("ส่งคืน", "เลือก 'ส่งคืน'")
-    r.tap("มิเตอร์", "เลือกหมวดของที่จะคืน")
+    r.tap("มิเตอร์", "เลือกหมวดอุปกรณ์ที่จะคืน")
     r.tap(meter.name, "เลือกรุ่น")
     r.type("1", "พิมพ์จำนวน ของที่มีเลขเครื่องต้องบอกเลขทุกเครื่อง")
     r.type(RETURNED, "พิมพ์เลขเครื่อง (หลายเครื่องคั่นด้วยเว้นวรรค)")
@@ -662,6 +709,12 @@ SCENARIOS = [
         withdrawal,
     ),
     Scenario(
+        "kcw",
+        "Meter, CT, VT ติดตามใบเบิก",
+        "เลือกอุปกรณ์ก่อน พิมพ์เลขใบเบิก SAP แล้วพิมพ์ช่องของมิเตอร์และ CT",
+        kcw,
+    ),
+    Scenario(
         "typed",
         "พิมพ์แจ้งเรื่องเอง",
         "พิมพ์ประโยคเดียว ระบบเติมร่างให้ เจ้าหน้าที่ขอข้อมูลเพิ่ม",
@@ -745,6 +798,6 @@ def render(data):
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     return (
         TEMPLATE.read_text()
-        .replace("__RICH_MENU__", f"data:image/png;base64,{menu}")
+        .replace("__RICH_MENU__", f"data:image/jpeg;base64,{menu}")
         .replace("__MOCKUP_DATA__", payload)
     )

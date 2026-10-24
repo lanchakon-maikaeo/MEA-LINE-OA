@@ -388,10 +388,13 @@ class EvidenceTests(RegistryTestCase):
             payload=payload,
         )
 
-    def test_a_manual_fact_needs_evidence_this_person_attached_to_this_case(self):
+    def test_evidence_is_optional_but_must_be_this_persons_file_on_this_case(self):
+        # 23 Oct 2569: the SAP document number is what staff must give; a file may go with it.
         case = self.approved(2, fuse(2), "SIM-EQP")
         other_case = self.approved(2, fuse(2), "SIM-EQP")
-        self.assertFails(ErrorCode.VALIDATION_ERROR, self.raw_issue, case, [])
+        without = self.approved(2, fuse(2), "SIM-EQP")
+        self.raw_issue(without, [])
+        self.assertFalse(RegistryRecord.objects.get(case=without).evidence.exists())
         someone_else = evidence_file(self.eqp, case)
         self.assertFails(ErrorCode.VALIDATION_ERROR, self.raw_issue, case, [str(someone_else.pk)])
         elsewhere = evidence_file(self.eqp_issuer, other_case)
@@ -458,7 +461,7 @@ class EvidenceTests(RegistryTestCase):
         client.force_login(self.eqp_issuer)
         url = f"/cases/{case.number}/act/issue/"
         form = client.get(url)
-        self.assertContains(form, "หลักฐานเอกสารจากระบบทะเบียน (SAP)")
+        self.assertContains(form, "ไฟล์เอกสาร SAP")
         post = {
             "revision": Case.objects.get(pk=case.pk).revision,
             "idempotency_key": key(),
@@ -481,7 +484,7 @@ class EvidenceTests(RegistryTestCase):
         record = RegistryRecord.objects.get(case=case)
         self.assertEqual(record.evidence.count(), 1)
         page = client.get(f"/cases/{case.number}/")
-        self.assertContains(page, "เอกสารทะเบียน (SAP)")
+        self.assertContains(page, "เลขเอกสาร SAP")
         self.assertContains(page, "รอไฟล์ SAP")
 
 
@@ -572,18 +575,35 @@ class WebTests(RegistryTestCase):
         self.assertNotContains(page, "นำเข้าไฟล์จาก SAP")
         self.assertContains(self.client_for(self.eqp).get(f"/registry/{d.pk}/"), "ผลการตรวจของกอง")
         self.assertEqual(self.client_for(self.reg).get("/registry/settings/").status_code, 403)
-        self.assertContains(self.client_for(self.admin).get("/registry/settings/"), "300002")
+        self.assertContains(self.client_for(self.admin).get("/registry/settings/"), "movement type")
+        # Item codes and LINE groups live on รายการอุปกรณ์ (23 Oct 2569).
+        self.assertContains(self.client_for(self.admin).get("/console/admin/items/"), "300002")
 
     def test_registry_staff_read_the_cases_their_discrepancies_name_and_no_others(self):
         case, _ = self.issued(8, "4900000001")
         unrelated = self.approved(1)
         reader = self.client_for(self.reg)
         page = reader.get(f"/cases/{case.number}/")
-        self.assertContains(page, "เอกสารทะเบียน (SAP)")
+        self.assertContains(page, "เลขเอกสาร SAP")
         self.assertEqual(page.context["offers"], [])  # read only: no actions offered
         self.assertEqual(reader.get(f"/cases/{unrelated.number}/").status_code, 404)
         # Only the registry unit gets this reading right, not every division.
         self.assertEqual(self.client_for(self.meter).get(f"/cases/{case.number}/").status_code, 404)
+
+    def test_with_the_menu_off_the_case_shows_typed_numbers_without_comparing(self):
+        case, _ = self.issued(8, "4900000001")
+        self.documents([doc("4900000001", "201", "300002", 7)])  # a difference, while it was on
+        options.change(self.admin, options.REGISTRY_ACCESS, "off", "ใช้แค่เลข SAP ที่พิมพ์")
+        page = self.client_for(self.eqp_issuer).get(f"/cases/{case.number}/")
+        self.assertContains(page, "เลขเอกสาร SAP")
+        self.assertContains(page, "4900000001")
+        for state in ("ตรงกับ SAP", "รอไฟล์ SAP", "มีส่วนต่างทะเบียน", "/registry/"):
+            self.assertNotContains(page, state)
+        self.assertTrue(D.objects.exists())  # kept, only not shown
+        self.assertEqual(self.client_for(self.reg).get("/registry/").status_code, 404)
+        self.assertIsNone(
+            self.client_for(self.reg).get("/divisions/SIM-REG/").context.get("registry_count")
+        )
 
     def test_queue_chip_for_the_registry_unit_and_for_a_division_asked_to_check(self):
         self.issued(8, "4900000001")

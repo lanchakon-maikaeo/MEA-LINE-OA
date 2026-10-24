@@ -6,8 +6,9 @@ removed by the import (or after an hour). The preview shows which file column is
 (guessed from the headers, chosen by the admin, remembered for next time), the rows that cannot
 be used, and every ฝ่าย that is no เขต/หน่วยงาน yet: the admin maps it to one, adds it as a new
 unit, or leaves it empty. Columns that are not mapped are never read, so the two phone columns
-stay in the file. E-mails are kept as a keyed hash and sealed, never in plain text; the audit
-trail holds counts only.
+stay in the file, and names are no field at all (user, 23 Oct 2569): a name column in the file
+is never read. E-mails are kept as a keyed hash and sealed, never in plain text; the audit trail
+holds counts only.
 """
 
 import csv
@@ -23,7 +24,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from operations import employees, identity, sealing
+from operations import identity, sealing
 from operations.models import District, Employee, RosterSetting, RosterUpload
 
 MAX_BYTES = 10 * 1024 * 1024
@@ -32,7 +33,6 @@ STAGED_FOR = timedelta(hours=1)
 # field: (label, header words that name it). Order is the preview's order.
 FIELDS = {
     "employee_id": ("รหัสพนักงาน", ("รหัสพนักงาน", "รหัส", "employeeid", "empid", "id")),
-    "name": ("ชื่อ-สกุล", ("ชื่อสกุล", "ชื่อนามสกุล", "ชื่อ", "name", "fullname")),
     "position": ("ตำแหน่ง", ("ตำแหน่ง", "position")),
     "line_of_work": ("สายงาน", ("สายงาน",)),
     "department": ("ฝ่าย (ใช้เป็นหน่วยงาน (เขต/ฝ่าย))", ("ฝ่าย", "department")),
@@ -41,7 +41,7 @@ FIELDS = {
     "work_group": ("กลุ่มงาน", ("กลุ่มงาน",)),
     "email": ("อีเมล", ("อีเมล", "อีเมล์", "email", "e-mail", "mail")),
 }
-REQUIRED = ("employee_id", "name")
+REQUIRED = ("employee_id",)
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 NEW_UNIT = "__new__"
 
@@ -92,7 +92,7 @@ def read_table(filename, data):
             width = len(headers)
             cells = [[str(c or "").strip() for c in (list(r) + [""] * width)[:width]] for r in rows]
             return headers, cells, index + 2
-    raise ValidationError("ไม่พบแถวหัวคอลัมน์ เช่น รหัสพนักงาน ชื่อ-สกุล ใน 20 แถวแรก")
+    raise ValidationError("ไม่พบแถวหัวคอลัมน์ เช่น รหัสพนักงาน ตำแหน่ง ใน 20 แถวแรก")
 
 
 def _csv(data):
@@ -219,8 +219,8 @@ def preview(headers, rows, columns):
     known, saved = districts_by_key(), _setting().units
     seen, duplicates, incomplete, bad_email, units = set(), [], [], 0, {}
     for number, record in _records(headers, rows, columns):
-        employee_id, name = record.get("employee_id", ""), record.get("name", "")
-        if not employee_id or not name:
+        employee_id = record.get("employee_id", "")
+        if not employee_id:
             incomplete.append(number)
             continue
         if employee_id in seen:
@@ -263,20 +263,19 @@ def import_upload(actor, upload, columns, choices, deactivate_missing, reason):
     headers, rows = opened(upload)
     columns = {f: h for f, h in columns.items() if f in FIELDS and h in headers}
     if any(not columns.get(f) for f in REQUIRED):
-        raise ValidationError("เลือกคอลัมน์รหัสพนักงานและชื่อ-สกุลก่อนนำเข้า")
+        raise ValidationError("เลือกคอลัมน์รหัสพนักงานก่อนนำเข้า")
     units = _units(actor, headers, rows, columns, choices, reason)
     seen, created, updated, emails = set(), 0, 0, 0
     sealable = sealing.available()
     for _, record in _records(headers, rows, columns):
-        employee_id, name = record.get("employee_id", ""), record.get("name", "")
-        if not employee_id or not name or employee_id in seen:
+        employee_id = record.get("employee_id", "")
+        if not employee_id or employee_id in seen:
             continue
         seen.add(employee_id)
         email = normalise_email(record.get("email", ""))
         email = email if EMAIL.match(email) else ""
         emails += bool(email)
         values = {
-            "name": name[:200],
             "position": record.get("position", "")[:200],
             "line_of_work": record.get("line_of_work", "")[:200],
             "department": record.get("department", "")[:200],
@@ -292,7 +291,7 @@ def import_upload(actor, upload, columns, choices, deactivate_missing, reason):
         _, made = Employee.objects.update_or_create(employee_id=employee_id, defaults=values)
         created, updated = created + made, updated + (not made)
     if not seen:
-        raise ValidationError("ไฟล์ไม่มีแถวที่มีทั้งรหัสพนักงานและชื่อ")
+        raise ValidationError("ไฟล์ไม่มีแถวที่มีรหัสพนักงาน")
     closed = 0
     if deactivate_missing:
         closed = (
@@ -304,17 +303,8 @@ def import_upload(actor, upload, columns, choices, deactivate_missing, reason):
     setting.columns, setting.updated_by = columns, actor
     setting.save()
     upload.delete()
-    matched, unmatched, review = employees.match_requesters()
-    summary = {
-        "created": created,
-        "updated": updated,
-        "closed": closed,
-        "emails": emails,
-        "matched": matched,
-        "unmatched": unmatched,
-        "review": review,
-    }
-    # Counts only: names and e-mails never go to the audit trail.
+    summary = {"created": created, "updated": updated, "closed": closed, "emails": emails}
+    # Counts only: e-mails never go to the audit trail.
     identity.audit(actor, "employees.imported", setting, reason, **summary)
     return summary
 

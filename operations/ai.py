@@ -24,7 +24,7 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from operations import identity, pii
+from operations import identity, pii, typed_lines
 from operations.contracts import CommandFailed, ErrorCode, check_quantity_for_item, parse_quantity
 from operations.models import (
     AIConfigEntry,
@@ -42,6 +42,10 @@ PROMPT_VERSION = "extract-v4-grounded"  # +fewshotN must fit 32 chars
 EVAL_GATE = "application-v3+heldout-v4+redteam-v1+redteam-v2"
 # Bounded output types are enforced locally, not by the provider.
 SCHEMA_VERSION = "extraction-v5-grounded-fields"
+# A version with typed_fields (user, 23 Oct 2569) also reads the SAP slip number and the typed
+# rows of the equipment-first groups; it is evaluated on one more locked set as well.
+TYPED_SCHEMA_VERSION = "extraction-v6-sap-typed"
+TYPED_EVAL_GATE = f"{EVAL_GATE}+typed-v1+typed-v2"  # typed-v2: the กอจ. and กคอ. groups
 MAX_CHAIN = 4  # primary + 3 fallbacks
 MAX_REQUESTS = 3
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/-]{1,100}$")
@@ -167,7 +171,8 @@ def create_profile(
 
 
 # Ready-made models the admin page offers. The API key is never part of a preset: an admin
-# enters it once in the credential form (encrypted, write-only).
+# enters it once in the credential form (encrypted, write-only). `profile` is what a new
+# profile gets; the user chose JSON schema with temperature 0.4 for Typhoon (21 Oct 2569).
 PRESETS = {
     "typhoon-v2.5-30b": {
         "label": "Typhoon 2.5 30B A3B Instruct (OpenTyphoon)",
@@ -177,6 +182,7 @@ PRESETS = {
         "limits": "5 ครั้ง/วินาที, 200 ครั้ง/นาที, context 128K",
         "docs_url": "https://docs.opentyphoon.ai/en/models/",
         "key_url": "https://playground.opentyphoon.ai/api-key",
+        "profile": {"timeout_seconds": 15, "max_tokens": 1200, "temperature": "0.40"},
     },
 }
 
@@ -190,35 +196,55 @@ def preset_status():
 
 
 @transaction.atomic
-def create_preset_version(actor, key, pipeline, use_json_schema=True):
-    """A candidate with the preset model as primary and the active chain as fallbacks."""
+def create_preset_version(
+    actor,
+    key,
+    pipeline,
+    use_json_schema=True,
+    task=AIConfigVersion.Task.EXTRACT,
+    typed_fields=False,
+):
+    """A candidate with the preset model as primary and that task's active chain as fallbacks.
+    Extraction keeps the chosen pipeline and few-shot count; the other tasks run single."""
     identity.require_ai_editor(actor)
     preset = PRESETS.get(key)
     if preset is None:
         raise ValidationError("Unknown preset.")
+    if task not in AIConfigVersion.Task.values:
+        raise ValidationError("Unknown AI task.")
     credential = AICredential.objects.filter(name=preset["credential"]).first()
     if credential is None or credential.base_url != preset["base_url"]:
         raise ValidationError(
             f"Add the API key first: credential '{preset['credential']}' with base URL "
             f"{preset['base_url']}."
         )
+    defaults = preset.get("profile", {})
     profile = (
         AIProfile.objects.filter(
             credential=credential,
             model_id=preset["model_id"],
             use_json_schema=bool(use_json_schema),
+            **{
+                name: Decimal(value) if name == "temperature" else value
+                for name, value in defaults.items()
+            },
         )
         .order_by("-pk")
         .first()
-    ) or create_profile(actor, credential, preset["model_id"], use_json_schema=use_json_schema)
-    active = active_version()
+    ) or create_profile(
+        actor, credential, preset["model_id"], use_json_schema=use_json_schema, **defaults
+    )
+    active = active_version(task)
     fallbacks = [p for p in (active.chain() if active else []) if p.pk != profile.pk]
+    extract = task == AIConfigVersion.Task.EXTRACT
     return create_version(
         actor,
         [profile, *fallbacks[: MAX_CHAIN - 1]],
         f"preset {key}" + ("" if use_json_schema else " (no JSON schema)"),
-        active.few_shot if active else 3,
-        pipeline,
+        (active.few_shot if active else 3) if extract else 0,
+        pipeline if extract else AIConfigVersion.Pipeline.SINGLE,
+        task=task,
+        typed_fields=extract and bool(typed_fields),
     )
 
 
@@ -231,11 +257,14 @@ def create_version(
     pipeline=AIConfigVersion.Pipeline.SINGLE,
     screen_profile=None,
     task=AIConfigVersion.Task.EXTRACT,
+    typed_fields=False,
 ):
     """A candidate: primary first, then up to three fallbacks in order."""
     identity.require_ai_editor(actor)
     if task not in AIConfigVersion.Task.values:
         raise ValidationError("Unknown AI task.")
+    if typed_fields and task != AIConfigVersion.Task.EXTRACT:
+        raise ValidationError("Only an extraction version reads SAP numbers and typed rows.")
     profiles = list(profiles)
     if not 1 <= len(profiles) <= MAX_CHAIN or len({p.pk for p in profiles}) != len(profiles):
         raise ValidationError("Choose 1-4 different profiles (primary first).")
@@ -254,6 +283,7 @@ def create_version(
         few_shot=int(few_shot),
         pipeline=pipeline,
         screen_profile=screen_profile,
+        typed_fields=bool(typed_fields),
     )
     for position, profile in enumerate(profiles):
         AIConfigEntry.objects.create(version=version, position=position, profile=profile)
@@ -267,6 +297,7 @@ def create_version(
         pipeline=pipeline,
         few_shot=int(few_shot),
         screen=screen_profile.model_id if screen_profile else None,
+        typed_fields=bool(typed_fields),
     )
     return version
 
@@ -296,7 +327,11 @@ def test_version(actor, version):
         started = time.monotonic()
         try:
             extraction, _ = extract_with(
-                profile, "ขอเบิกฟิวส์ 2 ชิ้น", None, _catalog(), profile.timeout_seconds
+                profile,
+                "ขอเบิกฟิวส์ 2 ชิ้น",
+                None,
+                _catalog(reads_typed(version)),
+                profile.timeout_seconds,
             )
             # Connection + schema only; accuracy is the held-out evaluation's job.
             ok = True
@@ -382,7 +417,7 @@ def activation_blocker(version):
         if not ai_keywords.gate_passed(version.eval_result, version):
             return "Keyword evidence is missing, stale or failed; evaluate again."
         return None
-    if version.eval_result.get("gate") != EVAL_GATE:
+    if version.eval_result.get("gate") != eval_gate_for(version):
         return "The evaluation predates the current application/security gate; evaluate again."
     if version.pipeline == AIConfigVersion.Pipeline.HARNESS:
         from operations import ai_harness
@@ -535,30 +570,60 @@ def _post(url, api_key, body, timeout):
         raise AIError(type(exc).__name__) from exc
 
 
-def _catalog():
-    return list(EquipmentType.objects.filter(is_active=True).order_by("code"))
+def _catalog(typed=False):
+    """The catalog the model may name. The shared items of the typed groups (typed_lines) are
+    in it only for a version that reads typed rows: to any other they would make the plain
+    word "มิเตอร์" ambiguous."""
+    rows = EquipmentType.objects.filter(is_active=True).order_by("code")
+    return list(rows if typed else rows.filter(entry_group=""))
 
 
-def response_schema(codes):
+def reads_typed(version):
+    """Whether this extraction version also reads SAP slip numbers and typed rows."""
+    return bool(
+        version is not None
+        and version.task == AIConfigVersion.Task.EXTRACT
+        and getattr(version, "typed_fields", False)
+    )
+
+
+def schema_version_for(version):
+    return TYPED_SCHEMA_VERSION if reads_typed(version) else SCHEMA_VERSION
+
+
+def eval_gate_for(version):
+    return TYPED_EVAL_GATE if reads_typed(version) else EVAL_GATE
+
+
+def typed_catalog(catalog):
+    """Whether a catalog carries the shared items of typed groups (the typed prompt and schema
+    go with it)."""
+    return any(getattr(i, "entry_group", "") for i in catalog)
+
+
+def response_schema(codes, typed=False):
     item_code = {"type": ["string", "null"]}
     if codes:
         item_code = {"enum": [*codes, None]}
     text = {"type": ["string", "null"]}
+    item = {
+        "item_code": item_code,
+        "item_text": {"type": "string"},
+        "quantity": {"type": ["number", "string", "null"]},
+        "serials": {"type": "array", "items": {"type": "string"}},
+        **({"size": text} if typed else {}),
+    }
     request = {
         "type": "object",
         "properties": {
             "intent": {"enum": list(INTENTS)},
+            **({"sap_number": text} if typed else {}),
             "items": {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "properties": {
-                        "item_code": item_code,
-                        "item_text": {"type": "string"},
-                        "quantity": {"type": ["number", "string", "null"]},
-                        "serials": {"type": "array", "items": {"type": "string"}},
-                    },
-                    "required": ["item_code", "item_text", "quantity", "serials"],
+                    "properties": item,
+                    "required": list(item),
                     "additionalProperties": False,
                 },
             },
@@ -566,7 +631,14 @@ def response_schema(codes):
             "needed_by": text,
             "evidence": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["intent", "items", *TEXT_FIELDS, "needed_by", "evidence"],
+        "required": [
+            "intent",
+            *(["sap_number"] if typed else []),
+            "items",
+            *TEXT_FIELDS,
+            "needed_by",
+            "evidence",
+        ],
         "additionalProperties": False,
     }
     return {
@@ -614,14 +686,42 @@ SYSTEM_PROMPT += (
 )
 
 
-def _example_answer(example):
+# Read by a version with typed_fields only (user, 23 Oct 2569): the SAP slip number and the
+# rows a requester types for the equipment-first groups (typed_lines).
+TYPED_PROMPT = """
+
+SAP slips and typed rows:
+- sap_number: the number of the SAP slip the requester already made for a withdrawal \
+(ใบเบิก) or a return (ใบส่งคืน), copied exactly as written (e.g. 4500012345); null when it is not \
+written, and always null for a problem. Never use a meter number, phone number, case number, \
+date or quantity as sap_number.
+- Catalog entries with "group" stand for equipment the requester describes by size or number \
+(มิเตอร์, CT, VT, หม้อแปลง, LBS, RMU, other equipment) rather than by a catalog model: use them \
+for such text. size is the size or rating exactly as written (5(15)A, 15(45)A, 100/5A, \
+11000/110V, 160 kVA, 24kV 630A), else null.
+- For the มิเตอร์, หม้อแปลง, LBS and RMU groups, serials are the unit numbers written in the \
+message (หมายเลขเครื่อง, หมายเลขเครื่องวัด, หมายเลขมิเตอร์, เลขมิเตอร์) for withdrawals, returns and \
+problems alike.
+- For the other-equipment group, item_text is the equipment's name only.
+- Long numbers may appear as labels such as [เลข-1]: copy the label exactly into the value it \
+stands for."""
+
+
+def _example_answer(example, typed=False):
     requests = []
     for entry in example.requests:
         requests.append(
             {
                 "intent": entry["intent"],
+                **({"sap_number": None} if typed else {}),
                 "items": [
-                    {"item_code": code, "item_text": text, "quantity": quantity, "serials": []}
+                    {
+                        "item_code": code,
+                        "item_text": text,
+                        "quantity": quantity,
+                        "serials": [],
+                        **({"size": None} if typed else {}),
+                    }
                     for code, quantity, text in entry["items"]
                 ],
                 **{name: entry.get("fields", {}).get(name) for name in TEXT_FIELDS},
@@ -632,18 +732,26 @@ def _example_answer(example):
     return {"requests": requests}
 
 
+def _catalog_entry(item):
+    entry = {"code": item.code, "name": item.name, "unit": item.unit}
+    if getattr(item, "entry_group", ""):
+        entry["group"] = EquipmentType.LineGroup(item.entry_group).label
+    return entry
+
+
 def _messages(text, draft_context, catalog, examples=(), system=SYSTEM_PROMPT):
     """System rules, then retrieved examples as earlier turns, then the real message."""
-    messages = [{"role": "system", "content": system}]
+    typed = typed_catalog(catalog)
+    messages = [{"role": "system", "content": system + (TYPED_PROMPT if typed else "")}]
     for example in examples:
         shown = {"message": example.text, "current_draft": example.draft}
         messages.append({"role": "user", "content": json.dumps(shown, ensure_ascii=False)})
-        answer = json.dumps(_example_answer(example), ensure_ascii=False)
+        answer = json.dumps(_example_answer(example, typed), ensure_ascii=False)
         messages.append({"role": "assistant", "content": answer})
     payload = {
         "message": text,
         "current_draft": draft_context,
-        "catalog": [{"code": i.code, "name": i.name, "unit": i.unit} for i in catalog],
+        "catalog": [_catalog_entry(i) for i in catalog],
     }
     messages.append({"role": "user", "content": json.dumps(payload, ensure_ascii=False)})
     return messages
@@ -689,6 +797,8 @@ def prompt_version_for(version):
         from operations import ai_harness
 
         base = ai_harness.PROMPT_VERSION
+    if reads_typed(version):
+        base += "+sap"
     return f"{base}+fewshot{version.few_shot}" if version.few_shot else base
 
 
@@ -715,6 +825,7 @@ class ProposedItem:
     serials: list
     stated_quantity: bool = False  # the user wrote a number for it (even if not in the catalog)
     rejected: list = field(default_factory=list)
+    size: str = ""  # a typed row's size or rating, as written (typed versions only)
 
 
 @dataclass
@@ -724,6 +835,8 @@ class Proposal:
     fields: dict = field(default_factory=dict)
     rejected_fields: list = field(default_factory=list)
     field_sources: dict = field(default_factory=dict)  # server-derived, never read from model JSON
+    sap_number: str = ""  # the SAP slip number, checked against the message (typed versions)
+    rows: list = field(default_factory=list)  # a draft's typed rows (evaluation projection only)
 
 
 @dataclass
@@ -754,13 +867,24 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
         raise SchemaError("Missing requests.")
     items_by_code = {i.code: i for i in catalog}
     stated = _numbers_in(text)
+    typed = typed_catalog(catalog)
     requests, raw_codes = [], []
     for entry in data["requests"][:MAX_REQUESTS]:
         if not isinstance(entry, dict) or entry.get("intent") not in INTENTS:
             raise SchemaError("Bad intent.")
         if not isinstance(entry.get("items", []), list):
             raise SchemaError("Bad items.")
+        sap_number = entry.get("sap_number") if typed else None
+        if sap_number is not None and not isinstance(sap_number, str):
+            raise SchemaError("Bad sap_number.")
         proposal = Proposal(entry["intent"])
+        if sap_number and proposal.intent in ("withdrawal", "return"):
+            # Checked against the message in ai_grounding; a wrong shape is asked again.
+            number = re.sub(r"\s", "", sap_number.translate(THAI_DIGITS))
+            if typed_lines.SAP_NUMBER.match(number) and any(c.isdigit() for c in number):
+                proposal.sap_number = number
+            else:
+                proposal.rejected_fields.append("sap_number")
         for item in entry.get("items", [])[:20]:
             if not isinstance(item, dict):
                 raise SchemaError("Bad item.")
@@ -770,6 +894,7 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
                 or any(not isinstance(s, str) for s in (item.get("serials") or []))
                 or isinstance(item.get("quantity"), (dict, list, bool))
                 or (item.get("item_code") is not None and not isinstance(item["item_code"], str))
+                or (typed and item.get("size") is not None and not isinstance(item["size"], str))
             ):
                 raise SchemaError("Bad item fields.")
             code = item.get("item_code")
@@ -799,18 +924,23 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
                 for s in item.get("serials") or []
                 if isinstance(s, str) and 0 < len(s.strip()) <= 64
             ]
+            group = getattr(equipment, "entry_group", "") if equipment else ""
+            # Staff assign equipment to a withdrawal, except a typed meter row: its SAP slip
+            # already names the meter numbers (user, 23 Oct 2569).
+            serials_allowed = equipment is not None and equipment.is_serialized
+            serials_allowed &= proposal.intent != "withdrawal" or group in typed_lines.NUMBERED
+            size = " ".join(str(item.get("size") or "").split()) if group else ""
             proposal.items.append(
                 ProposedItem(
                     equipment.code if equipment else None,
                     str(item.get("item_text") or "")[:100],
                     quantity,
-                    serials
-                    if equipment and equipment.is_serialized and proposal.intent != "withdrawal"
-                    else [],
+                    serials if serials_allowed else [],
                     stated_quantity,
                     ["quantity"]
                     if equipment and raw_quantity not in (None, "") and quantity is None
                     else [],
+                    size if len(size) <= typed_lines.LIMITS["size"] else "",
                 )
             )
         for name in TEXT_FIELDS:
@@ -845,6 +975,12 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
         for name, value in proposal.fields.items():
             target.fields.setdefault(name, value)
         target.rejected_fields.extend(proposal.rejected_fields)
+        if proposal.sap_number and proposal.sap_number != target.sap_number:
+            if target.sap_number:
+                target.sap_number = ""  # two different slip numbers: ask
+                target.rejected_fields.append("sap_number")
+            elif "sap_number" not in target.rejected_fields:
+                target.sap_number = proposal.sap_number
     from operations.ai_grounding import ground
 
     return ground(
@@ -852,13 +988,52 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
     )
 
 
-def call_model(profile, messages, catalog, timeout):
-    """One chat call with the agreed JSON schema: returns (content, usage, latency_ms)."""
-    credential = profile.credential
-    schema = response_schema([i.code for i in catalog] if len(catalog) <= 300 else [])
+class Truncated(SchemaError):
+    """The answer stopped at max_tokens (finish_reason "length"), so its JSON is incomplete."""
+
+
+# A cut-off answer is asked once more with twice the tokens, up to the profile limit.
+TRUNCATED_RETRY_MAX_TOKENS = 2048
+
+
+def schema_in_prompt(profile):
+    """Whether the system prompt must carry the JSON schema. OpenTyphoon accepts
+    response_format and ignores it (checked 7 Oct and again 21 Oct 2569, json_schema and
+    json_object alike), so the model only follows a schema it can read. Hosts listed in
+    AI_SCHEMA_ENFORCED_HOSTS enforce response_format and get it alone."""
     if not profile.use_json_schema:
-        # The provider does not enforce response_format (OpenTyphoon accepts and ignores it):
-        # describe the schema in the prompt instead; validation stays exactly as strict.
+        return True
+    host = (urlsplit(profile.credential.base_url).hostname or "").lower()
+    return host not in settings.AI_SCHEMA_ENFORCED_HOSTS
+
+
+def first_json(content):
+    """The JSON text in an answer: all of it when it parses, else the object that starts at
+    the first "{" (models add a sentence before it, or print the object twice)."""
+    try:
+        json.loads(content)
+        return content
+    except (ValueError, RecursionError):
+        pass
+    start = content.find("{")
+    if start == -1:
+        return content
+    try:
+        _, end = json.JSONDecoder().raw_decode(content, start)
+    except (ValueError, RecursionError):
+        return content
+    return content[start:end]
+
+
+def chat_json(profile, messages, schema, name, timeout, task, max_tokens=None):
+    """One chat call that must answer with one JSON object for `schema`:
+    (content, usage, latency_ms). Every task's own validator still checks the content.
+
+    With use_json_schema the provider gets response_format (strict) and, unless it enforces
+    it, the prompt describes the same schema. Temperature, tokens and timeout come from the
+    profile. A cut-off answer is retried once with more tokens while the timeout allows,
+    otherwise Truncated is raised (a SchemaError: the chain moves on)."""
+    if schema_in_prompt(profile):
         described = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
         messages = [
             {
@@ -871,18 +1046,43 @@ def call_model(profile, messages, catalog, timeout):
     body = {
         "model": profile.model_id,
         "messages": messages,
-        "max_tokens": profile.max_tokens,
+        "max_tokens": max_tokens or profile.max_tokens,
         "temperature": float(profile.temperature),
     }
     if profile.use_json_schema:
         body["response_format"] = {
             "type": "json_schema",
-            "json_schema": {"name": "extraction", "strict": True, "schema": schema},
+            "json_schema": {"name": name, "strict": True, "schema": schema},
         }
+    credential = profile.credential
+    url, key = f"{credential.base_url}/chat/completions", decrypt_key(credential)
     started = time.monotonic()
-    url = f"{credential.base_url}/chat/completions"
-    data = post(url, decrypt_key(credential), body, timeout, "extract")
-    return _content(data), data.get("usage") or {}, int((time.monotonic() - started) * 1000)
+    while True:
+        data = post(url, key, body, max(timeout - (time.monotonic() - started), 1), task)
+        usage = (data.get("usage") or {}) if isinstance(data, dict) else {}
+        if _finish_reason(data) != "length":
+            break
+        more = min(body["max_tokens"] * 2, TRUNCATED_RETRY_MAX_TOKENS)
+        if more <= body["max_tokens"] or timeout - (time.monotonic() - started) < 2:
+            raise Truncated(f"Answer cut off at max_tokens={body['max_tokens']}.")
+        body = {**body, "max_tokens": more}
+    latency = int((time.monotonic() - started) * 1000)
+    return first_json(_content(data)), usage, latency
+
+
+def _finish_reason(data):
+    try:
+        return data["choices"][0].get("finish_reason")
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
+def call_model(profile, messages, catalog, timeout):
+    """One extraction call with the agreed JSON schema: returns (content, usage, latency_ms)."""
+    schema = response_schema(
+        [i.code for i in catalog] if len(catalog) <= 300 else [], typed_catalog(catalog)
+    )
+    return chat_json(profile, messages, schema, "extraction", timeout, "extract")
 
 
 def extract_with(profile, text, draft_context, catalog, timeout, examples=()):
@@ -909,7 +1109,7 @@ def extract(text, draft_context, version, budget_seconds=None, catalog=None):
 
         return ai_harness.extract(text, draft_context, version, budget, catalog=catalog)
     deadline = time.monotonic() + budget
-    catalog = _catalog() if catalog is None else catalog
+    catalog = _catalog(reads_typed(version)) if catalog is None else catalog
     examples = retrieve_examples(text, draft_context, version.few_shot, [i.code for i in catalog])
     attempts = []
     for profile in version.chain():

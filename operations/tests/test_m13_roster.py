@@ -1,7 +1,8 @@
 """ทะเบียนพนักงานจากไฟล์ขององค์กร และการยืนยันตัวตนด้วยอีเมล (15 ต.ค. 2569 Q10–Q16, Q24–Q29).
 
 Acceptance → tests: the roster comes in from .csv or .xlsx through a preview that maps columns
-and ฝ่าย, never reads the phone columns and keeps e-mails only hashed and sealed (ImportTests);
+and ฝ่าย, never reads the name or phone columns (names left the roster, 23 Oct 2569) and keeps
+e-mails only hashed and sealed (ImportTests);
 an employee registers in LINE with their ID and a code sent to the roster e-mail or the e-mail
 typed, approved by the system and logged with the method, while anything else still reaches a
 person (LineEmailTests).
@@ -98,6 +99,7 @@ class ImportTests(RosterTestCase):
         self.assertEqual(columns["employee_id"], "รหัสพนักงาน")
         self.assertEqual(columns["email"], "อีเมล")
         self.assertNotIn("เบอร์ภายใน", columns.values())
+        self.assertNotIn("ชื่อ-สกุล", columns.values())  # names are no field
         view = roster.preview(headers, rows, columns)
         self.assertEqual(
             (view["usable"], view["duplicates"], view["incomplete"]), (2, ["510002"], [6])
@@ -120,15 +122,16 @@ class ImportTests(RosterTestCase):
         self.assertEqual(sealing.unseal(one.email_sealed), "one@example.test")
         two = Employee.objects.get(employee_id="510002")
         self.assertEqual(two.district.name, "ฝ่ายอุปกรณ์งานจำหน่าย (จำลอง)")  # a new unit
-        stored = str(list(Employee.objects.values("name", "position", "department", "email_hash")))
+        stored = str(list(Employee.objects.values()))
         self.assertNotIn("0811111111", stored)
         self.assertNotIn("1234", stored)
+        self.assertNotIn("ทดสอบ หนึ่ง", stored)
         self.assertFalse(RosterUpload.objects.exists())  # the staged file is gone
         event = AuditEvent.objects.get(action="employees.imported")
         self.assertNotIn("510001", str(event.data))
         self.assertNotIn("example.test", str(event.data))
         setting = RosterSetting.objects.get()
-        self.assertEqual(setting.columns["name"], "ชื่อ-สกุล")
+        self.assertNotIn("name", setting.columns)
         self.assertEqual(
             setting.units[roster.unit_key("ฝ่ายอุปกรณ์งานจำหน่าย (จำลอง)")], two.district.code
         )
@@ -218,7 +221,7 @@ class LineEmailTests(RosterTestCase):
         self.assertIn("ยืนยันตัวตนแล้ว", texts(self.type(ALICE, self.code())))
         registration = RegistrationRequest.objects.get()
         self.assertEqual((registration.status, registration.verified_by), ("approved", "otp"))
-        self.assertEqual(registration.submitted_name, "นางสาวทดสอบ หนึ่ง")
+        self.assertEqual(registration.submitted_name, "พนักงาน 510001")  # the ID, no name
         self.assertEqual(registration.requested_district.code, "D01")
         self.assertNotEqual(EmailCode.objects.get().code_hash, self.code())
 

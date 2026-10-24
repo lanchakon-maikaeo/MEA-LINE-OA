@@ -157,6 +157,13 @@ AI_ALLOWED_HOSTS = frozenset(
     for h in os.environ.get("AI_ALLOWED_HOSTS", "thaillm.or.th,api.opentyphoon.ai").split(",")
     if h.strip()
 )
+# Providers that enforce response_format json_schema (ThaiLLM's vLLM, checked 6 Oct 2569). Any
+# other host also gets the schema in the prompt, because OpenTyphoon accepts and ignores it.
+AI_SCHEMA_ENFORCED_HOSTS = frozenset(
+    h.strip().lower()
+    for h in os.environ.get("AI_SCHEMA_ENFORCED_HOSTS", "thaillm.or.th").split(",")
+    if h.strip()
+)
 AI_TOTAL_BUDGET_SECONDS = 25
 AI_REPLY_FALLBACK_SECONDS = 35
 # Harness pipeline: start the next model in parallel when the current one is this slow.

@@ -5,7 +5,7 @@
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
     <h1>ทะเบียนพนักงาน</h1>
-    <p class="lede">ใช้ยืนยันตัวตนตอนลงทะเบียนทาง LINE และแสดงตำแหน่งกับฝ่ายของผู้ใช้ LINE OA ไฟล์ไม่ผ่าน AI อีเมลเก็บแบบเข้ารหัส และระบบไม่อ่านคอลัมน์เบอร์โทร</p>
+    <p class="lede">ใช้ยืนยันตัวตนตอนลงทะเบียนทาง LINE และแสดงตำแหน่งกับฝ่ายของผู้ใช้ LINE OA ไฟล์ไม่ผ่าน AI อีเมลเก็บแบบเข้ารหัส และระบบไม่อ่านคอลัมน์ชื่อ-สกุลและเบอร์โทร</p>
   </div>
 </div>
 <dl class="facts">
@@ -37,7 +37,7 @@
     {% if preview.missing %}<div class="notice notice--error mb-24" role="alert"><div class="notice__body">ต้องเลือกคอลัมน์ {{ preview.missing|join:" และ " }} ก่อนนำเข้า</div></div>{% endif %}
     <dl class="facts">
       <div><dt>นำเข้าได้</dt><dd class="num">{{ preview.usable }} คน</dd></div>
-      <div><dt>ขาดรหัสหรือชื่อ</dt><dd class="num">{{ preview.incomplete|length }} แถว{% if preview.incomplete %} <span class="muted">(แถว {{ preview.incomplete|slice:":10"|join:", " }}{% if preview.incomplete|length > 10 %} …{% endif %})</span>{% endif %}</dd></div>
+      <div><dt>ไม่มีรหัสพนักงาน</dt><dd class="num">{{ preview.incomplete|length }} แถว{% if preview.incomplete %} <span class="muted">(แถว {{ preview.incomplete|slice:":10"|join:", " }}{% if preview.incomplete|length > 10 %} …{% endif %})</span>{% endif %}</dd></div>
       <div><dt>รหัสซ้ำ</dt><dd class="num">{{ preview.duplicates|length }}{% if preview.duplicates %} <span class="muted">(ใช้แถวแรก)</span>{% endif %}</dd></div>
       <div><dt>อีเมลรูปแบบไม่ถูก</dt><dd class="num">{{ preview.bad_email }} <span class="muted">(นำเข้าโดยไม่มีอีเมล)</span></dd></div>
       <div><dt>ในระบบตอนนี้</dt><dd class="num">{{ preview.existing }} คน</dd></div>
@@ -72,7 +72,7 @@
 
 <section class="section" aria-labelledby="emp-import">
   <div class="section-head"><h2 id="emp-import">{% if preview %}เลือกไฟล์อื่น{% else %}นำเข้าทะเบียนพนักงาน{% endif %}</h2></div>
-  <p class="muted">ไฟล์ .xlsx หรือ .csv ไม่เกิน 10 MB แผ่นงานแรก หัวคอลัมน์เช่น รหัสพนักงาน ชื่อ-สกุล ตำแหน่ง สายงาน ฝ่าย กอง แผนก กลุ่มงาน อีเมล ระบบอ่านไฟล์แล้วให้ตรวจก่อน ยังไม่บันทึกอะไรจนกว่าจะกดนำเข้า ไฟล์ที่ตรวจไว้ลบเองใน 1 ชั่วโมง</p>
+  <p class="muted">ไฟล์ .xlsx หรือ .csv ไม่เกิน 10 MB แผ่นงานแรก หัวคอลัมน์เช่น รหัสพนักงาน ตำแหน่ง สายงาน ฝ่าย กอง แผนก กลุ่มงาน อีเมล ถ้าไฟล์มีคอลัมน์ชื่อ-สกุล ระบบไม่อ่าน ระบบอ่านไฟล์แล้วให้ตรวจก่อน ยังไม่บันทึกอะไรจนกว่าจะกดนำเข้า ไฟล์ที่ตรวจไว้ลบเองใน 1 ชั่วโมง</p>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}<input type="hidden" name="action" value="upload">
     <div class="field"><label for="emp-file">ไฟล์</label><input id="emp-file" type="file" name="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></div>

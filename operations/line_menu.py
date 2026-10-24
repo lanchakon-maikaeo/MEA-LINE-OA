@@ -12,13 +12,15 @@ from operations.models import ChannelIdentity, Division, LineMenuItem, Requester
 NAME = "faoj-menu-v2"  # everyone's menu
 PREFIX = "faoj-"  # staff menus and their aliases: faoj-staff-work, faoj-sup-order, ...
 WIDTH, HEIGHT, BAR, TAB_H = 2500, 1686, 286, 230
-MAX_TILES, MAX_BAR = 6, 4
+MAX_TILES, MAX_BAR = 6, 2
 MAX_IMAGE = 1024 * 1024  # LINE's limit for a rich menu picture
 A = LineMenuItem.Action
 P = LineMenuItem.Place
 T = LineMenuItem.Tab
 # The tabs each role's menu shows, and every page that is published.
 ROLE_TABS = {"staff": (T.REPORT, T.WORK), "sup": (T.REPORT, T.WORK, T.ORDER)}
+# These remain the compact quick replies in chat.  The rich menu itself uses the six fixed
+# service tiles from the catalogue below, plus its two bottom actions.
 SERVICE_BUTTONS = (
     ("เบิกอุปกรณ์", "m=equipment&kind=withdrawal"),
     ("ส่งคืนอุปกรณ์", "m=equipment&kind=return"),
@@ -50,7 +52,8 @@ def bind_seed_divisions():
     """Complete the seed after the organisation is imported; preserve explicit menu routing."""
     mappings = {
         "Meter, CT, VT": ("กคว.",),
-        "หม้อแปลง, LBS, RMU": ("กอจ.", "กองอุปกรณ์ฯ"),
+        "หม้อแปลง LBS RMU": ("กอจ.", "กองอุปกรณ์ฯ"),
+        "หม้อแปลง, LBS, RMU": ("กอจ.", "กองอุปกรณ์ฯ"),  # historical seed
         "เครื่องมือและอุปกรณ์": ("กคอ.", "กองเครื่องมือฯ"),
         "ระบบ SMG, AMR": ("ศอค.",),
         "ตรวจสอบการใช้ไฟฟ้า": ("กตฟ.",),
@@ -92,24 +95,23 @@ def alias(page):
 
 
 def areas(page="user"):
-    """A role's tab strip and at most four large service buttons."""
+    """One role's tappable areas.
+
+    Service pages deliberately share the six service tiles and two personal actions shown in
+    the supplied menu.  Staff still get their role tabs, while their work and order pages keep
+    their focused shortcuts.
+    """
     role, tab = _split(page)
     tabs = ROLE_TABS.get(role, ())
     top_h = TAB_H if tabs else 0
-    if tab == T.REPORT:
-        top = [{"item": None, "label": label, "postback": data} for label, data in SERVICE_BUTTONS]
-    elif tab == T.GUEST:
-        top = [
-            {"item": None, "label": label, "postback": data}
-            for label, data in (
-                ("ลงทะเบียน", "m=register"),
-                ("แจ้งปัญหา", "m=problems"),
-                ("ติดตามเรื่องของฉัน", "m=mine"),
-            )
-        ]
+    is_service_page = tab in {T.REPORT, T.GUEST}
+    if is_service_page:
+        top = [{"item": item} for item in tiles(T.REPORT)]
+        bottom = [{"item": item} for item in bar(T.REPORT)]
     else:
         top = [{"item": item} for item in tiles(tab)[:3]]
         top.append({"item": None, "label": "เมนูเพิ่มเติม", "postback": "m=roles"})
+        bottom = []
     tile_h = HEIGHT - top_h
     out = []
     for c, name in enumerate(tabs):
@@ -125,6 +127,36 @@ def areas(page="user"):
                 "h": top_h,
             }
         )
+    if is_service_page:
+        columns = 3
+        rows = [top[i : i + columns] for i in range(0, len(top), columns)]
+        grid_h = tile_h - (BAR if bottom else 0)
+        for r, row in enumerate(rows):
+            height = grid_h // len(rows)
+            for c, button in enumerate(row):
+                width = WIDTH // len(row)
+                out.append(
+                    {
+                        **button,
+                        "x": c * width,
+                        "y": top_h + r * height,
+                        "w": width,
+                        "h": height,
+                    }
+                )
+        for c, button in enumerate(bottom):
+            width = WIDTH // len(bottom)
+            out.append(
+                {
+                    **button,
+                    "x": c * width,
+                    "y": top_h + grid_h,
+                    "w": width,
+                    "h": BAR,
+                }
+            )
+        return out
+
     columns = 2
     rows = [top[i : i + columns] for i in range(0, len(top), columns)]
     for r, row in enumerate(rows):
@@ -218,8 +250,8 @@ def _picture(data):
 
 
 def staff_page(user):
-    """The menu page a staff LINE opens on: งานของกอง, with สั่งงาน for Supervisors."""
-    return "sup-work" if identity.staff_scope(user).overseen else "staff-work"
+    """The service grid is the default; staff can switch to work and order tabs when needed."""
+    return "sup-report" if identity.staff_scope(user).overseen else "staff-report"
 
 
 def page_for_identity(row):

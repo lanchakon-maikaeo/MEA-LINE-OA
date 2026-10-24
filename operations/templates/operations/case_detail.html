@@ -82,7 +82,7 @@
           {% for l in page.lines.lines %}
             <tr>
               <td class="num">{{ l.line_no }}</td>
-              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}{% if l.approval_reason %}<br><span class="muted">{{ l.approval_reason }}</span>{% endif %}</td>
+              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}{% if l.approval_reason %}<br><span class="muted">{{ l.approval_reason }}</span>{% endif %}</td>
               <td class="num">{{ l.requested }}</td>
               <td class="num">{{ l.approved }}</td>
               <td class="num">{{ l.issued }}</td>
@@ -100,7 +100,7 @@
           {% for l in page.lines.lines %}
             <tr>
               <td class="num">{{ l.line_no }}</td>
-              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% if l.requested_serials %}<br><span class="muted">{{ l.requested_serials|join:", " }}</span>{% endif %}{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}</td>
+              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}{% if l.requested_serials and not l.typed %}<br><span class="muted">{{ l.requested_serials|join:", " }}</span>{% endif %}{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}</td>
               <td class="num">{{ l.requested }}</td><td class="num">{{ l.arrived }}</td><td class="num">{{ l.ready }}</td><td class="num">{{ l.repair }}</td><td class="num">{{ l.other }}</td><td class="num">{{ l.awaiting }}</td><td class="num">{{ l.terminated }}</td>
               <td class="num{% if l.outstanding != '0' %} t-strong{% endif %}">{{ l.outstanding }}</td>
             </tr>
@@ -112,7 +112,7 @@
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">จำนวน</th><th scope="col">เลขเครื่อง</th></tr></thead>
           <tbody>
           {% for l in page.lines.lines %}
-            <tr><td class="num">{{ l.line_no }}</td><td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }}</span></td><td class="num">{{ l.requested }}</td><td>{{ l.serials|join:", "|default:"-" }}</td></tr>
+            <tr><td class="num">{{ l.line_no }}</td><td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }}</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}</td><td class="num">{{ l.requested }}</td><td>{{ l.serials|join:", "|default:"-" }}</td></tr>
           {% empty %}<tr><td colspan="4" class="muted">ไม่ได้ระบุรายการของ</td></tr>
           {% endfor %}
           </tbody>
@@ -194,11 +194,11 @@
 
     {% if page.registry %}
     <section class="section" aria-labelledby="s-registry">
-      <div class="section-head"><h2 id="s-registry">เอกสารทะเบียน (SAP)</h2><span class="muted">{{ page.registry|length }} รายการ</span></div>
+      <div class="section-head"><h2 id="s-registry">เลขเอกสาร SAP</h2><span class="muted">{{ page.registry|length }} รายการ</span></div>
       <ul class="stack-sm">
         {% for f in page.registry %}
           <li class="card">
-            <div class="cluster"><span class="strong">{{ f.record.get_kind_display }} · เอกสาร {{ f.record.document_number }}</span><span class="tag {{ f.tone }}">{{ f.label }}</span></div>
+            <div class="cluster"><span class="strong">{{ f.record.get_kind_display }} · เอกสาร {{ f.record.document_number }}</span>{% if f.label %}<span class="tag {{ f.tone }}">{{ f.label }}</span>{% endif %}</div>
             <p class="muted">บันทึกโดย {{ f.record.recorded_by.staff_profile.display_name|default:f.record.recorded_by.username }} ({{ f.record.division.code }}) · {{ f.record.recorded_at|thai_short }}</p>
             {% for d in f.open %}<p class="flag"><a href="{% url 'registry-discrepancy' d.pk %}">{{ d.get_kind_display }}</a> · {{ d.get_status_display }}</p>{% endfor %}
             {% if f.evidence %}<ul class="files mt-8">{% for a in f.evidence %}<li class="file">{% icon "clip" %}{% if a.scan_status == "clean" %}<a href="{% url 'attachment-download' a.pk %}">{{ a.declared_name }}</a>{% else %}<span>{{ a.declared_name }}</span>{% endif %}<span class="muted">หลักฐาน · {{ a.get_scan_status_display }}</span></li>{% endfor %}</ul>{% endif %}

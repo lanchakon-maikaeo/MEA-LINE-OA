@@ -24,6 +24,7 @@ from operations import (
     registry,
     returns,
     routing_words,
+    typed_lines,
     workflow,
 )
 from operations.fulfilment import CANCEL_RESOLUTIONS
@@ -66,6 +67,7 @@ BUTTON_LABELS = {
     "decide_routing": "ตัดสินว่ากองใดรับ",
     "set_priority": "ยืนยันระดับความเร่งด่วน",
     "set_section": "ระบุแผนก",
+    "set_sap_number": "แก้เลข SAP ของคำขอ",
     "record_facts": "แก้ข้อเท็จจริง",
     "approve": "อนุมัติ",
     "deny_approval": "ไม่อนุมัติ",
@@ -357,6 +359,9 @@ RULES = {
     ),
     "dispute_resolution": lambda st: st.case.kind == K.PROBLEM and st.answers_for_district(),
     "set_section": lambda st: bool(st.sections) and st.member(st.owner),
+    "set_sap_number": lambda st: (
+        st.member(st.owner) and bool(typed_lines.sap_label(st.case.kind, st.case.topic))
+    ),
     "close": lambda st: (
         st.case.kind in (K.WITHDRAWAL, K.PROBLEM)
         and st.member(st.owner)
@@ -664,9 +669,7 @@ def build_form(action, st, params, demo=False):
             add(
                 Field("resolution", "ของที่จ่ายไปแล้ว", "radio", True, list(CANCEL_RESOLUTIONS.items()))
             )
-            add(
-                Field("reference", "เลขเอกสารการปรับในระบบทะเบียน", help="จำเป็นเมื่อปรับในระบบทะเบียนแล้ว")
-            )
+            add(Field("reference", "เลขเอกสารการปรับใน SAP", help="จำเป็นเมื่อปรับใน SAP แล้ว"))
         add(_reason(True))
     elif action == "request_handoff":
         proposal = policy.card(case)
@@ -713,6 +716,17 @@ def build_form(action, st, params, demo=False):
         add(_reason(True))
         if routing_words.teachable(case):
             add(Field("keywords", "คำสำคัญให้ระบบจำ", help=routing_words.KEYWORDS_HELP))
+    elif action == "set_sap_number":
+        add(
+            Field(
+                "sap_number",
+                typed_lines.sap_label(case.kind, case.topic) or "เลข SAP",
+                required=True,
+                initial=case.sap_number,
+                help="ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว ประวัติเรื่องเก็บทั้งเลขเดิมและเลขใหม่",
+            )
+        )
+        add(_reason())
     elif action == "set_section":
         add(
             Field(
@@ -812,7 +826,7 @@ def build_form(action, st, params, demo=False):
             )
         add(Field("recipient_name", "ชื่อผู้รับของ ณ จุดส่งมอบ", required=True))
         if inventory.mode() == inventory.MANUAL:
-            add(Field("document_number", "เลขเอกสารจ่ายจากระบบทะเบียน", required=True))
+            add(Field("document_number", "เลขเอกสารจ่าย SAP", required=True))
         add(
             Field(
                 "lines",
@@ -848,7 +862,7 @@ def build_form(action, st, params, demo=False):
         form.picker = [(d.seq, f"ส่งมอบครั้งที่ {d.seq}", f"delivery={d.seq}") for d in mismatched]
         add(Field("delivery", "", "hidden", initial=delivery.seq if delivery else ""))
         add(Field("resolution", "ผลการตรวจส่วนต่าง", "radio", True, Delivery.Resolution.choices))
-        add(Field("reference", "เลขเอกสารอ้างอิง", help="จำเป็นเมื่อของหายหรือใช้ระบบทะเบียนเดิม"))
+        add(Field("reference", "เลขเอกสารอ้างอิง", help="จำเป็นเมื่อของหายหรือใช้เลขเอกสาร SAP"))
         if delivery:
             rows = [
                 {
@@ -968,7 +982,7 @@ def build_form(action, st, params, demo=False):
         )
         add(Field("carrier_name", "ผู้นำของมาส่ง", required=True))
         if inventory.mode() == inventory.MANUAL:
-            add(Field("document_number", "เลขเอกสารรับคืนจากระบบทะเบียน", required=True))
+            add(Field("document_number", "เลขเอกสารรับคืน SAP", required=True))
         add(_reason(label="หมายเหตุ"))
     elif action in ("inspect", "decide_inspection"):
         if action == "inspect":
@@ -1018,7 +1032,7 @@ def build_form(action, st, params, demo=False):
                 )
             )
         if inventory.mode() == inventory.MANUAL:
-            add(Field("reference", "เลขเอกสารผลตรวจจากระบบทะเบียน", required=True))
+            add(Field("reference", "เลขเอกสารผลตรวจ SAP", required=True))
         add(_reason(action == "decide_inspection", help_text="จำเป็นเมื่อผลเป็น ดำเนินการอื่นตามระเบียบ"))
     elif action == "resolve_return_discrepancy":
         units = [u for u in st.units if u.open_discrepancy and st.other(u.arrival.received_by_id)]
@@ -1054,7 +1068,7 @@ def build_form(action, st, params, demo=False):
             )
         )
         add(Field("category", "สาเหตุ", "radio", True, list(returns.STOP_CATEGORIES.items())))
-        add(Field("reference", "เลขเอกสารทะเบียน", help="จำเป็นเมื่อสูญหาย"))
+        add(Field("reference", "เลขเอกสาร SAP", help="จำเป็นเมื่อสูญหาย"))
         add(_reason(True))
     elif action == "resolve":
         suggestion = case.topic == Case.Topic.SUGGESTION
@@ -1150,16 +1164,15 @@ def build_form(action, st, params, demo=False):
     else:
         add(_reason(spec.reason_required, "หมายเหตุ" if not spec.reason_required else "เหตุผล"))
     if action in registry.EVIDENCE_ACTIONS and inventory.mode() == inventory.MANUAL:
-        # M11 Q3/Q13: the SAP document this fact cites, attached with it.
-        optional = action == "resolve_return_discrepancy"
+        # M11 Q3/Q13: the SAP document this fact cites; the file is optional since 23 Oct 2569
+        # (the system is for typing the SAP number).
         add(
             Field(
                 "evidence",
-                "หลักฐานเอกสารจากระบบทะเบียน (SAP)",
+                "ไฟล์เอกสาร SAP",
                 "file",
-                not optional,
-                help="สแกนหรือรูปเอกสาร SAP ที่ตรงกับเลขเอกสาร 1 ถึง 5 ไฟล์ JPG, PNG หรือ PDF"
-                + (" (จำเป็นเมื่อใส่เลขเอกสาร)" if optional else ""),
+                False,
+                help="ไม่บังคับ สแกนหรือรูปเอกสาร SAP ที่ตรงกับเลขเอกสาร ได้ถึง 5 ไฟล์ JPG, PNG หรือ PDF",
             )
         )
     if st.support and not demo:

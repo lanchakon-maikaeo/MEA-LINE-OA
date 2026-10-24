@@ -216,7 +216,7 @@ def due(turn, user):
 
 def find_prompt(turn):
     turn.set_prompt("staff_find")
-    turn.say("พิมพ์เลขเรื่อง (เช่น W69-000123) หรือเลขงานสั่ง (เช่น T69-000001)")
+    turn.say("พิมพ์เลขเรื่อง (เช่น W69-000123) เลขงานสั่ง (เช่น T69-000001) หรือเลขใบเบิก/ใบส่งคืน SAP")
 
 
 def find(turn, user, text):
@@ -227,11 +227,13 @@ def find(turn, user, text):
             turn.set_prompt()
             return order_detail(turn, user, order)
     else:
-        case = staff_line._case_for(user, number=number)
+        case = staff_line._case_for(user, number=number) or staff_line._case_for(
+            user, sap_number=text.strip()
+        )
         if case is not None:
             turn.set_prompt()
             return case_detail(turn, user, case)
-    turn.say("ไม่พบเลขเรื่องหรืองานสั่งในสิทธิ์ กรุณาระบุเลขใหม่หรือเลือกเมนูอื่น")
+    turn.say("ไม่พบเลขเรื่อง งานสั่ง หรือเลข SAP ในสิทธิ์ กรุณาระบุเลขใหม่หรือเลือกเมนูอื่น")
 
 
 # --- Supervisors --------------------------------------------------------------------------------
@@ -488,6 +490,14 @@ def case_detail(turn, user, case):
         f"กอง {case.owner_division.code}"
         + (f" · ผู้รับผิดชอบ {work_orders.name_of(case.assignee)}" if case.assignee else ""),
     ]
+    from operations import typed_lines
+
+    if case.sap_number and typed_lines.sap_label(case.kind, case.topic):
+        rows.append(f"{typed_lines.sap_label(case.kind, case.topic)}: {case.sap_number}")
+    for line in case.lines.select_related("item"):
+        for row in line.details:
+            unit = line.item.unit if typed_lines.is_shared(line.item) else ""
+            rows.append(f"· {typed_lines.label_of(row['group'])} {typed_lines.describe(row, unit)}")
     text = (case.description or case.purpose or case.return_reason or "").strip()
     if text:
         rows.append(text[:300])

@@ -339,10 +339,50 @@ def _build_lines(submission):
                 fail(ErrorCode.VALIDATION_ERROR, f"Give one serial per returned {item.code}.")
         lines.append(
             CaseLine(
-                line_no=number, item=item, requested_quantity=quantity, serials=list(line.serials)
+                line_no=number,
+                item=item,
+                requested_quantity=quantity,
+                serials=list(line.serials),
+                details=list(line.details),
             )
         )
     return lines
+
+
+def preview_owners(payload):
+    """The division codes a draft would go to, without writing anything: the menu's division,
+    else the rules' (empty while the draft cannot be read yet or an intake desk takes all)."""
+    if payload.get("division_code"):
+        return [payload["division_code"]]
+    if identity.intake_division() is not None:
+        return []
+    try:
+        submission = parse_submission(payload, on_behalf=False)
+        lines = _build_lines(submission)
+    except CommandFailed:
+        return []
+    routes = _route(submission.kind, lines, None, timezone.now())
+    return [owner.code for owner, _ in routes if owner is not None]
+
+
+def _check_sap(submission, fields, requester, routes, intake):
+    """เลขใบเบิก/ใบส่งคืน SAP (user, 23 Oct 2569): an open case already citing the number
+    refuses it; a LINE withdrawal or return to a division that follows SAP slips needs one."""
+    from operations import typed_lines
+
+    number = fields.get("sap_number", "")
+    if number:
+        problem = typed_lines.sap_in_use(number, requester)
+        if problem:
+            fail(ErrorCode.VALIDATION_ERROR, problem)
+        return
+    if submission.channel != Case.Channel.LINE or intake is not None:
+        return
+    if fields.get("topic") == Case.Topic.REPAIR:
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลข SAP งานซ่อมก่อนส่งเรื่อง")
+    owners = [owner.code for owner, _ in routes if owner is not None]
+    if typed_lines.needs_sap(submission.kind, owners):
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขใบเบิกหรือใบส่งคืน SAP ก่อนส่งเรื่อง")
 
 
 def _submission_requester(ctx, submission, intake):
@@ -465,7 +505,9 @@ def submit_case(actor, *, idempotency_key, payload):
             else None
         )
         routes = [(chosen, lines)] if chosen and intake is None else None
-        for owner, group in routes or _route(submission.kind, lines, intake, now):
+        routes = list(routes or _route(submission.kind, lines, intake, now))
+        _check_sap(submission, fields, requester, routes, intake)
+        for owner, group in routes:
             case = Case.objects.create(
                 number=_next_number(submission.kind, now),
                 kind=submission.kind,

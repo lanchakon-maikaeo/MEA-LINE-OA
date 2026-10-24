@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from django.core.management import call_command
 from django.test import TestCase
 
-from operations import options, staff_work
+from operations import employees, options, staff_work
 from operations.models import Case, ConversationDraft, LineMenuItem, WorkOrder
 from operations.tests.test_m03_line import ALICE, buttons, texts
 from operations.tests.test_m10_web import FriendlyFlowTests, WebTestCase
@@ -120,7 +120,7 @@ class RegistrationRedesignTests(StaffChatTestCase):
         registration = identity.submit_registration(
             "line",
             row.external_id,
-            employee.name,
+            employees.label(employee),
             "D01",
             employee=employee,
             verified_by="otp",
@@ -147,7 +147,7 @@ class RegistrationRedesignTests(StaffChatTestCase):
         registration = identity.submit_registration(
             "line",
             row.external_id,
-            employee.name,
+            employees.label(employee),
             "D01",
             employee=employee,
             verified_by="otp",
@@ -168,18 +168,38 @@ class ServiceMenuFlowTests(MenuTestCase):
 
         line_menu_catalog.sync()
 
-    def test_meter_withdrawal_uses_its_division_and_category(self):
-        self.open("Meter, CT, VT")
-        self.type(ALICE, "เบิกอุปกรณ์")
+    def test_a_tile_withdrawal_uses_its_division_and_category(self):
+        # 24 Oct 2569: every equipment tile asks for the equipment first (test_m14_kcw_menu).
+        self.open("เครื่องมือและอุปกรณ์")
+        self.press(ALICE, "พิมพ์ชื่ออุปกรณ์")
+        self.press(ALICE, "ติดตามใบเบิก")
         draft = ConversationDraft.objects.get(status="open")
-        self.assertEqual(draft.kind, Case.Kind.WITHDRAWAL)
-        self.assertEqual(draft.data["division"], "กคว.")
-        self.assertEqual(draft.step, "meter_group")
-        self.type(ALICE, "มิเตอร์")
-        draft.refresh_from_db()
-        self.assertEqual(draft.data["line"]["category"], "meter")
+        self.assertEqual(
+            (draft.kind, draft.data["division"], draft.data["typed"]),
+            (Case.Kind.WITHDRAWAL, "กคอ.", "other"),
+        )
+
+    def test_every_equipment_service_uses_the_same_four_groups(self):
+        # 24 Oct 2569: each tile asks its own equipment first; the catalogue shortcut keeps the
+        # same four LINE groups for every service.
+        from operations import line_menu_catalog
+
+        line_menu_catalog.sync()
+        expected = {
+            "Meter, CT, VT": ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น", "ติดตามเรื่อง"],
+            "หม้อแปลง LBS RMU": ["หม้อแปลง", "LBS", "RMU", "อุปกรณ์อื่น", "ติดตามเรื่อง"],
+            "เครื่องมือและอุปกรณ์": ["พิมพ์ชื่ออุปกรณ์", "ติดตามเรื่อง"],
+        }
+        for label, choices in expected.items():
+            with self.subTest(label=label):
+                reply = self.open(label)
+                self.assertEqual([b for b in buttons(reply) if b != "หน้าหลัก"], choices)
+        reply = self.type(ALICE, "เบิกอุปกรณ์")
+        self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
 
     def test_meter_groups_click_type_search_and_back(self):
+        # The catalogue's four LINE groups, from the typed shortcut (the tiles ask their own
+        # equipment first since 24 Oct 2569).
         from operations.models import EquipmentType
 
         for group in ("CT", "VT"):
@@ -190,7 +210,6 @@ class ServiceMenuFlowTests(MenuTestCase):
                 category="transformer",
                 unit="เครื่อง",
             )
-        self.open("Meter, CT, VT")
         reply = self.type(ALICE, "ส่งคืนอุปกรณ์")
         self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
         reply = self.press(ALICE, "CT")
@@ -205,11 +224,11 @@ class ServiceMenuFlowTests(MenuTestCase):
         self.press(ALICE, "CT ทดสอบ")
         self.type(ALICE, "2")
         draft = ConversationDraft.objects.get(status="open")
-        self.assertEqual(draft.data["division"], "กคว.")
+        self.assertEqual(draft.kind, Case.Kind.RETURN)
         self.assertEqual(draft.data["lines"][0]["item_code"], "CT_TEST")
 
     def test_missing_group_does_not_offer_unrelated_material(self):
-        self.open("Meter, CT, VT")
+        self.open("เครื่องมือและอุปกรณ์")
         self.type(ALICE, "เบิกอุปกรณ์")
         reply = self.type(ALICE, "CT")
         self.assertIn("ยังไม่มีรายการที่ใช้งานได้", texts(reply))
@@ -229,7 +248,7 @@ class ServiceMenuFlowTests(MenuTestCase):
         EquipmentType.objects.create(
             code="VT_99", name="VT รุ่น 99", line_group="vt", category="meter", unit="เครื่อง"
         )
-        self.open("Meter, CT, VT")
+        self.open("เครื่องมือและอุปกรณ์")
         self.type(ALICE, "เบิกอุปกรณ์")
         self.type(ALICE, "CT")
         self.assertEqual(ConversationDraft.objects.get(status="open").step, "item_search")
@@ -266,7 +285,12 @@ class ServiceMenuFlowTests(MenuTestCase):
 
         self.say(self.event(BOB, "follow"))
         self.type(BOB, "ไม่ระบุตัวตน")
-        reply = self.type(BOB, "Meter, CT, VT")
+        # 24 Oct 2569: an equipment tile also takes problem reports, so it opens its equipment;
+        # picking one goes straight to a problem report, never a withdrawal.
+        reply = self.type(BOB, "หม้อแปลง LBS RMU")
         self.assertNotIn("เบิกอุปกรณ์", buttons(reply))
         self.assertNotIn("ส่งคืนอุปกรณ์", buttons(reply))
+        self.assertIn("หม้อแปลง", buttons(reply))
+        reply = self.press(BOB, "หม้อแปลง")
         self.assertIn("เฉพาะปัญหา", texts(reply))
+        self.assertNotIn("ติดตามใบเบิก", buttons(reply))

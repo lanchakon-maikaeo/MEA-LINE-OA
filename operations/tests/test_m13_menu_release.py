@@ -132,5 +132,17 @@ class ReleaseTests(TestCase):
 
     def test_guest_image_matches_guest_actions_and_every_image_fits(self):
         labels = [a["action"]["displayText"] for a in line_menu.rich_menu("user")["areas"]]
-        self.assertEqual(labels, ["ลงทะเบียน", "แจ้งปัญหา", "ติดตามเรื่องของฉัน"])
+        self.assertEqual(
+            labels,
+            [
+                "Meter, CT, VT",
+                "หม้อแปลง LBS RMU",
+                "เครื่องมือและอุปกรณ์",
+                "ระบบ SMG, AMR",
+                "ตรวจสอบการใช้ไฟฟ้า",
+                "ปัญหา/ข้อเสนอแนะ",
+                "เรื่องของฉัน",
+                "ติดตามเลขเรื่อง",
+            ],
+        )
         self.assertTrue(all(len(image) <= line_menu.MAX_IMAGE for image in self.images.values()))

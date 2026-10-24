@@ -115,20 +115,29 @@ REPORTED_AT_MAX_AGE = timedelta(days=30)
 REPORTED_AT_SKEW = timedelta(minutes=5)
 KIND_FIELDS = {
     # M09 Q5: withdrawals and returns may refer to the requester's earlier case (e.g. a problem).
+    # sap_number (user, 23 Oct 2569): the SAP slip the request follows.
     Case.Kind.WITHDRAWAL: {
         "required": {"purpose"},
-        "optional": {"needed_by", "related_case_number"},
+        "optional": {"needed_by", "related_case_number", "sap_number"},
     },
     Case.Kind.RETURN: {
         "required": {"condition", "reason"},
-        "optional": {"source_reference", "related_case_number"},
+        "optional": {"source_reference", "related_case_number", "sap_number"},
     },
     Case.Kind.PROBLEM: {
         "required": {"description"},
-        "optional": {"impact", "related_case_number", "topic", "latitude", "longitude"},
+        # sap_number: ติดตามสถานะการซ่อม (topic repair, 24 Oct 2569) cites its SAP number.
+        "optional": {
+            "impact",
+            "related_case_number",
+            "topic",
+            "latitude",
+            "longitude",
+            "sap_number",
+        },
     },
 }
-LINE_FIELDS = {"item_code", "quantity", "serials"}
+LINE_FIELDS = {"item_code", "quantity", "serials", "details"}
 NO_ITEM_TOPICS = {Case.Topic.USAGE, Case.Topic.SUGGESTION, Case.Topic.INQUIRY, Case.Topic.SYSTEM}
 ACTION_FIELDS = {"reason"}
 ACTION_EXTRA_FIELDS = {
@@ -137,6 +146,7 @@ ACTION_EXTRA_FIELDS = {
     "decide_routing": {"division", "keywords"},
     "set_priority": {"priority"},
     "set_section": {"section"},
+    "set_sap_number": {"sap_number"},
     "record_facts": {"facts", "clear"},
     # M07: lines are [{"line_no": n, ...}] of the case; deliveries are numbered per case.
     "approve": {"lines"},
@@ -257,6 +267,7 @@ class LineInput:
     item_code: str
     quantity: Decimal | None
     serials: tuple
+    details: tuple = ()  # rows the requester typed for a shared item (typed_lines)
 
 
 @dataclass(frozen=True)
@@ -295,8 +306,13 @@ def parse_submission(payload, on_behalf):
         "topic",
         "latitude",
         "longitude",
+        "sap_number",
     }:
         fields[name] = _text(payload, name, False, 100 if name == "source_reference" else TEXT_MAX)
+    if "sap_number" in spec["optional"]:
+        fields["sap_number"] = _text(payload, "sap_number", False, 20)
+        if fields["sap_number"] and not re.fullmatch(r"[A-Za-z0-9-]{4,20}", fields["sap_number"]):
+            fail(ErrorCode.VALIDATION_ERROR, "เลข SAP ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว")
     if "needed_by" in spec["optional"]:
         fields["needed_by"] = None
         if payload.get("needed_by"):
@@ -336,7 +352,13 @@ def parse_submission(payload, on_behalf):
         serials = _serials(raw.get("serials"))
         if kind == Case.Kind.WITHDRAWAL and serials:
             fail(ErrorCode.VALIDATION_ERROR, "Serials are recorded at issue, not on request.")
-        lines.append(LineInput(code.strip(), quantity, tuple(serials)))
+        from operations import typed_lines  # local: it reads the database
+
+        try:
+            details = typed_lines.clean_details(raw.get("details"))
+        except ValueError as exc:
+            fail(ErrorCode.VALIDATION_ERROR, str(exc))
+        lines.append(LineInput(code.strip(), quantity, tuple(serials), tuple(details)))
     if lines and fields.get("topic") in NO_ITEM_TOPICS:
         fail(ErrorCode.VALIDATION_ERROR, "This topic lists no items.")
     if len({line.item_code for line in lines}) != len(lines):

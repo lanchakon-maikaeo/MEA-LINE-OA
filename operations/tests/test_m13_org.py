@@ -41,6 +41,7 @@ from operations.models import (
     AuthorityGrant,
     Case,
     CaseTriage,
+    ConversationDraft,
     District,
     Division,
     EquipmentType,
@@ -50,7 +51,7 @@ from operations.models import (
     Section,
 )
 from operations.tests.test_m02_cases import ITEMS, make_staff
-from operations.tests.test_m03_line import ALICE, LineTestCase, texts
+from operations.tests.test_m03_line import ALICE, LineTestCase, buttons, texts
 
 S = Case.Status
 A = AuthorityGrant.Activity
@@ -72,6 +73,9 @@ def real_world(target):
             },
         )
     Division.objects.filter(is_intake=True).update(is_intake=False)
+    # load_org asks กคว. for SAP slip numbers (23 Oct 2569); tests about that switch it on
+    # themselves (test_m14_kcw_menu), so the other real-structure tests file without one.
+    Division.objects.update(requires_sap=False)
     version = policy.import_policy(policy.load_document(seed_org_demo.REAL_POLICY))
     if policy.active_policy() != version:
         policy.activate_policy(None, version, "ผู้ทดสอบ", "TEST-ORG", "ทดสอบโครงสร้างจริง")
@@ -455,12 +459,23 @@ class OptionsTests(OrgTestCase):
 
 
 class RegistryTests(OrgTestCase):
-    def test_the_registry_is_for_admins_only_by_default(self):
-        # 15 ต.ค. 2569 Q6: admins hold the registry; ตัวเลือกระบบ gives it back to divisions.
+    def test_the_registry_menu_is_off_by_default_then_for_admins_or_divisions(self):
+        # 23 ต.ค. 2569: no registry menu unless switched on; 15 ต.ค. Q6: then admins hold it,
+        # and ตัวเลือกระบบ gives it back to divisions.
         _, meter = self.submit(withdrawal(("MTR_SYN_A", "1")))
         d = RegistryDiscrepancy.objects.create(
             kind="not_found", case=meter, document_number="49001", opened_at=timezone.now()
         )
+        admin = Client()
+        admin.force_login(self.admin)
+        self.assertFalse(registry.enabled())
+        self.assertFalse(registry.may_open(self.admin))
+        self.assertFalse(registry.may_decide(self.admin, d))
+        self.assertNotContains(admin.get("/console/"), 'href="/registry/"')
+        for page in ("/registry/", f"/registry/{d.pk}/", "/registry/settings/"):
+            self.assertEqual(admin.get(page).status_code, 404)
+        self.assertEqual(admin.get("/console/admin/items/").status_code, 200)
+        options.change(self.admin, options.REGISTRY_ACCESS, "admin", "เทียบกับไฟล์ SAP")
         self.assertTrue(registry.admins_only())
         self.assertFalse(registry.may_open(self.kcw))
         self.assertFalse(registry.may_decide(self.kcw, d))
@@ -528,21 +543,21 @@ class LineTopicTests(LineTestCase):
         super().setUpTestData()
         real_world(cls)
 
-    def test_the_requester_chooses_usage_and_it_reaches_ktf(self):
+    def test_the_general_problem_menu_uses_the_four_equipment_groups(self):
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.assertIn("4. การใช้ไฟฟ้า (ลักใช้ไฟ ไฟแพง ร้องเรียน)", texts(self.sent[-1]))
-        self.press(ALICE, "การใช้ไฟฟ้า")
-        self.assertIn("แจ้งเรื่องที่พบ", texts(self.sent[-1]))
-        self.type(ALICE, "สงสัยมีการลักใช้ไฟ (ข้อมูลทดสอบ)")
-        self.press(ALICE, "ข้าม")
-        summary = self.press(ALICE, "ข้าม")
-        self.assertIn("สรุปเรื่อง: การใช้ไฟฟ้า", texts(summary))
-        reply = self.press(ALICE, "ยืนยันส่งเรื่อง")
-        case = Case.objects.get()
-        self.assertEqual((case.owner_division.code, case.topic), ("กตฟ.", "usage"))
-        self.assertIn(case.number, texts(reply))
+        reply = self.sent[-1]
+        self.assertIn(
+            "เรื่องนี้เกี่ยวกับอะไร\n1. มิเตอร์\n2. CT\n3. VT\n4. อุปกรณ์อื่น\n5. ข้อเสนอแนะ",
+            texts(reply),
+        )
+        self.assertEqual(list(buttons(reply))[:5], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น", "ข้อเสนอแนะ"])
+        self.assertNotIn("หม้อแปลง", texts(reply))
+        self.assertNotIn("การใช้ไฟฟ้า", texts(reply))
+        self.type(ALICE, "2")
+        draft = ConversationDraft.objects.get(status="open")
+        self.assertEqual((draft.data["line"]["group"], draft.data["topic"]), ("ct", "meter"))
 
     def test_a_suggestion_reaches_the_coordinator_and_is_acknowledged(self):
         self.approve(ALICE)
@@ -560,18 +575,14 @@ class LineTopicTests(LineTestCase):
         self.assertEqual(problems.categories_for(case), ["considered", "adopted", "not_feasible"])
         self.assertEqual(problem_chat.labels(case), ("รับทราบ", "มีข้อมูลเพิ่ม"))
 
-    def test_an_equipment_problem_picks_the_topic_then_may_skip_the_item(self):
+    def test_an_equipment_problem_uses_its_selected_item_for_the_case_topic(self):
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "หม้อแปลง")
-        self.press(ALICE, "ไม่ระบุรุ่น")
-        self.type(ALICE, "หม้อแปลงมีเสียงดัง (ทดสอบ)")
-        self.press(ALICE, "ข้าม")
-        self.press(ALICE, "ข้าม")
-        self.press(ALICE, "ยืนยันส่งเรื่อง")
-        case = Case.objects.get()
-        self.assertEqual((case.owner_division.code, case.topic), ("กองอุปกรณ์ฯ", "transformer"))
+        self.press(ALICE, "อุปกรณ์อื่น")
+        self.press(ALICE, "TRF_SYN_A")
+        draft = ConversationDraft.objects.get(status="open")
+        self.assertEqual((draft.kind, draft.data["topic"]), ("problem", "transformer"))
 
     def test_a_mixed_request_lists_every_number(self):
         self.approve(ALICE)
@@ -600,6 +611,4 @@ class LineTopicTests(LineTestCase):
             patch.object(ai_chat.ai, "active_version", return_value=object()),
         ):
             self.assertFalse(ai_chat.wants_ai(None, None, "ร้องเรียนค่าไฟแพงผิดปกติ"))
-        self.assertEqual(
-            conversation._topics(), ["meter", "transformer", "other", "usage", "suggestion"]
-        )
+        self.assertEqual(conversation._topics(), ["meter", "ct", "vt", "other", "suggestion"])

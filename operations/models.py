@@ -45,6 +45,9 @@ class Division(models.Model):
     # it when no duty entry fits. The examples test the AI and never reach its prompt (Q25).
     duty_overview = models.TextField(blank=True)
     duty_examples = models.JSONField(default=list, blank=True)
+    # เลขใบเบิก/ใบส่งคืน SAP (user, 23 Oct 2569): a withdrawal or return this division takes
+    # follows a slip already made in SAP, so the LINE chat asks for its number. Admins switch it.
+    requires_sap = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["code"]
@@ -187,11 +190,10 @@ class Requester(models.Model):
         REVOKED = "revoked", "ถอนแล้ว"
 
     class EmployeeLink(models.TextChoices):
-        """How `employee` was set. Only a verified or admin link counts as proof of who this is;
-        a name match only shows the position (user, 14 Oct 2569)."""
+        """How `employee` was set: the person proved the employee ID, or an admin linked it.
+        The roster has no names (user, 23 Oct 2569), so nothing is linked by a name any more."""
 
         VERIFIED = "verified", "ยืนยันด้วยรหัสพนักงาน"
-        NAME = "name", "ชื่อตรงทะเบียนพนักงาน"
         ADMIN = "admin", "แอดมินผูก"
         UNLINKED = "unlinked", "แอดมินยกเลิกการผูก"
 
@@ -221,7 +223,6 @@ class Requester(models.Model):
         "Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     # ทะเบียนพนักงาน behind this person, for the position and staff roles on the requester list.
-    # Empty `employee_link`: not decided yet, so a unique name match may still fill it.
     employee = models.ForeignKey(
         "Employee", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -373,6 +374,13 @@ class EquipmentType(models.Model):
         CT = "ct", "CT"
         VT = "vt", "VT"
         OTHER = "other", "อุปกรณ์อื่น"
+        # The กอจ. tile (user, 24 Oct 2569): typed rows like the กคว. groups.
+        TRANSFORMER = "transformer", "หม้อแปลง"
+        LBS = "lbs", "LBS"
+        RMU = "rmu", "RMU"
+
+    # The old category menus (เบิก/คืนด้วยรายการ) offer these four groups only.
+    MENU_GROUPS = ("meter", "ct", "vt", "other")
 
     line_group = models.CharField(max_length=16, blank=True, choices=LineGroup.choices)
 
@@ -386,6 +394,9 @@ class EquipmentType(models.Model):
     is_synthetic = models.BooleanField(default=False)
     # M11 Q5: the registry's (SAP) material code; one per item, empty until mapped.
     official_code = models.CharField(max_length=40, blank=True)
+    # ช่องที่ผู้ใช้พิมพ์ (user, 23 Oct 2569): the one shared item of a LINE group whose lines are
+    # typed (meter numbers, size, quantity) instead of chosen; never offered in a list.
+    entry_group = models.CharField(max_length=16, blank=True, choices=LineGroup.choices)
 
     class Meta:
         ordering = ["code"]
@@ -435,6 +446,8 @@ class Case(models.Model):
         # เมนู LINE (15 ต.ค. 2569 Q18, Q20): a question to a division, and a work system's problem.
         INQUIRY = "inquiry", "สอบถาม/ติดตาม"
         SYSTEM = "system", "ระบบงาน"
+        # ปุ่ม Meter, CT, VT (user, 24 Oct 2569): follow a repair by its SAP number.
+        REPAIR = "repair", "ติดตามสถานะการซ่อม"
 
     class Channel(models.TextChoices):
         LINE = "line", "LINE"
@@ -482,6 +495,8 @@ class Case(models.Model):
     condition = models.TextField(blank=True)
     return_reason = models.TextField(blank=True)
     source_reference = models.CharField(max_length=100, blank=True)
+    # เลขใบเบิก/ใบส่งคืน SAP the requester gave (user, 23 Oct 2569); staff may correct it.
+    sap_number = models.CharField(max_length=20, blank=True, db_index=True)
     description = models.TextField(blank=True)
     impact = models.TextField(blank=True)
     related_case = models.ForeignKey(
@@ -543,6 +558,9 @@ class CaseLine(models.Model):
     item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
     requested_quantity = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     serials = models.JSONField(default=list, blank=True)
+    # What the requester typed for a shared item (typed_lines): [{size, quantity, numbers,
+    # name, extra}], one entry per typed row; empty for an item chosen from the list.
+    details = models.JSONField(default=list, blank=True)
     approved_quantity = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     approval_reason = models.TextField(blank=True)
     approved_by = models.ForeignKey(
@@ -1110,6 +1128,9 @@ class AIConfigVersion(models.Model):
     screen_profile = models.ForeignKey(
         AIProfile, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # Extraction only (user, 23 Oct 2569): also read the SAP slip number and the typed fields
+    # of the equipment-first groups (typed_lines). Older versions keep the prompt they passed.
+    typed_fields = models.BooleanField(default=False, db_default=False)
     profiles = models.ManyToManyField(AIProfile, through="AIConfigEntry", related_name="+")
     test_passed = models.BooleanField(null=True)
     test_result = models.JSONField(default=dict, blank=True)
@@ -2181,10 +2202,13 @@ class Employee(models.Model):
     15 ต.ค. 2569 (Q10, Q16): the organisation's roster columns. `district` is the ฝ่าย as a
     organisational unit (Q13); the e-mail is kept twice and never in plain text: a hash to compare
     what someone types, and sealed with the server's PII key to send a one-time code. Phone
-    columns are never read."""
+    columns are never read. 23 ต.ค. 2569: names are not read either; a verified employee is
+    shown by the employee ID (employees.label)."""
 
     employee_id = models.CharField(max_length=32, unique=True)
-    name = models.CharField(max_length=200)
+    # Emptied and never read or written since 23 ต.ค. 2569; kept one release so the previous
+    # release still runs during a deploy, then dropped.
+    name = models.CharField(max_length=200, blank=True, default="", db_default="")
     district = models.ForeignKey(District, null=True, blank=True, on_delete=models.PROTECT)
     division = models.ForeignKey(Division, null=True, blank=True, on_delete=models.PROTECT)
     position = models.CharField(max_length=200, blank=True)
@@ -2205,7 +2229,7 @@ class Employee(models.Model):
         ordering = ["employee_id"]
 
     def __str__(self):
-        return f"{self.employee_id} {self.name}"
+        return self.employee_id
 
 
 class AIKeywordRun(models.Model):
@@ -2251,6 +2275,7 @@ class LineMenuItem(models.Model):
         TOPIC = "topic", "เปิดปุ่มย่อยของหัวข้อนี้"
         TRACK = "track", "ติดตาม: แสดงเรื่องของผู้ใช้ ถ้าไม่มีให้ถามกองโดยตรง"
         RETURN = "return", "เริ่มคำขอคืนส่งถึงกองนี้"
+        EQUIPMENT = "equipment", "เลือกอุปกรณ์ แล้วเลือกเบิก ส่งคืน หรือแจ้งปัญหา"
         PROBLEM = "problem", "เริ่มแจ้งปัญหาส่งถึงกองนี้"
         GENERAL = "general", "แจ้งปัญหาหรือข้อเสนอแนะ (กติกาเลือกกอง)"
         NEW = "new", "ส่งเรื่องใหม่ (ผู้ใช้เลือกชนิดเอง)"
@@ -2290,6 +2315,42 @@ class LineMenuItem(models.Model):
 
     class Meta:
         ordering = ["tab", "place", "position", "pk"]
+
+
+class EntryField(models.Model):
+    """ช่องที่ผู้ใช้พิมพ์ของหมวด (user, 23 Oct 2569): what the LINE chat asks for each line of a
+    typed group, in order. The base fields (meter numbers, size, quantity, name) can be relabelled
+    but not removed, since the system counts quantities and meter numbers with them; admins add
+    text fields of their own. `required` holds for withdrawals and returns; a problem report may
+    skip every field."""
+
+    class Key(models.TextChoices):
+        NUMBERS = "numbers", "หมายเลขเครื่องวัด"
+        SIZE = "size", "ขนาด"
+        QUANTITY = "quantity", "จำนวน"
+        NAME = "name", "ชื่ออุปกรณ์"
+
+    group = models.CharField(max_length=16, choices=EquipmentType.LineGroup.choices)
+    key = models.CharField(max_length=32)  # a Key for a base field, "x<pk>" for an added one
+    label = models.CharField(max_length=40)
+    kinds = models.JSONField(default=list)  # of withdrawal, return, problem
+    required = models.BooleanField(default=True)
+    position = models.PositiveSmallIntegerField(default=0)
+    is_base = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["group", "position", "pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["group", "key"], name="entryfield_unique_key")
+        ]
+
+    def __str__(self):
+        return f"{self.group} · {self.label}"
 
 
 class MonitoringDay(models.Model):

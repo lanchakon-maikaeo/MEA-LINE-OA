@@ -2,7 +2,9 @@
 
 Registry staff (the policy's registry unit, SIM-REG in the synthetic policy) see every
 discrepancy and decide it; an admin sees everything read-only; another division sees only what
-was sent to it for checking. Settings and official codes are admin-only.
+was sent to it for checking. SAP import settings are admin-only. With ตัวเลือกระบบ
+registry_access "off" (the default since 23 Oct 2569) none of these pages exist; an item's LINE
+group and SAP code are set on the admin page รายการอุปกรณ์ (items_web).
 """
 
 import csv
@@ -12,14 +14,13 @@ from datetime import datetime, timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_safe
 
 from operations import identity, registry, reports
-from operations.models import EquipmentType, RegistryDiscrepancy, RegistryImport
+from operations.models import RegistryDiscrepancy, RegistryImport
 
 D = RegistryDiscrepancy
 TABS = [
@@ -35,6 +36,11 @@ CLOSED_DAYS = 30
 def _messages(request, exc):
     for text in getattr(exc, "messages", None) or [str(exc)]:
         messages.error(request, text)
+
+
+def _on():
+    if not registry.enabled():
+        raise Http404
 
 
 def _tabs(user):
@@ -61,6 +67,7 @@ def _rows(user, tab, kind, now):
 @login_required
 @require_safe
 def home(request):
+    _on()
     user, now = request.user, timezone.now()
     full = registry.may_open(user)
     if not full and not registry.visible_discrepancies(user).exists():
@@ -118,6 +125,7 @@ def _discrepancy(request, pk):
 
 @login_required
 def discrepancy(request, pk):
+    _on()
     d = _discrepancy(request, pk)
     user = request.user
     if request.method == "POST":
@@ -185,6 +193,7 @@ def _date(value):
 @login_required
 @require_POST
 def upload(request, kind):
+    _on()
     if kind not in RegistryImport.Kind.values:
         raise Http404
     if not registry.may_import(request.user):
@@ -230,6 +239,7 @@ def upload(request, kind):
 
 @login_required
 def settings_page(request):
+    _on()
     if not identity.staff_scope(request.user).is_admin:
         raise PermissionDenied
     row = registry.config()
@@ -244,23 +254,6 @@ def settings_page(request):
                     post.get("storage_locations", ""),
                     post.get("reason", ""),
                 )
-            elif post.get("action") == "codes":
-                reason = (post.get("reason") or "").strip()
-                with transaction.atomic():
-                    for item in EquipmentType.objects.order_by("code"):
-                        value = post.get(f"code-{item.pk}")
-                        if value is not None and value.strip() != item.official_code:
-                            registry.set_official_code(request.user, item, value, reason)
-                        group = post.get(f"group-{item.pk}")
-                        if group is not None:
-                            registry.set_line_group(request.user, item, group, reason)
-            elif post.get("action") == "codes_file" and request.FILES.get("file"):
-                upload_file = request.FILES["file"]
-                count = registry.import_official_codes(
-                    request.user, upload_file.name, upload_file.read(registry.MAX_BYTES + 1)
-                )
-                messages.success(request, f"ผูกรหัสทางการ {count} รายการแล้ว")
-                return redirect("registry-settings")
             else:
                 raise Http404
         except (ValidationError, PermissionDenied) as exc:
@@ -294,8 +287,6 @@ def settings_page(request):
                 for name in registry.DEFAULT_ALIASES
             ],
             "places": "\n".join(" / ".join(p for p in pair if p) for pair in row.storage_locations),
-            "items": EquipmentType.objects.order_by("code"),
-            "line_groups": EquipmentType.LineGroup.choices,
         },
     )
 
@@ -304,6 +295,7 @@ def settings_page(request):
 @require_safe
 def export(request):
     """ส่วนต่างทะเบียน as CSV (BOM, formula-safe, audited); no requester data."""
+    _on()
     if not registry.may_open(request.user):
         raise PermissionDenied
     rows = registry.visible_discrepancies(request.user).select_related(

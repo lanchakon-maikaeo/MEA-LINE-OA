@@ -201,6 +201,19 @@ ACTIONS = {
             "M06",
             _per_kind(lambda k, st: _same([s for s in st if s not in TERMINAL])),
         ),
+        # 23 Oct 2569: staff correct the SAP slip number a requester typed (history keeps both).
+        ActionSpec(
+            "set_sap_number",
+            "แก้เลข SAP ของคำขอ",
+            "M06",
+            _per_kind(
+                lambda k, st: (
+                    _same([s for s in st if s not in TERMINAL])
+                    if k in (K.WITHDRAWAL, K.RETURN, K.PROBLEM)  # problems: repair only
+                    else {}
+                )
+            ),
+        ),
         ActionSpec(
             "record_facts",
             "ยืนยัน/แก้ข้อเท็จจริง",

@@ -20,7 +20,7 @@ from django.db.models import Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from operations import identity as identity_services
-from operations import line_api, services, workflow
+from operations import line_api, services, typed_lines, workflow
 from operations.contracts import (
     Actor,
     CommandFailed,
@@ -60,17 +60,16 @@ THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 KIND_LABELS = {K.WITHDRAWAL: "เบิก", K.RETURN: "ส่งคืน", K.PROBLEM: "แจ้งปัญหา/ข้อเสนอแนะ"}
 KIND_SHORT = {K.WITHDRAWAL: "เบิก", K.RETURN: "คืน", K.PROBLEM: "ปัญหา/ข้อเสนอแนะ"}
 KIND_ORDER = [K.WITHDRAWAL, K.RETURN, K.PROBLEM]
-# หมวดเรื่อง of แจ้งปัญหา/ข้อเสนอแนะ (real structure Q3; 10 Oct 2569 Q1): equipment topics lead to
-# the items, การใช้ไฟฟ้า and ข้อเสนอแนะ straight to the story. A topic shows only while the
-# policy names an owner for it, so the list follows the rules (ADR 0009).
+# หมวดเรื่องจริงของ Case ใช้ส่งต่อและแสดงผลภายหลัง ส่วนเมนูเริ่มต้นของ LINE ใช้
+# METER_GROUPS ด้านล่างเพื่อให้ทุกบริการอุปกรณ์มีตัวเลือกชุดเดียวกัน.
 TOPIC_LABELS = {
     "meter": "มิเตอร์",
     "transformer": "หม้อแปลง",
     "other": "อุปกรณ์อื่น",
     "usage": "การใช้ไฟฟ้า",
     "suggestion": "ข้อเสนอแนะ",
+    "repair": "ติดตามสถานะการซ่อม",
 }
-TOPIC_NOTES = {"usage": " (ลักใช้ไฟ ไฟแพง ร้องเรียน)"}
 SUGGESTION_FIELDS = [
     ("description", "กรุณาแจ้งข้อเสนอแนะ", True),
     ("impact", "ถ้ามีรายละเอียดเพิ่ม เช่น สถานที่หรืองานที่เกี่ยวข้อง พิมพ์ต่อได้ หรือกดข้าม", False),
@@ -90,13 +89,19 @@ SYSTEM_FIELDS = [
     ("description", "แจ้งปัญหาที่พบ เช่น หน้าจอที่ใช้ เลขมิเตอร์ หรือช่วงเวลา", True),
     ("impact", "ผลกระทบหรือข้อมูลเพิ่มเติม พิมพ์ต่อได้ หรือกดข้าม", False),
 ]
+# ติดตามสถานะการซ่อม (user, 24 Oct 2569): after the SAP number and the equipment rows.
+REPAIR_FIELDS = [
+    ("description", "พิมพ์สิ่งที่ต้องการติดตาม เช่น ส่งซ่อมเมื่อไร หรืออาการที่ส่งซ่อม", True),
+    ("related_case_number", "หากเกี่ยวข้องกับเรื่องเดิม กรุณาเลือกเรื่อง หรือเลือกข้าม", False),
+]
 CATEGORY_LABELS = {
     EquipmentType.Category.METER: "มิเตอร์",
     EquipmentType.Category.TRANSFORMER: "หม้อแปลง",
     EquipmentType.Category.OTHER: "อุปกรณ์อื่น",
 }
-CATEGORY_ORDER = list(CATEGORY_LABELS)
 METER_GROUPS = {"meter": "มิเตอร์", "ct": "CT", "vt": "VT", "other": "อุปกรณ์อื่น"}
+# Every group a tile may ask for before the action (typed_lines; กอจ. since 24 Oct 2569).
+TYPED_GROUPS = dict(EquipmentType.LineGroup.choices)
 # Per-kind fields after the item lines: (name, question, required).
 FIELDS = {
     K.WITHDRAWAL: [
@@ -129,6 +134,7 @@ TOPIC_FIELD_LABELS = {
     "suggestion": {"description": "ข้อเสนอแนะ", "impact": "รายละเอียดเพิ่ม"},
     "usage": {"description": "เรื่องที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
     "inquiry": {"description": "สิ่งที่สอบถาม"},
+    "repair": {"description": "สิ่งที่ต้องการติดตาม"},
     "system": {"description": "ปัญหาที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
 }
 MENU = [("ส่งเรื่องใหม่", "m=new"), ("เรื่องของฉัน", "m=mine"), ("ติดตามเรื่อง", "m=track")]
@@ -824,12 +830,15 @@ def _registration(turn):
         data["district"] = token.value["code"]
         return _registration_next(turn, data)
     if prompt == "reg_district" and token is not None and token.action == "reg_rename":
+        if data.get("employee"):
+            return _ask_district(turn, data.pop("name", ""), **data)
         turn.set_prompt("reg_name")
         turn.say(f"พิมพ์ชื่อและนามสกุลใหม่ เว้นวรรคระหว่างกัน {NAME_EXAMPLE}")
         return
     text = _event_text(turn)
     if prompt == "reg_district" and text is not None and data.get("name"):
-        return _ask_district(turn, data["name"])  # typed instead of choosing: the list again
+        # Typed instead of choosing: the list again, keeping what the steps so far gave.
+        return _ask_district(turn, data.pop("name"), **data)
     if prompt == "reg_external_name":
         if not text or not 2 <= len(text.strip()) <= 200:
             turn.say("พิมพ์ชื่อ 2–200 ตัวอักษร")
@@ -1073,15 +1082,16 @@ def _failed(turn, data, reason, message, again):
 
 
 def _employee_proved(turn, data, employee, method):
-    """The name and unit come from the roster; the unit is asked only when the roster
-    gives none."""
+    """The employee ID stands for the name (the roster has none, 23 Oct 2569) and the unit
+    comes from the roster; the unit is asked only when the roster gives none."""
+    from operations import employees
+
     data = {k: v for k, v in data.items() if k not in ("employee_try", "employee_id", "name")}
     data.update(checked=True, employee=employee.pk, method=method)
+    name = employees.label(employee)
     if employee.district_id and employee.district.is_active:
-        return _registration_next(
-            turn, {**data, "name": employee.name, "district": employee.district.code}
-        )
-    return _ask_district(turn, employee.name, **data)
+        return _registration_next(turn, {**data, "name": name, "district": employee.district.code})
+    return _ask_district(turn, name, **data)
 
 
 def _ask_name(turn, text):
@@ -1122,15 +1132,18 @@ def _not_a_name(turn, text):
 
 
 def _ask_district(turn, name, **data):
-    """The district list, with 'แก้ชื่อ' in case the name was typed wrong."""
+    """The district list, with 'แก้ชื่อ' in case the name was typed wrong. A proved employee
+    typed no name (the employee ID stands for it), so there is nothing to correct."""
     turn.set_prompt("reg_district", **data, name=name)
     districts = District.objects.filter(is_active=True).order_by("code")
-    turn.say(f"ชื่อ: {name}\nเลือกหน่วยงาน (เขต/ฝ่าย)การไฟฟ้าที่คุณสังกัด")
+    employee = bool(data.get("employee"))
+    turn.say(f"{name if employee else f'ชื่อ: {name}'}\nเลือกหน่วยงาน (เขต/ฝ่าย)การไฟฟ้าที่คุณสังกัด")
     message = button_list(
         "เลือกหน่วยงาน (เขต/ฝ่าย)การไฟฟ้า",
         [turn.button(d.name, "reg_district", {"code": d.code}) for d in districts],
     )
-    message["quickReply"] = {"items": [_postback(*turn.button("แก้ชื่อ", "reg_rename"))]}
+    if not employee:
+        message["quickReply"] = {"items": [_postback(*turn.button("แก้ชื่อ", "reg_rename"))]}
     turn.replies.append(message)
 
 
@@ -1329,10 +1342,12 @@ def _free_text(turn, draft, text, message=None):
             return answers.respond(turn, draft, found)
         if use_ai:
             return ai_chat.queue(turn, draft, text, message)
+    if turn.conversation.prompt == "track" and text and _sap_cases(turn, text):
+        return
     if draft is not None and text is not None:
         return _draft_text(turn, draft, text)
     if turn.conversation.prompt == "track" and text:
-        turn.say("ไม่พบเลขเรื่องในรูปแบบที่ถูกต้อง เช่น W69-000001")
+        turn.say("ไม่พบเรื่องที่มีเลขนี้ในเรื่องของคุณ พิมพ์เลขเรื่อง เช่น W69-000001 หรือเลข SAP")
         return
     if text and draft is None and not turn.conversation.prompt and not _open_drafts(turn).exists():
         from operations import questions  # local: questions reads answers, which read this module
@@ -1499,7 +1514,9 @@ def _expects_text(draft):
     """Steps whose answer is typed; elsewhere a typed case number means 'show this case'."""
     if draft is None:
         return False
-    return draft.step in {"item_search", "quantity", "serials"} or draft.step.startswith("field:")
+    return draft.step in {"item_search", "quantity", "serials", "sap", "entry"} or (
+        draft.step.startswith("field:")
+    )
 
 
 def reads_as(text):
@@ -1523,7 +1540,7 @@ def off_step(draft, text):
     if not _expects_text(draft) or options.get(options.CHAT_TYPED) != "check":
         return ""
     found = reads_as(text)
-    if found == "request" and draft.step in ("quantity", "serials"):
+    if found == "request" and draft.step in ("quantity", "serials", "sap", "entry"):
         return ""
     return found
 
@@ -1578,6 +1595,8 @@ def _static_postback(turn, data, draft):
         return _menu(turn, "เลือกบริการที่ต้องการ")
     if data.startswith("m=item&id="):
         return _menu_item(turn, data.split("=", 2)[2])
+    if data.startswith("m=act&"):
+        return _menu_act(turn, data)
     if data.startswith("m=ask&id="):
         return _menu_ask(turn, data.split("=", 2)[2])
     if data == "m=new":
@@ -1627,24 +1646,47 @@ def _menu_item(turn, pk):
         return _menu(turn, "เมนูนี้สำหรับเจ้าหน้าที่ที่เชื่อม LINE กับบัญชีแล้ว")
     action = item.action
     A = LineMenuItem.Action
+    choices = (
+        list(item.choices.filter(is_active=True).order_by("position", "pk")[:12])
+        if action == A.TOPIC
+        else []
+    )
+    # 23 Oct 2569: a tile that asks for the equipment first also takes problem reports, so a
+    # person who may only report problems opens it too (the withdrawal choices stay closed).
+    equipment_first = any(c.action == A.EQUIPMENT for c in choices)
     if (
         turn.requester
         and (turn.requester.is_external or turn.requester.is_anonymous)
         and action in {A.TOPIC, A.RETURN}
+        and not equipment_first
     ):
         return _menu(turn, "บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ พิมพ์ ลงทะเบียนพนักงาน เพื่อยืนยัน")
     if action == A.REGISTER:
         return _ask_kind(turn, "ลงทะเบียนหรือยืนยันตัวตน")
     if action == A.TOPIC:
-        choices = list(item.choices.filter(is_active=True).order_by("position", "pk")[:12])
         if not choices:
             return _menu(turn, "หัวข้อนี้ยังไม่มีเรื่องให้เลือก")
         turn.set_prompt()
+        if equipment_first:
+            return _card(
+                turn,
+                item.label,
+                "เลือกอุปกรณ์",
+                [(c.label, f"m=item&id={c.pk}") for c in choices],
+                [("หน้าหลัก", "m=home")],
+            )
         turn.say(
             f"{item.label}\nเลือกเรื่องที่ต้องการ",
             [(c.label, f"m=item&id={c.pk}") for c in choices],
         )
         return
+    if action == A.EQUIPMENT:
+        if item.topic not in TYPED_GROUPS:
+            return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
+        if _problems_only(turn):
+            turn.say("บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ")
+            return _typed_draft(turn, item, K.PROBLEM)
+        return _action_card(turn, item)
     if action == A.NEW:
         if item.kind == K.WITHDRAWAL:
             if (
@@ -1655,10 +1697,10 @@ def _menu_item(turn, pk):
             ):
                 return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนเบิกของ")
             draft = _menu_draft(turn, item, K.WITHDRAWAL, "category")
-            if item.topic == "meter":
-                return _set(turn, draft, "meter_group", equipment_menu="meter")
             if item.topic in CATEGORY_LABELS:
-                return _set(turn, draft, "item", line={"category": item.topic})
+                # All equipment services use the same four LINE groups.  The service
+                # division remains on the draft and the selected item keeps its registry type.
+                return _set(turn, draft, "meter_group", equipment_menu="equipment")
             return _ask(turn, draft)
         return _start_new(turn)
     if action == A.MINE:
@@ -1676,19 +1718,141 @@ def _menu_item(turn, pk):
         if only_problems:
             return _menu(turn, "บัญชีเจ้าหน้าที่แจ้งได้เฉพาะปัญหาและข้อเสนอแนะ")
         draft = _menu_draft(turn, item, K.RETURN, "category")
-        if item.topic == "meter":
-            return _set(turn, draft, "meter_group", equipment_menu="meter")
         if item.topic in CATEGORY_LABELS:
-            return _set(turn, draft, "item", line={"category": item.topic})
+            return _set(turn, draft, "meter_group", equipment_menu="equipment")
         return _ask(turn, draft)
     if action == A.PROBLEM:
         topic = item.topic or Case.Topic.OTHER
         draft = _menu_draft(turn, item, K.PROBLEM, "topic", topic=topic)
         if topic in CATEGORY_LABELS:
-            return _set(turn, draft, "item", line={"category": topic})
+            return _set(turn, draft, "meter_group", equipment_menu="equipment")
         return _set(turn, draft, _next_field(draft))
     # GENERAL: a problem or suggestion; the rules choose the division.
     return _ask(turn, _menu_draft(turn, item, K.PROBLEM, "topic", division=""))
+
+
+def _problems_only(turn):
+    """A staff-only LINE, an internal or outside reporter, someone waiting for approval, or an
+    anonymous reporter: problems and suggestions only."""
+    return bool(
+        turn.internal
+        or getattr(turn.requester, "is_internal", False)
+        or getattr(turn.requester, "is_external", False)
+        or getattr(turn.requester, "is_anonymous", False)
+    )
+
+
+def _card(turn, title, prompt, buttons, quick=()):
+    """A Flex card whose buttons stay in the chat (23 Oct 2569: the กคว. menu): the title and
+    question in its header, the choices in its body, navigation as quick replies. Labels typed
+    instead of tapped still work (_remember_choices reads every postback)."""
+    header = [
+        {"type": "text", "text": title, "weight": "bold", "wrap": True},
+        {"type": "text", "text": prompt, "size": "sm", "wrap": True},
+    ]
+    body = [
+        {
+            "type": "button",
+            "style": "secondary",
+            "height": "sm",
+            # The choice shows in the chat as the requester's message, as quick replies do.
+            "action": {
+                "type": "postback",
+                "label": _fit(label, 20),
+                "data": data,
+                "displayText": label,
+            },
+        }
+        for label, data in buttons
+    ]
+    bubble = {
+        "type": "bubble",
+        "header": {"type": "box", "layout": "vertical", "contents": header},
+        "body": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": body},
+    }
+    message = {
+        "type": "flex",
+        "altText": f"{title} · {prompt}",
+        "contents": {"type": "carousel", "contents": [bubble]},
+    }
+    if quick:
+        message["quickReply"] = {"items": [_postback(*button) for button in quick]}
+    turn.replies.append(message)
+
+
+REPAIR = Case.Topic.REPAIR
+ACTION_CARD = (
+    ("ติดตามใบเบิก", K.WITHDRAWAL),
+    ("ติดตามใบส่งคืน", K.RETURN),
+    ("ติดตามสถานะการซ่อม", REPAIR),  # 24 Oct 2569: in place of แจ้งปัญหา
+)
+# Cards already in people's chats still carry แจ้งปัญหา, and problem-only accounts use it.
+ACTION_LABELS = {**{kind: label for label, kind in ACTION_CARD}, K.PROBLEM: "แจ้งปัญหา"}
+
+
+def _action_card(turn, item):
+    """The second card of an equipment-first tile: what to do with the chosen equipment."""
+    turn.set_prompt()
+    return _card(
+        turn,
+        _menu_label(item),
+        "เลือกสิ่งที่ต้องการ",
+        [(label, f"m=act&id={item.pk}&do={kind}") for label, kind in ACTION_CARD],
+        [("ย้อนกลับ", f"m=item&id={item.parent_id}"), ("หน้าหลัก", "m=home")],
+    )
+
+
+def _menu_act(turn, data):
+    """ติดตามใบเบิก / ติดตามใบส่งคืน / ติดตามสถานะการซ่อม on the chosen equipment
+    (m=act&id=…&do=…)."""
+    from urllib.parse import parse_qs
+
+    query = parse_qs(data[2:])
+    item = _menu_entry((query.get("id") or [""])[0])
+    kind = (query.get("do") or [""])[0]
+    if item is None or item.action != LineMenuItem.Action.EQUIPMENT:
+        return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
+    if kind not in ACTION_LABELS:
+        return _action_card(turn, item)
+    if kind in (K.WITHDRAWAL, K.RETURN) and _problems_only(turn):
+        return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
+    return _typed_draft(turn, item, kind)
+
+
+def _typed_draft(turn, item, kind):
+    """A draft whose lines are typed (typed_lines): the SAP number first for a withdrawal or
+    return when the division follows SAP slips, and always for ติดตามสถานะการซ่อม (a problem
+    case with the repair topic), then the first row of the chosen group."""
+    group = item.topic
+    action = ACTION_LABELS[kind]
+    extra = {}
+    if kind == REPAIR:
+        kind, extra = K.PROBLEM, {"topic": Case.Topic.REPAIR}
+    elif kind == K.PROBLEM:
+        shared = typed_lines.shared_item(group)
+        extra = {"topic": shared.category if shared else Case.Topic.OTHER}
+    # "เพิ่มรายการ" offers the groups of the same tile (กคว., กอจ. or กคอ.).
+    extra["groups"] = _tile_groups(item)
+    draft = _menu_draft(turn, item, kind, "sap", typed=group, **extra)
+    draft.data = dict(draft.data, menu_label=f"{_menu_label(item)} · {action}")
+    if extra.get("topic") == Case.Topic.REPAIR or typed_lines.needs_sap(kind, _owners(draft)):
+        return _set(turn, draft, "sap")
+    return _start_row(turn, draft, group)
+
+
+def _tile_groups(item):
+    """[[group, label]] of the equipment choices beside this one on its tile."""
+    rows = LineMenuItem.objects.filter(
+        parent_id=item.parent_id, action=LineMenuItem.Action.EQUIPMENT, is_active=True
+    ).order_by("position", "pk")
+    return [[row.topic, row.label] for row in rows if row.topic in TYPED_GROUPS] or [
+        [item.topic, item.label]
+    ]
+
+
+def _draft_groups(draft):
+    """The groups "เพิ่มรายการ" offers in a typed draft: its tile's, else every group."""
+    return [tuple(g) for g in draft.data.get("groups") or []] or list(TYPED_GROUPS.items())
 
 
 def _menu_draft(turn, item, kind, step, **data):
@@ -1832,8 +1996,33 @@ def _track_prompt(turn):
 def _search_cases(turn):
     turn.set_prompt("track")
     turn.say(
-        "พิมพ์เลขเรื่องที่ต้องการติดตาม เช่น W69-000001", [("เรื่องของฉัน", "m=mine"), ("หน้าหลัก", "m=home")]
+        "พิมพ์เลขเรื่องที่ต้องการติดตาม เช่น W69-000001 หรือเลขใบเบิก/ใบส่งคืน SAP",
+        [("เรื่องของฉัน", "m=mine"), ("หน้าหลัก", "m=home")],
     )
+
+
+def _sap_cases(turn, text):
+    """ติดตามด้วยเลขใบเบิก/ใบส่งคืน SAP: shows the requester's own cases citing it; False when
+    there are none (the caller says so)."""
+    number, problem = typed_lines.clean_sap(text)
+    if problem:
+        return False
+    found = list(
+        services.visible_cases(_actor(turn))
+        .filter(sap_number__iexact=number)
+        .order_by("-submitted_at")[:5]
+    )
+    if len(found) == 1:
+        _case_detail(turn, found[0].number)
+        return True
+    if found:
+        turn.set_prompt()
+        turn.say(
+            f"เลข SAP {number} อยู่ใน {len(found)} เรื่อง กดเลขเรื่องเพื่อดูรายละเอียด",
+            [(c.number, f"c={c.number}") for c in found] + [("หน้าหลัก", "m=home")],
+        )
+        return True
+    return False
 
 
 def _case_detail(turn, number):
@@ -1844,8 +2033,13 @@ def _case_detail(turn, number):
         turn.say(f"ไม่พบเรื่อง {number} ในเรื่องของคุณ", MENU)
         return
     files = case.attachments.count()
+    sap = (
+        f"\n{typed_lines.sap_label(case.kind, case.topic)}: {case.sap_number}"
+        if case.sap_number and typed_lines.sap_label(case.kind, case.topic)
+        else ""
+    )
     text = (
-        f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}\n"
+        f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}{sap}\n"
         f"สถานะ: {_status_label(case)}\nกองเจ้าภาพ: {case.owner_division.name}\n"
         f"อัปเดตล่าสุด: {_when(case.updated_at)}" + (f"\nไฟล์แนบ: {files} ไฟล์" if files else "")
     )
@@ -2017,7 +2211,8 @@ def _token_action(turn, token, draft):
 
 
 def _items(category, group=""):
-    items = EquipmentType.objects.filter(is_active=True).order_by("name")
+    # A shared item of a typed group is never chosen from a list (typed_lines).
+    items = EquipmentType.objects.filter(is_active=True, entry_group="").order_by("name")
     if group:
         matching = Q(line_group=group)
         if group == "meter":
@@ -2060,14 +2255,13 @@ def _ask_question(turn, draft):
         )
     elif step == "topic":
         topics = _topics()
-        lines = [f"{n}. {TOPIC_LABELS[t]}{TOPIC_NOTES.get(t, '')}" for n, t in enumerate(topics, 1)]
+        lines = [f"{n}. {_topic_menu_label(t)}" for n, t in enumerate(topics, 1)]
         turn.say(
             "เรื่องนี้เกี่ยวกับอะไร\n" + "\n".join(lines),
-            [b(TOPIC_LABELS[t], "topic", {"topic": t}, draft) for t in topics]
-            + [b("ไม่แน่ใจ", "lines_done", draft=draft)]  # the text and the rules decide
+            [b(_topic_menu_label(t), "topic", {"topic": t}, draft) for t in topics]
             + [b("ยกเลิกร่าง", "discard", draft=draft)],
         )
-    elif step == "meter_group" or (step == "category" and data.get("equipment_menu")):
+    elif step in {"meter_group", "category"}:
         buttons = [
             b(label, "equipment_group", {"group": group}, draft)
             for group, label in METER_GROUPS.items()
@@ -2078,15 +2272,6 @@ def _ask_question(turn, draft):
             "เลือกหมวดอุปกรณ์\n1. มิเตอร์\n2. CT\n3. VT\n4. อุปกรณ์อื่น",
             buttons,
         )
-    elif step == "category":
-        buttons = [
-            b(CATEGORY_LABELS[c], "category", {"category": c}, draft) for c in CATEGORY_ORDER
-        ]
-        if draft.kind == K.PROBLEM or data["lines"]:
-            buttons.append(
-                b("ข้าม (ไม่ระบุของ)" if not data["lines"] else "ไปต่อ", "lines_done", draft=draft)
-            )
-        turn.say("เลือกหมวดของ\n1. มิเตอร์\n2. หม้อแปลง\n3. อุปกรณ์อื่น", buttons)
     elif step == "item":
         items = list(_items(data["line"]["category"], data["line"].get("group", "")))
         skip = _skip_model(turn, draft)
@@ -2136,6 +2321,14 @@ def _ask_question(turn, draft):
         turn.say(question, buttons or None)
     elif step == "location":
         turn.say("กด 'ส่งตำแหน่ง' แล้วเลือกจุดที่พบเรื่องนี้", [("ส่งตำแหน่ง", LOCATION)])
+    elif step == "sap":
+        turn.say(f"พิมพ์{typed_lines.sap_label(draft.kind, draft.data.get('topic'))}ที่ทำไว้แล้ว")
+    elif step == "entry":
+        return _ask_entry(turn, draft)
+    elif step == "typed_group":
+        return _typed_group_card(turn, draft)
+    elif step == "detail":
+        return _detail_row(turn, draft)
     elif step == "summary":
         turn.say(
             _summary(draft),
@@ -2163,17 +2356,32 @@ def _summary(draft):
         lines.append(f"หัวข้อ: {data['menu_label']}")
     if data.get("division"):
         lines.append(f"ส่งถึง: {data['division']}")
+    if data.get("sap_number"):
+        label = typed_lines.sap_label(draft.kind, data.get("topic"))
+        lines.append(f"{label}: {data['sap_number']}")
     items = {
         i.code: i
         for i in EquipmentType.objects.filter(code__in=[x["item_code"] for x in data["lines"]])
     }
-    for number, line in enumerate(data["lines"], start=1):
+    number = 0
+    for line in data["lines"]:
         item = items.get(line["item_code"])
+        if line.get("details") and typed_lines.is_shared(item):
+            for row in line["details"]:
+                number += 1
+                typed = typed_lines.describe(row, item.unit)
+                group = typed_lines.label_of(row["group"])
+                lines.append(f"{number}. {group}" + (f" · {typed}" if typed else ""))
+            continue
+        number += 1
         text = f"{number}. {item.name if item else line['item_code']}"
         if line.get("quantity"):
             text += f" {line['quantity']} {item.unit if item else ''}".rstrip()
         if line.get("serials"):
             text += f" (หมายเลข {', '.join(line['serials'])})"
+        for row in line.get("details", []):
+            typed = typed_lines.describe(row)
+            text += f" · {typed}" if typed else ""
         lines.append(text)
     # In the order the questions were asked: the stored JSON does not keep key order.
     labels = {**FIELD_LABELS, **TOPIC_FIELD_LABELS.get(data.get("topic"), {})}
@@ -2199,18 +2407,21 @@ def _summary(draft):
     return "\n".join(lines)
 
 
-def _offered(topic):
-    """Whether the policy names an owner for a problem of this topic."""
-    from operations import policy  # local: policy builds on workflow, not on this module
-
-    current = policy.current_policy()
-    rules = current.doc.get("responsibility", []) if current else []
-    return any(r.get("category") == topic and K.PROBLEM in r.get("kinds", []) for r in rules)
-
-
 def _topics():
-    """Equipment topics always (unknown ones go to people), story topics while owned."""
-    return [t for t in TOPIC_LABELS if t in CATEGORY_LABELS or _offered(t)]
+    """The concise first menu for a general problem report."""
+    return [*METER_GROUPS, Case.Topic.SUGGESTION]
+
+
+def _topic_menu_label(topic):
+    label = METER_GROUPS.get(topic)
+    return label if label is not None else TOPIC_LABELS[topic]
+
+
+def _returns_to_topic_menu(draft):
+    """Whether Back returns to the general five-choice problem menu."""
+    return draft.kind == K.PROBLEM and (
+        draft.data.get("problem_topic_menu") or not draft.data.get("equipment_menu")
+    )
 
 
 def _kind_label(kind, topic=""):
@@ -2218,6 +2429,8 @@ def _kind_label(kind, topic=""):
         return TOPIC_LABELS[topic]
     if topic == Case.Topic.INQUIRY:
         return "สอบถาม/ติดตาม"
+    if topic == Case.Topic.REPAIR:
+        return "ติดตามสถานะการซ่อม"
     if topic == Case.Topic.SYSTEM:
         return "แจ้งปัญหาระบบงาน"
     return KIND_LABELS[kind]
@@ -2231,6 +2444,8 @@ def _fields(draft):
         return SUGGESTION_FIELDS
     if topic == Case.Topic.INQUIRY:
         return INQUIRY_FIELDS
+    if topic == Case.Topic.REPAIR:
+        return REPAIR_FIELDS
     if topic == Case.Topic.SYSTEM:
         return SYSTEM_FIELDS
     return FIELDS[draft.kind]
@@ -2243,6 +2458,12 @@ def _next_field(draft):
             return f"field:{name}"
     if draft.data.get("anonymous") and not draft.data.get("location"):
         return "location"
+    # 23 Oct 2569: a division that follows SAP slips needs the slip's number, and the same
+    # typed fields as its own menu (ตัวเลือกระบบ sap_line_entry), before the summary.
+    if _sap_missing(draft):
+        return "sap"
+    if _detail_missing(draft) is not None:
+        return "detail"
     return "summary"
 
 
@@ -2266,7 +2487,7 @@ def _draft_button(turn, draft, action, value):
                 "more"
                 if data["lines"]
                 else "topic"
-                if draft.kind == K.PROBLEM and not data.get("equipment_menu")
+                if _returns_to_topic_menu(draft)
                 else "category",
             )
         previous = fields[index - 1]
@@ -2307,13 +2528,24 @@ def _draft_button(turn, draft, action, value):
         topic = value.get("topic")
         if topic not in _topics():
             return _ask(turn, draft)
+        if topic in METER_GROUPS:
+            category = "other" if topic == "other" else "meter"
+            return _set(
+                turn,
+                draft,
+                "item",
+                equipment_menu="equipment",
+                problem_topic_menu=True,
+                topic=category,
+                line={"category": category, "group": topic},
+            )
         if topic in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
             keep = {"anonymous": True} if data.get("anonymous") else {}
             draft.data = {"lines": [], "fields": {}, "topic": topic, **keep}
             return _set(turn, draft, _next_field(draft))
         draft.data = dict(data, topic=topic)
         return _set(turn, draft, "item", line={"category": topic})
-    if action == "equipment_group" and data.get("equipment_menu"):
+    if action == "equipment_group" and draft.step in {"meter_group", "category"}:
         group = value.get("group")
         if group not in METER_GROUPS:
             return _ask(turn, draft)
@@ -2323,24 +2555,38 @@ def _draft_button(turn, draft, action, value):
             "item",
             line={"category": "other" if group == "other" else "meter", "group": group},
         )
-    if action == "category":
-        return _set(turn, draft, "item", line={"category": value["category"]})
     if action == "back_category":
-        back = (
-            "topic"
-            if draft.kind == K.PROBLEM and not data["lines"] and not data.get("equipment_menu")
-            else "category"
-        )
+        back = "topic" if not data["lines"] and _returns_to_topic_menu(draft) else "category"
         return _set(turn, draft, back, line={})
     if action == "item":
         return _choose_item(turn, draft, value["code"])
     if action == "skip_serials":
         return _finish_line(turn, draft, [])
+    if action == "typed_group" and draft.step == "typed_group":
+        if value.get("group") not in dict(_draft_groups(draft)):
+            return _ask(turn, draft)
+        return _start_row(turn, draft, value["group"])
+    if action == "entry_skip" and draft.step == "entry":
+        entry, fields = dict(data["entry"]), _row_fields(draft)
+        if entry["at"] < len(fields) and not typed_lines.required(fields[entry["at"]], draft.kind):
+            entry["at"] += 1
+            if entry["at"] >= len(fields):
+                return _finish_row(turn, draft, entry)
+            return _set(turn, draft, "entry", entry=entry)
+        return _ask(turn, draft)
+    if action == "entry_back" and draft.step == "entry":
+        entry, fields = dict(data["entry"]), _row_fields(draft)
+        at = max(entry["at"] - 1, 0)
+        row = dict(entry["row"])
+        if at < len(fields):
+            row.pop(fields[at].key, None)
+            row.get("extra", {}).pop(fields[at].key, None)
+        return _set(turn, draft, "entry", entry={**entry, "at": at, "row": row})
     if action == "add_line":
-        return _set(turn, draft, "category", line={})
+        return _set(turn, draft, "typed_group" if data.get("typed") else "category", line={})
     if action == "lines_done":
         if draft.kind != K.PROBLEM and not data["lines"]:
-            return _set(turn, draft, "category")
+            return _set(turn, draft, "typed_group" if data.get("typed") else "category")
         return _set(turn, draft, _next_field(draft), line={})
     if action == "skip_field":
         name = draft.step.split(":", 1)[1]
@@ -2354,6 +2600,262 @@ def _draft_button(turn, draft, action, value):
     if action == "confirm":
         return _confirm(turn, draft)
     return _ask(turn, draft)
+
+
+# --- ช่องที่ผู้ใช้พิมพ์ (typed_lines, 23 Oct 2569) --------------------------------------------
+# A row is typed instead of chosen: one message split by "/" or field by field. The draft holds
+# the row being typed in data["entry"]: {group, line, row, keys, at}. `line` is None for a new
+# line of the group's shared item (the กคว. cards); an index when a line chosen from the list
+# still needs its typed details (another path into a division that follows SAP slips).
+
+EXAMPLES = {
+    "numbers": "12345678 12345679",
+    "size": {
+        "meter": "5(100)A",
+        "ct": "100/5A",
+        "vt": "11000/110V",
+        "other": "2 นิ้ว",
+        "transformer": "160 kVA",
+        "lbs": "24kV 630A",
+        "rmu": "24kV 630A",
+    },
+    "quantity": "2",
+    "name": "คีมตัดสาย",
+}
+
+
+def _example(field, group):
+    value = EXAMPLES.get(field.key, "…")
+    return value.get(group, "…") if isinstance(value, dict) else value
+
+
+def _row_fields(draft):
+    entry = draft.data["entry"]
+    by_key = {f.key: f for f in typed_lines.fields(entry["group"], draft.kind)}
+    return [by_key[key] for key in entry["keys"] if key in by_key]
+
+
+def _entry_unit(draft):
+    entry = draft.data["entry"]
+    if entry["line"] is not None:
+        code = draft.data["lines"][entry["line"]]["item_code"]
+        item = EquipmentType.objects.filter(code=code).first()
+    else:
+        item = typed_lines.shared_item(entry["group"])
+    return item.unit if item else ""
+
+
+def _group_of(item):
+    """The LINE group of an item chosen from the list (as _items files it)."""
+    if item.line_group:
+        return item.line_group
+    return "meter" if item.category == EquipmentType.Category.METER else "other"
+
+
+def _start_row(turn, draft, group, line=None):
+    """Begin one typed row of `group`: a new line of the shared item, or (line=index) the
+    typed details a line chosen from the list still lacks."""
+    fields = typed_lines.fields(group, draft.kind)
+    if line is not None:
+        target = draft.data["lines"][line]
+        known = {"quantity", "name"} | ({"numbers"} if target.get("serials") else set())
+        fields = [f for f in fields if f.key not in known]
+    if not fields:
+        if line is None:
+            turn.say("หมวดนี้ยังไม่มีช่องให้พิมพ์ กรุณาติดต่อผู้ดูแล")
+            return _set(turn, draft, "more" if draft.data["lines"] else "typed_group")
+        lines = [dict(x) for x in draft.data["lines"]]
+        lines[line]["details"] = [{"group": group}]
+        draft.data = dict(draft.data, lines=lines)
+        return _set(turn, draft, _next_field(draft))
+    entry = {"group": group, "line": line, "row": {}, "keys": [f.key for f in fields], "at": 0}
+    changes = {"entry": entry, **({"typed": group} if line is None else {})}
+    return _set(turn, draft, "entry", **changes)
+
+
+def _ask_entry(turn, draft):
+    entry, kind = draft.data["entry"], draft.kind
+    fields = _row_fields(draft)
+    if entry["at"] >= len(fields):
+        return _finish_row(turn, draft, dict(entry))
+    field, group = fields[entry["at"]], entry["group"]
+    buttons = []
+    if not typed_lines.required(field, kind):
+        buttons.append(turn.button("ข้าม", "entry_skip", draft=draft))
+    if entry["at"] > 0:
+        buttons.append(turn.button("ย้อนกลับ", "entry_back", draft=draft))
+    if entry["line"] is not None:
+        code = draft.data["lines"][entry["line"]]["item_code"]
+        item = EquipmentType.objects.filter(code=code).first()
+        head = item.name if item else code
+    else:
+        head = typed_lines.label_of(group)
+    if entry["at"] == 0 and not entry["row"] and len(fields) > 1:
+        labels = " / ".join(f.label for f in fields)
+        example = " / ".join(_example(f, group) for f in fields)
+        text = f"{head}\nพิมพ์ {labels}\nเช่น {example}\nหรือพิมพ์ทีละช่อง เริ่มจาก{field.label}"
+    else:
+        text = f"{head}\nพิมพ์{field.label}"
+    if field.key == "numbers":
+        quantity = entry["row"].get("quantity") or (
+            draft.data["lines"][entry["line"]].get("quantity") if entry["line"] is not None else ""
+        )
+        text += f" ทั้ง {quantity} หมายเลข" if quantity else ""
+        text += " คั่นแต่ละหมายเลขด้วยเว้นวรรค"
+    elif field.key == "quantity":
+        text += f" เป็นตัวเลข หน่วย{_entry_unit(draft)}"
+    if kind == K.PROBLEM and entry["at"] == 0:
+        text += "\nช่องที่ไม่ทราบ กดข้ามได้"
+    turn.say(text, buttons or None)
+
+
+def _assign(fields, parts):
+    """[(field, value)] of a row typed in one message. The size takes any extra "/" (a CT of
+    100/5A); with fewer parts than fields the rest are asked one by one."""
+    if len(parts) <= len(fields):
+        return list(zip(fields, parts, strict=False))
+    keys = [f.key for f in fields]
+    if "size" not in keys:
+        return None
+    at = keys.index("size")
+    after = len(fields) - at - 1
+    values = [*parts[:at], "/".join(parts[at : len(parts) - after])]
+    if after:
+        values += parts[len(parts) - after :]
+    return list(zip(fields, values, strict=True))
+
+
+def _entry_text(turn, draft, text):
+    entry, kind = dict(draft.data["entry"]), draft.kind
+    fields, row, at = _row_fields(draft), dict(draft.data["entry"]["row"]), entry["at"]
+    if at >= len(fields):
+        return _finish_row(turn, draft, entry)
+    unit = _entry_unit(draft)
+    parts = typed_lines.split(text) if at == 0 and not row and len(fields) > 1 else None
+    pairs = _assign(fields, parts) if parts else None
+    if pairs:
+        trial = {}
+        if not any(typed_lines.take(trial, f, value, kind, unit) for f, value in pairs):
+            row.update(trial)
+            at = len(pairs)
+        else:
+            pairs = None  # not a whole row after all: the text answers this field alone
+    if not pairs:
+        problem = typed_lines.take(row, fields[at], text, kind, unit)
+        if problem:
+            turn.say(problem)
+            return _ask(turn, draft)
+        at += 1
+    entry.update(row=row, at=at)
+    if at < len(fields):
+        return _set(turn, draft, "entry", entry=entry)
+    return _finish_row(turn, draft, entry)
+
+
+def _finish_row(turn, draft, entry):
+    data, kind, group = draft.data, draft.kind, entry["group"]
+    lines, row, target = data["lines"], dict(entry["row"]), entry["line"]
+    others = [line for i, line in enumerate(lines) if i != target]
+    checked = dict(row)
+    if target is not None and lines[target].get("quantity") and "numbers" in row:
+        checked["quantity"] = str(int(float(lines[target]["quantity"])))
+    problem = typed_lines.check(checked, kind, group, others, draft.requester)
+    if problem:
+        turn.say(f"{problem} กรุณาพิมพ์รายการนี้ใหม่")
+        return _set(turn, draft, "entry", entry={**entry, "row": {}, "at": 0})
+    if target is None:
+        lines = typed_lines.add(lines, group, row, kind)
+        draft.data = dict(data, lines=lines, entry={})
+        if draft.data.get("menu_label"):
+            draft.data["menu_label"] = typed_topic(draft.data)
+        return _set(turn, draft, "more" if len(lines) < MAX_LINES else _next_field(draft))
+    lines = [dict(x) for x in lines]
+    lines[target]["details"] = [{"group": group, **{k: v for k, v in row.items() if v}}]
+    draft.data = dict(data, lines=lines, entry={})
+    return _set(turn, draft, _next_field(draft))
+
+
+def typed_topic(data):
+    """A typed draft's topic ("Meter, CT, VT · มิเตอร์ · ติดตามใบเบิก") names its equipment only
+    while every row is of it; with rows of another group it keeps the tile and the action."""
+    label = data.get("menu_label", "")
+    groups = {row.get("group") for line in data.get("lines", []) for row in line.get("details", [])}
+    parts = label.split(" · ")
+    if len(groups) > 1 and len(parts) == 3:
+        return f"{parts[0]} · {parts[2]}"
+    return label
+
+
+def _sap_text(turn, draft, text):
+    number, problem = typed_lines.clean_sap(text)
+    if not problem:
+        problem = typed_lines.sap_in_use(number, draft.requester)
+    if problem:
+        turn.say(problem)
+        return _ask(turn, draft)
+    draft.data = dict(draft.data, sap_number=number)
+    if draft.data.get("typed") and not draft.data["lines"]:
+        return _start_row(turn, draft, draft.data["typed"])
+    return _set(turn, draft, _next_field(draft))
+
+
+def _owners(draft):
+    if draft.data.get("division"):
+        return [draft.data["division"]]
+    return services.preview_owners(_payload(draft))
+
+
+def _sap_missing(draft):
+    if draft.data.get("sap_number") or not typed_lines.sap_label(
+        draft.kind, draft.data.get("topic")
+    ):
+        return False
+    repair = draft.data.get("topic") == Case.Topic.REPAIR
+    return repair or typed_lines.needs_sap(draft.kind, _owners(draft))
+
+
+def _detail_missing(draft):
+    """The first line chosen from the list that still lacks its typed details, when the draft
+    goes to a division that follows SAP slips and ตัวเลือกระบบ asks for the same fields."""
+    from operations import options
+
+    if (
+        draft.data.get("typed")
+        or draft.kind not in typed_lines.SAP_LABELS
+        or options.get(options.SAP_LINE_ENTRY) != "typed"
+        or not typed_lines.needs_sap(draft.kind, _owners(draft))
+    ):
+        return None
+    codes = [line["item_code"] for line in draft.data["lines"]]
+    items = {i.code: i for i in EquipmentType.objects.filter(code__in=codes)}
+    for index, line in enumerate(draft.data["lines"]):
+        item = items.get(line["item_code"])
+        if item is None or line.get("details"):
+            continue
+        known = {"quantity", "name"} | ({"numbers"} if line.get("serials") else set())
+        if any(f.key not in known for f in typed_lines.fields(_group_of(item), draft.kind)):
+            return index
+    return None
+
+
+def _detail_row(turn, draft):
+    index = _detail_missing(draft)
+    if index is None:
+        _touch(draft, turn.now, step=_next_field(draft))
+        return _ask(turn, draft)
+    code = draft.data["lines"][index]["item_code"]
+    item = EquipmentType.objects.get(code=code)
+    return _start_row(turn, draft, _group_of(item), line=index)
+
+
+def _typed_group_card(turn, draft):
+    lines = draft.data["lines"]
+    buttons = [
+        turn.button(label, "typed_group", {"group": group}, draft)
+        for group, label in _draft_groups(draft)
+    ]
+    quick = [turn.button("ไปต่อ", "lines_done", draft=draft)] if lines else []
+    return _card(turn, "เพิ่มรายการ", "เลือกอุปกรณ์", buttons, quick)
 
 
 def _choose_item(turn, draft, code):
@@ -2402,6 +2904,18 @@ def _draft_text(turn, draft, text):
     text = text.strip()
     step = draft.step
     data = draft.data
+    if step == "sap":
+        return _sap_text(turn, draft, text)
+    if step == "entry":
+        return _entry_text(turn, draft, text)
+    if step == "typed_group":
+        raw = text.translate(THAI_DIGITS)
+        groups = _draft_groups(draft)
+        if raw.isdigit() and 1 <= int(raw) <= len(groups):
+            return _start_row(turn, draft, groups[int(raw) - 1][0])
+        for group, label in groups:
+            if raw.casefold() == label.casefold():
+                return _start_row(turn, draft, group)
     if step == "item_search":
         query = text.strip()
         matches = list(
@@ -2480,12 +2994,17 @@ def _draft_text(turn, draft, text):
     if step == "kind" and text.translate(THAI_DIGITS) in {"1", "2", "3"}:
         kind = KIND_ORDER[int(text.translate(THAI_DIGITS)) - 1]
         return _draft_button(turn, draft, "kind", {"kind": kind})
-    if step == "topic" and text.translate(THAI_DIGITS).isdigit():
+    if step == "topic":
+        raw = text.translate(THAI_DIGITS)
         topics = _topics()
-        number = int(text.translate(THAI_DIGITS))
-        if 1 <= number <= len(topics):
-            return _draft_button(turn, draft, "topic", {"topic": topics[number - 1]})
-    if step == "meter_group" or (step == "category" and data.get("equipment_menu")):
+        if raw.isdigit():
+            number = int(raw)
+            if 1 <= number <= len(topics):
+                return _draft_button(turn, draft, "topic", {"topic": topics[number - 1]})
+        for topic in topics:
+            if raw.casefold() == _topic_menu_label(topic).casefold():
+                return _draft_button(turn, draft, "topic", {"topic": topic})
+    if step in {"meter_group", "category"}:
         raw = text.translate(THAI_DIGITS)
         groups = list(METER_GROUPS)
         if raw in {"1", "2", "3", "4"}:
@@ -2493,13 +3012,6 @@ def _draft_text(turn, draft, text):
         for group, label in METER_GROUPS.items():
             if raw.casefold() == label.casefold():
                 return _draft_button(turn, draft, "equipment_group", {"group": group})
-    if (
-        step == "category"
-        and not data.get("equipment_menu")
-        and text.translate(THAI_DIGITS) in {"1", "2", "3"}
-    ):
-        category = CATEGORY_ORDER[int(text.translate(THAI_DIGITS)) - 1]
-        return _draft_button(turn, draft, "category", {"category": category})
     # Free text where a button is expected: how to answer, then the question again.
     turn.say(CHOICE_HINTS.get(step, "เลือกจากปุ่มด้านล่าง"))
     return _ask(turn, draft)
@@ -2507,7 +3019,7 @@ def _draft_text(turn, draft, text):
 
 CHOICE_HINTS = {
     "kind": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
-    "topic": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ ถ้าไม่แน่ใจกด 'ไม่แน่ใจ'",
+    "topic": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อหรือชื่อหมวด",
     "category": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
     "location": "กด 'ส่งตำแหน่ง' ด้านล่าง",
 }
@@ -2524,6 +3036,8 @@ def _payload(draft):
         payload["division_code"] = data["division"]
     if data.get("menu_label"):
         payload["menu_label"] = data["menu_label"]
+    if data.get("sap_number") and typed_lines.sap_label(draft.kind, data.get("topic")):
+        payload["sap_number"] = data["sap_number"]
     for name, value in data["fields"].items():
         if value:
             payload[name] = value
@@ -2531,6 +3045,12 @@ def _payload(draft):
 
 
 def _confirm(turn, draft):
+    # A draft that reached its summary another way (before 23 Oct 2569, or filled by the AI)
+    # still needs what a division that follows SAP slips asks for.
+    if _sap_missing(draft):
+        return _set(turn, draft, "sap")
+    if _detail_missing(draft) is not None:
+        return _set(turn, draft, "detail")
     try:
         result = services.submit_case(
             _actor(turn), idempotency_key=f"draft-{draft.pk}", payload=_payload(draft)

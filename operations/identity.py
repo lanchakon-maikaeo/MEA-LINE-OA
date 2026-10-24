@@ -850,8 +850,10 @@ def provision_employee_staff(identity_row, employee, actor):
         if User.objects.filter(username=username).exists():
             raise ValidationError("บัญชีพนักงานซ้ำ ให้แอดมินตรวจ")
         user = User.objects.create_user(username=username, password=None)
+        from operations import employees  # local: employees audits through this module
+
         StaffProfile.objects.create(
-            user=user, display_name=employee.name, employee_id=employee.employee_id
+            user=user, display_name=employees.label(employee), employee_id=employee.employee_id
         )
     if identity_row.staff_user_id and identity_row.staff_user_id != user.pk:
         raise ValidationError("LINE นี้เชื่อมกับพนักงานอีกคน ให้แอดมินตรวจ")
@@ -1022,8 +1024,6 @@ def approve_registration(actor, registration, reason=""):
 
 
 def _approve(actor, registration, reason="", automatic=False):
-    from operations import employees  # local: employees audits through this module
-
     registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
     if registration.status == RegistrationRequest.Status.APPROVED:
         return registration.identity.requester
@@ -1061,9 +1061,6 @@ def _approve(actor, registration, reason="", automatic=False):
         requester.save(update_fields=list(values))
     else:
         requester = Requester.objects.create(**values)
-    if registration.employee is None:
-        employees.match_requesters([requester])
-        requester.refresh_from_db()
     identity.requester = requester
     identity.status = ChannelIdentity.Status.ACTIVE
     identity.save(update_fields=["requester", "status"])
@@ -1198,23 +1195,19 @@ def revoke_requester(actor, requester, reason):
 @transaction.atomic
 def link_requester_employee(actor, requester, employee_id, reason):
     """An admin ties a requester to ทะเบียนพนักงาน (for the position and staff roles) after
-    checking who they are; it replaces a name match, which never overrides it. Confirming the
-    employee a name already matched is recorded as such."""
+    checking who they are."""
     requester, reason = _managed_requester(actor, requester, reason)
     employee = Employee.objects.filter(
         employee_id=(employee_id or "").strip(), is_active=True
     ).first()
     if employee is None:
         raise ValidationError("ไม่พบรหัสพนักงานนี้ในทะเบียนพนักงานที่ใช้งานอยู่")
-    link = Requester.EmployeeLink
-    confirmed = requester.employee_id == employee.pk and requester.employee_link == link.NAME
     requester.employee = employee
-    requester.employee_link = link.ADMIN
+    requester.employee_link = Requester.EmployeeLink.ADMIN
     if not requester.district.is_active and employee.district_id and employee.district.is_active:
         requester.district = employee.district
     requester.save(update_fields=["employee", "employee_link", "district"])
-    action = "requester.employee_confirmed" if confirmed else "requester.employee_linked"
-    audit(actor, action, requester, reason, employee=employee.employee_id)
+    audit(actor, "requester.employee_linked", requester, reason, employee=employee.employee_id)
     lines = list(
         ChannelIdentity.objects.select_for_update().filter(
             requester=requester, status=ChannelIdentity.Status.ACTIVE
@@ -1240,9 +1233,7 @@ def link_requester_employee(actor, requester, employee_id, reason):
 def set_requester_district(actor, requester, district_code, reason):
     """An admin corrects the district a requester chose (for example when ทะเบียนพนักงาน
     puts them in another one). Cases keep the district they were filed with; new cases use
-    this one. The name match is checked again for the new district."""
-    from operations import employees  # local: employees audits through this module
-
+    this one."""
     requester, reason = _managed_requester(actor, requester, reason)
     if requester.is_internal:
         raise ValidationError("ผู้แจ้งภายในแจ้งในนามกอง ไม่มีหน่วยงาน (เขต/ฝ่าย)")
@@ -1262,14 +1253,12 @@ def set_requester_district(actor, requester, district_code, reason):
         previous=previous,
         district=district.code,
     )
-    employees.match_requesters([requester])
-    requester.refresh_from_db()
     return requester
 
 
 @transaction.atomic
 def unlink_requester_employee(actor, requester, reason):
-    """An admin removes a wrong link; a later name match will not tie it again."""
+    """An admin removes a wrong link."""
     requester, reason = _managed_requester(actor, requester, reason)
     if requester.employee_id is None:
         raise ValidationError("ผู้แจ้งรายนี้ยังไม่ได้ผูกกับทะเบียนพนักงาน")
@@ -1328,8 +1317,6 @@ def requester_roles(requesters):
 @transaction.atomic
 def create_requester(actor, display_name, district_code, reason):
     """Approve a requester who does not use LINE; staff file their cases on their behalf."""
-    from operations import employees  # local: employees audits through this module
-
     reason = _require_reason(reason)
     require_admin(actor)
     display_name = " ".join((display_name or "").split())
@@ -1342,8 +1329,6 @@ def create_requester(actor, display_name, district_code, reason):
         display_name=display_name, district=district, approved_by=actor
     )
     audit(actor, "requester.created_direct", requester, reason, district=district.code)
-    employees.match_requesters([requester])
-    requester.refresh_from_db()
     return requester
 
 

@@ -16,7 +16,16 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from operations import ai, ai_grounding, conversation, line_api, orchestration, policy, questions
+from operations import (
+    ai,
+    ai_grounding,
+    conversation,
+    line_api,
+    orchestration,
+    policy,
+    questions,
+    typed_lines,
+)
 from operations.conversation import FIELDS, KIND_LABELS, D, Turn
 from operations.models import (
     AIConfigVersion,
@@ -27,13 +36,15 @@ from operations.models import (
     ConversationDraft,
     ConversationMessage,
     EquipmentType,
+    LineMenuItem,
     OutboxEvent,
     Requester,
     WebhookInbox,
 )
 
 R = AIRun.Status
-BUTTON_STEPS = {"kind", "category", "item", "more", "summary"}
+# "typed_group" is the group card of a typed draft (only a version that reads typed rows).
+BUTTON_STEPS = {"kind", "category", "item", "more", "summary", "typed_group"}
 
 
 def private_text(draft, text):
@@ -64,6 +75,14 @@ def wants_ai(turn, draft, text):
     if draft is None:
         # Several open drafts and none chosen: the user must pick one first (no guessing).
         return not conversation._open_drafts(turn).exists()
+    if (
+        draft.data.get("typed")
+        and not ai.reads_typed(ai.active_version())
+        and conversation.reads_as(text) != "question"
+    ):
+        # Typed rows (23 Oct 2569) are proposed only by an extraction version that reads them:
+        # a question may still reach the answer AI; anything else is the step's own answer.
+        return False
     if draft.step in BUTTON_STEPS:
         return True
     # At a step that takes typed answers, only a new request, or a question while the AI
@@ -101,7 +120,7 @@ def queue(turn, draft, text, message=None):
         draft_revision=draft.revision if draft else None,
         config_version=version,
         prompt_version=ai.prompt_version_for(version),
-        schema_version=ai.SCHEMA_VERSION,
+        schema_version=ai.schema_version_for(version),
         result=result,
     )
     turn.replies.clear()
@@ -222,11 +241,13 @@ def _finish(run, status, attempts, extraction, turn):
                             "code": i.code,
                             "text": i.text,
                             "quantity": str(i.quantity) if i.quantity else None,
+                            **({"size": i.size} if i.size else {}),
                         }
                         for i in p.items
                     ],
                     "fields": p.fields,
                     "field_sources": p.field_sources,
+                    **({"sap_number": p.sap_number} if p.sap_number else {}),
                 }
                 for p in extraction.requests
             ],
@@ -563,7 +584,10 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     for name, value in (screened or {}).items():
         if name in stored:
             stored[name] = value
+    # A draft of typed rows (only a version that reads them gets here) keeps what makes it one.
+    kept = draft.data if draft.data.get("typed") else {}
     data = {
+        **{k: kept[k] for k in TYPED_KEEP if k in kept},
         "lines": list(draft.data.get("lines", [])),
         "fields": {
             k: v
@@ -579,7 +603,7 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
         for i in EquipmentType.objects.filter(code__in=[p.code for p in proposal.items if p.code])
     }
     lines = {line["item_code"]: dict(line) for line in data["lines"]}
-    pending, unknown = None, []
+    pending, unknown, rows = None, [], []
     recognised = any(items.get(p.code) for p in proposal.items)
     for proposed in proposal.items:
         equipment = items.get(proposed.code)
@@ -588,6 +612,9 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
             # the user asked a number of (or the only thing mentioned) is asked about.
             if proposed.text and (proposed.stated_quantity or not recognised):
                 unknown.append(proposed.text)
+            continue
+        if equipment.entry_group:
+            rows.append((equipment, proposed))  # a typed row, joined below
             continue
         line = lines.get(equipment.code, {"item_code": equipment.code})
         for name in proposed.rejected:
@@ -615,20 +642,33 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     added = set(lines) - {line["item_code"] for line in draft.data.get("lines", [])}
     asked = typed.split(":", 1)[1] if typed and typed.startswith("field:") else None
     data["lines"] = list(lines.values())
-    for name, value in proposal.fields.items():
-        if name in allowed and value and not (name == asked and (added or pending)):
-            data["fields"][name] = value
     notes = []
+    entry = _typed_rows(turn, data, rows, kind, notes) if rows else None
+    if data.get("menu_label"):
+        data["menu_label"] = conversation.typed_topic(data)
+    added = added or (rows and data["lines"] != list(lines.values()))
+    for name, value in proposal.fields.items():
+        if name in allowed and value and not (name == asked and (added or pending or entry)):
+            data["fields"][name] = value
+    if proposal.sap_number and kind in typed_lines.SAP_LABELS:
+        problem = typed_lines.sap_in_use(proposal.sap_number, turn.requester)
+        if problem:
+            notes.append(problem)
+        else:
+            data["sap_number"] = proposal.sap_number
     if proposal.rejected_fields or any(i.rejected for i in proposal.items):
-        notes.append("บางช่องยังตรวจสอบกับข้อความไม่ได้ ขอถามเฉพาะข้อมูลที่ขาด")
+        notes.insert(0, "บางช่องยังตรวจสอบกับข้อความไม่ได้ ขอถามเฉพาะข้อมูลที่ขาด")
     if unknown:
         notes.append(f"ไม่พบ '{', '.join(unknown[:3])}' ในทะเบียน กรุณาเลือกจากหมวด")
     if pending is not None:
         data["line"] = pending
         step = "serials" if "quantity" in pending else "quantity"
+    elif entry is not None:
+        data["line"], data["entry"] = {}, entry
+        step = "entry"
     elif unknown or (kind != "problem" and not data["lines"]):
         data["line"] = {}
-        step = "category"
+        step = "typed_group" if data.get("typed") else "category"
     else:
         data["line"] = {}
         draft.kind = kind
@@ -637,10 +677,67 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     data["ai_run_id"] = run.pk
     data["ai_proposal"] = {
         "kind": kind,
-        "items": {code: line.get("quantity") for code, line in lines.items()},
+        "items": {line["item_code"]: line.get("quantity") for line in data["lines"]},
     }
     conversation._touch(draft, turn.now, kind=kind, step=step, data=data)
     return notes
+
+
+# What a typed draft keeps when the AI fills it (typed_lines, 23 Oct 2569).
+TYPED_KEEP = ("typed", "division", "menu_label", "sap_number", "topic")
+
+
+def _typed_rows(turn, data, rows, kind, notes):
+    """Join the typed rows the AI read to data["lines"] (typed_lines.add) the way the chat
+    does when they are typed by hand. Returns the first row that still lacks a field, as the
+    chat's typed-row step (data["entry"]) asks it, or None. A draft of typed rows only is
+    filed with its group's tile and goes to that tile's division."""
+    entry = None
+    for equipment, proposed in rows:
+        group = equipment.entry_group
+        fields = typed_lines.fields(group, kind)
+        values = {
+            "numbers": " ".join(proposed.serials),
+            "size": proposed.size,
+            "quantity": _format(proposed.quantity) if proposed.quantity is not None else "",
+            "name": proposed.text if group == "other" and not _says_no_name(proposed.text) else "",
+        }
+        row, missing = {}, []
+        for f in fields:
+            value = values.get(f.key, "")
+            if not value or typed_lines.take(row, f, value, kind, equipment.unit):
+                missing.append(f.key)  # asked one at a time, as without AI
+        if not missing:
+            problem = typed_lines.check(row, kind, group, data["lines"], turn.requester)
+            if not problem:
+                data["lines"] = typed_lines.add(data["lines"], group, row, kind)
+                continue
+            notes.append(f"{problem} กรุณาพิมพ์รายการนี้ใหม่")
+            row, missing = {}, [f.key for f in fields]
+        if entry is None:
+            entry = {"group": group, "line": None, "row": row, "keys": missing, "at": 0}
+        else:
+            notes.append(f"{typed_lines.label_of(group)} อีกรายการ เพิ่มได้หลังรายการนี้")
+    shared = {i.code for i in EquipmentType.objects.exclude(entry_group="")}
+    if all(line["item_code"] in shared for line in data["lines"]):
+        first = entry["group"] if entry else rows[0][0].entry_group
+        data.setdefault("typed", first)
+        tiles = list(
+            LineMenuItem.objects.filter(
+                is_active=True, action=LineMenuItem.Action.EQUIPMENT, topic=first
+            ).exclude(division=None)
+        )
+        # อุปกรณ์อื่น is on several tiles: only a group one division owns names the division.
+        if len({t.division_id for t in tiles}) == 1:
+            data.setdefault("division", tiles[0].division.code)
+            data.setdefault("groups", conversation._tile_groups(tiles[0]))
+    return entry
+
+
+def _says_no_name(text):
+    """A name that only repeats the group ("อุปกรณ์อื่น") is asked again, never stored."""
+    words = {"อุปกรณ์", "อุปกรณ์อื่น", "อุปกรณ์อื่นๆ", "อื่นๆ", "อื่น ๆ", "อุปกรณ์อื่น ๆ"}
+    return " ".join(str(text or "").split()) in words | {typed_lines.label_of("other")}
 
 
 def record_corrections(draft):

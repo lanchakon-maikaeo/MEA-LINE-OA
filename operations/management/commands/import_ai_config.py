@@ -24,9 +24,24 @@ class Command(BaseCommand):
         parser.add_argument("--activate", action="store_true")
         parser.add_argument("--few-shot", type=int, default=0, help="Retrieved examples (0-5)")
         parser.add_argument("--pipeline", choices=AIConfigVersion.Pipeline.values, default="single")
+        parser.add_argument(
+            "--typed-fields",
+            action="store_true",
+            help="Also read SAP slip numbers and the typed rows of มิเตอร์/CT/VT",
+        )
 
     def handle(
-        self, *args, username, reason, test, evaluate, activate, few_shot, pipeline, **options
+        self,
+        *args,
+        username,
+        reason,
+        test,
+        evaluate,
+        activate,
+        few_shot,
+        pipeline,
+        typed_fields=False,
+        **options,
     ):
         actor = get_user_model().objects.filter(username=username, is_active=True).first()
         if actor is None:
@@ -60,8 +75,10 @@ class Command(BaseCommand):
                     .first()
                 )
                 profiles.append(existing or ai.create_profile(actor, credential, model_id))
-            version = self._matching(profiles, few_shot, pipeline) or ai.create_version(
-                actor, profiles, f"import: {reason}", few_shot, pipeline
+            version = self._matching(
+                profiles, few_shot, pipeline, typed_fields
+            ) or ai.create_version(
+                actor, profiles, f"import: {reason}", few_shot, pipeline, typed_fields=typed_fields
             )
             self.stdout.write(
                 f"Version v{version.number} ({version.status}): {' -> '.join(models)}"
@@ -82,13 +99,14 @@ class Command(BaseCommand):
         except (PermissionDenied, ValidationError) as exc:
             raise CommandError(str(exc)) from exc
 
-    def _matching(self, profiles, few_shot, pipeline):
+    def _matching(self, profiles, few_shot, pipeline, typed_fields=False):
         """Reuse the newest non-rejected version with exactly this chain instead of duplicating."""
         wanted = [p.pk for p in profiles]
         for version in AIConfigVersion.objects.exclude(status=AIConfigVersion.Status.REJECTED):
             if (
                 version.few_shot == few_shot
                 and version.pipeline == pipeline
+                and version.typed_fields == bool(typed_fields)
                 and [p.pk for p in version.chain()] == wanted
             ):
                 return version

@@ -24,6 +24,9 @@
       </form>{% endif %}
       {% if division.is_active and not division.is_intake %}<form class="inline" method="post" action="{% url 'admin-division-action' division.pk 'set-intake' %}">
         {% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">ตั้งเป็นกองรับเรื่องกลาง</button>
+      </form>{% endif %}
+      {% if division.kind == "division" %}<form class="inline" method="post" action="{% url 'admin-division-action' division.pk division.requires_sap|yesno:'sap-off,sap-on' %}">
+        {% csrf_token %}<span>{% if division.requires_sap %}<strong>ถามเลขใบเบิก/ใบส่งคืน SAP</strong>{% else %}ไม่ถามเลข SAP{% endif %}</span> <button type="submit">{{ division.requires_sap|yesno:"เลิกถามเลข SAP,ถามเลขใบเบิก/ใบส่งคืน SAP" }}</button>
       </form>{% endif %}</td>
     </tr>
   {% endfor %}

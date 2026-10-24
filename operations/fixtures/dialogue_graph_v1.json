@@ -23,9 +23,9 @@
     "topic": [
       ["press_topic", 4],
       ["type_topic_number", 1],
-      ["press_unsure", 1],
       ["press_discard", 1]
     ],
+    "usage_menu": [["press_usage_choice", 1]],
     "category": [["press_category", 4], ["type_category_number", 1], ["press_lines_done", 1]],
     "item": [["press_item", 3], ["press_no_model", 1], ["press_back", 1]],
     "item_search": [["search_item", 1], ["press_item", 1], ["press_no_model", 1]],
@@ -33,6 +33,8 @@
     "serials": [["type_serials", 1], ["press_skip_serials", 1]],
     "more": [["press_add_line", 1], ["press_continue", 1], ["change_mind_add", 0.3]],
     "field": [["type_field", 3], ["press_skip_field", 1]],
+    "sap": [["type_sap_number", 1]],
+    "entry": [["type_entry", 1]],
     "location": [["send_location", 1]],
     "summary": [["press_confirm", 6], ["press_restart", 1], ["press_discard", 1]],
     "staff_start": [["follow", 1]],
@@ -152,12 +154,12 @@
     },
     {
       "id": "problem_unsure",
-      "label": "แจ้งปัญหาโดยกดไม่แน่ใจ",
+      "label": "แจ้งปัญหาโดยเลือกหมวดอุปกรณ์",
       "weight": 2,
       "actor": "registered",
       "kind": "problem",
-      "topics": ["meter", "transformer", "other", "none"],
-      "choose": "unsure",
+      "topics": ["meter", "transformer", "other"],
+      "choose": "topic",
       "hazard": 0.2
     },
     {
@@ -185,7 +187,7 @@
       "weight": 2,
       "actor": "anonymous",
       "kind": "problem",
-      "topics": ["usage", "suggestion", "meter", "transformer"],
+      "topics": ["suggestion", "meter", "transformer"],
       "choose": "topic",
       "hazard": 0.2,
       "options": {"anonymous_reports": "on"}
