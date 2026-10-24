@@ -40,6 +40,7 @@ archive/
 !operations/line_assets/*.png
 
 !Docs/adr/0019-automatic-line-menus-and-confirmed-chat-orders.md
+!Docs/adr/0020-signed-ai-evaluation-evidence-for-production.md
 
 !operations/line_assets/*.jpg
 

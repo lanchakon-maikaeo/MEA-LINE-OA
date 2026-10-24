@@ -21,6 +21,7 @@ from operations import (
     ai,
     ai_chat,
     ai_eval,
+    ai_evidence,
     answers,
     attachments,
     email_codes,
@@ -1000,6 +1001,8 @@ def admin_ai(request):
     )
     for version in versions:
         version.blocker = ai.activation_blocker(version)
+        version.imported = (version.eval_result or {}).get("imported")
+        version.examples_warning = ai_evidence.examples_warning(version)
         version.last_job = next(iter(version.eval_jobs.all()), None)
     # The last 50 messages that went to the AI, with what it did (ADR 0012 review).
     runs = list(AIRun.objects.select_related("config_version").order_by("-pk")[:50])
@@ -1194,6 +1197,20 @@ def admin_ai_action(request, action, pk=None):
                 return redirect(f"{reverse('admin-ai')}#v{version.number}")
         else:
             messages.error(request, "เลือกรูปแบบการทำงานก่อน")
+    elif action == "evidence":
+        upload = request.FILES.get("evidence")
+        if upload is None or upload.size > ai_evidence.MAX_BYTES:
+            messages.error(request, "เลือกไฟล์ผลประเมินที่ส่งออกจากเครื่องที่ประเมิน")
+        else:
+            imported = _run(
+                request,
+                lambda: ai_evidence.import_evidence(actor, upload.read(), reason),
+                "นำเข้าผลประเมินแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อบนเครื่องนี้ แล้วจึงเปลี่ยนไปใช้",
+            )
+            if imported is not None:
+                if imported[1]:
+                    messages.warning(request, imported[1])
+                return redirect(f"{reverse('admin-ai')}#v{imported[0].number}")
     elif action == "stop":
         task = data.get("task", "")
         if task not in AIConfigVersion.Task.values:

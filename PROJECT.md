@@ -1808,7 +1808,7 @@ Backup baseline self-hosted: pgBackRest full weekly + differential daily + conti
 Runbooks (เขียนครบใน M12, 8 ตุลาคม 2569; คำสั่งรันบนเครื่องผ่าน OCI Bastion ด้วย `sudo faoj …` ทุกขั้นที่เปลี่ยนระบบให้บันทึกเวลาและเหตุผลในบันทึกเหตุการณ์):
 
 - **RB01 DB/app outage** (alert host-down, unhealthy, outbox/inbox age): `faoj status` ดูว่า container ไหนล้ม → ถ้าคาดว่าเกิน 5 นาที `faoj maintenance on` (เว็บและ LINE webhook ตอบ 503 พร้อมเบอร์โทรและลิงก์แบบฟอร์มสำรอง; LINE ส่ง webhook ซ้ำเมื่อเปิด Webhook redelivery) → แจ้งกองรับเรื่องกลางให้รับเรื่องทางช่องทางรับเรื่องสำรอง → `docker compose -p faoj restart <service>` หรือ reboot เครื่อง → `faoj smoke` → `faoj maintenance off` → ดู `inbox_pending_oldest_seconds` และ `outbox_oldest_pending_seconds` กลับเป็น 0 → กองรับเรื่องกลางบันทึกเรื่องจากช่องทางสำรองแทนผู้แจ้ง (ช่องทาง "แบบฟอร์มสำรอง"/"โทรศัพท์" พร้อม**เวลาแจ้งจริง**) ถ้าเครื่องเสียถาวรใช้ RB05 กู้ลง `faoj-staging`
-- **RB02 AI unavailable**: หน้าแอดมิน AI → "หยุดใช้ AI ของงาน" เลือกงานที่มีปัญหาแล้วใส่เหตุผล (หรือ `manage.py stop_ai --task extract|answer|triage --username <แอดมินผู้พัฒนา> --reason ...`; ปิดทุกงานพร้อมกันด้วย `AI_ENABLED=false` ใน `django.env` แล้ว `faoj deploy` digest เดิม) บทสนทนากลับเป็นคำถามทีละช่อง ตอบจากคำสำคัญ และกติกายังเสนอกองและระดับ งานคัดกรองที่รอ AI ปิดเป็นไม่ใช้ AI ให้คนคัดกรอง → ตรวจ profile/endpoint/key/quota ที่หน้าแอดมิน AI และ `make eval-ai` บน staging → เปิดกลับด้วยเมนูเปลี่ยนรุ่น (รุ่นต้องมีผลประเมินของโค้ดที่ใช้อยู่)
+- **RB02 AI unavailable**: หน้าแอดมิน AI → "หยุดใช้ AI ของงาน" เลือกงานที่มีปัญหาแล้วใส่เหตุผล (หรือ `manage.py stop_ai --task extract|answer|triage --username <แอดมินผู้พัฒนา> --reason ...`; ปิดทุกงานพร้อมกันด้วย `AI_ENABLED=false` ใน `django.env` แล้ว `faoj deploy` digest เดิม) บทสนทนากลับเป็นคำถามทีละช่อง ตอบจากคำสำคัญ และกติกายังเสนอกองและระดับ งานคัดกรองที่รอ AI ปิดเป็นไม่ใช้ AI ให้คนคัดกรอง → ตรวจ profile/endpoint/key/quota ที่หน้าแอดมิน AI → ประเมินบนเครื่องที่ประเมินด้วย commit ของ release ที่ใช้อยู่ ส่งออกผลที่เซ็นแล้วนำเข้า production (ADR 0020) → ทดสอบการเชื่อมต่อ → เปิดกลับด้วยเมนูเปลี่ยนรุ่น (รุ่นต้องมีผลประเมินของโค้ดที่ใช้อยู่)
 - **RB03 LINE failure/quota** (alert line-quota, dead-letter): หน้า `/console/admin/line/` ดูผล 429/monthly limit/unknown → อย่ากดส่งซ้ำรายการ unknown จนตรวจกับ LINE แล้ว → ถ้างบเดือนหมด ข้อความ critical เท่านั้นที่ส่งได้ (tier 2) แจ้งกองรับเรื่องกลางโทรหาผู้แจ้งที่รอข้อมูล → ส่ง dead-letter กลับเข้าคิวพร้อมเหตุผลเมื่อสาเหตุหายแล้ว
 - **RB04 External unknown** (alert external-unknown): ห้ามส่งซ้ำ → ถามระบบทะเบียนด้วย operation ID (`registry_ops.reconcile_external`) → คนตรวจเอกสาร SAP → ยืนยันหรือ fail พร้อมหลักฐาน ปัจจุบันไม่มี adapter จริง (ADR 0005) จึงไม่ควรเกิดใน production
 - **RB05 Restore/data corruption** (alert backup-age, wal-archive): หยุดการเขียน `faoj maintenance on` และ `docker compose -p faoj stop worker n8n` → เก็บหลักฐาน (`faoj releases`, log) → บน `faoj-staging`: `faoj restore-drill --keep` (หยุด stack ของ staging ให้เอง กู้ฐานข้อมูลถึง WAL สุดท้ายและไฟล์ล่าสุด ตรวจไฟล์กับ checksum รายงาน RPO/RTO) → ตรวจข้อความ LINE และรายการ SAP ที่เกิดหลังจุดกู้ ก่อนเปิดส่งข้อความออก → ผู้รับผิดชอบอนุมัติเปิดใช้ (ชี้ LINE webhook ไปที่ staging หรือสร้าง prod ใหม่แล้ว restore กลับ) ห้าม replay การแจ้งเตือนจาก n8n execution history
@@ -3126,3 +3126,15 @@ AI งานสกัดร่าง: สวิตช์ใหม่ของร
 ผลต่างระหว่างสองรอบมาจาก temperature 0.4 ของโมเดลหลัก ส่วน typed-v1 ช้ากว่าชุดอื่นมากในรอบนี้ (ชุดอื่น p95 2 ถึง 10 วินาที) ข้อความที่ AI ตอบไม่ทันบอทจะถามทีละขั้นแทน ควรดูความเร็วของผู้ให้บริการอีกครั้งก่อนเปิดใช้
 
 ข้อควรระวังตอน deploy รอบถัดไป: migration 0056 ล้างชื่อจากทะเบียน ย้อนกลับด้วยโค้ดเก่าไม่คืนชื่อ ต้องสำรองฐานข้อมูลก่อน และหลักฐานประเมินของ v11/v14 ผูกกับ source digest จึงต้องประเมินใหม่ตอน release ตามปกติ
+
+### 24 ตุลาคม 2569 ผลประเมิน AI ข้ามเครื่อง (ทาง ก, ADR 0020)
+
+ผู้ใช้สั่ง deploy ตามขั้นตอนของ main: PR #15 merge เป็น `a53f284` ผ่าน CI และ Release แล้ว `faoj deploy` บน E5 ด้วย image จาก OCIR (`faoj/app@sha256:712069c6…`) เป็นครั้งแรกที่ E5 ดึงจาก OCIR ด้วย instance principal migrate 0056–0060 smoke ผ่าน AI บน production ยังเป็น v11
+
+production ประเมินเองไม่ได้ จึงเปลี่ยนรุ่น AI หลัง deploy ไม่ได้ ตรวจพบด้วยว่า image ไม่มี `uv.lock` `source_digest()` จึงล้มบน production ทางแก้ที่ผู้ใช้เลือก (Q1–Q7):
+
+- Mac ประเมินด้วย commit ของ release แล้วเซ็นผลด้วย Ed25519 (`make_ai_evidence_key`, `export_ai_evidence`) production เก็บกุญแจสาธารณะใน `AI_EVIDENCE_PUBLIC_KEYS`
+- production นำเข้าด้วย `import_ai_evidence` หรือปุ่มในหน้าแอดมิน AI ตรวจลายเซ็น โค้ดที่รันอยู่ และการตั้งค่าแบบเทียบเนื้อหา แล้วติดผลกับรุ่นที่ตั้งค่าตรงกันหรือสร้างรุ่นใหม่ ยังต้องทดสอบการเชื่อมต่อบน production ก่อนเปลี่ยนไปใช้ ผู้ใช้เป็นคนเปลี่ยนเอง
+- ตัวอย่าง few-shot ไม่ตรงก็นำเข้าได้ แต่เตือนและบันทึกใน audit (ผู้ใช้เลือกข้อ ข)
+- image ใส่ `uv.lock` แล้ว และไฟล์ที่ขาดทำให้ผลประเมินไม่ผ่านแทนการล้มหน้าเว็บ
+- ตอนนี้ทำเฉพาะงานอ่านข้อความ

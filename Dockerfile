@@ -21,7 +21,8 @@ WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY config ./config
 COPY operations ./operations
-COPY manage.py synthetic-data.json priority-engine-demo.json ./
+# uv.lock too: AI evaluation evidence is bound to the locked dependencies (ai_eval.source_digest).
+COPY manage.py synthetic-data.json priority-engine-demo.json uv.lock ./
 # Hashed static files for WhiteNoise (M10); throwaway settings, nothing connects to a database.
 RUN BUILD_KEY="$(/app/.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(64))')" \
     && APP_ENV=production ALLOWED_HOSTS=build CSRF_TRUSTED_ORIGINS=https://build \
