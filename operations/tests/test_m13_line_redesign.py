@@ -168,12 +168,13 @@ class ServiceMenuFlowTests(MenuTestCase):
 
         line_menu_catalog.sync()
 
-    def test_meter_withdrawal_uses_its_division_and_category(self):
-        self.open("Meter, CT, VT")
+    def test_a_tile_withdrawal_uses_its_division_and_category(self):
+        # 23 Oct 2569: the กคว. tile asks for the equipment first (test_m14_kcw_menu).
+        self.open("เครื่องมือและอุปกรณ์")
         self.type(ALICE, "เบิกอุปกรณ์")
         draft = ConversationDraft.objects.get(status="open")
         self.assertEqual(draft.kind, Case.Kind.WITHDRAWAL)
-        self.assertEqual(draft.data["division"], "กคว.")
+        self.assertEqual(draft.data["division"], "กคอ.")
         self.assertEqual(draft.step, "meter_group")
         self.type(ALICE, "มิเตอร์")
         draft.refresh_from_db()
@@ -183,12 +184,14 @@ class ServiceMenuFlowTests(MenuTestCase):
         from operations import line_menu_catalog
 
         line_menu_catalog.sync()
-        for label in ("Meter, CT, VT", "หม้อแปลง LBS RMU", "เครื่องมือและอุปกรณ์"):
+        for label in ("หม้อแปลง LBS RMU", "เครื่องมือและอุปกรณ์"):
             with self.subTest(label=label):
                 self.open(label)
                 reply = self.press(ALICE, "เบิกอุปกรณ์")
                 self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
                 self.press(ALICE, "ยกเลิกร่าง")
+        reply = self.open("Meter, CT, VT")  # the same groups, asked first
+        self.assertEqual(list(buttons(reply))[1:5], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
 
     def test_meter_groups_click_type_search_and_back(self):
         from operations.models import EquipmentType
@@ -201,7 +204,7 @@ class ServiceMenuFlowTests(MenuTestCase):
                 category="transformer",
                 unit="เครื่อง",
             )
-        self.open("Meter, CT, VT")
+        self.open("หม้อแปลง LBS RMU")
         reply = self.type(ALICE, "ส่งคืนอุปกรณ์")
         self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
         reply = self.press(ALICE, "CT")
@@ -216,11 +219,11 @@ class ServiceMenuFlowTests(MenuTestCase):
         self.press(ALICE, "CT ทดสอบ")
         self.type(ALICE, "2")
         draft = ConversationDraft.objects.get(status="open")
-        self.assertEqual(draft.data["division"], "กคว.")
+        self.assertEqual(draft.data["division"], "กอจ.")
         self.assertEqual(draft.data["lines"][0]["item_code"], "CT_TEST")
 
     def test_missing_group_does_not_offer_unrelated_material(self):
-        self.open("Meter, CT, VT")
+        self.open("เครื่องมือและอุปกรณ์")
         self.type(ALICE, "เบิกอุปกรณ์")
         reply = self.type(ALICE, "CT")
         self.assertIn("ยังไม่มีรายการที่ใช้งานได้", texts(reply))
@@ -240,7 +243,7 @@ class ServiceMenuFlowTests(MenuTestCase):
         EquipmentType.objects.create(
             code="VT_99", name="VT รุ่น 99", line_group="vt", category="meter", unit="เครื่อง"
         )
-        self.open("Meter, CT, VT")
+        self.open("เครื่องมือและอุปกรณ์")
         self.type(ALICE, "เบิกอุปกรณ์")
         self.type(ALICE, "CT")
         self.assertEqual(ConversationDraft.objects.get(status="open").step, "item_search")
@@ -277,7 +280,13 @@ class ServiceMenuFlowTests(MenuTestCase):
 
         self.say(self.event(BOB, "follow"))
         self.type(BOB, "ไม่ระบุตัวตน")
-        reply = self.type(BOB, "Meter, CT, VT")
+        reply = self.type(BOB, "หม้อแปลง LBS RMU")
         self.assertNotIn("เบิกอุปกรณ์", buttons(reply))
         self.assertNotIn("ส่งคืนอุปกรณ์", buttons(reply))
         self.assertIn("เฉพาะปัญหา", texts(reply))
+        # 23 Oct 2569: the กคว. tile also takes problem reports, so it opens; no withdrawal.
+        reply = self.type(BOB, "Meter, CT, VT")
+        self.assertIn("มิเตอร์", buttons(reply))
+        reply = self.press(BOB, "มิเตอร์")
+        self.assertIn("เฉพาะปัญหา", texts(reply))
+        self.assertNotIn("ติดตามใบเบิก", buttons(reply))

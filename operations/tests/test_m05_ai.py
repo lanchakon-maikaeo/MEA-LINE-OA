@@ -137,8 +137,8 @@ class AITestCase(OrchestrationTestCase):
         original_catalog = ai._catalog
         names = {i.code: i.name for i in ai_eval.load(ai_eval.DATASETS["v4"])[1]}
 
-        def catalog():
-            items = original_catalog()
+        def catalog(typed=False):
+            items = original_catalog(typed)
             for item in items:
                 item.name = names.get(item.code, item.name)
             return items

@@ -123,6 +123,11 @@ class AIPresetForm(forms.Form):
         widget=forms.RadioSelect,
     )
     use_json_schema = AIProfileForm.base_fields["use_json_schema"]
+    typed_fields = forms.BooleanField(
+        label="อ่านเลขใบเบิก/ใบส่งคืน SAP และช่องที่พิมพ์ของมิเตอร์ CT VT (งานสกัดร่างเท่านั้น)",
+        initial=True,
+        required=False,
+    )
 
 
 class AIVersionForm(forms.Form):
@@ -157,6 +162,7 @@ class AIVersionForm(forms.Form):
         queryset=AIProfile.objects.all(),
         required=False,
     )
+    typed_fields = AIPresetForm.base_fields["typed_fields"]
     note = forms.CharField(label="หมายเหตุ", max_length=500, required=False)
 
     def profiles(self):

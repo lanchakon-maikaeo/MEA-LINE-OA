@@ -1440,6 +1440,41 @@ def i_press_skip_serials(d):
     return d.press("press_skip_serials", "ข้าม")
 
 
+def i_type_sap_number(d):
+    """The SAP slip a withdrawal or return follows (23 Oct 2569): one synthetic number per
+    dialogue, typed again if the bot asks again."""
+    number = d.flags.setdefault("sap_number", f"45{d.rng.randint(10**7, 10**8 - 1)}")
+    return d.text("type_sap_number", number)
+
+
+def i_type_entry(d):
+    """The typed fields the bot asks for a line (typed_lines), in one message split by "/".
+    What is asked comes from the draft, like the step itself; the person makes up synthetic
+    meter numbers, one per unit, and a common size."""
+    draft = d.draft()
+    entry = (draft.data.get("entry") if draft is not None else None) or {}
+    keys = entry.get("keys", [])[entry.get("at", 0) :]
+    if not keys:
+        return None
+    line = draft.data["lines"][entry["line"]] if entry.get("line") is not None else {}
+    quantity = str(int(float(entry.get("row", {}).get("quantity") or line.get("quantity") or 1)))
+    values = []
+    for key in keys:
+        if key == "numbers":
+            values.append(
+                " ".join(f"SIM-{d.rng.randint(10**5, 10**6 - 1)}" for _ in range(int(quantity)))
+            )
+        elif key == "size":
+            values.append(d.rng.choice(["5(15)A", "15(45)A", "5(100)A"]))
+        elif key == "quantity":
+            values.append(quantity)
+        elif key == "name":
+            values.append("อุปกรณ์จำลอง")
+        else:
+            values.append("ข้อมูลจำลอง")
+    return d.text("type_entry", " / ".join(values))
+
+
 def i_press_add_line(d):
     return d.press("press_add_line", "เพิ่มรายการ") if _next_line(d) is not None else None
 
@@ -1857,7 +1892,12 @@ class World:
         line_menu_catalog.sync()
         self.policy = policy.current_policy()
         self.items = {
-            c: list(EquipmentType.objects.filter(category=c, is_active=True).order_by("code"))
+            # A shared item of a typed group is never offered in a list (typed_lines).
+            c: list(
+                EquipmentType.objects.filter(category=c, is_active=True, entry_group="").order_by(
+                    "code"
+                )
+            )
             for c in EQUIPMENT
         }
         self.reporter = Requester.objects.create(
@@ -1865,7 +1905,9 @@ class World:
         )
 
     def _pad(self, category, count):
-        have = EquipmentType.objects.filter(category=category, is_active=True).count()
+        have = EquipmentType.objects.filter(
+            category=category, is_active=True, entry_group=""
+        ).count()
         unit, serialized = PAD_UNITS[category]
         label = conversation.CATEGORY_LABELS[category]
         number = 0

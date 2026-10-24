@@ -15,6 +15,7 @@ from operations import (
     queues,
     registry,
     returns,
+    typed_lines,
     workflow,
 )
 from operations.models import (
@@ -177,6 +178,9 @@ def timeline(case):
     entries = []
     for decision in case.decisions.select_related("actor__staff_profile"):
         label = action_label(decision.action)
+        data = decision.data if isinstance(decision.data, dict) else {}
+        if decision.action == "set_sap_number" and data.get("sap_number"):
+            label += f" {data.get('previous') or 'ไม่มี'} → {data['sap_number']}"
         moved = decision.from_status and decision.from_status != decision.to_status
         entries.append(
             {
@@ -311,10 +315,32 @@ def line_owners(case):
 
 
 def lines(case):
+    """The line table, with what the requester typed for a shared item (typed_lines)."""
     if case.kind == K.WITHDRAWAL:
-        return fulfilment.summary(case)
-    if case.kind == K.RETURN:
-        return returns.summary(case)
+        page = fulfilment.summary(case)
+    elif case.kind == K.RETURN:
+        page = returns.summary(case)
+    else:
+        page = _problem_lines(case)
+    typed = {}
+    for line in case.lines.select_related("item"):
+        unit = line.item.unit if typed_lines.is_shared(line.item) else ""
+        rows = [
+            " · ".join(
+                part
+                for part in (typed_lines.label_of(row["group"]), typed_lines.describe(row, unit))
+                if part
+            )
+            for row in line.details
+        ]
+        if rows:
+            typed[line.line_no] = rows
+    for row in page.get("lines", []):
+        row["typed"] = typed.get(row["line_no"], [])
+    return page
+
+
+def _problem_lines(case):
     return {
         "lines": [
             {
@@ -436,7 +462,12 @@ def build(case, now=None):
         "level": queues.level_of(triage),
         "triage": triage,
         "texts": [
-            (label, getattr(case, name)) for name, label in TEXT_FIELDS if getattr(case, name)
+            *(
+                [(typed_lines.SAP_LABELS[case.kind], case.sap_number)]
+                if case.sap_number and case.kind in typed_lines.SAP_LABELS
+                else []
+            ),
+            *((label, getattr(case, name)) for name, label in TEXT_FIELDS if getattr(case, name)),
         ],
         "hazard_guidance": policy.hazard_guidance(case),
         "hazard": bool(triage and triage.priority_floor == "P0"),

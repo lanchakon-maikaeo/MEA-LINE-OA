@@ -29,4 +29,41 @@
     <button class="btn--sm" type="submit">นำเข้าไฟล์รหัส</button>
   </form>
 </section>
+<section class="section mt-24" aria-labelledby="t-typed">
+  <div class="section-head"><h2 id="t-typed">ช่องที่ผู้ใช้ LINE พิมพ์</h2><span class="muted">ใช้กับเมนูที่เลือกอุปกรณ์ก่อน เช่น Meter, CT, VT</span></div>
+  <p class="muted">ผู้ใช้พิมพ์ทุกช่องในบรรทัดเดียวคั่นด้วย / หรือพิมพ์ทีละช่องก็ได้ ช่องหลักเปลี่ยนชื่อได้แต่ลบไม่ได้ หมายเลขเครื่องวัดและจำนวนบังคับเสมอสำหรับเบิกและคืน แจ้งปัญหาข้ามได้ทุกช่องและไม่ถามจำนวน</p>
+  <form method="post">
+    {% csrf_token %}<input type="hidden" name="action" value="fields">
+    {% for g in groups %}
+    <h3 class="mt-18">{{ g.label }}{% if g.item %} <span class="muted">· รายการกลาง {{ g.item.code }}</span>{% endif %}</h3>
+    {% if g.item %}<div class="field"><label for="unit-{{ g.key }}">หน่วยที่แสดง</label><input id="unit-{{ g.key }}" name="unit-{{ g.key }}" value="{{ g.item.unit }}" maxlength="32" autocomplete="off"></div>{% endif %}
+    <div class="table-wrap"><table class="table--cards">
+      <thead><tr><th scope="col">ชื่อช่อง</th><th scope="col">ใช้กับ</th><th scope="col">บังคับ (เบิก/คืน)</th><th scope="col">ลำดับ</th><th scope="col">ใช้งาน</th></tr></thead>
+      <tbody>
+      {% for row in g.fields %}{% with f=row.field %}<tr>
+        <td class="cell--wide" data-label="ชื่อช่อง"><label class="visually-hidden" for="label-{{ f.pk }}">ชื่อช่อง</label><input id="label-{{ f.pk }}" name="label-{{ f.pk }}" value="{{ f.label }}" maxlength="40" required autocomplete="off">{% if f.is_base %} <span class="tag tag--outline">ช่องหลัก</span>{% endif %}</td>
+        <td data-label="ใช้กับ">{% for value, label in kinds %}<label class="choice"><input type="checkbox" name="kinds-{{ f.pk }}" value="{{ value }}"{% if value in f.kinds %} checked{% endif %}{% if f.is_base %} disabled{% endif %}> <span>{{ label }}</span></label>{% endfor %}</td>
+        <td data-label="บังคับ"><input type="checkbox" name="required-{{ f.pk }}" value="1" aria-label="บังคับ {{ f.label }}"{% if f.required %} checked{% endif %}{% if row.fixed %} disabled{% endif %}>{% if row.fixed %}<input type="hidden" name="required-{{ f.pk }}" value="1">{% endif %}</td>
+        <td class="cell--end" data-label="ลำดับ"><input name="position-{{ f.pk }}" value="{{ f.position }}" inputmode="numeric" size="3" aria-label="ลำดับ {{ f.label }}"></td>
+        <td data-label="ใช้งาน"><input type="checkbox" name="active-{{ f.pk }}" value="1" aria-label="ใช้งาน {{ f.label }}"{% if f.is_active %} checked{% endif %}{% if f.is_base %} disabled{% endif %}>{% if f.is_base %}<input type="hidden" name="active-{{ f.pk }}" value="1">{% endif %}</td>
+      </tr>{% endwith %}{% endfor %}
+      </tbody>
+    </table></div>
+    {% endfor %}
+    <div class="field mt-18"><label for="t-freason">เหตุผล <span class="muted">(ไม่บังคับ)</span></label><input id="t-freason" name="reason" autocomplete="off"></div>
+    <div class="form-actions"><button class="btn btn--sm" type="submit">บันทึกช่องและหน่วย</button></div>
+  </form>
+  <form method="post" class="mt-24">
+    <fieldset><legend>เพิ่มช่อง</legend>{% csrf_token %}<input type="hidden" name="action" value="add_field">
+      <div class="form-grid">
+        <div class="field"><label for="t-group">หมวด</label><select id="t-group" name="group">{% for g in groups %}<option value="{{ g.key }}">{{ g.label }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="t-label">ชื่อช่อง</label><input id="t-label" name="label" maxlength="40" required autocomplete="off"></div>
+      </div>
+      <p>{% for value, label in kinds %}<label class="choice"><input type="checkbox" name="kinds" value="{{ value }}" checked> <span>{{ label }}</span></label>{% endfor %}</p>
+      <p><label class="choice"><input type="checkbox" name="required" value="1"> <span>บังคับสำหรับเบิกและคืน</span></label></p>
+      <div class="field"><label for="t-areason">เหตุผล <span class="muted">(ไม่บังคับ)</span></label><input id="t-areason" name="reason" autocomplete="off"></div>
+      <button class="btn--sm" type="submit">เพิ่มช่อง</button>
+    </fieldset>
+  </form>
+</section>
 {% endblock %}

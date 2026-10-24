@@ -48,7 +48,10 @@ TOOLS = [
     ),
     types.Tool(
         name="get_case",
-        description="Open a case by its exact number within own or staff permissions.",
+        description=(
+            "Open a case by its exact number, or by the SAP slip number (เลขใบเบิก/ใบส่งคืน SAP) "
+            "it cites, within own or staff permissions."
+        ),
         inputSchema={
             **schema(number=TEXT, scope={"type": "string", "enum": ["own", "staff"]}),
             "required": ["number"],
@@ -172,7 +175,10 @@ class Tools:
             rows = services.visible_cases(actor).order_by("-submitted_at", "-pk")
             # Display only identifiers and states; customer details never enter the model.
             if name == "get_case":
-                row = rows.filter(number=args["number"].upper()).first()
+                row = (
+                    rows.filter(number=args["number"].upper()).first()
+                    or rows.filter(sap_number__iexact=args["number"].strip()).first()
+                )
                 if row is None:
                     raise PermissionDenied("ไม่พบเรื่องนี้ในสิทธิ์ของคุณ")
                 return {"kind": "case", "scope": scope, "number": row.number, "id": str(row.pk)}

@@ -82,7 +82,7 @@
           {% for l in page.lines.lines %}
             <tr>
               <td class="num">{{ l.line_no }}</td>
-              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}{% if l.approval_reason %}<br><span class="muted">{{ l.approval_reason }}</span>{% endif %}</td>
+              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}{% if l.approval_reason %}<br><span class="muted">{{ l.approval_reason }}</span>{% endif %}</td>
               <td class="num">{{ l.requested }}</td>
               <td class="num">{{ l.approved }}</td>
               <td class="num">{{ l.issued }}</td>
@@ -100,7 +100,7 @@
           {% for l in page.lines.lines %}
             <tr>
               <td class="num">{{ l.line_no }}</td>
-              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% if l.requested_serials %}<br><span class="muted">{{ l.requested_serials|join:", " }}</span>{% endif %}{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}</td>
+              <td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }} ({{ l.unit }})</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}{% if l.requested_serials and not l.typed %}<br><span class="muted">{{ l.requested_serials|join:", " }}</span>{% endif %}{% for no, code in page.line_owners.items %}{% if no == l.line_no %}<br><span class="tag tag--outline">ดำเนินการโดย {{ code }}</span>{% endif %}{% endfor %}</td>
               <td class="num">{{ l.requested }}</td><td class="num">{{ l.arrived }}</td><td class="num">{{ l.ready }}</td><td class="num">{{ l.repair }}</td><td class="num">{{ l.other }}</td><td class="num">{{ l.awaiting }}</td><td class="num">{{ l.terminated }}</td>
               <td class="num{% if l.outstanding != '0' %} t-strong{% endif %}">{{ l.outstanding }}</td>
             </tr>
@@ -112,7 +112,7 @@
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">จำนวน</th><th scope="col">เลขเครื่อง</th></tr></thead>
           <tbody>
           {% for l in page.lines.lines %}
-            <tr><td class="num">{{ l.line_no }}</td><td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }}</span></td><td class="num">{{ l.requested }}</td><td>{{ l.serials|join:", "|default:"-" }}</td></tr>
+            <tr><td class="num">{{ l.line_no }}</td><td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }}</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}</td><td class="num">{{ l.requested }}</td><td>{{ l.serials|join:", "|default:"-" }}</td></tr>
           {% empty %}<tr><td colspan="4" class="muted">ไม่ได้ระบุรายการของ</td></tr>
           {% endfor %}
           </tbody>

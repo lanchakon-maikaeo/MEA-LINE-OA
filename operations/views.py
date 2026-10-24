@@ -757,6 +757,16 @@ def admin_division_action(request, pk, action):
             ),
             "เปลี่ยนสถานะกองแล้ว",
         )
+    elif action in {"sap-on", "sap-off"}:
+        from operations import typed_lines
+
+        _run(
+            request,
+            lambda: typed_lines.set_requires_sap(
+                request.user, division, action == "sap-on", reason
+            ),
+            "บันทึกแล้ว",
+        )
     else:
         raise Http404
     return redirect("admin-divisions")
@@ -1157,6 +1167,7 @@ def admin_ai_action(request, action, pk=None):
                     d["pipeline"],
                     d["screen_profile"],
                     d["task"] or AIConfigVersion.Task.EXTRACT,
+                    d["typed_fields"] and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
                 ),
                 "สร้างรุ่นการตั้งค่าแล้ว (รอทดสอบและประเมิน)",
             )
@@ -1175,6 +1186,7 @@ def admin_ai_action(request, action, pk=None):
                     d["pipeline"],
                     d["use_json_schema"],
                     d["task"] or AIConfigVersion.Task.EXTRACT,
+                    d["typed_fields"],
                 ),
                 "สร้างรุ่นใหม่จากโมเดลสำเร็จรูปแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อ → ประเมิน → เปลี่ยน",
             )

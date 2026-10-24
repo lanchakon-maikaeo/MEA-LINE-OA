@@ -45,6 +45,9 @@ class Division(models.Model):
     # it when no duty entry fits. The examples test the AI and never reach its prompt (Q25).
     duty_overview = models.TextField(blank=True)
     duty_examples = models.JSONField(default=list, blank=True)
+    # เลขใบเบิก/ใบส่งคืน SAP (user, 23 Oct 2569): a withdrawal or return this division takes
+    # follows a slip already made in SAP, so the LINE chat asks for its number. Admins switch it.
+    requires_sap = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["code"]
@@ -384,6 +387,9 @@ class EquipmentType(models.Model):
     is_synthetic = models.BooleanField(default=False)
     # M11 Q5: the registry's (SAP) material code; one per item, empty until mapped.
     official_code = models.CharField(max_length=40, blank=True)
+    # ช่องที่ผู้ใช้พิมพ์ (user, 23 Oct 2569): the one shared item of a LINE group whose lines are
+    # typed (meter numbers, size, quantity) instead of chosen; never offered in a list.
+    entry_group = models.CharField(max_length=16, blank=True, choices=LineGroup.choices)
 
     class Meta:
         ordering = ["code"]
@@ -480,6 +486,8 @@ class Case(models.Model):
     condition = models.TextField(blank=True)
     return_reason = models.TextField(blank=True)
     source_reference = models.CharField(max_length=100, blank=True)
+    # เลขใบเบิก/ใบส่งคืน SAP the requester gave (user, 23 Oct 2569); staff may correct it.
+    sap_number = models.CharField(max_length=20, blank=True, db_index=True)
     description = models.TextField(blank=True)
     impact = models.TextField(blank=True)
     related_case = models.ForeignKey(
@@ -541,6 +549,9 @@ class CaseLine(models.Model):
     item = models.ForeignKey(EquipmentType, on_delete=models.PROTECT, related_name="+")
     requested_quantity = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     serials = models.JSONField(default=list, blank=True)
+    # What the requester typed for a shared item (typed_lines): [{size, quantity, numbers,
+    # name, extra}], one entry per typed row; empty for an item chosen from the list.
+    details = models.JSONField(default=list, blank=True)
     approved_quantity = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     approval_reason = models.TextField(blank=True)
     approved_by = models.ForeignKey(
@@ -1108,6 +1119,9 @@ class AIConfigVersion(models.Model):
     screen_profile = models.ForeignKey(
         AIProfile, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # Extraction only (user, 23 Oct 2569): also read the SAP slip number and the typed fields
+    # of the equipment-first groups (typed_lines). Older versions keep the prompt they passed.
+    typed_fields = models.BooleanField(default=False, db_default=False)
     profiles = models.ManyToManyField(AIProfile, through="AIConfigEntry", related_name="+")
     test_passed = models.BooleanField(null=True)
     test_result = models.JSONField(default=dict, blank=True)
@@ -2252,6 +2266,7 @@ class LineMenuItem(models.Model):
         TOPIC = "topic", "เปิดปุ่มย่อยของหัวข้อนี้"
         TRACK = "track", "ติดตาม: แสดงเรื่องของผู้ใช้ ถ้าไม่มีให้ถามกองโดยตรง"
         RETURN = "return", "เริ่มคำขอคืนส่งถึงกองนี้"
+        EQUIPMENT = "equipment", "เลือกอุปกรณ์ แล้วเลือกเบิก ส่งคืน หรือแจ้งปัญหา"
         PROBLEM = "problem", "เริ่มแจ้งปัญหาส่งถึงกองนี้"
         GENERAL = "general", "แจ้งปัญหาหรือข้อเสนอแนะ (กติกาเลือกกอง)"
         NEW = "new", "ส่งเรื่องใหม่ (ผู้ใช้เลือกชนิดเอง)"
@@ -2291,6 +2306,42 @@ class LineMenuItem(models.Model):
 
     class Meta:
         ordering = ["tab", "place", "position", "pk"]
+
+
+class EntryField(models.Model):
+    """ช่องที่ผู้ใช้พิมพ์ของหมวด (user, 23 Oct 2569): what the LINE chat asks for each line of a
+    typed group, in order. The base fields (meter numbers, size, quantity, name) can be relabelled
+    but not removed, since the system counts quantities and meter numbers with them; admins add
+    text fields of their own. `required` holds for withdrawals and returns; a problem report may
+    skip every field."""
+
+    class Key(models.TextChoices):
+        NUMBERS = "numbers", "หมายเลขเครื่องวัด"
+        SIZE = "size", "ขนาด"
+        QUANTITY = "quantity", "จำนวน"
+        NAME = "name", "ชื่ออุปกรณ์"
+
+    group = models.CharField(max_length=16, choices=EquipmentType.LineGroup.choices)
+    key = models.CharField(max_length=32)  # a Key for a base field, "x<pk>" for an added one
+    label = models.CharField(max_length=40)
+    kinds = models.JSONField(default=list)  # of withdrawal, return, problem
+    required = models.BooleanField(default=True)
+    position = models.PositiveSmallIntegerField(default=0)
+    is_base = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["group", "position", "pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["group", "key"], name="entryfield_unique_key")
+        ]
+
+    def __str__(self):
+        return f"{self.group} · {self.label}"
 
 
 class MonitoringDay(models.Model):

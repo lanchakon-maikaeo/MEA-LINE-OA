@@ -398,13 +398,16 @@ def budget_allows(level, now):
 # --- The staff side of a LINE chat ---------------------------------------------------------------
 
 
-def _case_for(user, case_id=None, number=None):
+def _case_for(user, case_id=None, number=None, sap_number=None):
     from operations import services
     from operations.contracts import Actor
 
     cases = services.visible_cases(Actor.staff(user))
     if case_id:
         return cases.filter(pk=case_id).first()
+    if sap_number:
+        # The newest case citing this SAP slip (an older one may be closed already).
+        return cases.filter(sap_number__iexact=sap_number).order_by("-submitted_at").first()
     return cases.filter(number=number).first()
 
 

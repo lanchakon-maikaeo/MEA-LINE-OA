@@ -66,6 +66,7 @@ BUTTON_LABELS = {
     "decide_routing": "ตัดสินว่ากองใดรับ",
     "set_priority": "ยืนยันระดับความเร่งด่วน",
     "set_section": "ระบุแผนก",
+    "set_sap_number": "แก้เลข SAP ของคำขอ",
     "record_facts": "แก้ข้อเท็จจริง",
     "approve": "อนุมัติ",
     "deny_approval": "ไม่อนุมัติ",
@@ -357,6 +358,7 @@ RULES = {
     ),
     "dispute_resolution": lambda st: st.case.kind == K.PROBLEM and st.answers_for_district(),
     "set_section": lambda st: bool(st.sections) and st.member(st.owner),
+    "set_sap_number": lambda st: st.member(st.owner),
     "close": lambda st: (
         st.case.kind in (K.WITHDRAWAL, K.PROBLEM)
         and st.member(st.owner)
@@ -711,6 +713,19 @@ def build_form(action, st, params, demo=False):
         add(_reason(True))
         if routing_words.teachable(case):
             add(Field("keywords", "คำสำคัญให้ระบบจำ", help=routing_words.KEYWORDS_HELP))
+    elif action == "set_sap_number":
+        from operations import typed_lines
+
+        add(
+            Field(
+                "sap_number",
+                typed_lines.SAP_LABELS.get(case.kind, "เลข SAP"),
+                required=True,
+                initial=case.sap_number,
+                help="ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว ประวัติเรื่องเก็บทั้งเลขเดิมและเลขใหม่",
+            )
+        )
+        add(_reason())
     elif action == "set_section":
         add(
             Field(

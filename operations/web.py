@@ -569,8 +569,12 @@ def case_search(request):
     if order is not None:  # งานสั่ง numbers (T69-000001) open the order
         return redirect("order-detail", number=order.number)
     if query:
-        cases = queues.visible(request.user).filter(number__icontains=query)
+        # 23 Oct 2569: a SAP slip number finds its case too.
+        visible = queues.visible(request.user)
+        cases = visible.filter(Q(number__icontains=query) | Q(sap_number__iexact=query))
         exact = cases.filter(number=query).first()
+        if exact is None and visible.filter(sap_number__iexact=query).count() == 1:
+            exact = visible.get(sap_number__iexact=query)
         if exact is not None:
             return redirect("case-detail", number=exact.number)
         orders = (

@@ -25,7 +25,13 @@ def load(document):
         if row["code"] == "กองอุปกรณ์ฯ" and Division.objects.filter(code="กอจ.").exists():
             row = {**row, "code": "กอจ."}
         division, created = Division.objects.get_or_create(
-            code=row["code"], defaults={"name": row["name"], "kind": kind}
+            code=row["code"],
+            # เลขใบเบิก SAP (23 Oct 2569): set once; an admin may change it later on the กอง page.
+            defaults={
+                "name": row["name"],
+                "kind": kind,
+                "requires_sap": bool(row.get("requires_sap")),
+            },
         )
         if created or (division.name, division.kind, division.is_synthetic) != (
             row["name"],

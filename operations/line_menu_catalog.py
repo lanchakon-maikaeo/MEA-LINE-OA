@@ -1,4 +1,7 @@
-"""The service menu agreed by the owner on 16 October 2026; no browser editing step."""
+"""The service menu agreed by the owner on 16 October 2026; no browser editing step.
+
+23 Oct 2569: the กคว. tile asks for the equipment first (มิเตอร์ / CT / VT / อุปกรณ์อื่น), then
+ติดตามใบเบิก / ติดตามใบส่งคืน / แจ้งปัญหา (conversation._action_card); the other tiles stay."""
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -7,7 +10,18 @@ from operations.models import Division, LineMenuItem
 
 A, P, T = LineMenuItem.Action, LineMenuItem.Place, LineMenuItem.Tab
 TOPICS = [
-    ("Meter, CT, VT", "กคว.", "meter", []),
+    (
+        "Meter, CT, VT",
+        "กคว.",
+        "meter",
+        [
+            ("มิเตอร์", A.EQUIPMENT, "meter"),
+            ("CT", A.EQUIPMENT, "ct"),
+            ("VT", A.EQUIPMENT, "vt"),
+            ("อุปกรณ์อื่น", A.EQUIPMENT, "other"),
+            ("ติดตามเรื่อง", A.TRACK),
+        ],
+    ),
     ("หม้อแปลง LBS RMU", "กอจ.", "transformer", []),
     ("เครื่องมือและอุปกรณ์", "กคอ.", "other", []),
     (
@@ -136,7 +150,7 @@ def sync():
         parent = put(T.REPORT, P.TILE, index, label, A.TOPIC, division=division, note=code)
         if not choices:
             choices = [("เบิกอุปกรณ์", A.NEW), ("ส่งคืนอุปกรณ์", A.RETURN), ("ติดตามเรื่อง", A.TRACK)]
-        for number, (choice, action) in enumerate(choices, 1):
+        for number, (choice, action, *group) in enumerate(choices, 1):
             put(
                 T.REPORT,
                 P.CHOICE,
@@ -145,7 +159,7 @@ def sync():
                 action,
                 parent=parent,
                 division=division,
-                topic=topic,
+                topic=group[0] if group else topic,  # an equipment choice holds its LINE group
                 kind="withdrawal" if action == A.NEW else "",
             )
     put(T.REPORT, P.TILE, 6, "ปัญหา/ข้อเสนอแนะ", A.GENERAL, note="ทุกกอง/ศูนย์")

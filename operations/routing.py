@@ -427,8 +427,30 @@ def set_section(ctx, case, payload, reason, target):
     }
 
 
+def set_sap_number(ctx, case, payload, reason, target):
+    """23 Oct 2569: staff of the owner division correct the SAP slip number the requester typed;
+    the event keeps the old and the new number."""
+    from operations import typed_lines
+
+    if ctx.requester is not None or not _member(ctx, case.owner_division_id):
+        fail(ErrorCode.FORBIDDEN, "เฉพาะเจ้าหน้าที่ของกองเจ้าภาพแก้เลข SAP ได้")
+    number, problem = typed_lines.clean_sap(payload.get("sap_number"))
+    if problem:
+        fail(ErrorCode.VALIDATION_ERROR, problem)
+    if number == case.sap_number:
+        fail(ErrorCode.VALIDATION_ERROR, "เลข SAP นี้เป็นเลขเดิมของเรื่องอยู่แล้ว")
+    problem = typed_lines.sap_in_use(number, None, exclude=case)
+    if problem:
+        fail(ErrorCode.VALIDATION_ERROR, problem)
+    previous = case.sap_number
+    case.sap_number = number
+    case.status = target
+    return {"sap_number": number, "previous": previous}
+
+
 HANDLERS = {
     "set_section": set_section,
+    "set_sap_number": set_sap_number,
     "complete_triage": complete_triage,
     "request_handoff": request_handoff,
     "accept_handoff": accept_handoff,

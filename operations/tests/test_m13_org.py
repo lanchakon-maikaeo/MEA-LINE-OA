@@ -73,6 +73,9 @@ def real_world(target):
             },
         )
     Division.objects.filter(is_intake=True).update(is_intake=False)
+    # load_org asks กคว. for SAP slip numbers (23 Oct 2569); tests about that switch it on
+    # themselves (test_m14_kcw_menu), so the other real-structure tests file without one.
+    Division.objects.update(requires_sap=False)
     version = policy.import_policy(policy.load_document(seed_org_demo.REAL_POLICY))
     if policy.active_policy() != version:
         policy.activate_policy(None, version, "ผู้ทดสอบ", "TEST-ORG", "ทดสอบโครงสร้างจริง")

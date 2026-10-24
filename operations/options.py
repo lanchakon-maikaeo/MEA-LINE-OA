@@ -52,6 +52,7 @@ ROUTING_AI_ACCURACY = "routing_ai_accuracy"
 CATCH_UP = "catch_up_push"
 CATCH_UP_APOLOGY = "catch_up_apology"
 REGISTRY_ACCESS = "registry_access"
+SAP_LINE_ENTRY = "sap_line_entry"
 AI_EDITORS = "ai_editors"
 EMAIL_METHODS = "employee_email_methods"
 EMAIL_TYPED = "employee_email_typed"
@@ -390,6 +391,22 @@ OPTIONS = {
             ("5", "5 นาที", ""),
             ("30", "30 นาที", ""),
             ("never", "ไม่ต้องขอโทษ", ""),
+        ),
+    ),
+    SAP_LINE_ENTRY: Option(
+        "เรื่องเบิก/คืนที่ไปกองที่ต้องมีเลข SAP แต่ไม่ได้เริ่มจากปุ่มของกอง",
+        (
+            (
+                "typed",
+                "พิมพ์ช่องเหมือนปุ่มของกอง",
+                "ค่าที่ตกลงไว้ (23 ต.ค. 2569) ก่อนสรุป บอทถามเลข SAP และช่องที่ยังขาด เช่น "
+                "หมายเลขเครื่องวัดและขนาด ข้อมูลของกองจึงเป็นแบบเดียวกัน",
+            ),
+            (
+                "catalog",
+                "เลือกรุ่นจากรายการ ถามแค่เลข SAP",
+                "ทางที่เลือกรุ่นจากรายการทำแบบเดิม ก่อนสรุปบอทถามเฉพาะเลขใบเบิกหรือใบส่งคืน SAP",
+            ),
         ),
     ),
     REGISTRY_ACCESS: Option(
