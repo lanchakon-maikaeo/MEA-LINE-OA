@@ -100,6 +100,8 @@ CATEGORY_LABELS = {
     EquipmentType.Category.OTHER: "อุปกรณ์อื่น",
 }
 METER_GROUPS = {"meter": "มิเตอร์", "ct": "CT", "vt": "VT", "other": "อุปกรณ์อื่น"}
+# Every group a tile may ask for before the action (typed_lines; กอจ. since 24 Oct 2569).
+TYPED_GROUPS = dict(EquipmentType.LineGroup.choices)
 # Per-kind fields after the item lines: (name, question, required).
 FIELDS = {
     K.WITHDRAWAL: [
@@ -1679,7 +1681,7 @@ def _menu_item(turn, pk):
         )
         return
     if action == A.EQUIPMENT:
-        if item.topic not in METER_GROUPS:
+        if item.topic not in TYPED_GROUPS:
             return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
         if _problems_only(turn):
             turn.say("บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ")
@@ -1827,12 +1829,30 @@ def _typed_draft(turn, item, kind):
     if kind == REPAIR:
         kind, extra = K.PROBLEM, {"topic": Case.Topic.REPAIR}
     elif kind == K.PROBLEM:
-        extra = {"topic": "other" if group == "other" else "meter"}
+        shared = typed_lines.shared_item(group)
+        extra = {"topic": shared.category if shared else Case.Topic.OTHER}
+    # "เพิ่มรายการ" offers the groups of the same tile (กคว., กอจ. or กคอ.).
+    extra["groups"] = _tile_groups(item)
     draft = _menu_draft(turn, item, kind, "sap", typed=group, **extra)
     draft.data = dict(draft.data, menu_label=f"{_menu_label(item)} · {action}")
     if extra.get("topic") == Case.Topic.REPAIR or typed_lines.needs_sap(kind, _owners(draft)):
         return _set(turn, draft, "sap")
     return _start_row(turn, draft, group)
+
+
+def _tile_groups(item):
+    """[[group, label]] of the equipment choices beside this one on its tile."""
+    rows = LineMenuItem.objects.filter(
+        parent_id=item.parent_id, action=LineMenuItem.Action.EQUIPMENT, is_active=True
+    ).order_by("position", "pk")
+    return [[row.topic, row.label] for row in rows if row.topic in TYPED_GROUPS] or [
+        [item.topic, item.label]
+    ]
+
+
+def _draft_groups(draft):
+    """The groups "เพิ่มรายการ" offers in a typed draft: its tile's, else every group."""
+    return [tuple(g) for g in draft.data.get("groups") or []] or list(TYPED_GROUPS.items())
 
 
 def _menu_draft(turn, item, kind, step, **data):
@@ -2543,7 +2563,7 @@ def _draft_button(turn, draft, action, value):
     if action == "skip_serials":
         return _finish_line(turn, draft, [])
     if action == "typed_group" and draft.step == "typed_group":
-        if value.get("group") not in METER_GROUPS:
+        if value.get("group") not in dict(_draft_groups(draft)):
             return _ask(turn, draft)
         return _start_row(turn, draft, value["group"])
     if action == "entry_skip" and draft.step == "entry":
@@ -2590,7 +2610,15 @@ def _draft_button(turn, draft, action, value):
 
 EXAMPLES = {
     "numbers": "12345678 12345679",
-    "size": {"meter": "5(100)A", "ct": "100/5A", "vt": "11000/110V", "other": "2 นิ้ว"},
+    "size": {
+        "meter": "5(100)A",
+        "ct": "100/5A",
+        "vt": "11000/110V",
+        "other": "2 นิ้ว",
+        "transformer": "160 kVA",
+        "lbs": "24kV 630A",
+        "rmu": "24kV 630A",
+    },
     "quantity": "2",
     "name": "คีมตัดสาย",
 }
@@ -2824,7 +2852,7 @@ def _typed_group_card(turn, draft):
     lines = draft.data["lines"]
     buttons = [
         turn.button(label, "typed_group", {"group": group}, draft)
-        for group, label in METER_GROUPS.items()
+        for group, label in _draft_groups(draft)
     ]
     quick = [turn.button("ไปต่อ", "lines_done", draft=draft)] if lines else []
     return _card(turn, "เพิ่มรายการ", "เลือกอุปกรณ์", buttons, quick)
@@ -2882,10 +2910,10 @@ def _draft_text(turn, draft, text):
         return _entry_text(turn, draft, text)
     if step == "typed_group":
         raw = text.translate(THAI_DIGITS)
-        groups = list(METER_GROUPS)
-        if raw in {"1", "2", "3", "4"}:
-            return _start_row(turn, draft, groups[int(raw) - 1])
-        for group, label in METER_GROUPS.items():
+        groups = _draft_groups(draft)
+        if raw.isdigit() and 1 <= int(raw) <= len(groups):
+            return _start_row(turn, draft, groups[int(raw) - 1][0])
+        for group, label in groups:
             if raw.casefold() == label.casefold():
                 return _start_row(turn, draft, group)
     if step == "item_search":

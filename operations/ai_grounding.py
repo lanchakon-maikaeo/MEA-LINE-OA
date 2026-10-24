@@ -8,6 +8,7 @@ import re
 from decimal import Decimal
 
 from operations.conversation import CATEGORY_LABELS, THAI_DIGITS, _parse_date
+from operations.typed_lines import NUMBERED
 
 NUMBER = r"\d+(?:,\d{3})*(?:\.\d+)?"
 AUTHORITY = re.compile(
@@ -60,6 +61,9 @@ GROUP_WORDS = {
     "meter": ("มิเตอร์", "เครื่องวัด", "meter"),
     "ct": ("ct", "ซีที"),
     "vt": ("vt", "วีที"),
+    "transformer": ("หม้อแปลง", "transformer"),
+    "lbs": ("lbs",),
+    "rmu": ("rmu",),
 }
 # A group word right after these is part of another word (a label or another thing).
 NOT_GROUP_AFTER = ("เลข", "กล่อง", "ฝา", "ซีล", "ตู้")
@@ -496,7 +500,7 @@ def ground(extraction, text, catalog, draft=None, source_context=None):
             if equipment is not None:
                 original = list(item.serials)
                 inherited = old.get("serials", [])
-                label = METER_LABEL if group == "meter" else SERIAL_LABEL
+                label = METER_LABEL if group in NUMBERED else SERIAL_LABEL
                 tokens = serial_tokens(source, label)
                 if group:
                     # A typed row's size or the request's SAP slip number is not a meter number.
@@ -529,7 +533,7 @@ def ground(extraction, text, catalog, draft=None, source_context=None):
                     not item.serials
                     and not inherited
                     and equipment.is_serialized
-                    and (proposal.intent != "withdrawal" or group == "meter")
+                    and (proposal.intent != "withdrawal" or group in NUMBERED)
                     and written
                     and count not in (None, "")
                     and len(written) == Decimal(str(count))

@@ -23,7 +23,9 @@ from operations import identity, workflow
 from operations.models import Case, CaseLine, Division, EntryField, EquipmentType
 
 K = Case.Kind
-GROUPS = tuple(EquipmentType.LineGroup.values)  # meter, ct, vt, other
+GROUPS = tuple(EquipmentType.LineGroup.values)  # meter, ct, vt, other, transformer, lbs, rmu
+# Groups whose rows name each unit by its number (the number is the unit's serial).
+NUMBERED = ("meter", "transformer", "lbs", "rmu")
 SAP_NUMBER = re.compile(r"^[A-Za-z0-9-]{4,20}$")
 METER_NUMBER = SAP_NUMBER  # the same loose shape until the real formats are known
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")

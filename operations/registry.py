@@ -284,7 +284,7 @@ def update_config(actor, movement_types, column_aliases, storage_locations, reas
 def set_line_group(actor, item, group, reason=""):
     identity.require_admin(actor)
     group = (group or "").strip()
-    if group and group not in EquipmentType.LineGroup.values:
+    if group and group not in EquipmentType.MENU_GROUPS:
         raise ValidationError("เลือกหมวดเมนู LINE จากรายการ")
     before = item.line_group
     if before != group:

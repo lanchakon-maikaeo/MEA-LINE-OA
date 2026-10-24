@@ -65,7 +65,9 @@ def admin_items(request):
         "operations/admin_items.html",
         {
             "items": EquipmentType.objects.filter(entry_group="").order_by("code"),
-            "line_groups": EquipmentType.LineGroup.choices,
+            "line_groups": [
+                c for c in EquipmentType.LineGroup.choices if c[0] in EquipmentType.MENU_GROUPS
+            ],
             "groups": _groups(),
             "kinds": [
                 ("withdrawal", "เบิก"),

@@ -722,17 +722,15 @@ def _typed_rows(turn, data, rows, kind, notes):
     if all(line["item_code"] in shared for line in data["lines"]):
         first = entry["group"] if entry else rows[0][0].entry_group
         data.setdefault("typed", first)
-        if not data.get("division"):
-            tile = (
-                LineMenuItem.objects.filter(
-                    is_active=True, action=LineMenuItem.Action.EQUIPMENT, topic=first
-                )
-                .exclude(division=None)
-                .select_related("division")
-                .first()
-            )
-            if tile is not None:
-                data["division"] = tile.division.code
+        tiles = list(
+            LineMenuItem.objects.filter(
+                is_active=True, action=LineMenuItem.Action.EQUIPMENT, topic=first
+            ).exclude(division=None)
+        )
+        # อุปกรณ์อื่น is on several tiles: only a group one division owns names the division.
+        if len({t.division_id for t in tiles}) == 1:
+            data.setdefault("division", tiles[0].division.code)
+            data.setdefault("groups", conversation._tile_groups(tiles[0]))
     return entry
 
 

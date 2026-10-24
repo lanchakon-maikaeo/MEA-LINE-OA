@@ -80,7 +80,7 @@ class SetupTests(MenuTestCase):
 
         document = json.loads(load_org.DEFAULT.read_text(encoding="utf-8"))
         flagged = [row["code"] for row in document["divisions"] if row.get("requires_sap")]
-        self.assertEqual(flagged, ["กคว."])
+        self.assertEqual(sorted(flagged), sorted(["กคว.", "กคอ.", "กองอุปกรณ์ฯ"]))  # 24 Oct
         coordinator = {"code": "TEST-COORD", "name": "ผู้ประสานทดสอบ", "sections": []}
         new = {"code": "TEST-SAP", "name": "กองทดสอบ", "sections": [], "requires_sap": True}
         load_org.load({"coordinator": coordinator, "divisions": [new]})
@@ -88,12 +88,21 @@ class SetupTests(MenuTestCase):
         shared = dict(EquipmentType.objects.exclude(entry_group="").values_list("code", "unit"))
         self.assertEqual(
             shared,
-            {"TYPED_METER": "เครื่อง", "TYPED_CT": "ตัว", "TYPED_VT": "ตัว", "TYPED_OTHER": "หน่วย"},
+            {
+                "TYPED_METER": "เครื่อง",
+                "TYPED_CT": "ตัว",
+                "TYPED_VT": "ตัว",
+                "TYPED_OTHER": "หน่วย",
+                "TYPED_TRF": "เครื่อง",
+                "TYPED_LBS": "ตัว",
+                "TYPED_RMU": "ชุด",
+            },
         )
-        self.assertEqual(
-            list(EntryField.objects.filter(group="meter").values_list("key", flat=True)),
-            ["numbers", "size", "quantity"],
-        )
+        for group in ("meter", "transformer", "lbs", "rmu"):
+            self.assertEqual(
+                list(EntryField.objects.filter(group=group).values_list("key", flat=True)),
+                ["numbers", "size", "quantity"],
+            )
 
 
 class CardTests(KcwTestCase):
@@ -118,14 +127,6 @@ class CardTests(KcwTestCase):
             ("return", "sap", "กคว.", "ct"),
         )
         self.assertEqual(draft.data["menu_label"], f"{TILE} · CT · ติดตามใบส่งคืน")
-
-    def test_the_other_equipment_tiles_stay_as_they_were(self):
-        reply = self.open("หม้อแปลง LBS RMU")
-        self.assertIn("เลือกเรื่องที่ต้องการ", texts(reply))
-        self.assertEqual(list(buttons(reply)), ["เบิกอุปกรณ์", "ส่งคืนอุปกรณ์", "ติดตามเรื่อง"])
-        reply = self.press(ALICE, "เบิกอุปกรณ์")
-        self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
-        self.assertNotIn("TYPED_METER", str(reply))  # shared items are never in a list
 
     def test_tracking_lists_the_kcw_cases(self):
         case = self.submit(self.requester, "kcw-track-001", "4500000001")
@@ -273,6 +274,81 @@ class ProblemTests(KcwTestCase):
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         line = Case.objects.get().lines.get()
         self.assertEqual((line.serials, line.requested_quantity), (["P-0001"], None))
+
+
+class OtherTileTests(KcwTestCase):
+    """24 Oct 2569: the กอจ. tile asks หม้อแปลง / LBS / RMU / อุปกรณ์อื่น and the กคอ. tile a
+    name the requester types, then the same card 2, SAP number and typed rows as กคว."""
+
+    def setUp(self):
+        super().setUp()
+        Division.objects.filter(code__in=["กอจ.", "กคอ."]).update(requires_sap=True)
+
+    def test_the_kaoj_tile_asks_its_own_groups_and_files_to_kaoj(self):
+        reply = self.open("หม้อแปลง LBS RMU")
+        self.assertEqual(
+            [b for b in buttons(reply) if b != "หน้าหลัก"],
+            ["หม้อแปลง", "LBS", "RMU", "อุปกรณ์อื่น", "ติดตามเรื่อง"],
+        )
+        reply = self.press(ALICE, "LBS")
+        self.assertEqual(
+            [b for b in buttons(reply) if b not in ("ย้อนกลับ", "หน้าหลัก")],
+            ["ติดตามใบเบิก", "ติดตามใบส่งคืน", "ติดตามสถานะการซ่อม"],
+        )
+        self.assertIn("เลขใบเบิก SAP", texts(self.press(ALICE, "ติดตามใบเบิก")))
+        reply = self.type(ALICE, "4500300001")
+        self.assertIn("หมายเลขเครื่อง / ขนาด / จำนวน", texts(reply))
+        self.assertIn("24kV 630A", texts(reply))
+        self.type(ALICE, "LB-0001 / 24kV 630A / 1")
+        reply = self.press(ALICE, "เพิ่มรายการ")
+        self.assertEqual(
+            [b for b in buttons(reply) if b not in ("ไปต่อ", "หน้าหลัก", "ยกเลิกร่าง")],
+            ["หม้อแปลง", "LBS", "RMU", "อุปกรณ์อื่น"],
+        )
+        self.press(ALICE, "หม้อแปลง")
+        self.type(ALICE, "TR-0001 / 160 kVA / 1")
+        self.press(ALICE, "ไปต่อ")
+        self.type(ALICE, "เปลี่ยนชุดที่ชำรุด")
+        summary = texts(self.press(ALICE, "ข้าม"))
+        self.assertIn("ส่งถึง: กอจ.", summary)
+        self.assertIn("LBS · 24kV 630A · 1 ตัว (หมายเลข LB-0001)", summary)
+        self.assertIn("หม้อแปลง · 160 kVA · 1 เครื่อง (หมายเลข TR-0001)", summary)
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        case = Case.objects.get()
+        self.assertEqual((case.owner_division.code, case.sap_number), ("กอจ.", "4500300001"))
+        self.assertEqual(
+            sorted(case.lines.values_list("item__code", flat=True)), ["TYPED_LBS", "TYPED_TRF"]
+        )
+
+    def test_the_kkho_tile_takes_a_typed_name(self):
+        reply = self.open("เครื่องมือและอุปกรณ์")
+        self.assertEqual([b for b in buttons(reply) if b != "หน้าหลัก"], ["พิมพ์ชื่ออุปกรณ์", "ติดตามเรื่อง"])
+        self.press(ALICE, "พิมพ์ชื่ออุปกรณ์")
+        self.press(ALICE, "ติดตามใบส่งคืน")
+        reply = self.type(ALICE, "4900300002")
+        self.assertIn("ชื่ออุปกรณ์ / ขนาด / จำนวน", texts(reply))
+        reply = self.type(ALICE, "สว่านไฟฟ้า / 13 มม. / 1")
+        self.press(ALICE, "ไปต่อ")
+        self.type(ALICE, "ใช้งานได้")
+        self.type(ALICE, "งานเสร็จแล้ว")
+        summary = texts(self.press(ALICE, "ข้าม"))
+        self.assertIn("ส่งถึง: กคอ.", summary)
+        self.assertIn("เลขใบส่งคืน SAP: 4900300002", summary)
+        self.assertIn("สว่านไฟฟ้า · 13 มม. · 1", summary)
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        case = Case.objects.get()
+        self.assertEqual((case.kind, case.owner_division.code), ("return", "กคอ."))
+        self.assertEqual(case.lines.get().details[0]["name"], "สว่านไฟฟ้า")
+
+    def test_a_problem_only_account_reports_a_transformer_problem(self):
+        self.requester.is_external = True
+        self.requester.save(update_fields=["is_external"])
+        self.open("หม้อแปลง LBS RMU")
+        reply = self.press(ALICE, "หม้อแปลง")
+        self.assertIn("แจ้งได้เฉพาะปัญหา", texts(reply))
+        self.assertNotIn("ติดตามใบเบิก", buttons(reply))
+        draft = ConversationDraft.objects.get(status="open")
+        self.assertEqual((draft.kind, draft.data["topic"]), ("problem", "transformer"))
 
 
 class RepairTests(KcwTestCase):

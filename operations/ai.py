@@ -45,7 +45,7 @@ SCHEMA_VERSION = "extraction-v5-grounded-fields"
 # A version with typed_fields (user, 23 Oct 2569) also reads the SAP slip number and the typed
 # rows of the equipment-first groups; it is evaluated on one more locked set as well.
 TYPED_SCHEMA_VERSION = "extraction-v6-sap-typed"
-TYPED_EVAL_GATE = f"{EVAL_GATE}+typed-v1"
+TYPED_EVAL_GATE = f"{EVAL_GATE}+typed-v1+typed-v2"  # typed-v2: the กอจ. and กคอ. groups
 MAX_CHAIN = 4  # primary + 3 fallbacks
 MAX_REQUESTS = 3
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/-]{1,100}$")
@@ -696,10 +696,12 @@ SAP slips and typed rows:
 written, and always null for a problem. Never use a meter number, phone number, case number, \
 date or quantity as sap_number.
 - Catalog entries with "group" stand for equipment the requester describes by size or number \
-(มิเตอร์, CT, VT, other equipment) rather than by a catalog model: use them for such text. size \
-is the size or rating exactly as written (5(15)A, 15(45)A, 100/5A, 11000/110V), else null.
-- For the มิเตอร์ group, serials are the meter numbers written in the message (หมายเลขเครื่องวัด, \
-หมายเลขมิเตอร์, เลขมิเตอร์) for withdrawals, returns and problems alike.
+(มิเตอร์, CT, VT, หม้อแปลง, LBS, RMU, other equipment) rather than by a catalog model: use them \
+for such text. size is the size or rating exactly as written (5(15)A, 15(45)A, 100/5A, \
+11000/110V, 160 kVA, 24kV 630A), else null.
+- For the มิเตอร์, หม้อแปลง, LBS and RMU groups, serials are the unit numbers written in the \
+message (หมายเลขเครื่อง, หมายเลขเครื่องวัด, หมายเลขมิเตอร์, เลขมิเตอร์) for withdrawals, returns and \
+problems alike.
 - For the other-equipment group, item_text is the equipment's name only.
 - Long numbers may appear as labels such as [เลข-1]: copy the label exactly into the value it \
 stands for."""
@@ -926,7 +928,7 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
             # Staff assign equipment to a withdrawal, except a typed meter row: its SAP slip
             # already names the meter numbers (user, 23 Oct 2569).
             serials_allowed = equipment is not None and equipment.is_serialized
-            serials_allowed &= proposal.intent != "withdrawal" or group == "meter"
+            serials_allowed &= proposal.intent != "withdrawal" or group in typed_lines.NUMBERED
             size = " ".join(str(item.get("size") or "").split()) if group else ""
             proposal.items.append(
                 ProposedItem(

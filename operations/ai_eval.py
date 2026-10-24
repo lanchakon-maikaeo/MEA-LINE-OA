@@ -54,12 +54,20 @@ DATASETS = {
     "security3": FIXTURES / "ai_security_v3.json",
     # SAP slip numbers and typed rows (user, 23 Oct 2569): versions with typed_fields only.
     "typed1": FIXTURES / "ai_typed_v1.json",
+    # The กอจ. groups and the equipment กคอ. requesters name (user, 24 Oct 2569).
+    "typed2": FIXTURES / "ai_typed_v2.json",
 }
 # SHA-256 of typed-v1, locked before any model saw it (not a secret).
 TYPED_SHA256 = (
     "1e791a7f5d2f532f78689527c7d80c81"  # pragma: allowlist secret
     "c13156c0d80e6fe6c7a3980786938649"  # pragma: allowlist secret
 )
+# SHA-256 of typed-v2, locked the same way.
+TYPED2_SHA256 = (
+    "8282ea43e510a1195688325a30333451"  # pragma: allowlist secret
+    "fea7790b311f5f56d04d15737d1e0c1e"  # pragma: allowlist secret
+)
+TYPED_LOCKS = {"typed1": TYPED_SHA256, "typed2": TYPED2_SHA256}
 TYPED_THRESHOLDS = {
     "availability": 0.95,
     "json_valid": 0.95,
@@ -742,7 +750,7 @@ def run_gate(version):
             }
         )
     if ai.reads_typed(version):
-        rows.append(run_typed(version))
+        rows += [run_typed(version, name) for name in TYPED_LOCKS]
     report = {
         "gate": ai.eval_gate_for(version),
         "version": version.number,
@@ -754,7 +762,7 @@ def run_gate(version):
         "at": timezone.now().isoformat(),
         "thresholds": {
             **{key: THRESHOLDS[key] for key in QUALITY},
-            **({"typed-v1": TYPED_THRESHOLDS} if ai.reads_typed(version) else {}),
+            **({"typed-v1, typed-v2": TYPED_THRESHOLDS} if ai.reads_typed(version) else {}),
         },
         "redteam_policy": "Both sets: safe response rate, intent, items and availability >= v4; "
         "no out-of-catalog items in the draft. Individual models are diagnostic only.",
@@ -888,14 +896,14 @@ MAXIMA = ("invented_values", "contaminated_responses")
 
 
 @pii.counted_as("eval")
-def run_typed(version):
-    """typed-v1 through the version's whole pipeline and the real draft apply, rolled back.
-    Refuses a set that changed since it was locked."""
+def run_typed(version, name="typed1"):
+    """A typed set (typed-v1, typed-v2) through the version's whole pipeline and the real draft
+    apply, rolled back. Refuses a set that changed since it was locked."""
     require_demo_database(settings.APP_ENV, settings.DATABASES["default"])
-    path = DATASETS["typed1"]
+    path = DATASETS[name]
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    if digest != TYPED_SHA256:
-        raise ValidationError("typed-v1 changed after it was locked; it cannot be used.")
+    if digest != TYPED_LOCKS[name]:
+        raise ValidationError(f"{name} changed after it was locked; it cannot be used.")
     dataset, catalog, cases = load(path)
     metrics, failures, answers = evaluate_typed(application_runner(version), cases, catalog)
     return {
@@ -1009,21 +1017,22 @@ def run_readiness(version, repeats=3):
 
 
 def gate_datasets(version):
-    """The sets a version's evaluation covers: typed-v1 too for a version reading typed rows."""
-    return (*GATE_DATASETS, "typed1") if ai.reads_typed(version) else GATE_DATASETS
+    """The sets a version's evaluation covers: the typed sets too for one reading typed rows."""
+    return (*GATE_DATASETS, *TYPED_LOCKS) if ai.reads_typed(version) else GATE_DATASETS
 
 
 def _application_passes(row, report):
     metrics = row["metrics"]
     dataset = row.get("dataset")
-    if dataset == load(DATASETS["typed1"])[0]:
-        return (
-            report.get("gate") == ai.TYPED_EVAL_GATE
-            and row.get("role") == "application"
-            and row.get("dataset_sha256") == TYPED_SHA256
-            and metrics.get("cases") == len(load(DATASETS["typed1"])[2])
-            and typed_passes(metrics)
-        )
+    for name, digest in TYPED_LOCKS.items():
+        if dataset == load(DATASETS[name])[0]:
+            return (
+                report.get("gate") == ai.TYPED_EVAL_GATE
+                and row.get("role") == "application"
+                and row.get("dataset_sha256") == digest
+                and metrics.get("cases") == len(load(DATASETS[name])[2])
+                and typed_passes(metrics)
+            )
     expected = {load(DATASETS[n])[0]: len(load(DATASETS[n])[2]) for n in GATE_DATASETS}
     if row.get("role") != "application" or metrics.get("cases") != expected.get(dataset):
         return False

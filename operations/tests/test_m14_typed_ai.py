@@ -21,15 +21,31 @@ from operations.models import AIConfigVersion, ChannelIdentity, ConversationDraf
 from operations.tests.test_m03_line import ALICE, texts
 from operations.tests.test_m05_ai import AITestCase, answer, passing_gate, request
 
-GROUP_CODES = {"meter": "TYPED_METER", "ct": "TYPED_CT", "vt": "TYPED_VT", "other": "TYPED_OTHER"}
-LABELS = {"meter": "มิเตอร์", "ct": "CT", "vt": "VT"}
+GROUP_CODES = {
+    "meter": "TYPED_METER",
+    "ct": "TYPED_CT",
+    "vt": "TYPED_VT",
+    "other": "TYPED_OTHER",
+    "transformer": "TYPED_TRF",
+    "lbs": "TYPED_LBS",
+    "rmu": "TYPED_RMU",
+}
+LABELS = {
+    "meter": "มิเตอร์",
+    "ct": "CT",
+    "vt": "VT",
+    "transformer": "หม้อแปลง",
+    "lbs": "LBS",
+    "rmu": "RMU",
+}
 # What a correct reading of these messages proposes besides the oracle rows.
 REGULAR = {"T08": [("FUSE_SYN_A", 10, "ฟิวส์")], "T20": [("CBL_SYN_A", 30, "สายไฟ")]}
 # T14 writes two meter numbers for three meters: the model reads both, the chat refuses the row.
 READ = {
     "T14": [
         {"group": "meter", "numbers": ["55001111", "55001112"], "size": "5(15)A", "quantity": "3"}
-    ]
+    ],
+    "W08": [{"group": "transformer", "numbers": ["TR-100001"], "size": "100 kVA", "quantity": "2"}],
 }
 
 
@@ -69,26 +85,29 @@ def ideal(case):
 
 def passing_typed_gate(version):
     report = passing_gate(version)
-    dataset, _, cases = ai_eval.load(ai_eval.DATASETS["typed1"])
-    report["profiles"].append(
-        {
-            "dataset": dataset,
-            "dataset_sha256": ai_eval.TYPED_SHA256,
-            "role": "application",
-            "passed": True,
-            "metrics": {
-                **ai_eval.TYPED_THRESHOLDS,
-                "cases": len(cases),
-                "availability": 1.0,
-                "json_valid": 1.0,
-                "intent_accuracy": 1.0,
-                "sap_exact": 1.0,
-                "rows_exact": 1.0,
-            },
-        }
-    )
+    for name, digest in ai_eval.TYPED_LOCKS.items():
+        report["profiles"].append(typed_row(name, digest))
     report.update(gate=ai.TYPED_EVAL_GATE, schema=ai.TYPED_SCHEMA_VERSION)
     return report
+
+
+def typed_row(name, digest):
+    dataset, _, cases = ai_eval.load(ai_eval.DATASETS[name])
+    return {
+        "dataset": dataset,
+        "dataset_sha256": digest,
+        "role": "application",
+        "passed": True,
+        "metrics": {
+            **ai_eval.TYPED_THRESHOLDS,
+            "cases": len(cases),
+            "availability": 1.0,
+            "json_valid": 1.0,
+            "intent_accuracy": 1.0,
+            "sap_exact": 1.0,
+            "rows_exact": 1.0,
+        },
+    }
 
 
 class TypedTestCase(AITestCase):
@@ -345,33 +364,36 @@ class NameTests(TypedTestCase):
 
 
 class TypedSetTests(TypedTestCase):
-    def test_typed_v1_is_locked(self):
-        raw = ai_eval.DATASETS["typed1"].read_bytes()
-        self.assertEqual(hashlib.sha256(raw).hexdigest(), ai_eval.TYPED_SHA256)
-        version, catalog, cases = ai_eval.load(ai_eval.DATASETS["typed1"])
-        self.assertEqual((version, len(cases)), ("typed-v1", 22))
-        self.assertEqual(
-            {i.code: i.entry_group for i in catalog if i.entry_group},
-            {code: group for group, code in GROUP_CODES.items()},
-        )
+    def test_the_typed_sets_are_locked(self):
+        for name, label, count in (("typed1", "typed-v1", 22), ("typed2", "typed-v2", 12)):
+            with self.subTest(name=name):
+                raw = ai_eval.DATASETS[name].read_bytes()
+                self.assertEqual(hashlib.sha256(raw).hexdigest(), ai_eval.TYPED_LOCKS[name])
+                version, catalog, cases = ai_eval.load(ai_eval.DATASETS[name])
+                self.assertEqual((version, len(cases)), (label, count))
+                for item in catalog:
+                    if item.entry_group:
+                        self.assertEqual(GROUP_CODES[item.entry_group], item.code)
 
     def test_a_correct_reading_scores_perfectly_on_the_real_apply(self):
-        _, catalog, cases = ai_eval.load(ai_eval.DATASETS["typed1"])
-        by_id = {c["id"]: c for c in cases}
+        for name in ai_eval.TYPED_LOCKS:
+            with self.subTest(name=name):
+                _, catalog, cases = ai_eval.load(ai_eval.DATASETS[name])
+                by_id = {c["id"]: c for c in cases}
 
-        def runner(case, catalog, codes):
-            raw = json.dumps(ideal(by_id[case["id"]]), ensure_ascii=False)
-            extraction = ai.validate(raw, case["text"], catalog)
-            projected = ai_eval.application_projection(extraction, case, catalog, self.dev)
-            return projected, "", "", []
+                def runner(case, catalog, codes, by_id=by_id):
+                    raw = json.dumps(ideal(by_id[case["id"]]), ensure_ascii=False)
+                    extraction = ai.validate(raw, case["text"], catalog)
+                    projected = ai_eval.application_projection(extraction, case, catalog, self.dev)
+                    return projected, "", "", []
 
-        metrics, failures, _ = ai_eval.evaluate_typed(runner, cases, catalog)
-        self.assertEqual(failures, [])
-        self.assertTrue(ai_eval.typed_passes(metrics), metrics)
-        self.assertEqual(
-            (metrics["sap_exact"], metrics["rows_exact"], metrics["invented_values"]),
-            (1.0, 1.0, 0),
-        )
+                metrics, failures, _ = ai_eval.evaluate_typed(runner, cases, catalog)
+                self.assertEqual(failures, [])
+                self.assertTrue(ai_eval.typed_passes(metrics), metrics)
+                self.assertEqual(
+                    (metrics["sap_exact"], metrics["rows_exact"], metrics["invented_values"]),
+                    (1.0, 1.0, 0),
+                )
 
     def test_a_reading_that_invents_or_obeys_an_attack_fails(self):
         _, catalog, cases = ai_eval.load(ai_eval.DATASETS["typed1"])
@@ -399,7 +421,7 @@ class TypedSetTests(TypedTestCase):
         self.assertTrue(version.eval_passed)
         self.assertIsNone(ai.activation_blocker(version))
         stale = passing_typed_gate(version)
-        stale["profiles"][-1]["dataset_sha256"] = "0" * 64
+        stale["profiles"][-1]["dataset_sha256"] = "0" * 64  # typed-v2's lock
         self.assertFalse(ai_eval.gate_passed(stale, version))
 
     def test_the_shared_items_are_seeded_for_the_typed_catalog(self):

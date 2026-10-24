@@ -374,6 +374,13 @@ class EquipmentType(models.Model):
         CT = "ct", "CT"
         VT = "vt", "VT"
         OTHER = "other", "อุปกรณ์อื่น"
+        # The กอจ. tile (user, 24 Oct 2569): typed rows like the กคว. groups.
+        TRANSFORMER = "transformer", "หม้อแปลง"
+        LBS = "lbs", "LBS"
+        RMU = "rmu", "RMU"
+
+    # The old category menus (เบิก/คืนด้วยรายการ) offer these four groups only.
+    MENU_GROUPS = ("meter", "ct", "vt", "other")
 
     line_group = models.CharField(max_length=16, blank=True, choices=LineGroup.choices)
 
