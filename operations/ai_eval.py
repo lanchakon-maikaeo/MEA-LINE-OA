@@ -115,7 +115,9 @@ def source_digest():
     digest = hashlib.sha256()
     for path in sorted(paths):
         digest.update(str(path.relative_to(root)).encode())
-        digest.update(path.read_bytes())
+        # A file missing here (uv.lock was left out of images before 24 Oct 2569) gives a digest
+        # no evaluation has, so evidence fails closed instead of raising on the admin page.
+        digest.update(path.read_bytes() if path.is_file() else b"\0missing")
     return digest.hexdigest()
 
 
@@ -1056,16 +1058,32 @@ def _application_passes(row, report):
 
 
 def gate_passed(report, version):
-    """Fail closed on missing/stale/partial evidence; never trust a caller-supplied passed flag."""
+    """Fail closed on missing/stale/partial evidence; never trust a caller-supplied passed flag.
+    Evidence signed on the evaluating machine and imported here is checked by ai_evidence."""
+    if report.get("imported"):
+        from operations import ai_evidence
+
+        return ai_evidence.imported_passes(report, version)
+    return evidence_passes(
+        report,
+        version,
+        number=version.number,
+        config_matches=report.get("config_digest") == config_digest(version),
+    )
+
+
+def evidence_passes(report, version, *, number, config_matches):
+    """The gate's checks on one report, given which version number made it and whether the
+    configuration it measured is this version's."""
     try:
         security = report.get("security", {})
         rows = report.get("profiles", [])
         expected = {load(DATASETS[n])[0] for n in gate_datasets(version)}
         return (
-            report.get("gate") == ai.eval_gate_for(version)
-            and report.get("version") == version.number
+            config_matches
+            and report.get("gate") == ai.eval_gate_for(version)
+            and report.get("version") == number
             and report.get("schema") == ai.schema_version_for(version)
-            and report.get("config_digest") == config_digest(version)
             and not any(report.get(k) for k in ("limit", "primary_only", "ablate"))
             and security.get("passed") is True
             and security.get("tests", 0) > 0

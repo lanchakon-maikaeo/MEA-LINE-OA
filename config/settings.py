@@ -164,6 +164,11 @@ AI_SCHEMA_ENFORCED_HOSTS = frozenset(
     for h in os.environ.get("AI_SCHEMA_ENFORCED_HOSTS", "thaillm.or.th").split(",")
     if h.strip()
 )
+# Public halves (base64, comma-separated) of the Ed25519 keys that sign evaluation evidence on the
+# machine that evaluates; production imports only evidence signed by one of them (24 Oct 2569).
+AI_EVIDENCE_PUBLIC_KEYS = tuple(
+    k.strip() for k in os.environ.get("AI_EVIDENCE_PUBLIC_KEYS", "").split(",") if k.strip()
+)
 AI_TOTAL_BUDGET_SECONDS = 25
 AI_REPLY_FALLBACK_SECONDS = 35
 # Harness pipeline: start the next model in parallel when the current one is this slow.

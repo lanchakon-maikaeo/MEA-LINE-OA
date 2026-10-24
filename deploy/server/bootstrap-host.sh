@@ -105,6 +105,8 @@ CSRF_TRUSTED_ORIGINS=$ORIGIN
 STAFF_WEB_BASE_URL=$ORIGIN
 INVENTORY_MODE=$INV
 AI_ENABLED=false
+# Public keys that sign AI evaluation evidence made on the evaluating machine (comma-separated).
+AI_EVIDENCE_PUBLIC_KEYS=
 OUTBOUND_ENABLED=false
 LINE_PUSH_ENABLED=false
 # Outside production only these LINE user IDs get replies (comma-separated).
