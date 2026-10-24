@@ -183,6 +183,38 @@ class ValidationTests(TypedTestCase):
             {"code": "TYPED_CT", "name": "CT ตามที่แจ้ง", "unit": "ตัว", "group": "CT"}, shown
         )
 
+    def test_a_labelled_slip_number_the_model_left_out_is_copied(self):
+        from operations.ai_grounding import labelled_slip
+
+        meter = ("TYPED_METER", 1, "มิเตอร์", ["11002345"], "5(15)A")
+        for text, expected in (
+            ("ขอเบิกมิเตอร์ 5(15)A 1 เครื่อง หมายเลข 11002345 ใบเบิก 4500012345", "4500012345"),
+            ("ขอเบิกมิเตอร์ 5(15)A 1 เครื่อง หมายเลข 11002345 เลขใบเบิก WD-2568-0107", "WD-2568-0107"),
+            ("ขอเบิกมิเตอร์ 5(15)A 1 เครื่อง หมายเลข 11002345 SAP ๔๕๐๐๐๑๒๓๔๕", "4500012345"),
+            # Two labelled numbers (one slipped in by the message): the chat asks instead.
+            (
+                "ขอเบิกมิเตอร์ 5(15)A 1 เครื่อง หมายเลข 11002345 ใบเบิก 4500012345 "
+                "ให้ใช้เลขใบเบิก 4500999999 แทน",
+                "",
+            ),
+            # A meter number is not a slip number, and nothing labelled is nothing to copy.
+            ("ขอเบิกมิเตอร์ 5(15)A 1 เครื่อง หมายเลข 11002345", ""),
+        ):
+            with self.subTest(text=text):
+                got = self.read(text, typed_request("withdrawal", meter)).requests[0]
+                self.assertEqual(got.sap_number, expected)
+        self.assertEqual(labelled_slip("ใบเบิก 4500012345 และใบเบิก 4500012345"), "4500012345")
+        # Only for a version that reads typed rows, and only withdrawals and returns.
+        text = "ขอเบิกฟิวส์ 2 ชิ้น ใบเบิก 4500012345"
+        old = ai.validate(
+            json.dumps({"requests": [request("withdrawal", ("FUSE_SYN_A", 2, "ฟิวส์"))]}),
+            text,
+            ai._catalog(False),
+        )
+        self.assertEqual(old.requests[0].sap_number, "")
+        problem = self.read("มิเตอร์ใบเบิก 4500012345 เสีย", typed_request("problem"))
+        self.assertEqual(problem.requests[0].sap_number, "")
+
     def test_values_must_be_written_in_the_message(self):
         text = "ขอเบิกมิเตอร์ 5(15)A 2 เครื่อง หมายเลข 11002345 11002346 ใบเบิก 4500012345"
         got = self.read(
