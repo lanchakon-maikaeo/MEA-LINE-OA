@@ -24,6 +24,7 @@ from operations import (
     registry,
     returns,
     routing_words,
+    typed_lines,
     workflow,
 )
 from operations.fulfilment import CANCEL_RESOLUTIONS
@@ -358,7 +359,9 @@ RULES = {
     ),
     "dispute_resolution": lambda st: st.case.kind == K.PROBLEM and st.answers_for_district(),
     "set_section": lambda st: bool(st.sections) and st.member(st.owner),
-    "set_sap_number": lambda st: st.member(st.owner),
+    "set_sap_number": lambda st: (
+        st.member(st.owner) and bool(typed_lines.sap_label(st.case.kind, st.case.topic))
+    ),
     "close": lambda st: (
         st.case.kind in (K.WITHDRAWAL, K.PROBLEM)
         and st.member(st.owner)
@@ -714,12 +717,10 @@ def build_form(action, st, params, demo=False):
         if routing_words.teachable(case):
             add(Field("keywords", "คำสำคัญให้ระบบจำ", help=routing_words.KEYWORDS_HELP))
     elif action == "set_sap_number":
-        from operations import typed_lines
-
         add(
             Field(
                 "sap_number",
-                typed_lines.SAP_LABELS.get(case.kind, "เลข SAP"),
+                typed_lines.sap_label(case.kind, case.topic) or "เลข SAP",
                 required=True,
                 initial=case.sap_number,
                 help="ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว ประวัติเรื่องเก็บทั้งเลขเดิมและเลขใหม่",

@@ -126,7 +126,15 @@ KIND_FIELDS = {
     },
     Case.Kind.PROBLEM: {
         "required": {"description"},
-        "optional": {"impact", "related_case_number", "topic", "latitude", "longitude"},
+        # sap_number: ติดตามสถานะการซ่อม (topic repair, 24 Oct 2569) cites its SAP number.
+        "optional": {
+            "impact",
+            "related_case_number",
+            "topic",
+            "latitude",
+            "longitude",
+            "sap_number",
+        },
     },
 }
 LINE_FIELDS = {"item_code", "quantity", "serials", "details"}

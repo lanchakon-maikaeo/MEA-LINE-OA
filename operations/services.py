@@ -378,6 +378,8 @@ def _check_sap(submission, fields, requester, routes, intake):
         return
     if submission.channel != Case.Channel.LINE or intake is not None:
         return
+    if fields.get("topic") == Case.Topic.REPAIR:
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลข SAP งานซ่อมก่อนส่งเรื่อง")
     owners = [owner.code for owner, _ in routes if owner is not None]
     if typed_lines.needs_sap(submission.kind, owners):
         fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขใบเบิกหรือใบส่งคืน SAP ก่อนส่งเรื่อง")

@@ -68,6 +68,7 @@ TOPIC_LABELS = {
     "other": "อุปกรณ์อื่น",
     "usage": "การใช้ไฟฟ้า",
     "suggestion": "ข้อเสนอแนะ",
+    "repair": "ติดตามสถานะการซ่อม",
 }
 SUGGESTION_FIELDS = [
     ("description", "กรุณาแจ้งข้อเสนอแนะ", True),
@@ -87,6 +88,11 @@ INQUIRY_FIELDS = [
 SYSTEM_FIELDS = [
     ("description", "แจ้งปัญหาที่พบ เช่น หน้าจอที่ใช้ เลขมิเตอร์ หรือช่วงเวลา", True),
     ("impact", "ผลกระทบหรือข้อมูลเพิ่มเติม พิมพ์ต่อได้ หรือกดข้าม", False),
+]
+# ติดตามสถานะการซ่อม (user, 24 Oct 2569): after the SAP number and the equipment rows.
+REPAIR_FIELDS = [
+    ("description", "พิมพ์สิ่งที่ต้องการติดตาม เช่น ส่งซ่อมเมื่อไร หรืออาการที่ส่งซ่อม", True),
+    ("related_case_number", "หากเกี่ยวข้องกับเรื่องเดิม กรุณาเลือกเรื่อง หรือเลือกข้าม", False),
 ]
 CATEGORY_LABELS = {
     EquipmentType.Category.METER: "มิเตอร์",
@@ -126,6 +132,7 @@ TOPIC_FIELD_LABELS = {
     "suggestion": {"description": "ข้อเสนอแนะ", "impact": "รายละเอียดเพิ่ม"},
     "usage": {"description": "เรื่องที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
     "inquiry": {"description": "สิ่งที่สอบถาม"},
+    "repair": {"description": "สิ่งที่ต้องการติดตาม"},
     "system": {"description": "ปัญหาที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
 }
 MENU = [("ส่งเรื่องใหม่", "m=new"), ("เรื่องของฉัน", "m=mine"), ("ติดตามเรื่อง", "m=track")]
@@ -1771,11 +1778,14 @@ def _card(turn, title, prompt, buttons, quick=()):
     turn.replies.append(message)
 
 
+REPAIR = Case.Topic.REPAIR
 ACTION_CARD = (
     ("ติดตามใบเบิก", K.WITHDRAWAL),
     ("ติดตามใบส่งคืน", K.RETURN),
-    ("แจ้งปัญหา", K.PROBLEM),
+    ("ติดตามสถานะการซ่อม", REPAIR),  # 24 Oct 2569: in place of แจ้งปัญหา
 )
+# Cards already in people's chats still carry แจ้งปัญหา, and problem-only accounts use it.
+ACTION_LABELS = {**{kind: label for label, kind in ACTION_CARD}, K.PROBLEM: "แจ้งปัญหา"}
 
 
 def _action_card(turn, item):
@@ -1791,7 +1801,8 @@ def _action_card(turn, item):
 
 
 def _menu_act(turn, data):
-    """ติดตามใบเบิก / ติดตามใบส่งคืน / แจ้งปัญหา on the chosen equipment (m=act&id=…&do=…)."""
+    """ติดตามใบเบิก / ติดตามใบส่งคืน / ติดตามสถานะการซ่อม on the chosen equipment
+    (m=act&id=…&do=…)."""
     from urllib.parse import parse_qs
 
     query = parse_qs(data[2:])
@@ -1799,22 +1810,27 @@ def _menu_act(turn, data):
     kind = (query.get("do") or [""])[0]
     if item is None or item.action != LineMenuItem.Action.EQUIPMENT:
         return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
-    if kind not in dict((k, k) for _, k in ACTION_CARD):
+    if kind not in ACTION_LABELS:
         return _action_card(turn, item)
-    if kind != K.PROBLEM and _problems_only(turn):
+    if kind in (K.WITHDRAWAL, K.RETURN) and _problems_only(turn):
         return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
     return _typed_draft(turn, item, kind)
 
 
 def _typed_draft(turn, item, kind):
-    """A draft whose lines are typed (typed_lines): the SAP slip number first for a withdrawal
-    or return when the division follows SAP slips, then the first row of the chosen group."""
+    """A draft whose lines are typed (typed_lines): the SAP number first for a withdrawal or
+    return when the division follows SAP slips, and always for ติดตามสถานะการซ่อม (a problem
+    case with the repair topic), then the first row of the chosen group."""
     group = item.topic
-    action = next(label for label, k in ACTION_CARD if k == kind)
-    extra = {"topic": "other" if group == "other" else "meter"} if kind == K.PROBLEM else {}
+    action = ACTION_LABELS[kind]
+    extra = {}
+    if kind == REPAIR:
+        kind, extra = K.PROBLEM, {"topic": Case.Topic.REPAIR}
+    elif kind == K.PROBLEM:
+        extra = {"topic": "other" if group == "other" else "meter"}
     draft = _menu_draft(turn, item, kind, "sap", typed=group, **extra)
     draft.data = dict(draft.data, menu_label=f"{_menu_label(item)} · {action}")
-    if typed_lines.needs_sap(kind, _owners(draft)):
+    if extra.get("topic") == Case.Topic.REPAIR or typed_lines.needs_sap(kind, _owners(draft)):
         return _set(turn, draft, "sap")
     return _start_row(turn, draft, group)
 
@@ -1998,8 +2014,8 @@ def _case_detail(turn, number):
         return
     files = case.attachments.count()
     sap = (
-        f"\n{typed_lines.SAP_LABELS[case.kind]}: {case.sap_number}"
-        if case.sap_number and case.kind in typed_lines.SAP_LABELS
+        f"\n{typed_lines.sap_label(case.kind, case.topic)}: {case.sap_number}"
+        if case.sap_number and typed_lines.sap_label(case.kind, case.topic)
         else ""
     )
     text = (
@@ -2286,7 +2302,7 @@ def _ask_question(turn, draft):
     elif step == "location":
         turn.say("กด 'ส่งตำแหน่ง' แล้วเลือกจุดที่พบเรื่องนี้", [("ส่งตำแหน่ง", LOCATION)])
     elif step == "sap":
-        turn.say(f"พิมพ์{typed_lines.SAP_LABELS[draft.kind]}ที่ทำไว้แล้ว")
+        turn.say(f"พิมพ์{typed_lines.sap_label(draft.kind, draft.data.get('topic'))}ที่ทำไว้แล้ว")
     elif step == "entry":
         return _ask_entry(turn, draft)
     elif step == "typed_group":
@@ -2321,7 +2337,8 @@ def _summary(draft):
     if data.get("division"):
         lines.append(f"ส่งถึง: {data['division']}")
     if data.get("sap_number"):
-        lines.append(f"{typed_lines.SAP_LABELS[draft.kind]}: {data['sap_number']}")
+        label = typed_lines.sap_label(draft.kind, data.get("topic"))
+        lines.append(f"{label}: {data['sap_number']}")
     items = {
         i.code: i
         for i in EquipmentType.objects.filter(code__in=[x["item_code"] for x in data["lines"]])
@@ -2392,6 +2409,8 @@ def _kind_label(kind, topic=""):
         return TOPIC_LABELS[topic]
     if topic == Case.Topic.INQUIRY:
         return "สอบถาม/ติดตาม"
+    if topic == Case.Topic.REPAIR:
+        return "ติดตามสถานะการซ่อม"
     if topic == Case.Topic.SYSTEM:
         return "แจ้งปัญหาระบบงาน"
     return KIND_LABELS[kind]
@@ -2405,6 +2424,8 @@ def _fields(draft):
         return SUGGESTION_FIELDS
     if topic == Case.Topic.INQUIRY:
         return INQUIRY_FIELDS
+    if topic == Case.Topic.REPAIR:
+        return REPAIR_FIELDS
     if topic == Case.Topic.SYSTEM:
         return SYSTEM_FIELDS
     return FIELDS[draft.kind]
@@ -2757,11 +2778,12 @@ def _owners(draft):
 
 
 def _sap_missing(draft):
-    return (
-        draft.kind in typed_lines.SAP_LABELS
-        and not draft.data.get("sap_number")
-        and typed_lines.needs_sap(draft.kind, _owners(draft))
-    )
+    if draft.data.get("sap_number") or not typed_lines.sap_label(
+        draft.kind, draft.data.get("topic")
+    ):
+        return False
+    repair = draft.data.get("topic") == Case.Topic.REPAIR
+    return repair or typed_lines.needs_sap(draft.kind, _owners(draft))
 
 
 def _detail_missing(draft):
@@ -2986,7 +3008,7 @@ def _payload(draft):
         payload["division_code"] = data["division"]
     if data.get("menu_label"):
         payload["menu_label"] = data["menu_label"]
-    if data.get("sap_number") and draft.kind in typed_lines.SAP_LABELS:
+    if data.get("sap_number") and typed_lines.sap_label(draft.kind, data.get("topic")):
         payload["sap_number"] = data["sap_number"]
     for name, value in data["fields"].items():
         if value:

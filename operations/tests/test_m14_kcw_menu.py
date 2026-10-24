@@ -23,6 +23,7 @@ from operations.models import (
     Division,
     EntryField,
     EquipmentType,
+    LineMenuItem,
     Role,
 )
 from operations.tests.test_m02_cases import make_staff
@@ -107,7 +108,8 @@ class CardTests(KcwTestCase):
         reply = self.press(ALICE, "CT")
         self.assertIn(f"{TILE} · CT", card_texts(reply))
         self.assertEqual(
-            list(buttons(reply)), ["ย้อนกลับ", "หน้าหลัก", "ติดตามใบเบิก", "ติดตามใบส่งคืน", "แจ้งปัญหา"]
+            list(buttons(reply)),
+            ["ย้อนกลับ", "หน้าหลัก", "ติดตามใบเบิก", "ติดตามใบส่งคืน", "ติดตามสถานะการซ่อม"],
         )
         self.type(ALICE, "ติดตามใบส่งคืน")  # typing a card label works like tapping it
         draft = ConversationDraft.objects.get(status="open")
@@ -256,8 +258,11 @@ class ProblemTests(KcwTestCase):
         )
         self.assertEqual(case.lines.get().details, [{"group": "meter"}])
 
-    def test_a_requester_reports_a_problem_with_a_meter_number(self):
-        reply = self.start(action="แจ้งปัญหา")
+    def test_a_problem_button_already_in_the_chat_still_reports_a_problem(self):
+        # Card 2 offered แจ้งปัญหา until 24 Oct 2569; the cards stay in people's chats.
+        meter = LineMenuItem.objects.get(action="equipment", topic="meter")
+        reply = self.say(self.postback(ALICE, f"m=act&id={meter.pk}&do=problem"))
+        self.assertNotIn("SAP", texts(reply))
         self.assertIn("หมายเลขเครื่องวัด / ขนาด", texts(reply))
         self.assertNotIn("จำนวน", texts(reply))
         self.type(ALICE, "P-0001 / 5(15)A")
@@ -268,6 +273,101 @@ class ProblemTests(KcwTestCase):
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         line = Case.objects.get().lines.get()
         self.assertEqual((line.serials, line.requested_quantity), (["P-0001"], None))
+
+
+class RepairTests(KcwTestCase):
+    """ติดตามสถานะการซ่อม (user, 24 Oct 2569): card 2's third choice asks the SAP number like
+    the others, then the equipment rows (no quantity) and what to follow up."""
+
+    def repair(self, requester, key, sap):
+        result = services.submit_case(
+            Actor.for_requester(requester),
+            idempotency_key=key,
+            payload={
+                "kind": "problem",
+                "topic": "repair",
+                "division_code": "กคว.",
+                "sap_number": sap,
+                "description": "ส่งซ่อมแล้วยังไม่ได้คืน",
+                "lines": [],
+            },
+        )
+        return Case.objects.get(pk=result.case_id)
+
+    def test_repair_tracking_starts_with_the_sap_number(self):
+        reply = self.start(action="ติดตามสถานะการซ่อม")
+        self.assertIn("เลข SAP งานซ่อม", texts(reply))
+        self.assertIn("4 ถึง 20 ตัว", texts(self.type(ALICE, "ab")))
+        reply = self.type(ALICE, "6000012345")
+        self.assertIn("หมายเลขเครื่องวัด / ขนาด", texts(reply))
+        self.assertNotIn("จำนวน", texts(reply))
+        self.type(ALICE, "S-0001 / 5(15)A")
+        reply = self.press(ALICE, "ไปต่อ")
+        self.assertIn("สิ่งที่ต้องการติดตาม", texts(reply))
+        self.type(ALICE, "ส่งซ่อมตั้งแต่ 1 ต.ค. ยังไม่ได้คืน")
+        summary = texts(self.press(ALICE, "ข้าม"))
+        self.assertIn("สรุปเรื่อง: ติดตามสถานะการซ่อม", summary)
+        self.assertIn(f"หัวข้อ: {TILE} · มิเตอร์ · ติดตามสถานะการซ่อม", summary)
+        self.assertIn("เลข SAP งานซ่อม: 6000012345", summary)
+        self.assertIn("มิเตอร์ · 5(15)A (หมายเลข S-0001)", summary)
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        case = Case.objects.get()
+        self.assertEqual(
+            (case.kind, case.topic, case.sap_number, case.owner_division.code),
+            ("problem", "repair", "6000012345", "กคว."),
+        )
+        line = case.lines.get()
+        self.assertEqual((line.serials, line.requested_quantity), (["S-0001"], None))
+        self.start(action="ติดตามสถานะการซ่อม")
+        reply = self.type(ALICE, "6000012345")
+        self.assertIn(f"เลขนี้อยู่ในเรื่อง {case.number}", texts(reply))
+
+    def test_a_line_repair_tracking_needs_its_sap_number(self):
+        with self.assertRaises(CommandFailed):
+            self.repair(self.requester, "kcw-repair-000", "")
+        self.assertEqual(
+            self.repair(self.requester, "kcw-repair-001", "6000099999").topic, "repair"
+        )
+
+    def test_staff_correct_a_repair_sap_number_but_not_a_plain_problems(self):
+        staff = make_staff("kcw-staff", (Role.STAFF, "กคว."))
+        client = Client()
+        client.force_login(staff)
+        case = self.repair(self.requester, "kcw-repair-002", "6000011111")
+        page = client.get(f"/cases/{case.number}/")
+        self.assertContains(page, "เลข SAP งานซ่อม")
+        response = client.post(
+            f"/cases/{case.number}/act/set_sap_number/",
+            {
+                "sap_number": "6000011112",
+                "revision": case.revision,
+                "idempotency_key": uuid.uuid4().hex,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        case.refresh_from_db()
+        self.assertEqual(case.sap_number, "6000011112")
+        plain = services.submit_case(
+            Actor.for_requester(self.requester),
+            idempotency_key="kcw-plain-001",
+            payload={
+                "kind": "problem",
+                "division_code": "กคว.",
+                "description": "จอดับ",
+                "lines": [],
+            },
+        )
+        plain = Case.objects.get(pk=plain.case_id)
+        self.assertNotContains(client.get(f"/cases/{plain.number}/"), "set_sap_number")
+        with self.assertRaises(CommandFailed):
+            services.perform_action(
+                Actor.staff(staff),
+                plain.pk,
+                "set_sap_number",
+                expected_revision=plain.revision,
+                idempotency_key=uuid.uuid4().hex,
+                payload={"sap_number": "6000022222"},
+            )
 
 
 class OtherPathTests(KcwTestCase):

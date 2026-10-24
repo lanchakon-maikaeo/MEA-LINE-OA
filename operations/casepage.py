@@ -463,8 +463,8 @@ def build(case, now=None):
         "triage": triage,
         "texts": [
             *(
-                [(typed_lines.SAP_LABELS[case.kind], case.sap_number)]
-                if case.sap_number and case.kind in typed_lines.SAP_LABELS
+                [(typed_lines.sap_label(case.kind, case.topic), case.sap_number)]
+                if case.sap_number and typed_lines.sap_label(case.kind, case.topic)
                 else []
             ),
             *((label, getattr(case, name)) for name, label in TEXT_FIELDS if getattr(case, name)),

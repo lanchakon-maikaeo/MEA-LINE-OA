@@ -276,6 +276,40 @@ class ChatTests(TypedTestCase):
         )
         self.assertEqual(draft.data["fields"]["purpose"], "ติดตั้งผู้ใช้ไฟรายใหม่")
 
+    def test_a_repair_draft_keeps_its_topic_and_sap_number_when_the_ai_adds_a_row(self):
+        self.typed_version()
+        draft = ConversationDraft.objects.create(
+            identity=ChannelIdentity.objects.get(external_id=ALICE),
+            requester=self.alice,
+            kind="problem",
+            step="more",
+            data={
+                "lines": [],
+                "fields": {},
+                "typed": "meter",
+                "topic": "repair",
+                "division": "กคว.",
+                "sap_number": "6000012345",
+                "menu_label": "Meter, CT, VT · มิเตอร์ · ติดตามสถานะการซ่อม",
+            },
+            updated_at=timezone.now(),
+        )
+        self.conversation_of(draft)
+        self.llm.default = answer(typed_request("problem", ("TYPED_CT", None, "CT", [], "100/5A")))
+        self.post(self.text(ALICE, "เพิ่ม CT 100/5A ที่ส่งซ่อมด้วย"))
+        run_once()
+        self.claim_and_run_ai()
+        draft.refresh_from_db()
+        self.assertEqual((draft.data["topic"], draft.data["sap_number"]), ("repair", "6000012345"))
+        self.assertEqual(draft.data["lines"][0]["details"], [{"group": "ct", "size": "100/5A"}])
+
+    def conversation_of(self, draft):
+        from operations.models import Conversation
+
+        conv, _ = Conversation.objects.get_or_create(identity=draft.identity)
+        conv.active_draft = draft
+        conv.save(update_fields=["active_draft"])
+
     def test_a_slip_number_already_on_an_open_case_is_not_taken(self):
         self.typed_version()
         with patch.object(ai_chat.typed_lines, "sap_in_use", return_value="เลขนี้มีเรื่องที่ยังไม่จบอยู่แล้ว"):

@@ -684,7 +684,7 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
 
 
 # What a typed draft keeps when the AI fills it (typed_lines, 23 Oct 2569).
-TYPED_KEEP = ("typed", "division", "menu_label", "sap_number")
+TYPED_KEEP = ("typed", "division", "menu_label", "sap_number", "topic")
 
 
 def _typed_rows(turn, data, rows, kind, notes):

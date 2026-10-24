@@ -439,6 +439,8 @@ class Case(models.Model):
         # เมนู LINE (15 ต.ค. 2569 Q18, Q20): a question to a division, and a work system's problem.
         INQUIRY = "inquiry", "สอบถาม/ติดตาม"
         SYSTEM = "system", "ระบบงาน"
+        # ปุ่ม Meter, CT, VT (user, 24 Oct 2569): follow a repair by its SAP number.
+        REPAIR = "repair", "ติดตามสถานะการซ่อม"
 
     class Channel(models.TextChoices):
         LINE = "line", "LINE"

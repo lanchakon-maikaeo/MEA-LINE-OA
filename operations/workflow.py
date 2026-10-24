@@ -209,7 +209,7 @@ ACTIONS = {
             _per_kind(
                 lambda k, st: (
                     _same([s for s in st if s not in TERMINAL])
-                    if k in (K.WITHDRAWAL, K.RETURN)
+                    if k in (K.WITHDRAWAL, K.RETURN, K.PROBLEM)  # problems: repair only
                     else {}
                 )
             ),

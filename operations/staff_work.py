@@ -492,8 +492,8 @@ def case_detail(turn, user, case):
     ]
     from operations import typed_lines
 
-    if case.sap_number and case.kind in typed_lines.SAP_LABELS:
-        rows.append(f"{typed_lines.SAP_LABELS[case.kind]}: {case.sap_number}")
+    if case.sap_number and typed_lines.sap_label(case.kind, case.topic):
+        rows.append(f"{typed_lines.sap_label(case.kind, case.topic)}: {case.sap_number}")
     for line in case.lines.select_related("item"):
         for row in line.details:
             unit = line.item.unit if typed_lines.is_shared(line.item) else ""

@@ -31,6 +31,8 @@ LIMITS = {"size": 40, "name": 100, "extra": 200}
 MAX_ROWS = 50
 MAX_NUMBERS = 500
 SAP_LABELS = {K.WITHDRAWAL: "เลขใบเบิก SAP", K.RETURN: "เลขใบส่งคืน SAP"}
+# ติดตามสถานะการซ่อม (user, 24 Oct 2569): a problem-kind case that cites its SAP repair number.
+REPAIR_SAP_LABEL = "เลข SAP งานซ่อม"
 
 
 def label_of(group):
@@ -65,6 +67,13 @@ def sap_divisions():
 
 def needs_sap(kind, division_codes):
     return kind in SAP_LABELS and bool(set(division_codes) & sap_divisions())
+
+
+def sap_label(kind, topic=""):
+    """What this case's SAP number is called, or "" when this kind of case has none."""
+    if kind == K.PROBLEM and topic == Case.Topic.REPAIR:
+        return REPAIR_SAP_LABEL
+    return SAP_LABELS.get(kind, "")
 
 
 def clean_sap(text):

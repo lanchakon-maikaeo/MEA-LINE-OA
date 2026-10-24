@@ -434,6 +434,8 @@ def set_sap_number(ctx, case, payload, reason, target):
 
     if ctx.requester is not None or not _member(ctx, case.owner_division_id):
         fail(ErrorCode.FORBIDDEN, "เฉพาะเจ้าหน้าที่ของกองเจ้าภาพแก้เลข SAP ได้")
+    if not typed_lines.sap_label(case.kind, case.topic):
+        fail(ErrorCode.VALIDATION_ERROR, "เรื่องประเภทนี้ไม่มีเลข SAP")
     number, problem = typed_lines.clean_sap(payload.get("sap_number"))
     if problem:
         fail(ErrorCode.VALIDATION_ERROR, problem)
