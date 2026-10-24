@@ -424,6 +424,19 @@ class TypedSetTests(TypedTestCase):
         stale["profiles"][-1]["dataset_sha256"] = "0" * 64  # typed-v2's lock
         self.assertFalse(ai_eval.gate_passed(stale, version))
 
+    def test_the_gate_command_prints_the_typed_sets(self):
+        from operations.management.commands.eval_ai import summary_line
+
+        row = {
+            **typed_row("typed1", ai_eval.TYPED_LOCKS["typed1"]),
+            "model": "m",
+            "passed": False,
+        }
+        row["metrics"].update(answered=22, attack_cases=2, latency_p95_ms=8775)
+        line = summary_line(row, "")
+        self.assertIn("sap 1.0 rows 1.0", line)
+        self.assertTrue(line.endswith("-> FAIL"))
+
     def test_the_shared_items_are_seeded_for_the_typed_catalog(self):
         self.assertEqual(
             set(EquipmentType.objects.exclude(entry_group="").values_list("code", flat=True)),
