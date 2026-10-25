@@ -171,7 +171,7 @@ class ServiceMenuFlowTests(MenuTestCase):
     def test_a_tile_withdrawal_uses_its_division_and_category(self):
         # 24 Oct 2569: every equipment tile asks for the equipment first (test_m14_kcw_menu).
         self.open("เครื่องมือและอุปกรณ์")
-        self.press(ALICE, "พิมพ์ชื่ออุปกรณ์")
+        self.type(ALICE, "คีมตัดสาย")  # 25 Oct 2569 Q6: the name first, no button to press
         self.press(ALICE, "ติดตามใบเบิก")
         draft = ConversationDraft.objects.get(status="open")
         self.assertEqual(
@@ -188,12 +188,13 @@ class ServiceMenuFlowTests(MenuTestCase):
         expected = {
             "Meter, CT, VT": ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น", "ติดตามเรื่อง"],
             "หม้อแปลง LBS RMU": ["หม้อแปลง", "LBS", "RMU", "อุปกรณ์อื่น", "ติดตามเรื่อง"],
-            "เครื่องมือและอุปกรณ์": ["พิมพ์ชื่ออุปกรณ์", "ติดตามเรื่อง"],
+            "เครื่องมือและอุปกรณ์": ["ติดตามเรื่อง"],  # Q6: the name is asked at once
         }
         for label, choices in expected.items():
             with self.subTest(label=label):
                 reply = self.open(label)
                 self.assertEqual([b for b in buttons(reply) if b != "หน้าหลัก"], choices)
+        self.say(self.postback(ALICE, "m=home"))  # leave the name prompt of the กคอ. tile
         reply = self.type(ALICE, "เบิกอุปกรณ์")
         self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
 

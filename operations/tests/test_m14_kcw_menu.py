@@ -308,25 +308,69 @@ class OtherTileTests(KcwTestCase):
             sorted(case.lines.values_list("item__code", flat=True)), ["TYPED_LBS", "TYPED_TRF"]
         )
 
-    def test_the_kkho_tile_takes_a_typed_name(self):
+    def test_the_kkho_tile_asks_the_name_first(self):
+        # 25 Oct 2569 Q6: no "พิมพ์ชื่ออุปกรณ์" button to press; the name is asked at once.
         reply = self.open("เครื่องมือและอุปกรณ์")
-        self.assertEqual([b for b in buttons(reply) if b != "หน้าหลัก"], ["พิมพ์ชื่ออุปกรณ์", "ติดตามเรื่อง"])
-        self.press(ALICE, "พิมพ์ชื่ออุปกรณ์")
+        self.assertIn("พิมพ์ชื่ออุปกรณ์", texts(reply))
+        self.assertEqual(list(buttons(reply)), ["ติดตามเรื่อง"])
+        reply = self.type(ALICE, "สว่านไฟฟ้า")
+        self.assertIn("เครื่องมือและอุปกรณ์ · สว่านไฟฟ้า", texts(reply))
+        self.assertEqual(
+            [b for b in buttons(reply) if b != "ย้อนกลับ"],
+            ["ติดตามใบเบิก", "ติดตามใบส่งคืน", "ติดตามสถานะการซ่อม"],
+        )
         self.press(ALICE, "ติดตามใบส่งคืน")
         reply = self.type(ALICE, "4900300002")
-        self.assertIn("ชื่ออุปกรณ์ / ขนาด / จำนวน", texts(reply))
-        reply = self.type(ALICE, "สว่านไฟฟ้า / 13 มม. / 1")
+        self.assertIn("สว่านไฟฟ้า\nพิมพ์ หมายเลขอุปกรณ์ / ขนาด / จำนวน", texts(reply))
+        self.type(ALICE, "DR-13 / 13 มม. / 1")
         self.press(ALICE, "ไปต่อ")
         self.type(ALICE, "ใช้งานได้")
         self.type(ALICE, "งานเสร็จแล้ว")
         summary = texts(self.press(ALICE, "ข้าม"))
         self.assertIn("ส่งถึง: กคอ.", summary)
+        self.assertIn("หัวข้อ: เครื่องมือและอุปกรณ์ · สว่านไฟฟ้า · ติดตามใบส่งคืน", summary)
         self.assertIn("เลขใบส่งคืน SAP: 4900300002", summary)
-        self.assertIn("สว่านไฟฟ้า · 13 มม. · 1", summary)
+        self.assertIn("สว่านไฟฟ้า · 13 มม. · 1 หน่วย · หมายเลขอุปกรณ์ DR-13", summary)
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
         self.assertEqual((case.kind, case.owner_division.code), ("return", "กคอ."))
-        self.assertEqual(case.lines.get().details[0]["name"], "สว่านไฟฟ้า")
+        row = case.lines.get().details[0]
+        self.assertEqual((row["name"], row["equipment_number"]), ("สว่านไฟฟ้า", "DR-13"))
+
+    def test_a_repair_names_the_piece_instead_of_a_sap_number(self):
+        # 25 Oct 2569 Q7: "ขอติดตามงานซ่อม เครื่องบีบสายไฟแบบแบตเตอรี่ หมายเลข BB-011".
+        self.open("เครื่องมือและอุปกรณ์")
+        self.type(ALICE, "เครื่องบีบสายไฟแบบแบตเตอรี่")
+        reply = self.press(ALICE, "ติดตามสถานะการซ่อม")
+        self.assertIn("ถ้าไม่มี กดข้าม", texts(reply))
+        reply = self.press(ALICE, "ข้าม")
+        self.assertIn("หมายเลขอุปกรณ์ / ขนาด", texts(reply))
+        self.type(ALICE, "BB-011")
+        self.press(ALICE, "ข้าม")  # size
+        reply = self.press(ALICE, "ไปต่อ")
+        self.assertIn("สิ่งที่ต้องการติดตาม", texts(reply))
+        self.type(ALICE, "ส่งซ่อมสองสัปดาห์แล้ว")
+        summary = texts(self.press(ALICE, "ข้าม"))
+        self.assertIn("เครื่องบีบสายไฟแบบแบตเตอรี่ · หมายเลขอุปกรณ์ BB-011", summary)
+        self.assertNotIn("เลข SAP งานซ่อม:", summary)
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        case = Case.objects.get()
+        self.assertEqual(
+            (case.topic, case.sap_number, case.owner_division.code), ("repair", "", "กคอ.")
+        )
+
+    def test_a_repair_without_either_number_asks_for_the_sap_number(self):
+        self.open("เครื่องมือและอุปกรณ์")
+        self.type(ALICE, "คีมย้ำหางปลา")
+        self.press(ALICE, "ติดตามสถานะการซ่อม")
+        self.type(ALICE, "ไม่มี")  # typed instead of tapping ข้าม
+        self.press(ALICE, "ข้าม")  # equipment number
+        self.press(ALICE, "ข้าม")  # size
+        reply = self.press(ALICE, "ไปต่อ")
+        self.assertIn("ต้องมีเลข SAP งานซ่อมหรือหมายเลขอุปกรณ์", texts(reply))
+        self.assertNotIn("ข้าม", buttons(reply))
+        reply = self.type(ALICE, "6000077777")
+        self.assertIn("สิ่งที่ต้องการติดตาม", texts(reply))
 
     def test_a_problem_only_account_reports_a_transformer_problem(self):
         self.requester.is_external = True
@@ -343,7 +387,7 @@ class RepairTests(KcwTestCase):
     """ติดตามสถานะการซ่อม (user, 24 Oct 2569): card 2's third choice asks the SAP number like
     the others, then the equipment rows (no quantity) and what to follow up."""
 
-    def repair(self, requester, key, sap):
+    def repair(self, requester, key, sap, lines=()):
         result = services.submit_case(
             Actor.for_requester(requester),
             idempotency_key=key,
@@ -353,7 +397,7 @@ class RepairTests(KcwTestCase):
                 "division_code": "กคว.",
                 "sap_number": sap,
                 "description": "ส่งซ่อมแล้วยังไม่ได้คืน",
-                "lines": [],
+                "lines": list(lines),
             },
         )
         return Case.objects.get(pk=result.case_id)
@@ -386,11 +430,20 @@ class RepairTests(KcwTestCase):
         reply = self.type(ALICE, "6000012345")
         self.assertIn(f"เลขนี้อยู่ในเรื่อง {case.number}", texts(reply))
 
-    def test_a_line_repair_tracking_needs_its_sap_number(self):
+    def test_a_line_repair_tracking_needs_its_sap_number_or_a_numbered_piece(self):
         with self.assertRaises(CommandFailed):
             self.repair(self.requester, "kcw-repair-000", "")
         self.assertEqual(
             self.repair(self.requester, "kcw-repair-001", "6000099999").topic, "repair"
+        )
+        piece = [
+            {
+                "item_code": "TYPED_OTHER",
+                "details": [{"group": "other", "name": "คีม", "equipment_number": "BB-011"}],
+            }
+        ]
+        self.assertEqual(
+            self.repair(self.requester, "kcw-repair-003", "", lines=piece).sap_number, ""
         )
 
     def test_staff_correct_a_repair_sap_number_but_not_a_plain_problems(self):

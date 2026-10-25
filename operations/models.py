@@ -2329,6 +2329,7 @@ class EntryField(models.Model):
         SIZE = "size", "ขนาด"
         QUANTITY = "quantity", "จำนวน"
         NAME = "name", "ชื่ออุปกรณ์"
+        EQUIPMENT_NUMBER = "equipment_number", "หมายเลขอุปกรณ์"  # 25 Oct 2569 Q7
 
     group = models.CharField(max_length=16, choices=EquipmentType.LineGroup.choices)
     key = models.CharField(max_length=32)  # a Key for a base field, "x<pk>" for an added one

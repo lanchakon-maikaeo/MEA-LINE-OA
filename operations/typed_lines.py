@@ -30,6 +30,7 @@ SAP_NUMBER = re.compile(r"^[A-Za-z0-9-]{4,20}$")
 METER_NUMBER = SAP_NUMBER  # the same loose shape until the real formats are known
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 LIMITS = {"size": 40, "name": 100, "extra": 200}
+EQUIPMENT_NUMBER = re.compile(r"^[A-Za-z0-9-]{2,30}$")
 MAX_ROWS = 50
 MAX_NUMBERS = 500
 SAP_LABELS = {K.WITHDRAWAL: "เลขใบเบิก SAP", K.RETURN: "เลขใบส่งคืน SAP"}
@@ -69,6 +70,16 @@ def sap_divisions():
 
 def needs_sap(kind, division_codes):
     return kind in SAP_LABELS and bool(set(division_codes) & sap_divisions())
+
+
+def identified(lines):
+    """Whether typed rows name a piece by its number: what ติดตามสถานะการซ่อม may give in place of
+    the SAP repair number (25 Oct 2569 Q7)."""
+    return any(
+        row.get("numbers") or row.get("equipment_number")
+        for line in lines
+        for row in (line.get("details") if isinstance(line, dict) else line.details) or []
+    )
 
 
 def sap_label(kind, topic=""):
@@ -126,6 +137,11 @@ def take(entry, field, value, kind, unit):
         if number is None or int(number.group(1)) < 1:
             return "จำนวนต้องเป็นจำนวนเต็มมากกว่า 0"
         entry["quantity"] = str(int(number.group(1)))
+    elif field.key == EntryField.Key.EQUIPMENT_NUMBER:
+        number = value.translate(THAI_DIGITS).replace(" ", "")
+        if not EQUIPMENT_NUMBER.match(number):
+            return "หมายเลขอุปกรณ์ใช้ตัวอักษร ตัวเลข หรือขีด 2 ถึง 30 ตัว"
+        entry["equipment_number"] = number
     elif field.key in (EntryField.Key.SIZE, EntryField.Key.NAME):
         limit = LIMITS[field.key]
         if len(value) > limit:
@@ -194,6 +210,8 @@ def describe(row, unit=""):
     if row.get("quantity"):
         parts.append(f"{row['quantity']} {unit}".strip())
     parts += [str(v) for v in (row.get("extra") or {}).values() if v]
+    if row.get("equipment_number"):
+        parts.append(f"หมายเลขอุปกรณ์ {row['equipment_number']}")
     text = " · ".join(parts)
     if row.get("numbers"):
         text += f" (หมายเลข {', '.join(row['numbers'])})"
@@ -217,9 +235,12 @@ def clean_details(raw):
             "quantity",
             "numbers",
             "name",
+            "equipment_number",
             "extra",
         }:
-            raise ValueError("Each detail row has group, size, quantity, numbers, name, extra.")
+            raise ValueError(
+                "Each detail row has group, size, quantity, numbers, name, equipment_number, extra."
+            )
         if row.get("group") not in GROUPS:
             raise ValueError("A detail row needs a LINE group.")
         clean = {"group": row["group"]}
@@ -232,6 +253,12 @@ def clean_details(raw):
             if not re.fullmatch(r"\d{1,4}", str(row["quantity"])) or int(row["quantity"]) < 1:
                 raise ValueError("A detail quantity is a whole number above 0.")
             clean["quantity"] = str(int(row["quantity"]))
+        if row.get("equipment_number") not in (None, ""):
+            if not isinstance(row["equipment_number"], str) or not EQUIPMENT_NUMBER.match(
+                row["equipment_number"]
+            ):
+                raise ValueError("equipment_number is 2-30 letters, digits or dashes.")
+            clean["equipment_number"] = row["equipment_number"]
         numbers = row.get("numbers") or []
         if not isinstance(numbers, list) or len(numbers) > MAX_NUMBERS:
             raise ValueError("numbers must be a list.")

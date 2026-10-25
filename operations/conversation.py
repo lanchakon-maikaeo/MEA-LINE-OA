@@ -1319,6 +1319,8 @@ def _requester_turn(turn):
         from operations import problem_chat  # local: problem_chat builds on services (M09)
 
         return problem_chat.on_text(turn, text)
+    if text is not None and draft is None and turn.conversation.prompt == "equipment_name":
+        return _equipment_named(turn, text)
     if command and CASE_NUMBER.fullmatch(command.upper()) and not _expects_text(draft):
         return _case_detail(turn, command.upper())
     if text is not None and turn.conversation.prompt in ("", "info_reply", "info_target"):
@@ -1667,6 +1669,9 @@ def _menu_item(turn, pk):
             return _menu(turn, "หัวข้อนี้ยังไม่มีเรื่องให้เลือก")
         turn.set_prompt()
         if equipment_first:
+            equipment = [c for c in choices if c.action == A.EQUIPMENT]
+            if len(equipment) == 1 and equipment[0].topic == "other":
+                return _ask_equipment_name(turn, item, equipment[0], choices)
             return _card(
                 turn,
                 item.label,
@@ -1759,12 +1764,42 @@ ACTION_CARD = (
 ACTION_LABELS = {**{kind: label for label, kind in ACTION_CARD}, K.PROBLEM: "แจ้งปัญหา"}
 
 
-def _action_card(turn, item):
-    """The second card of an equipment-first tile: what to do with the chosen equipment."""
-    turn.set_prompt()
+def _ask_equipment_name(turn, tile, choice, choices):
+    """25 Oct 2569 Q6: a tile whose one equipment choice is named by the requester (กคอ.) asks
+    for the name at once; its other choices (ติดตามเรื่อง) stay as quick replies."""
+    turn.set_prompt("equipment_name", item=choice.pk)
+    turn.say(
+        f"{tile.label}\nพิมพ์ชื่ออุปกรณ์ เช่น {EXAMPLES['name']}",
+        [(c.label, f"m=item&id={c.pk}") for c in choices if c.pk != choice.pk],
+    )
+
+
+def _equipment_named(turn, text):
+    item = _menu_entry(turn.conversation.prompt_data.get("item"))
+    if item is None or item.action != LineMenuItem.Action.EQUIPMENT:
+        turn.set_prompt()
+        return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
+    name = " ".join(text.split())
+    limit = typed_lines.LIMITS["name"]
+    if len(name) > limit:
+        turn.say(f"ชื่ออุปกรณ์พิมพ์ไม่เกิน {limit} ตัวอักษร กรุณาพิมพ์ใหม่")
+        return
+    if _problems_only(turn):
+        turn.say("บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ")
+        return _typed_draft(turn, item, K.PROBLEM, name=name)
+    return _action_card(turn, item, name=name)
+
+
+def _action_card(turn, item, name=""):
+    """The second choice of an equipment-first tile: what to do with the chosen equipment (or,
+    on the กคอ. tile, the equipment just named, kept with the prompt until a choice)."""
+    if name:
+        turn.set_prompt("equipment_name", item=item.pk, name=name)
+    else:
+        turn.set_prompt()
     return _card(
         turn,
-        _menu_label(item),
+        f"{item.parent.label} · {name}" if name and item.parent_id else _menu_label(item),
         "เลือกสิ่งที่ต้องการ",
         [(label, f"m=act&id={item.pk}&do={kind}") for label, kind in ACTION_CARD],
         [("ย้อนกลับ", f"m=item&id={item.parent_id}")],
@@ -1785,15 +1820,19 @@ def _menu_act(turn, data):
         return _action_card(turn, item)
     if kind in (K.WITHDRAWAL, K.RETURN) and _problems_only(turn):
         return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
-    return _typed_draft(turn, item, kind)
+    prompt = turn.conversation.prompt_data if turn.conversation.prompt == "equipment_name" else {}
+    name = prompt.get("name", "") if prompt.get("item") == item.pk else ""
+    return _typed_draft(turn, item, kind, name=name)
 
 
-def _typed_draft(turn, item, kind):
+def _typed_draft(turn, item, kind, name=""):
     """A draft whose lines are typed (typed_lines): the SAP number first for a withdrawal or
     return when the division follows SAP slips, and always for ติดตามสถานะการซ่อม (a problem
-    case with the repair topic), then the first row of the chosen group."""
+    case with the repair topic), then the first row of the chosen group. A name typed on the
+    กคอ. tile fills the first row's name (25 Oct 2569 Q6)."""
     group = item.topic
     action = ACTION_LABELS[kind]
+    turn.set_prompt()
     extra = {}
     if kind == REPAIR:
         kind, extra = K.PROBLEM, {"topic": Case.Topic.REPAIR}
@@ -1802,8 +1841,11 @@ def _typed_draft(turn, item, kind):
         extra = {"topic": shared.category if shared else Case.Topic.OTHER}
     # "เพิ่มรายการ" offers the groups of the same tile (กคว., กอจ. or กคอ.).
     extra["groups"] = _tile_groups(item)
+    if name:
+        extra["prefill"] = {"name": name}
     draft = _menu_draft(turn, item, kind, "sap", typed=group, **extra)
-    draft.data = dict(draft.data, menu_label=f"{_menu_label(item)} · {action}")
+    label = f"{item.parent.label} · {name}" if name and item.parent_id else _menu_label(item)
+    draft.data = dict(draft.data, menu_label=f"{label} · {action}")
     if extra.get("topic") == Case.Topic.REPAIR or typed_lines.needs_sap(kind, _owners(draft)):
         return _set(turn, draft, "sap")
     return _start_row(turn, draft, group)
@@ -2283,7 +2325,17 @@ def _ask_question(turn, draft):
     elif step == "location":
         turn.say("กด 'ส่งตำแหน่ง' แล้วเลือกจุดที่พบเรื่องนี้", [("ส่งตำแหน่ง", LOCATION)])
     elif step == "sap":
-        turn.say(f"พิมพ์{typed_lines.sap_label(draft.kind, draft.data.get('topic'))}ที่ทำไว้แล้ว")
+        label = typed_lines.sap_label(draft.kind, draft.data.get("topic"))
+        if draft.data.get("topic") != Case.Topic.REPAIR:
+            turn.say(f"พิมพ์{label}ที่ทำไว้แล้ว")
+        elif draft.data.get("sap_skipped"):
+            # 25 Oct 2569 Q7: neither the SAP repair number nor a number on the piece yet.
+            turn.say(f"ต้องมี{label}หรือหมายเลขอุปกรณ์อย่างน้อยหนึ่งอย่าง กรุณาพิมพ์{label}")
+        else:
+            turn.say(
+                f"พิมพ์{label} ถ้าไม่มี กดข้ามแล้วพิมพ์หมายเลขอุปกรณ์ในขั้นถัดไป",
+                [b("ข้าม", "sap_skip", draft=draft)],
+            )
     elif step == "entry":
         return _ask_entry(turn, draft)
     elif step == "typed_group":
@@ -2414,6 +2466,8 @@ def _fields(draft):
 
 def _next_field(draft):
     filled = draft.data["fields"]
+    if draft.data.get("sap_skipped") and _sap_missing(draft):
+        return "sap"  # a repair skipped its SAP number but the rows name no piece (Q7)
     for name, _, _ in _fields(draft):
         if name not in filled:
             return f"field:{name}"
@@ -2527,6 +2581,8 @@ def _draft_button(turn, draft, action, value):
         if value.get("group") not in dict(_draft_groups(draft)):
             return _ask(turn, draft)
         return _start_row(turn, draft, value["group"])
+    if action == "sap_skip" and draft.step == "sap" and data.get("topic") == Case.Topic.REPAIR:
+        return _skip_sap(turn, draft)
     if action == "entry_skip" and draft.step == "entry":
         entry, fields = dict(data["entry"]), _row_fields(draft)
         if entry["at"] < len(fields) and not typed_lines.required(fields[entry["at"]], draft.kind):
@@ -2582,6 +2638,7 @@ EXAMPLES = {
     },
     "quantity": "2",
     "name": "คีมตัดสาย",
+    "equipment_number": "BB-011",
 }
 
 
@@ -2629,9 +2686,21 @@ def _start_row(turn, draft, group, line=None):
         lines[line]["details"] = [{"group": group}]
         draft.data = dict(draft.data, lines=lines)
         return _set(turn, draft, _next_field(draft))
-    entry = {"group": group, "line": line, "row": {}, "keys": [f.key for f in fields], "at": 0}
-    changes = {"entry": entry, **({"typed": group} if line is None else {})}
+    prefill = dict(draft.data.get("prefill") or {}) if line is None else {}
+    fields = [f for f in fields if f.key not in prefill]
+    entry = {"group": group, "line": line, "row": prefill, "keys": [f.key for f in fields], "at": 0}
+    if prefill:
+        entry["prefilled"] = True
+        if not fields:
+            draft.data = dict(draft.data, prefill={})
+            return _finish_row(turn, draft, entry)
+    changes = {"entry": entry, "prefill": {}, **({"typed": group} if line is None else {})}
     return _set(turn, draft, "entry", **changes)
+
+
+def _fresh(entry):
+    """Nothing typed into this row yet (a name typed before the draft does not count)."""
+    return entry["at"] == 0 and (not entry["row"] or entry.get("prefilled"))
 
 
 def _ask_entry(turn, draft):
@@ -2651,7 +2720,9 @@ def _ask_entry(turn, draft):
         head = item.name if item else code
     else:
         head = typed_lines.label_of(group)
-    if entry["at"] == 0 and not entry["row"] and len(fields) > 1:
+        if entry["row"].get("name"):
+            head = entry["row"]["name"]  # typed on the กคอ. tile (25 Oct 2569 Q6)
+    if _fresh(entry) and len(fields) > 1:
         labels = " / ".join(f.label for f in fields)
         example = " / ".join(_example(f, group) for f in fields)
         text = f"{head}\nพิมพ์ {labels}\nเช่น {example}\nหรือพิมพ์ทีละช่อง เริ่มจาก{field.label}"
@@ -2692,7 +2763,7 @@ def _entry_text(turn, draft, text):
     if at >= len(fields):
         return _finish_row(turn, draft, entry)
     unit = _entry_unit(draft)
-    parts = typed_lines.split(text) if at == 0 and not row and len(fields) > 1 else None
+    parts = typed_lines.split(text) if _fresh(entry) and len(fields) > 1 else None
     pairs = _assign(fields, parts) if parts else None
     if pairs:
         trial = {}
@@ -2747,7 +2818,21 @@ def typed_topic(data):
     return label
 
 
+def _skip_sap(turn, draft):
+    """ติดตามสถานะการซ่อม without its SAP repair number: the rows must then name the piece."""
+    draft.data = dict(draft.data, sap_skipped=True)
+    if draft.data.get("typed") and not draft.data["lines"]:
+        return _start_row(turn, draft, draft.data["typed"])
+    return _set(turn, draft, _next_field(draft))
+
+
 def _sap_text(turn, draft, text):
+    if (
+        draft.data.get("topic") == Case.Topic.REPAIR
+        and not draft.data.get("sap_skipped")
+        and " ".join(text.split()) in {"ไม่มี", "ไม่ทราบ", "ข้าม"}
+    ):
+        return _skip_sap(turn, draft)
     number, problem = typed_lines.clean_sap(text)
     if not problem:
         problem = typed_lines.sap_in_use(number, draft.requester)
@@ -2771,8 +2856,10 @@ def _sap_missing(draft):
         draft.kind, draft.data.get("topic")
     ):
         return False
-    repair = draft.data.get("topic") == Case.Topic.REPAIR
-    return repair or typed_lines.needs_sap(draft.kind, _owners(draft))
+    if draft.data.get("topic") == Case.Topic.REPAIR:
+        # 25 Oct 2569 Q7: the SAP repair number, or else a number on the piece in the rows.
+        return not (draft.data.get("sap_skipped") and typed_lines.identified(draft.data["lines"]))
+    return typed_lines.needs_sap(draft.kind, _owners(draft))
 
 
 def _detail_missing(draft):

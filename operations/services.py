@@ -367,7 +367,8 @@ def preview_owners(payload):
 
 def _check_sap(submission, fields, requester, routes, intake):
     """เลขใบเบิก/ใบส่งคืน SAP (user, 23 Oct 2569): an open case already citing the number
-    refuses it; a LINE withdrawal or return to a division that follows SAP slips needs one."""
+    refuses it; a LINE withdrawal or return to a division that follows SAP slips needs one, and
+    ติดตามสถานะการซ่อม needs its SAP repair number or a numbered piece (25 Oct 2569 Q7)."""
     from operations import typed_lines
 
     number = fields.get("sap_number", "")
@@ -379,7 +380,10 @@ def _check_sap(submission, fields, requester, routes, intake):
     if submission.channel != Case.Channel.LINE or intake is not None:
         return
     if fields.get("topic") == Case.Topic.REPAIR:
-        fail(ErrorCode.VALIDATION_ERROR, "ระบุเลข SAP งานซ่อมก่อนส่งเรื่อง")
+        # 25 Oct 2569 Q7: the SAP repair number, or a number on the piece in the typed rows.
+        if not typed_lines.identified([line for _, group in routes for line in group]):
+            fail(ErrorCode.VALIDATION_ERROR, "ระบุเลข SAP งานซ่อมหรือหมายเลขอุปกรณ์ก่อนส่งเรื่อง")
+        return
     owners = [owner.code for owner, _ in routes if owner is not None]
     if typed_lines.needs_sap(submission.kind, owners):
         fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขใบเบิกหรือใบส่งคืน SAP ก่อนส่งเรื่อง")
