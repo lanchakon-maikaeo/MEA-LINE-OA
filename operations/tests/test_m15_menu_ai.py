@@ -365,3 +365,20 @@ class ExampleTests(MenuTestCase):
         plain = [i.code for i in ai._catalog(False)]
         found = ai.retrieve_examples("ขอเบิกมิเตอร์ ใบเบิก 45001", None, 99, plain)
         self.assertFalse(any("44005566" in e.text for e in found))  # typed codes: typed only
+
+
+class UnplacedRowTests(MenuTestCase):
+    def test_a_meter_row_waits_while_the_chat_asks_whose_meter_it_is(self):
+        # typed-v1 T06 on 25 Oct 2569: the row still asking its size was lost at the question.
+        self.menu_version()
+        draft = self.chat(
+            "มิเตอร์หมายเลข 33005678 หน้าจอไม่แสดงผล",
+            menu_request("problem", ("TYPED_METER", None, "มิเตอร์", ["33005678"], None)),
+        )
+        self.assertEqual(draft.step, "which_division")
+        self.assertEqual(draft.data["entry"]["row"]["numbers"], ["33005678"])
+        self.assertEqual(draft.data["meters_pending"], ["33005678"])
+        reply = self.press(ALICE, "มิเตอร์ของ กคว.")
+        draft.refresh_from_db()
+        self.assertEqual((draft.step, draft.data["division"]), ("entry", "กคว."))
+        self.assertIn("พิมพ์ขนาด", texts(reply))

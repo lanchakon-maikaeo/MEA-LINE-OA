@@ -670,13 +670,15 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     if data.get("topic") == Case.Topic.USAGE:
         data["meters"] = [m for m in proposal.meters if m["district"]]
         data["meters_pending"] = [m["number"] for m in proposal.meters if not m["district"]]
-    ambiguous, unplaced = _unplaced_meter(proposal, data, kind)
+    ambiguous, unplaced = _unplaced_meter(proposal, data, kind, entry)
     if proposal.rejected_fields or any(i.rejected for i in proposal.items):
         notes.insert(0, "บางช่องยังตรวจสอบกับข้อความไม่ได้ ขอถามเฉพาะข้อมูลที่ขาด")
     if unknown:
         notes.append(f"ไม่พบ '{', '.join(unknown[:3])}' ในทะเบียน กรุณาเลือกจากหมวด")
     if ambiguous:
         data["meters_pending"] = unplaced
+        if entry is not None:
+            data["line"], data["entry"] = {}, entry  # kept for กคว. (found by typed-v1 T06)
         step = "which_division"
     elif data.get("topic") == Case.Topic.USAGE:
         data["line"] = {}
@@ -743,7 +745,7 @@ def _menu_path(proposal):
 EQUIPMENT_DIVISIONS = ("กคว.", "กอจ.", "กคอ.")
 
 
-def _unplaced_meter(proposal, data, kind):
+def _unplaced_meter(proposal, data, kind, entry=None):
     """(ask, meter numbers): a menu version's problem about a meter that names neither a กตฟ.
     topic nor a division. Q10 asks whose meter it is instead of guessing; the typed meter
     rows' own division (กคว.) is not the model's word on it."""
@@ -761,6 +763,8 @@ def _unplaced_meter(proposal, data, kind):
         for row in line.get("details", [])
         if row.get("group") == "meter"
     ]
+    if entry and entry.get("group") == "meter":
+        rows.append(entry.get("row", {}))  # a meter row still asking a field
     numbers = [m["number"] for m in proposal.meters] + [
         n for row in rows for n in row.get("numbers", [])
     ]

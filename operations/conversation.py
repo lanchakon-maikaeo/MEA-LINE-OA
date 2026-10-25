@@ -2645,8 +2645,8 @@ def _draft_button(turn, draft, action, value):
         if value.get("to") == "usage":
             draft.data = dict(data, topic=Case.Topic.USAGE, division="กตฟ.", lines=[], entry={})
             return _set(turn, draft, "usage_topic")
-        draft.data = dict(data, division="กคว.")
-        return _set(turn, draft, _next_field(draft))
+        draft.data = dict(data, division="กคว.", meters_pending=[])
+        return _set(turn, draft, "entry" if data.get("entry") else _next_field(draft))
     if action == "usage_topic" and draft.step == "usage_topic":
         item = next((c for c in _usage_topics() if c.pk == value.get("id")), None)
         if item is None:
