@@ -504,6 +504,12 @@ def _ground_menu(proposal, text):
             item.equipment_number = ""
             item.rejected.append("equipment_number")
     topics = ai.menu_topics()
+    if proposal.topic and topics[proposal.topic][1] == "usage":
+        # Q10: a กตฟ. topic needs the message to show the meter is a customer's; then it wins
+        # over a division the model also named. Unshown, the model was unsure: no topic and no
+        # division, so the chat asks whose meter it is.
+        if not usage_meters.customer_meter(text):
+            proposal.topic = proposal.division = ""
     if proposal.topic:
         proposal.division = topics[proposal.topic][0]
     if proposal.topic and topics[proposal.topic][1] != "usage":

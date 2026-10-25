@@ -1031,8 +1031,11 @@ class Extraction:
 
 
 def _equipment_number(item):
-    """หมายเลขอุปกรณ์ in its loose shape, or "" (grounded against the message afterwards)."""
-    value = re.sub(r"\s", "", str(item.get("equipment_number") or "").translate(THAI_DIGITS))
+    """หมายเลขอุปกรณ์ in its loose shape, or "" (grounded against the message afterwards). A
+    model may put the one number of other equipment among its serials (seen on menu-v1)."""
+    serials = item.get("serials") or []
+    value = item.get("equipment_number") or (serials[0] if len(serials) == 1 else "")
+    value = re.sub(r"\s", "", str(value or "").translate(THAI_DIGITS))
     return value if typed_lines.EQUIPMENT_NUMBER.match(value) else ""
 
 

@@ -35,6 +35,35 @@ def match_district(text):
     return None
 
 
+# Words that show a meter is a customer's (Q10): with the policy's usage words (ลักใช้ไฟ,
+# ไฟแพง, …, admin-editable) and a district named in the message.
+CUSTOMER_WORDS = (
+    "ลูกค้า",
+    "ผู้ใช้ไฟ",
+    "บ้าน",
+    "หน่วยไฟ",
+    "ทบทวนหน่วย",
+    "ร้องเรียน",
+    "อ้อมมิเตอร์",
+    "ไม่ผ่านมิเตอร์",
+)
+
+
+def customer_meter(text):
+    """Whether the message shows its meter is a customer's: the line between a กตฟ. report and
+    a meter of กคว. (owner, 25 Oct 2569 Q10). Without it the chat asks instead of guessing."""
+    from operations import policy  # local: policy reads the database
+
+    text = str(text or "")
+    if any(word in text for word in CUSTOMER_WORDS) or policy.usage_text(text):
+        return True
+    key = name_key(text)
+    return any(
+        name_key(name) and name_key(name) in key
+        for name in District.objects.filter(is_active=True).values_list("name", flat=True)
+    )
+
+
 def examples(count=3):
     return ", ".join(short(d.name) for d in District.objects.filter(is_active=True)[:count])
 

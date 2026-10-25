@@ -114,6 +114,32 @@ class GroundingTests(MenuTestCase):
         self.assertEqual(got.division, "กตฟ.")
         self.assertEqual(got.meters, [{"number": "12345678", "district": ""}])  # not written
 
+    def test_a_ktf_topic_needs_a_sign_that_the_meter_is_a_customers(self):
+        # Q10: "มิเตอร์ ... เสีย" or a meter withdrawn on a slip is not shown to be a customer's;
+        # the model's guess is dropped and the chat asks whose meter it is.
+        for text, division in (
+            ("มิเตอร์ 12340000 เสีย", None),
+            ("แจ้งปัญหา มิเตอร์ที่เบิกตามใบเบิก 4500131313 หมายเลข 77001234 ไม่หมุน", "กคว."),
+        ):
+            with self.subTest(text=text):
+                got = self.read(
+                    text,
+                    menu_request("problem", division=division, topic="เครื่องวัดฯ ชำรุด", meters=[]),
+                ).requests[0]
+                self.assertEqual((got.topic, got.division), ("", ""))
+        got = self.read(
+            "มิเตอร์ของลูกค้า 12340000 เสีย",
+            menu_request("problem", division="กคว.", topic="เครื่องวัดฯ ชำรุด"),
+        ).requests[0]
+        self.assertEqual((got.topic, got.division), ("เครื่องวัดฯ ชำรุด", "กตฟ."))
+
+    def test_a_lone_serial_of_other_equipment_is_its_number(self):
+        item = ("TYPED_OTHER", None, "สว่านไฟฟ้า", ["DR-2001"], None)
+        got = self.read(
+            "ติดตามงานซ่อมสว่านไฟฟ้า หมายเลข DR-2001", menu_request("repair", item, division="กคอ.")
+        ).requests[0]
+        self.assertEqual(got.items[0].equipment_number, "DR-2001")
+
     def test_a_repair_names_its_piece_only_when_the_message_does(self):
         item = ("TYPED_OTHER", None, "เครื่องบีบสายไฟแบบแบตเตอรี่", [], None)
         for number, expected in (("BB-011", "BB-011"), ("BB-999", "")):
@@ -158,7 +184,7 @@ class ChatTests(MenuTestCase):
 
     def test_a_meter_without_its_district_asks_the_district(self):
         draft = self.chat(
-            "เครื่องวัด 12345678 หน้าปัดแตก",
+            "เครื่องวัดของลูกค้า 12345678 หน้าปัดแตก",
             menu_request("problem", topic="เครื่องวัดฯ ชำรุด", meters=[("12345678", None)]),
         )
         self.assertEqual((draft.step, draft.data["meter"]), ("district", "12345678"))
