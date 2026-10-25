@@ -3,7 +3,8 @@
 23 Oct 2569: the กคว. tile asks for the equipment first (มิเตอร์ / CT / VT / อุปกรณ์อื่น), then
 ติดตามใบเบิก / ติดตามใบส่งคืน / ติดตามสถานะการซ่อม (conversation._action_card). 24 Oct 2569: the
 กอจ. tile does the same with หม้อแปลง / LBS / RMU / อุปกรณ์อื่น, and the กคอ. tile with one
-choice whose name the requester types."""
+choice whose name the requester types (asked at once since 25 Oct 2569). 25 Oct 2569: the กตฟ.
+tile offers the five หัวข้อการใช้ไฟฟ้า, each asking meter numbers and districts (usage_meters)."""
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -57,10 +58,14 @@ TOPICS = [
         "ตรวจสอบการใช้ไฟฟ้า",
         "กตฟ.",
         "usage",
+        # 25 Oct 2569 Q3: the five หัวข้อการใช้ไฟฟ้า; a quick reply holds 20 characters, so a
+        # longer topic keeps its full name (shown in the chat and on the case) as the note.
         [
-            ("แจ้งละเมิดใช้ไฟฟ้า", A.PROBLEM),
-            ("ตรวจสอบค่าไฟแพง", A.PROBLEM),
-            ("แจ้งมิเตอร์ชำรุด", A.PROBLEM),
+            ("เครื่องวัดฯ ผิดปกติ", A.PROBLEM),
+            ("เครื่องวัดฯ ชำรุด", A.PROBLEM),
+            ("เครื่องวัดฯ ถูกกระทำ", A.PROBLEM, "", "เครื่องวัดฯ มีการกระทำ"),
+            ("ร้องเรียนไฟแพง", A.PROBLEM),
+            ("ทบทวนหน่วยไฟฟ้า", A.PROBLEM, "", "ทบทวนหน่วยไฟฟ้าจากการร้องเรียน"),
             ("ติดตามเรื่อง", A.TRACK),
         ],
     ),
@@ -168,7 +173,7 @@ def sync():
         parent = put(T.REPORT, P.TILE, index, label, A.TOPIC, division=division, note=code)
         if not choices:
             choices = [("เบิกอุปกรณ์", A.NEW), ("ส่งคืนอุปกรณ์", A.RETURN), ("ติดตามเรื่อง", A.TRACK)]
-        for number, (choice, action, *group) in enumerate(choices, 1):
+        for number, (choice, action, *rest) in enumerate(choices, 1):
             put(
                 T.REPORT,
                 P.CHOICE,
@@ -177,8 +182,9 @@ def sync():
                 action,
                 parent=parent,
                 division=division,
-                topic=group[0] if group else topic,  # an equipment choice holds its LINE group
+                topic=(rest[0] if rest else "") or topic,  # an equipment choice: its LINE group
                 kind="withdrawal" if action == A.NEW else "",
+                note=rest[1] if len(rest) > 1 else "",  # the full name of a shortened label
             )
     put(T.REPORT, P.TILE, 6, "ปัญหา/ข้อเสนอแนะ", A.GENERAL, note="ทุกกอง/ศูนย์")
     for index, (label, action) in enumerate(GUEST[2:], 1):

@@ -188,11 +188,24 @@ class DirectRoutingTests(OrgTestCase):
         self.assertEqual((rec.rules, rec.proposed_owner.code), (["R10"], "ฝอจ."))
         self.assertIn("ผู้ประสานระดับฝ่าย", rec.next_action)
 
-    def test_a_usage_matter_goes_to_ktf_and_never_to_the_ai(self):
-        payload = {"kind": "problem", "topic": "usage", "description": "สงสัยลักใช้ไฟ บ้านเลขที่ 9"}
+    def test_a_usage_matter_goes_to_ktf_and_to_the_ai_unless_kept_from_it(self):
+        from operations.models import District
+
+        payload = {
+            "kind": "problem",
+            "topic": "usage",
+            "description": "สงสัยลักใช้ไฟ บ้านเลขที่ 9",
+            "meters": [
+                {"number": "12345678", "district": District.objects.order_by("code").first().code}
+            ],  # 25 Oct 2569 Q11
+        }
         with override_settings(AI_ENABLED=True):
             _, case = self.submit(payload)
         self.assertEqual((case.owner_division.code, case.topic), ("กตฟ.", "usage"))
+        self.assertFalse(policy.private_topic(case))  # ADR 0021 (25 Oct 2569)
+        from operations import options
+
+        options.change(None, options.USAGE_AI, "never", "ทดสอบกฎ Q14 เดิม")
         self.assertTrue(policy.private_topic(case))
         self.assertFalse(case.ai_triage_runs.exists())
         # Words alone are enough to keep a text from the AI.
@@ -605,7 +618,12 @@ class LineTopicTests(LineTestCase):
         for number in numbers:
             self.assertIn(number, texts(reply))
 
-    def test_usage_text_never_starts_an_ai_draft(self):
+    def test_usage_text_starts_no_ai_draft_while_kept_from_the_ai(self):
+        from operations import options
+
+        # ADR 0021 (25 Oct 2569): by default such text may reach the AI after masking.
+        self.assertFalse(ai_chat.private_text(None, "ร้องเรียนค่าไฟแพงผิดปกติ"))
+        options.change(None, options.USAGE_AI, "never", "ทดสอบกฎ Q14 เดิม")
         with (
             override_settings(AI_ENABLED=True),
             patch.object(ai_chat.ai, "active_version", return_value=object()),

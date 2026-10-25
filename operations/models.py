@@ -511,6 +511,8 @@ class Case(models.Model):
     is_example = models.BooleanField(default=False)
     # The LINE menu choice the case came from, e.g. "ระบบ SMG, ระบบ AMR · การจัดทำบิล" (Q20).
     menu_label = models.CharField(max_length=120, blank=True)
+    # เรื่องการใช้ไฟฟ้า (25 Oct 2569 Q11, Q23): [{"number": …, "district": District.code}].
+    meters = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-submitted_at"]
@@ -1131,6 +1133,9 @@ class AIConfigVersion(models.Model):
     # Extraction only (user, 23 Oct 2569): also read the SAP slip number and the typed fields
     # of the equipment-first groups (typed_lines). Older versions keep the prompt they passed.
     typed_fields = models.BooleanField(default=False, db_default=False)
+    # Also reads where a message belongs on the LINE menu (owner, 25 Oct 2569 Q9): needs
+    # typed_fields; evaluated on menu-v1 as well.
+    menu_fields = models.BooleanField(default=False, db_default=False)
     profiles = models.ManyToManyField(AIProfile, through="AIConfigEntry", related_name="+")
     test_passed = models.BooleanField(null=True)
     test_result = models.JSONField(default=dict, blank=True)
@@ -2329,6 +2334,7 @@ class EntryField(models.Model):
         SIZE = "size", "ขนาด"
         QUANTITY = "quantity", "จำนวน"
         NAME = "name", "ชื่ออุปกรณ์"
+        EQUIPMENT_NUMBER = "equipment_number", "หมายเลขอุปกรณ์"  # 25 Oct 2569 Q7
 
     group = models.CharField(max_length=16, choices=EquipmentType.LineGroup.choices)
     key = models.CharField(max_length=32)  # a Key for a base field, "x<pk>" for an added one

@@ -171,7 +171,7 @@ class ServiceMenuFlowTests(MenuTestCase):
     def test_a_tile_withdrawal_uses_its_division_and_category(self):
         # 24 Oct 2569: every equipment tile asks for the equipment first (test_m14_kcw_menu).
         self.open("เครื่องมือและอุปกรณ์")
-        self.press(ALICE, "พิมพ์ชื่ออุปกรณ์")
+        self.type(ALICE, "คีมตัดสาย")  # 25 Oct 2569 Q6: the name first, no button to press
         self.press(ALICE, "ติดตามใบเบิก")
         draft = ConversationDraft.objects.get(status="open")
         self.assertEqual(
@@ -188,12 +188,13 @@ class ServiceMenuFlowTests(MenuTestCase):
         expected = {
             "Meter, CT, VT": ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น", "ติดตามเรื่อง"],
             "หม้อแปลง LBS RMU": ["หม้อแปลง", "LBS", "RMU", "อุปกรณ์อื่น", "ติดตามเรื่อง"],
-            "เครื่องมือและอุปกรณ์": ["พิมพ์ชื่ออุปกรณ์", "ติดตามเรื่อง"],
+            "เครื่องมือและอุปกรณ์": ["ติดตามเรื่อง"],  # Q6: the name is asked at once
         }
         for label, choices in expected.items():
             with self.subTest(label=label):
                 reply = self.open(label)
                 self.assertEqual([b for b in buttons(reply) if b != "หน้าหลัก"], choices)
+        self.say(self.postback(ALICE, "m=home"))  # leave the name prompt of the กคอ. tile
         reply = self.type(ALICE, "เบิกอุปกรณ์")
         self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
 
@@ -232,7 +233,7 @@ class ServiceMenuFlowTests(MenuTestCase):
         self.type(ALICE, "เบิกอุปกรณ์")
         reply = self.type(ALICE, "CT")
         self.assertIn("ยังไม่มีรายการที่ใช้งานได้", texts(reply))
-        self.assertEqual(list(buttons(reply)), ["ย้อนกลับ", "หน้าหลัก", "ยกเลิกร่าง"])
+        self.assertEqual(list(buttons(reply)), ["ย้อนกลับ", "ยกเลิกร่าง"])
 
     def test_group_filter_is_kept_when_catalogue_requires_search(self):
         from operations.models import EquipmentType
@@ -257,18 +258,21 @@ class ServiceMenuFlowTests(MenuTestCase):
         reply = self.type(ALICE, "CT_13")
         self.assertIn("CT รุ่น 13", buttons(reply))
 
-    def test_usage_menu_has_three_report_types_and_own_tracking(self):
+    def test_usage_menu_has_the_five_topics_and_own_tracking(self):
+        # 25 Oct 2569 Q3: the five หัวข้อการใช้ไฟฟ้า (test_m15_usage_meters).
         reply = self.open("ตรวจสอบการใช้ไฟฟ้า")
         self.assertEqual(
             set(buttons(reply)),
             {
-                "แจ้งละเมิดใช้ไฟฟ้า",
-                "ตรวจสอบค่าไฟแพง",
-                "แจ้งมิเตอร์ชำรุด",
+                "เครื่องวัดฯ ผิดปกติ",
+                "เครื่องวัดฯ ชำรุด",
+                "เครื่องวัดฯ ถูกกระทำ",
+                "ร้องเรียนไฟแพง",
+                "ทบทวนหน่วยไฟฟ้า",
                 "ติดตามเรื่อง",
             },
         )
-        self.type(ALICE, "แจ้งมิเตอร์ชำรุด")
+        self.type(ALICE, "เครื่องวัดฯ ชำรุด")
         draft = ConversationDraft.objects.get(status="open")
         self.assertEqual(draft.kind, Case.Kind.PROBLEM)
         self.assertEqual(draft.data["division"], "กตฟ.")
@@ -276,8 +280,8 @@ class ServiceMenuFlowTests(MenuTestCase):
 
     def test_rich_menu_label_can_be_typed_without_a_prior_suggestion(self):
         reply = self.type(ALICE, "ตรวจสอบการใช้ไฟฟ้า")
-        self.assertIn("แจ้งมิเตอร์ชำรุด", buttons(reply))
-        self.type(ALICE, "แจ้งมิเตอร์ชำรุด")
+        self.assertIn("เครื่องวัดฯ ชำรุด", buttons(reply))
+        self.type(ALICE, "เครื่องวัดฯ ชำรุด")
         self.assertEqual(ConversationDraft.objects.get(status="open").data["division"], "กตฟ.")
 
     def test_anonymous_cannot_open_equipment_options_by_typing_a_tile(self):

@@ -134,6 +134,7 @@ KIND_FIELDS = {
             "latitude",
             "longitude",
             "sap_number",
+            "meters",
         },
     },
 }
@@ -282,6 +283,7 @@ class Submission:
     reported_at: datetime | None = None
     division_code: str = ""
     menu_label: str = ""
+    meters: tuple = ()  # เครื่องวัดในเรื่องการใช้ไฟฟ้า (usage_meters)
 
 
 def parse_submission(payload, on_behalf):
@@ -307,6 +309,7 @@ def parse_submission(payload, on_behalf):
         "latitude",
         "longitude",
         "sap_number",
+        "meters",
     }:
         fields[name] = _text(payload, name, False, 100 if name == "source_reference" else TEXT_MAX)
     if "sap_number" in spec["optional"]:
@@ -384,6 +387,16 @@ def parse_submission(payload, on_behalf):
         related = _text(payload, "related_case_number", False, 16)
     division_code = _text(payload, "division_code", False, 16)
     menu_label = _text(payload, "menu_label", False, 120)
+    meters = ()
+    if "meters" in spec["optional"]:
+        from operations import usage_meters  # local: it reads the database for districts
+
+        try:
+            meters = usage_meters.clean(payload.get("meters"))
+        except ValueError as exc:
+            fail(ErrorCode.VALIDATION_ERROR, str(exc))
+        if meters and fields.get("topic") != Case.Topic.USAGE:
+            fail(ErrorCode.VALIDATION_ERROR, "ระบุเครื่องวัดได้เฉพาะเรื่องการใช้ไฟฟ้า")
     return Submission(
         kind,
         tuple(lines),
@@ -395,6 +408,7 @@ def parse_submission(payload, on_behalf):
         reported_at,
         division_code,
         menu_label,
+        meters,
     )
 
 

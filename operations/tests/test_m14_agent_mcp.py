@@ -108,7 +108,8 @@ class MCPTests(AgentTestCase):
         )
         self.assertNotIn("ตรวจคำสั่งก่อนดำเนินการ", texts(reply))
         self.assertNotIn("ยืนยัน", buttons(reply))
-        self.assertIn("เบิกอุปกรณ์", buttons(reply))
+        self.assertIn("เมนูด้านล่าง", texts(reply))  # Q2: the rich menu, no service buttons
+        self.assertNotIn("เบิกอุปกรณ์", buttons(reply))
         self.assertNotIn("agent_proposal", run.result)
         self.assertFalse(Case.objects.exists())
 
@@ -388,7 +389,7 @@ class MCPTests(AgentTestCase):
         ):
             ai_chat.process(run.pk)
         self.assertIn("ไม่สำเร็จ", texts(send.call_args.args[1]))
-        self.assertTrue(buttons(send.call_args.args[1]))
+        self.assertIn("เมนูด้านล่าง", texts(send.call_args.args[1]))
         run.refresh_from_db()
         self.assertNotIn("agent_proposal", run.result)
         self.assertFalse(Case.objects.exists())

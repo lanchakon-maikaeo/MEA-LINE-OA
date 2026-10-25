@@ -65,7 +65,7 @@ class KeywordTests(AnswerTestCase):
         self.approve(ALICE)
         reply = texts(self.type(ALICE, "สวัสดีครับ"))
         self.assertNotIn("ช่องทางนี้รับเรื่อง", reply)
-        self.assertIn("เลือกเมนูด้านล่าง", reply)
+        self.assertIn("เมนูด้านล่าง", reply)
 
     def test_greetings_and_questions_are_answered_from_the_bank(self):
         self.mode("faq")
@@ -73,7 +73,7 @@ class KeywordTests(AnswerTestCase):
         self.assertIn("ช่องทางนี้รับเรื่องเบิก", texts(self.type(ALICE, "สวัสดีครับ")))
         contact = self.type(ALICE, "ขอเบอร์ติดต่อหน่อย")
         self.assertIn("02-000-0001", texts(contact))
-        self.assertEqual(buttons(contact)["เบิกอุปกรณ์"], "m=equipment&kind=withdrawal")
+        self.assertNotIn("เบิกอุปกรณ์", buttons(contact))  # Q2: the rich menu is the menu
         # A greeting with a story is a report, not a greeting.
         reply = texts(self.type(ALICE, "สวัสดีครับ ขอแจ้งไฟดับที่ซอย 5 ตั้งแต่เมื่อคืน"))
         self.assertNotIn("ช่องทางนี้รับเรื่องเบิก", reply)
@@ -253,7 +253,8 @@ class AIAnswerTests(AIAnswerCase):
         self.approve(ALICE)
         _, run, reply = self.ask(ALICE, "พรุ่งนี้ฝนจะตกไหมครับ", answer_json("none"))
         self.assertIn("เรื่องนี้ตอบในแชตนี้ไม่ได้", texts(reply))
-        self.assertEqual(buttons(reply)["แจ้งปัญหา"], "m=problems")
+        # 25 Oct 2569 Q2: no service quick replies; the rich menu is the menu.
+        self.assertFalse(set(buttons(reply)) & {"เบิกอุปกรณ์", "แจ้งปัญหา", "หน้าหลัก"})
 
     def test_only_approved_keys_and_valid_json_are_accepted(self):
         rows = list(answers.approved())
@@ -264,18 +265,32 @@ class AIAnswerTests(AIAnswerCase):
         self.assertEqual(schema["properties"]["answer"]["enum"], ["greeting", "none"])
         self.assertNotIn("emergency", [r.key for r in ai_answer.choosable(rows)])
 
-    def test_usage_cases_and_other_people_never_reach_the_ai(self):
+    def test_other_people_never_reach_the_ai_and_usage_cases_only_when_allowed(self):
         alice, bob = self.approve(ALICE), self.approve(BOB)
-        self.case_for(alice, topic="usage", description="สงสัยลักใช้ไฟ บ้านเลขที่ 9 (ทดสอบ)")
+        from operations.models import District
+
+        self.case_for(
+            alice,
+            topic="usage",
+            description="สงสัยลักใช้ไฟ บ้านเลขที่ 9 (ทดสอบ)",
+            meters=[
+                {"number": "12345678", "district": District.objects.order_by("code").first().code}
+            ],  # 25 Oct 2569 Q11
+        )
         own = self.case_for(alice)
         self.case_for(bob)
+        facts = answers.facts(alice)  # ADR 0021: the number and status, never the text
+        self.assertEqual(len(facts), 2)
+        self.assertNotIn("ลักใช้ไฟ", " ".join(facts))
+        options.change(None, options.USAGE_AI, "never", "ทดสอบกฎ Q14 เดิม")
         facts = answers.facts(alice)
         self.assertEqual(len(facts), 1)
         self.assertIn(own.number, facts[0])
-        self.assertNotIn("ลักใช้ไฟ", " ".join(facts))
 
-    def test_usage_text_and_anonymous_reporters_never_go_to_the_ai(self):
+    def test_anonymous_reporters_never_go_to_the_ai_nor_usage_text_when_kept(self):
         self.mode("write")
+        self.assertFalse(ai_chat.private_text(None, "ร้องเรียนค่าไฟแพงผิดปกติ"))  # ADR 0021
+        options.change(None, options.USAGE_AI, "never", "ทดสอบกฎ Q14 เดิม")
         self.assertFalse(ai_chat.wants_ai(None, None, "ร้องเรียนค่าไฟแพงผิดปกติ"))
         anonymous = SimpleNamespace(anonymous=True)
         self.assertFalse(ai_chat.wants_ai(anonymous, None, "ต้องรอนานแค่ไหนครับ"))

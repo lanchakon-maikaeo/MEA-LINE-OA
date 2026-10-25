@@ -90,6 +90,8 @@ CASES = [
             "kind": "problem",
             "topic": "usage",
             "description": "สงสัยลักใช้ไฟ ต่อไฟตรงไม่ผ่านมิเตอร์ (ข้อมูลจำลอง)",
+            # 25 Oct 2569 Q11: a usage report names its meter and the meter's district.
+            "meters": [{"number": "SIM900004", "district": "D04"}],
         },
     ),
     (

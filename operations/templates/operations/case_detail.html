@@ -19,7 +19,7 @@
   </div>
   <dl class="facts">
     <div><dt>กองเจ้าภาพ</dt><dd>{{ case.owner_division.code }} {{ case.owner_division.name }}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>
-    {% if case.topic == "usage" %}<div><dt>หัวข้อ</dt><dd>การใช้ไฟฟ้า <span class="muted">(ไม่ส่งให้ AI)</span></dd></div>{% endif %}
+    {% if case.topic == "usage" %}<div><dt>หัวข้อ</dt><dd>การใช้ไฟฟ้า{% if page.usage_private %} <span class="muted">(ไม่ส่งให้ AI)</span>{% endif %}</dd></div>{% endif %}
     <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
     <div><dt>หน่วยงาน (เขต/ฝ่าย)</dt><dd>{{ case.district.name }}</dd></div>
     <div><dt>ผู้แจ้ง</dt><dd>{% if case.requester.is_anonymous %}<span class="tag">ไม่ระบุตัวตน</span>{% else %}{{ case.requester.display_name }}{% with e=case.requester.employee %}{% if e %}<br><span class="muted">{{ e.position }}{% if e.position and e.department %} · {% endif %}{{ e.department }}</span>{% endif %}{% endwith %}{% endif %}</dd></div>

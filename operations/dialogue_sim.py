@@ -115,7 +115,7 @@ CHECKS = {
     "split": "แยกเรื่องตามกองครบ และบอกเลขทุกเรื่อง",
     "hazard": "แจ้งอันตรายได้ระดับ P0 และคำแนะนำเร่งด่วนทันที",
     "hazard_overflag": "ไม่ได้แจ้งอันตรายแต่ได้ P0 (ยอมรับได้ตามกติกา)",
-    "ai_private": "ข้อความเรื่องการใช้ไฟฟ้าไม่ถูกส่งให้ AI",
+    "ai_private": "ข้อความเรื่องการใช้ไฟฟ้าไปถึง AI ตามตัวเลือกระบบ",
     "staff_private": "ข้อความเด้งถึงเจ้าหน้าที่ไม่มีชื่อหรือข้อความของผู้แจ้ง",
     "anonymous": "ผู้แจ้งไม่ระบุตัวตนไม่มีชื่อ และตำแหน่งตรงกับที่ส่ง",
     "stale_button": "กดปุ่มเก่าแล้วบอทไม่ทำตาม และถามคำถามล่าสุดอีกครั้ง",
@@ -1069,7 +1069,9 @@ class Dialogue:
                 if found:
                     self.fail("staff_private", f"ข้อความเด้ง {kind} มี '{found}' ของผู้แจ้ง")
         self.passed("staff_private")
-        if goal.topic == Case.Topic.USAGE:
+        if goal.topic == Case.Topic.USAGE and policy.usage_kept_from_ai():
+            # Only while an admin keeps การใช้ไฟฟ้า from the AI (usage_ai "never"); by default
+            # it reaches the AI after masking (ADR 0021, 25 Oct 2569).
             for draft, text in self.private_texts:
                 if not ai_chat.private_text(draft, text):
                     self.fail("ai_private", f"ข้อความ '{text[:30]}' อาจถูกส่งให้ AI")
@@ -1079,6 +1081,11 @@ class Dialogue:
                     asked = policy.maybe_request_ai(case, now)
                 if not policy.private_topic(case) or asked is not None:
                     self.fail("ai_private", f"เรื่อง {case.number} จะถูกส่งให้ AI คัดกรอง")
+            self.passed("ai_private")
+        elif goal.topic == Case.Topic.USAGE:
+            for draft, text in self.private_texts:
+                if ai_chat.private_text(draft, text):
+                    self.fail("ai_private", f"ข้อความ '{text[:30]}' ถูกกันจาก AI ทั้งที่ตัวเลือกให้ส่ง")
             self.passed("ai_private")
         if goal.actor == "anonymous":
             case = self.cases[0]
@@ -1121,7 +1128,17 @@ class Dialogue:
         result = services.submit_case(
             Actor.for_requester(reporter),
             idempotency_key=f"dialogue-sim-{self.number:06d}-{rng.getrandbits(32):08x}",
-            payload={"kind": "problem", "topic": topic, "description": text},
+            payload={
+                "kind": "problem",
+                "topic": topic,
+                "description": text,
+                # 25 Oct 2569 Q11: a usage report names its meter and the meter's district.
+                **(
+                    {"meters": [{"number": "SIM123456", "district": reporter.district.code}]}
+                    if topic == Case.Topic.USAGE
+                    else {}
+                ),
+            },
         )
         self.target = Case.objects.select_related("owner_division").get(pk=result.case_id)
         self.target_texts = [text, reporter.display_name]
@@ -1445,6 +1462,22 @@ def i_type_sap_number(d):
     dialogue, typed again if the bot asks again."""
     number = d.flags.setdefault("sap_number", f"45{d.rng.randint(10**7, 10**8 - 1)}")
     return d.text("type_sap_number", number)
+
+
+def i_type_meter_number(d):
+    """เรื่องการใช้ไฟฟ้า (25 Oct 2569 Q11): one synthetic meter number per dialogue."""
+    number = d.flags.setdefault("meter_number", f"SIM{d.rng.randint(10**5, 10**6 - 1)}")
+    return d.text("type_meter_number", number)
+
+
+def i_type_district(d):
+    """เขตของเครื่องวัด: the name of a real district, as a person would type it."""
+    from operations.models import District
+
+    names = [
+        n.replace("การไฟฟ้านครหลวงเขต", "") for n in District.objects.values_list("name", flat=True)
+    ]
+    return d.text("type_district", d.rng.choice(sorted(names) or ["วัดเลียบ"]))
 
 
 def i_type_entry(d):

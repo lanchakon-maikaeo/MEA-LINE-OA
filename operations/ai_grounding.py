@@ -377,7 +377,13 @@ def labelled_serials(source, label=SERIAL_LABEL):
         " ".join(source),
     ):
         labelled += [t for t in re.findall(r"[a-z0-9_-]+", group) if t not in labelled]
-    return labelled
+    return [t for t in labelled if _has_digit(t)]
+
+
+def _has_digit(token):
+    """A serial has a digit: a word after the numbers ("หมายเลข TR-2501 SAP …") is not one
+    (found by menu-v1 on 25 Oct 2569: "sap" voided the transformer's number)."""
+    return any(c.isdigit() for c in token)
 
 
 def serial_tokens(source, label=SERIAL_LABEL):
@@ -388,7 +394,7 @@ def serial_tokens(source, label=SERIAL_LABEL):
         rf"{label}\s*[:：]?\s*([a-z0-9_-]+(?:[ ,]+[a-z0-9_-]+)*)",
         text,
     ):
-        labelled.update(re.findall(r"[a-z0-9_-]+", group))
+        labelled.update(t for t in re.findall(r"[a-z0-9_-]+", group) if _has_digit(t))
     mixed = {
         token
         for token in re.findall(r"(?<![a-z0-9_-])[a-z0-9][a-z0-9_-]*", text)
@@ -466,6 +472,50 @@ def _ground_sap(proposal, text):
         proposal.rejected_fields.append("sap_number")
 
 
+def _alone(value, text):
+    return bool(value) and re.search(rf"(?<![a-z0-9-]){re.escape(value)}(?![a-z0-9-])", text)
+
+
+def _ground_menu(proposal, text):
+    """The menu path (menu versions, 25 Oct 2569): every meter number and หมายเลขอุปกรณ์ must
+    stand alone in the (screened) message and differ from the SAP number; a district must be
+    one of ours and named in the message, else it is asked. A กตฟ. topic decides the division
+    (Q10); a division the topic does not belong to is dropped."""
+    from operations import ai, usage_meters  # local: ai builds on this module
+
+    sap = normalise(proposal.sap_number)
+    meters = []
+    for meter in proposal.meters:
+        number = normalise(meter["number"])
+        if not _alone(number, text) or number == sap:
+            proposal.rejected_fields.append("meters")
+            continue
+        district = usage_meters.match_district(meter.get("district") or "")
+        named = district is not None and usage_meters.name_key(
+            district.name
+        ) in usage_meters.name_key(text)
+        meters.append({"number": meter["number"], "district": district.code if named else ""})
+    proposal.meters = meters
+    for item in proposal.items:
+        if item.equipment_number and (
+            not _alone(normalise(item.equipment_number), text)
+            or normalise(item.equipment_number) == sap
+        ):
+            item.equipment_number = ""
+            item.rejected.append("equipment_number")
+    topics = ai.menu_topics()
+    if proposal.topic and topics[proposal.topic][1] == "usage":
+        # Q10: a กตฟ. topic needs the message to show the meter is a customer's; then it wins
+        # over a division the model also named. Unshown, the model was unsure: no topic and no
+        # division, so the chat asks whose meter it is.
+        if not usage_meters.customer_meter(text):
+            proposal.topic = proposal.division = ""
+    if proposal.topic:
+        proposal.division = topics[proposal.topic][0]
+    if proposal.topic and topics[proposal.topic][1] != "usage":
+        proposal.meters = []  # meters belong to a กตฟ. report only
+
+
 def ground(extraction, text, catalog, draft=None, source_context=None):
     original_text, original_draft = source_context or (text, draft)
     labeled = labeled_fields(text)
@@ -485,6 +535,8 @@ def ground(extraction, text, catalog, draft=None, source_context=None):
     negated = negated_codes(text, catalog)
     for proposal in extraction.requests:
         _ground_sap(proposal, text)
+        if proposal.meters or proposal.topic or proposal.division or proposal.items:
+            _ground_menu(proposal, text)
         retained = []
         for item in proposal.items:
             equipment = by_code.get(item.code)

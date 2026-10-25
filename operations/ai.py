@@ -8,6 +8,7 @@ through the same validate → test → evaluate → activate path from the web a
 `manage.py import_ai_config`.
 """
 
+import hashlib
 import json
 import re
 import time
@@ -16,6 +17,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -34,6 +36,7 @@ from operations.models import (
     AIProfile,
     Case,
     EquipmentType,
+    LineMenuItem,
 )
 
 PROMPT_VERSION = "extract-v4-grounded"  # +fewshotN must fit 32 chars
@@ -46,11 +49,17 @@ SCHEMA_VERSION = "extraction-v5-grounded-fields"
 # rows of the equipment-first groups; it is evaluated on one more locked set as well.
 TYPED_SCHEMA_VERSION = "extraction-v6-sap-typed"
 TYPED_EVAL_GATE = f"{EVAL_GATE}+typed-v1+typed-v2"  # typed-v2: the กอจ. and กคอ. groups
+MENU_EVAL_GATE = f"{TYPED_EVAL_GATE}+menu-v1"
 MAX_CHAIN = 4  # primary + 3 fallbacks
 MAX_REQUESTS = 3
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/-]{1,100}$")
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 INTENTS = ("withdrawal", "return", "problem", "unknown")
+# A version with menu_fields (owner, 25 Oct 2569 Q9) also reads where a message belongs on the
+# LINE menu: ติดตามสถานะการซ่อม as its own intent, the division and topic, the meters and their
+# districts of a กตฟ. report and the number on a piece of other equipment.
+MENU_INTENTS = (*INTENTS, "repair")
+MENU_SCHEMA_VERSION = "extraction-v7-menu-path"
 TEXT_FIELDS = ("purpose", "reason", "condition", "description", "impact")
 
 # --- Secrets and endpoint validation ---------------------------------------------------------
@@ -203,6 +212,7 @@ def create_preset_version(
     use_json_schema=True,
     task=AIConfigVersion.Task.EXTRACT,
     typed_fields=False,
+    menu_fields=False,
 ):
     """A candidate with the preset model as primary and that task's active chain as fallbacks.
     Extraction keeps the chosen pipeline and few-shot count; the other tasks run single."""
@@ -245,6 +255,7 @@ def create_preset_version(
         pipeline if extract else AIConfigVersion.Pipeline.SINGLE,
         task=task,
         typed_fields=extract and bool(typed_fields),
+        menu_fields=extract and bool(typed_fields) and bool(menu_fields),
     )
 
 
@@ -258,6 +269,7 @@ def create_version(
     screen_profile=None,
     task=AIConfigVersion.Task.EXTRACT,
     typed_fields=False,
+    menu_fields=False,
 ):
     """A candidate: primary first, then up to three fallbacks in order."""
     identity.require_ai_editor(actor)
@@ -265,6 +277,8 @@ def create_version(
         raise ValidationError("Unknown AI task.")
     if typed_fields and task != AIConfigVersion.Task.EXTRACT:
         raise ValidationError("Only an extraction version reads SAP numbers and typed rows.")
+    if menu_fields and not typed_fields:
+        raise ValidationError("The menu path is read by a version that also reads typed rows.")
     profiles = list(profiles)
     if not 1 <= len(profiles) <= MAX_CHAIN or len({p.pk for p in profiles}) != len(profiles):
         raise ValidationError("Choose 1-4 different profiles (primary first).")
@@ -284,6 +298,7 @@ def create_version(
         pipeline=pipeline,
         screen_profile=screen_profile,
         typed_fields=bool(typed_fields),
+        menu_fields=bool(menu_fields),
     )
     for position, profile in enumerate(profiles):
         AIConfigEntry.objects.create(version=version, position=position, profile=profile)
@@ -298,6 +313,7 @@ def create_version(
         few_shot=int(few_shot),
         screen=screen_profile.model_id if screen_profile else None,
         typed_fields=bool(typed_fields),
+        menu_fields=bool(menu_fields),
     )
     return version
 
@@ -330,7 +346,7 @@ def test_version(actor, version):
                 profile,
                 "ขอเบิกฟิวส์ 2 ชิ้น",
                 None,
-                _catalog(reads_typed(version)),
+                _catalog(reads_typed(version), reads_menu(version)),
                 profile.timeout_seconds,
             )
             # Connection + schema only; accuracy is the held-out evaluation's job.
@@ -570,12 +586,49 @@ def _post(url, api_key, body, timeout):
         raise AIError(type(exc).__name__) from exc
 
 
-def _catalog(typed=False):
+class MenuCatalog(list):
+    """A typed catalog for a version that also reads the menu path: the marker travels with the
+    catalog through the harness, its hedged threads and the evaluation (25 Oct 2569)."""
+
+    menu = True
+
+
+def _catalog(typed=False, menu=False):
     """The catalog the model may name. The shared items of the typed groups (typed_lines) are
     in it only for a version that reads typed rows: to any other they would make the plain
     word "มิเตอร์" ambiguous."""
     rows = EquipmentType.objects.filter(is_active=True).order_by("code")
-    return list(rows if typed else rows.filter(entry_group=""))
+    items = list(rows if typed else rows.filter(entry_group=""))
+    return MenuCatalog(items) if typed and menu else items
+
+
+def reads_menu(version):
+    """Whether this extraction version also reads the menu path (menu_fields, Q9)."""
+    return reads_typed(version) and bool(getattr(version, "menu_fields", False))
+
+
+def menu_catalog(catalog):
+    return bool(getattr(catalog, "menu", False)) and typed_catalog(catalog)
+
+
+def menu_topics():
+    """{full topic name: (division code, case topic)} of the menu's report topics (the ศอค.
+    and กตฟ. tiles), from the owner's fixed menu (line_menu_catalog)."""
+    from operations import line_menu_catalog  # local: it reads the menu models
+
+    found = {}
+    for _, code, topic, choices in line_menu_catalog.TOPICS:
+        for label, action, *rest in choices:
+            if action == LineMenuItem.Action.PROBLEM:
+                case_topic = (rest[0] if rest else "") or topic
+                found[rest[1] if len(rest) > 1 else label] = (code, case_topic)
+    return found
+
+
+def menu_divisions():
+    from operations import line_menu_catalog  # local: it reads the menu models
+
+    return [code for _, code, _, _ in line_menu_catalog.TOPICS]
 
 
 def reads_typed(version):
@@ -588,10 +641,14 @@ def reads_typed(version):
 
 
 def schema_version_for(version):
+    if reads_menu(version):
+        return MENU_SCHEMA_VERSION
     return TYPED_SCHEMA_VERSION if reads_typed(version) else SCHEMA_VERSION
 
 
 def eval_gate_for(version):
+    if reads_menu(version):
+        return MENU_EVAL_GATE
     return TYPED_EVAL_GATE if reads_typed(version) else EVAL_GATE
 
 
@@ -601,7 +658,7 @@ def typed_catalog(catalog):
     return any(getattr(i, "entry_group", "") for i in catalog)
 
 
-def response_schema(codes, typed=False):
+def response_schema(codes, typed=False, menu=False):
     item_code = {"type": ["string", "null"]}
     if codes:
         item_code = {"enum": [*codes, None]}
@@ -612,12 +669,25 @@ def response_schema(codes, typed=False):
         "quantity": {"type": ["number", "string", "null"]},
         "serials": {"type": "array", "items": {"type": "string"}},
         **({"size": text} if typed else {}),
+        **({"equipment_number": text} if menu else {}),
+    }
+    meter = {
+        "type": "object",
+        "properties": {"number": {"type": "string"}, "district": text},
+        "required": ["number", "district"],
+        "additionalProperties": False,
+    }
+    menu_fields = {
+        "division": {"enum": [*menu_divisions(), None]},
+        "topic": {"enum": [*menu_topics(), None]},
+        "meters": {"type": "array", "items": meter},
     }
     request = {
         "type": "object",
         "properties": {
-            "intent": {"enum": list(INTENTS)},
+            "intent": {"enum": list(MENU_INTENTS if menu else INTENTS)},
             **({"sap_number": text} if typed else {}),
+            **(menu_fields if menu else {}),
             "items": {
                 "type": "array",
                 "items": {
@@ -634,6 +704,7 @@ def response_schema(codes, typed=False):
         "required": [
             "intent",
             *(["sap_number"] if typed else []),
+            *(list(menu_fields) if menu else []),
             "items",
             *TEXT_FIELDS,
             "needed_by",
@@ -708,23 +779,63 @@ problems alike.
 stands for."""
 
 
-def _example_answer(example, typed=False):
+# Read by a version with menu_fields only (owner, 25 Oct 2569 Q9, Q10): where the message belongs
+# on the LINE menu, so the chat can go straight to that step and ask only what is missing.
+MENU_PROMPT = """
+
+Menu path (where each request belongs):
+- intent "repair" means following up equipment already sent for repair (ติดตามสถานะการซ่อม, \
+ติดตามงานซ่อม). Its sap_number is the SAP repair-job number when written, else null.
+- division: the division that owns the request, else null when unclear. กคว.: meters, CT and VT \
+as equipment (withdrawals, returns, repairs). กอจ.: transformers, LBS and RMU. กคอ.: tools and \
+other equipment. ศอค.: SMG/AMR systems, billing, remote connect and disconnect. กตฟ.: electricity \
+use at a customer's premises (a customer's meter that is abnormal, broken or tampered with, \
+suspected theft of electricity, a high bill, a review of billed units).
+- topic: for a problem, the listed topic that fits, else null. Suspected theft (ลักใช้ไฟ) or a \
+tampered or bypassed meter is "เครื่องวัดฯ มีการกระทำ". A customer's meter wins over equipment: \
+when the message matches a กตฟ. topic, division is กตฟ.
+- meters: for a กตฟ. topic, every customer meter number written in the message, each with the \
+district written for it exactly as typed (บางเขน, เขตวัดเลียบ), or district null when none is \
+written; else an empty list. Meter numbers in meters are not item serials.
+- equipment_number: for other equipment, the number written on the piece (หมายเลข BB-011), \
+else null.
+- When the message does not say whether a meter is a customer's (กตฟ.) or equipment of the \
+meter division (กคว.), leave division and topic null."""
+
+
+def _example_items(entry, typed=False, menu=False):
+    """An example's items in the answer's shape. examples-v3 (25 Oct 2569) adds serials, size
+    and equipment_number after (code, quantity, text); older examples have none."""
+    items = []
+    for code, quantity, text, *rest in entry["items"]:
+        serials, size, number = (*rest, [], None, None)[:3]
+        items.append(
+            {
+                "item_code": code,
+                "item_text": text,
+                "quantity": quantity,
+                "serials": serials or [],
+                **({"size": size} if typed else {}),
+                **({"equipment_number": number} if menu else {}),
+            }
+        )
+    return items
+
+
+def _example_answer(example, typed=False, menu=False):
     requests = []
     for entry in example.requests:
+        path = {
+            "division": entry.get("division"),
+            "topic": entry.get("topic"),
+            "meters": [{"number": n, "district": d} for n, d in entry.get("meters", [])],
+        }
         requests.append(
             {
                 "intent": entry["intent"],
-                **({"sap_number": None} if typed else {}),
-                "items": [
-                    {
-                        "item_code": code,
-                        "item_text": text,
-                        "quantity": quantity,
-                        "serials": [],
-                        **({"size": None} if typed else {}),
-                    }
-                    for code, quantity, text in entry["items"]
-                ],
+                **({"sap_number": entry.get("sap_number")} if typed else {}),
+                **(path if menu else {}),
+                "items": _example_items(entry, typed, menu),
                 **{name: entry.get("fields", {}).get(name) for name in TEXT_FIELDS},
                 "needed_by": None,
                 "evidence": [],
@@ -743,11 +854,14 @@ def _catalog_entry(item):
 def _messages(text, draft_context, catalog, examples=(), system=SYSTEM_PROMPT):
     """System rules, then retrieved examples as earlier turns, then the real message."""
     typed = typed_catalog(catalog)
-    messages = [{"role": "system", "content": system + (TYPED_PROMPT if typed else "")}]
+    extra = (TYPED_PROMPT if typed else "") + (MENU_PROMPT if menu_catalog(catalog) else "")
+    messages = [{"role": "system", "content": system + extra}]
     for example in examples:
         shown = {"message": example.text, "current_draft": example.draft}
         messages.append({"role": "user", "content": json.dumps(shown, ensure_ascii=False)})
-        answer = json.dumps(_example_answer(example, typed), ensure_ascii=False)
+        answer = json.dumps(
+            _example_answer(example, typed, menu_catalog(catalog)), ensure_ascii=False
+        )
         messages.append({"role": "assistant", "content": answer})
     payload = {
         "message": text,
@@ -770,10 +884,67 @@ def _grams(text):
     return {norm[i : i + 3] for i in range(max(len(norm) - 2, 1))}
 
 
-def retrieve_examples(text, draft_context, k, catalog_codes):
+# Bundled curated example sets; install_examples puts one in any database (25 Oct 2569 Q17).
+EXAMPLE_SETS = {
+    name: Path(__file__).resolve().parent / "fixtures" / f"ai_examples_{name}.json"
+    for name in ("v1", "v2", "v3")
+}
+
+
+@transaction.atomic
+def install_examples(actor, name, reason):
+    """One bundled example set, also on production (owner, 25 Oct 2569 Q17): an AI editor with
+    a reason, audited with the file's SHA-256. Examples change what a few-shot version is
+    shown, so imported evaluation evidence warns while they differ (ADR 0020 Q5)."""
+    identity.require_ai_editor(actor)
+    reason = identity._require_reason(reason)
+    if not reason:
+        raise ValidationError("ใส่เหตุผลก่อนเพิ่มชุดตัวอย่าง")
+    path = EXAMPLE_SETS.get(name)
+    if path is None:
+        raise ValidationError("ไม่รู้จักชุดตัวอย่างนี้")
+    raw = path.read_bytes()
+    data = json.loads(raw)
+    created, first = 0, None
+    for row in data["examples"]:
+        example, new = AIExample.objects.update_or_create(
+            text=row["text"],
+            defaults={
+                "draft": row["draft"],
+                "requests": row["requests"],
+                "source": f"curated:{data['version']}",
+                "is_active": True,
+            },
+        )
+        created += new
+        first = first or example
+    identity.audit(
+        actor,
+        "ai.examples_installed",
+        first,
+        reason,
+        set=data["version"],
+        count=len(data["examples"]),
+        created=created,
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
+    return len(data["examples"]), created
+
+
+def _menu_example(example):
+    """An example whose answer needs the menu path (examples-v3): for menu versions only. A
+    division alone does not count: without it the answer still holds for a typed version."""
+    return any(
+        entry["intent"] == "repair" or entry.get("topic") or entry.get("meters")
+        for entry in example.requests
+    )
+
+
+def retrieve_examples(text, draft_context, k, catalog_codes, menu=False):
     """Top-k active examples by character-trigram similarity (works for Thai without word
-    segmentation). Examples naming items outside the current catalog are never shown, and an
-    example identical to the message is excluded (no answer leakage)."""
+    segmentation). Examples naming items outside the current catalog are never shown, nor one
+    answering with the menu path to a version that does not read it, and an example identical
+    to the message is excluded (no answer leakage)."""
     if k <= 0:
         return []
     query, norm = _grams(text), _normalise(text)
@@ -781,7 +952,9 @@ def retrieve_examples(text, draft_context, k, catalog_codes):
     for example in AIExample.objects.filter(is_active=True).order_by("pk"):
         if _normalise(example.text) == norm:
             continue
-        codes = {code for entry in example.requests for code, _, _ in entry["items"] if code}
+        if _menu_example(example) and not menu:
+            continue
+        codes = {code for entry in example.requests for code, *_ in entry["items"] if code}
         if not codes <= set(catalog_codes):
             continue
         grams = _grams(example.text)
@@ -827,6 +1000,7 @@ class ProposedItem:
     stated_quantity: bool = False  # the user wrote a number for it (even if not in the catalog)
     rejected: list = field(default_factory=list)
     size: str = ""  # a typed row's size or rating, as written (typed versions only)
+    equipment_number: str = ""  # หมายเลขอุปกรณ์ of other equipment (menu versions only)
 
 
 @dataclass
@@ -838,6 +1012,13 @@ class Proposal:
     field_sources: dict = field(default_factory=dict)  # server-derived, never read from model JSON
     sap_number: str = ""  # the SAP slip number, checked against the message (typed versions)
     rows: list = field(default_factory=list)  # a draft's typed rows (evaluation projection only)
+    # The menu path (menu versions): division code, full topic name, [{number, district}] with
+    # the district as written, then matched to a District code by the grounding.
+    division: str = ""
+    topic: str = ""
+    meters: list = field(default_factory=list)
+    menu: dict = field(default_factory=dict)  # where the draft stands (evaluation projection)
+    menu_read: bool = False  # read by a menu version (its silence on the division means unsure)
 
 
 @dataclass
@@ -847,6 +1028,41 @@ class Extraction:
     # Harness screening: saved draft text fields with directive segments removed
     # ({name: text or None}); None = not screened, keep the stored values' own checks.
     screened_draft_fields: dict = None
+
+
+def _equipment_number(item):
+    """หมายเลขอุปกรณ์ in its loose shape, or "" (grounded against the message afterwards). A
+    model may put the one number of other equipment among its serials (seen on menu-v1)."""
+    serials = item.get("serials") or []
+    value = item.get("equipment_number") or (serials[0] if len(serials) == 1 else "")
+    value = re.sub(r"\s", "", str(value or "").translate(THAI_DIGITS))
+    return value if typed_lines.EQUIPMENT_NUMBER.match(value) else ""
+
+
+def _read_menu(proposal, entry):
+    """The menu path of a menu version's answer, by shape only: ai_grounding checks every
+    number and district against the message, and the topic decides the division (Q10)."""
+    division, topic = entry.get("division"), entry.get("topic")
+    for name, value in (("division", division), ("topic", topic)):
+        if value is not None and not isinstance(value, str):
+            raise SchemaError(f"Bad {name}.")
+    meters = entry.get("meters") or []
+    if not isinstance(meters, list):
+        raise SchemaError("Bad meters.")
+    proposal.menu_read = True
+    proposal.division = division if division in menu_divisions() else ""
+    proposal.topic = topic if topic in menu_topics() else ""
+    from operations import usage_meters  # local: it reads districts
+
+    for meter in meters[: usage_meters.MAX_METERS]:
+        if not isinstance(meter, dict) or not isinstance(meter.get("number"), str):
+            raise SchemaError("Bad meter.")
+        district = meter.get("district")
+        if district is not None and not isinstance(district, str):
+            raise SchemaError("Bad meter district.")
+        number = usage_meters.clean_number(meter["number"])
+        if number and number not in {m["number"] for m in proposal.meters}:
+            proposal.meters.append({"number": number, "district": (district or "")[:60]})
 
 
 def _numbers_in(text):
@@ -869,9 +1085,12 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
     items_by_code = {i.code: i for i in catalog}
     stated = _numbers_in(text)
     typed = typed_catalog(catalog)
+    menu = menu_catalog(catalog)
     requests, raw_codes = [], []
     for entry in data["requests"][:MAX_REQUESTS]:
-        if not isinstance(entry, dict) or entry.get("intent") not in INTENTS:
+        if not isinstance(entry, dict) or entry.get("intent") not in (
+            MENU_INTENTS if menu else INTENTS
+        ):
             raise SchemaError("Bad intent.")
         if not isinstance(entry.get("items", []), list):
             raise SchemaError("Bad items.")
@@ -879,7 +1098,9 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
         if sap_number is not None and not isinstance(sap_number, str):
             raise SchemaError("Bad sap_number.")
         proposal = Proposal(entry["intent"])
-        if sap_number and proposal.intent in ("withdrawal", "return"):
+        if menu:
+            _read_menu(proposal, entry)
+        if sap_number and proposal.intent in ("withdrawal", "return", "repair"):
             # Checked against the message in ai_grounding; a wrong shape is asked again.
             number = re.sub(r"\s", "", sap_number.translate(THAI_DIGITS))
             if typed_lines.SAP_NUMBER.match(number) and any(c.isdigit() for c in number):
@@ -896,6 +1117,11 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
                 or isinstance(item.get("quantity"), (dict, list, bool))
                 or (item.get("item_code") is not None and not isinstance(item["item_code"], str))
                 or (typed and item.get("size") is not None and not isinstance(item["size"], str))
+                or (
+                    menu
+                    and item.get("equipment_number") is not None
+                    and not isinstance(item["equipment_number"], str)
+                )
             ):
                 raise SchemaError("Bad item fields.")
             code = item.get("item_code")
@@ -942,6 +1168,7 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
                     if equipment and raw_quantity not in (None, "") and quantity is None
                     else [],
                     size if len(size) <= typed_lines.LIMITS["size"] else "",
+                    equipment_number=_equipment_number(item) if menu and group == "other" else "",
                 )
             )
         for name in TEXT_FIELDS:
@@ -982,6 +1209,10 @@ def validate(raw, text, catalog, draft_context=None, *, source_context=None):
                 target.rejected_fields.append("sap_number")
             elif "sap_number" not in target.rejected_fields:
                 target.sap_number = proposal.sap_number
+        target.division = target.division or proposal.division
+        target.topic = target.topic or proposal.topic
+        seen = {m["number"] for m in target.meters}
+        target.meters += [m for m in proposal.meters if m["number"] not in seen]
     from operations.ai_grounding import ground, labelled_slip
 
     # A typed version copies a plainly labelled slip number the model left out; it is then
@@ -1087,7 +1318,9 @@ def _finish_reason(data):
 def call_model(profile, messages, catalog, timeout):
     """One extraction call with the agreed JSON schema: returns (content, usage, latency_ms)."""
     schema = response_schema(
-        [i.code for i in catalog] if len(catalog) <= 300 else [], typed_catalog(catalog)
+        [i.code for i in catalog] if len(catalog) <= 300 else [],
+        typed_catalog(catalog),
+        menu_catalog(catalog),
     )
     return chat_json(profile, messages, schema, "extraction", timeout, "extract")
 
@@ -1116,8 +1349,10 @@ def extract(text, draft_context, version, budget_seconds=None, catalog=None):
 
         return ai_harness.extract(text, draft_context, version, budget, catalog=catalog)
     deadline = time.monotonic() + budget
-    catalog = _catalog(reads_typed(version)) if catalog is None else catalog
-    examples = retrieve_examples(text, draft_context, version.few_shot, [i.code for i in catalog])
+    catalog = _catalog(reads_typed(version), reads_menu(version)) if catalog is None else catalog
+    examples = retrieve_examples(
+        text, draft_context, version.few_shot, [i.code for i in catalog], menu_catalog(catalog)
+    )
     attempts = []
     for profile in version.chain():
         remaining = deadline - time.monotonic()
@@ -1176,4 +1411,5 @@ KIND_FOR_INTENT = {
     "withdrawal": Case.Kind.WITHDRAWAL,
     "return": Case.Kind.RETURN,
     "problem": Case.Kind.PROBLEM,
+    "repair": Case.Kind.PROBLEM,  # ติดตามสถานะการซ่อม (menu versions): a problem with topic repair
 }

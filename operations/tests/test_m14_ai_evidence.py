@@ -109,10 +109,13 @@ class ImportTests(EvidenceTestCase):
             {"reason": "นำเข้าจากเว็บ", "evidence": SimpleUploadedFile("v.json", raw)},
         )
         version = AIConfigVersion.objects.order_by("-number").first()
-        self.assertRedirects(response, f"{reverse('admin-ai')}#v{version.number}")
+        self.assertRedirects(
+            response, f"{reverse('admin-ai')}#v{version.number}", fetch_redirect_response=False
+        )
         self.assertTrue(version.eval_passed)
         page = self.client.get(reverse("admin-ai"))
         self.assertContains(page, f"ผลประเมินนำเข้าจาก v{source.number}")
+        self.assertContains(page, f"อยู่ที่ v{version.number} บนเครื่องนี้")
 
 
 class RefusalTests(EvidenceTestCase):

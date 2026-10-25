@@ -48,7 +48,10 @@ BUTTON_STEPS = {"kind", "category", "item", "more", "summary", "typed_group"}
 
 
 def private_text(draft, text):
-    """Real structure Q14: การใช้ไฟฟ้า matters often hold a customer's details; never to the AI."""
+    """การใช้ไฟฟ้า matters often hold a customer's details: kept from the AI only while
+    policy.usage_kept_from_ai() (Q14, lifted by ADR 0021 on 25 Oct 2569)."""
+    if not policy.usage_kept_from_ai():
+        return False
     in_usage_draft = draft is not None and draft.data.get("topic") == Case.Topic.USAGE
     return in_usage_draft or policy.usage_text(text)
 
@@ -579,6 +582,9 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     kind = ai.KIND_FOR_INTENT[proposal.intent]
     if draft.kind and draft.kind != kind:
         kind = draft.kind
+    path = _menu_path(proposal) if kind == Case.Kind.PROBLEM or proposal.division else {}
+    if path.get("topic") in (Case.Topic.USAGE, Case.Topic.SYSTEM):
+        proposal.items = []  # these topics list no items; a usage report names meters instead
     allowed = {name for name, _, _ in FIELDS[kind]}
     stored = dict(draft.data.get("fields", {}))
     for name, value in (screened or {}).items():
@@ -598,6 +604,9 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
             and k not in proposal.rejected_fields
         },
     }
+    for name in ("division", "topic", "menu_label"):
+        if path.get(name):
+            data[name] = path[name]
     items = {
         i.code: i
         for i in EquipmentType.objects.filter(code__in=[p.code for p in proposal.items if p.code])
@@ -650,17 +659,41 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     for name, value in proposal.fields.items():
         if name in allowed and value and not (name == asked and (added or pending or entry)):
             data["fields"][name] = value
-    if proposal.sap_number and kind in typed_lines.SAP_LABELS:
+    if proposal.sap_number and typed_lines.sap_label(kind, data.get("topic")):
         problem = typed_lines.sap_in_use(proposal.sap_number, turn.requester)
         if problem:
             notes.append(problem)
         else:
             data["sap_number"] = proposal.sap_number
+    if data.get("topic") == Case.Topic.REPAIR and not data.get("sap_number"):
+        data["sap_skipped"] = True  # the rows may name the piece instead (Q7); else asked
+    if data.get("topic") == Case.Topic.USAGE:
+        data["meters"] = [m for m in proposal.meters if m["district"]]
+        data["meters_pending"] = [m["number"] for m in proposal.meters if not m["district"]]
+    ambiguous, unplaced = _unplaced_meter(proposal, data, kind, entry)
     if proposal.rejected_fields or any(i.rejected for i in proposal.items):
         notes.insert(0, "บางช่องยังตรวจสอบกับข้อความไม่ได้ ขอถามเฉพาะข้อมูลที่ขาด")
     if unknown:
         notes.append(f"ไม่พบ '{', '.join(unknown[:3])}' ในทะเบียน กรุณาเลือกจากหมวด")
-    if pending is not None:
+    if ambiguous:
+        data["meters_pending"] = unplaced
+        if entry is not None:
+            data["line"], data["entry"] = {}, entry  # kept for กคว. (found by typed-v1 T06)
+        step = "which_division"
+    elif data.get("topic") == Case.Topic.USAGE:
+        data["line"] = {}
+        if not path.get("label"):
+            step = "usage_topic"
+        elif data["meters_pending"]:
+            data["meter"], data["meters_pending"] = (
+                data["meters_pending"][0],
+                data["meters_pending"][1:],
+            )
+            step = "district"
+        else:
+            draft.kind, draft.data = kind, data
+            step = conversation._next_field(draft)
+    elif pending is not None:
         data["line"] = pending
         step = "serials" if "quantity" in pending else "quantity"
     elif entry is not None:
@@ -683,6 +716,61 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     return notes
 
 
+def _menu_path(proposal):
+    """Where a menu version placed this request on the LINE menu (25 Oct 2569 Q9, Q10): the
+    division, the case topic and, for a report topic, the menu label; {} when it said nothing.
+    Older versions never set these, so their drafts are unchanged."""
+    from operations import line_menu_catalog  # local: the owner's fixed menu
+
+    tiles = {code: label for label, code, _, _ in line_menu_catalog.TOPICS}
+    if proposal.intent == "repair":
+        division = proposal.division if proposal.division in EQUIPMENT_DIVISIONS else ""
+        path = {"topic": Case.Topic.REPAIR, "division": division}
+        if division:
+            path["menu_label"] = f"{tiles[division]} · ติดตามสถานะการซ่อม"
+        return path
+    if proposal.topic:
+        division, topic = ai.menu_topics()[proposal.topic]
+        return {
+            "division": division,
+            "topic": topic,
+            "label": proposal.topic,
+            "menu_label": f"{tiles[division]} · {proposal.topic}",
+        }
+    if proposal.division == "กตฟ.":
+        return {"division": "กตฟ.", "topic": Case.Topic.USAGE}  # the topic is asked
+    return {"division": proposal.division} if proposal.division else {}
+
+
+EQUIPMENT_DIVISIONS = ("กคว.", "กอจ.", "กคอ.")
+
+
+def _unplaced_meter(proposal, data, kind, entry=None):
+    """(ask, meter numbers): a menu version's problem about a meter that names neither a กตฟ.
+    topic nor a division. Q10 asks whose meter it is instead of guessing; the typed meter
+    rows' own division (กคว.) is not the model's word on it."""
+    if (
+        not proposal.menu_read
+        or kind != Case.Kind.PROBLEM
+        or proposal.intent == "repair"
+        or proposal.topic
+        or proposal.division
+    ):
+        return False, []
+    rows = [
+        row
+        for line in data["lines"]
+        for row in line.get("details", [])
+        if row.get("group") == "meter"
+    ]
+    if entry and entry.get("group") == "meter":
+        rows.append(entry.get("row", {}))  # a meter row still asking a field
+    numbers = [m["number"] for m in proposal.meters] + [
+        n for row in rows for n in row.get("numbers", [])
+    ]
+    return bool(proposal.meters or rows), list(dict.fromkeys(numbers))
+
+
 # What a typed draft keeps when the AI fills it (typed_lines, 23 Oct 2569).
 TYPED_KEEP = ("typed", "division", "menu_label", "sap_number", "topic")
 
@@ -701,6 +789,7 @@ def _typed_rows(turn, data, rows, kind, notes):
             "size": proposed.size,
             "quantity": _format(proposed.quantity) if proposed.quantity is not None else "",
             "name": proposed.text if group == "other" and not _says_no_name(proposed.text) else "",
+            "equipment_number": getattr(proposed, "equipment_number", ""),
         }
         row, missing = {}, []
         for f in fields:
@@ -722,15 +811,23 @@ def _typed_rows(turn, data, rows, kind, notes):
     if all(line["item_code"] in shared for line in data["lines"]):
         first = entry["group"] if entry else rows[0][0].entry_group
         data.setdefault("typed", first)
+        groups = {first} | {
+            row["group"] for line in data["lines"] for row in line.get("details", [])
+        }
         tiles = list(
             LineMenuItem.objects.filter(
-                is_active=True, action=LineMenuItem.Action.EQUIPMENT, topic=first
+                is_active=True, action=LineMenuItem.Action.EQUIPMENT, topic__in=groups
             ).exclude(division=None)
         )
-        # อุปกรณ์อื่น is on several tiles: only a group one division owns names the division.
-        if len({t.division_id for t in tiles}) == 1:
-            data.setdefault("division", tiles[0].division.code)
-            data.setdefault("groups", conversation._tile_groups(tiles[0]))
+        owners = {group: {t.division_id for t in tiles if t.topic == group} for group in groups}
+        # อุปกรณ์อื่น is on several tiles: only groups one and the same division owns name it.
+        # Rows of several divisions (meters with a transformer) name none, so the case splits
+        # per division at submission (25 Oct 2569 Q19) instead of all going to the first.
+        divisions = set().union(*owners.values())
+        if all(len(found) == 1 for found in owners.values()) and len(divisions) == 1:
+            tile = next(t for t in tiles if t.topic == first)
+            data.setdefault("division", tile.division.code)
+            data.setdefault("groups", conversation._tile_groups(tile))
     return entry
 
 

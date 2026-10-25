@@ -74,7 +74,7 @@ class TrackingTests(menu_tests.MenuTestCase):
         self.say(self.image(ALICE))
         self.assertEqual(Attachment.objects.get().case_id, first.pk)
 
-    def test_draft_back_button_replaces_answer_and_keeps_home_navigation(self):
+    def test_draft_back_button_replaces_answer_and_keeps_draft_navigation(self):
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "เบิก")
         self.press(ALICE, "มิเตอร์")
@@ -87,7 +87,9 @@ class TrackingTests(menu_tests.MenuTestCase):
         summary = self.press(ALICE, "ข้าม")
         self.assertIn("วัตถุประสงค์ใหม่", texts(summary))
         self.assertNotIn("วัตถุประสงค์เดิม", texts(summary))
-        self.assertIn("หน้าหลัก", buttons(summary))
+        # 25 Oct 2569 Q2: "หน้าหลัก" is the rich menu's; the draft keeps ยกเลิกร่าง.
+        self.assertNotIn("หน้าหลัก", buttons(summary))
+        self.assertIn("ยกเลิกร่าง", buttons(summary))
 
 
 class SimpleServiceTests(menu_tests.MenuTestCase):

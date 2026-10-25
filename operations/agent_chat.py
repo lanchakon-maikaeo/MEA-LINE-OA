@@ -383,7 +383,7 @@ def present(turn, run, result):
     """Render server facts, not a model-written account of an action it hasn't executed."""
     if result["kind"] == "reply":
         run.result = {**run.result, "agent_reply": result["text"]}
-        quick = [("บริการ", "m=home"), ("ติดตามเรื่องของฉัน", "m=mine")]
+        quick = []  # 25 Oct 2569 Q2: the rich menu is the menu
         if staff_line.staff_of(turn.identity):
             quick.append(("เมนูเพิ่มเติม", "m=roles"))
         turn.say(result["text"], quick)
@@ -489,7 +489,6 @@ def present(turn, run, result):
                     label, "agent_read", {"tool": tool, "arguments": {**args, "page": page}}
                 )
             )
-    quick.append(("หน้าหลัก", "m=home"))
     introduction = result.get("reply") or f"{title} {result['total']} รายการ · หน้า {result['page']}"
     if run is not None and result.get("reply"):
         run.result = {**run.result, "agent_reply": result["reply"]}
@@ -514,7 +513,7 @@ def handle_confirmation(turn):
             turn.requester = turn.identity.requester
             present(turn, None, result)
         except PermissionDenied:
-            turn.say("ไม่สามารถเปิดข้อมูลตามสิทธิ์ปัจจุบัน", [("หน้าหลัก", "m=home")])
+            turn.say("ไม่สามารถเปิดข้อมูลตามสิทธิ์ปัจจุบัน")
         return True
     run = (
         AIRun.objects.select_for_update()
@@ -527,7 +526,7 @@ def handle_confirmation(turn):
     if token.action == "agent_cancel":
         run.result = {**run.result, "agent_decision": "cancelled"}
         run.save(update_fields=["result"])
-        turn.say("ยกเลิกคำสั่งแล้ว", [("หน้าหลัก", "m=home")])
+        turn.say("ยกเลิกคำสั่งแล้ว")
         return True
     if (
         run.result.get("agent_state") != state(turn)
@@ -567,5 +566,5 @@ def handle_confirmation(turn):
             turn.replies.extend(result["replies"])
             turn.conversation.refresh_from_db()
     except PermissionDenied:
-        turn.say("ไม่สามารถดำเนินการตามสิทธิ์ปัจจุบัน กรุณาเปิดเมนูใหม่", [("หน้าหลัก", "m=home")])
+        turn.say("ไม่สามารถดำเนินการตามสิทธิ์ปัจจุบัน กรุณาเปิดเมนูใหม่")
     return True

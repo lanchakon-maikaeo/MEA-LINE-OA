@@ -181,7 +181,7 @@ def respond(turn, draft, answer, written=None):
         return conversation._my_cases(turn)
     if answer.action == A.MY_CASES:
         # A written status reply still offers the requester's own cases to open.
-        return turn.say(text, [*_case_buttons(turn), *conversation.MENU][: conversation.MAX_QUICK])
+        return turn.say(text, _case_buttons(turn)[: conversation.MAX_QUICK])
     return conversation._menu(turn, text)
 
 
@@ -224,20 +224,19 @@ def _hours():
 
 
 def facts(requester):
-    """What the AI may say about this requester: their own open cases, never การใช้ไฟฟ้า ones
-    (real structure Q14) and never anyone else's."""
-    from operations import services, workflow
+    """What the AI may say about this requester: their own open cases and never anyone else's;
+    การใช้ไฟฟ้า ones only while they may reach the AI (Q14, lifted by ADR 0021)."""
+    from operations import policy, services, workflow
     from operations.contracts import Actor
 
     if requester is None:
         return []
-    cases = (
-        services.visible_cases(Actor.for_requester(requester))
-        .exclude(status__in=workflow.TERMINAL)
-        .exclude(topic=Case.Topic.USAGE)
-        .select_related("owner_division")
-        .order_by("-submitted_at")[:5]
+    cases = services.visible_cases(Actor.for_requester(requester)).exclude(
+        status__in=workflow.TERMINAL
     )
+    if policy.usage_kept_from_ai():
+        cases = cases.exclude(topic=Case.Topic.USAGE)
+    cases = cases.select_related("owner_division").order_by("-submitted_at")[:5]
     rows = []
     for case in cases:
         when = timezone.localtime(case.updated_at)

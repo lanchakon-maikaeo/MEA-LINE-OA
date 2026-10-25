@@ -126,9 +126,27 @@ class UseTests(KeywordTestCase):
         self.act(self.bt, case, "accept_handoff")
         self.assertEqual(RoutingWord.objects.get().word, "ป้ายประกาศหลุด")
 
-    def test_usage_text_never_goes_to_the_ai(self):
+    def test_usage_text_stays_from_the_ai_while_an_admin_keeps_it(self):
+        # ADR 0021 lifted Q14 on 25 Oct 2569; ตัวเลือกระบบ usage_ai "never" brings it back.
+        from operations import options
+
+        options.change(None, options.USAGE_AI, "never", "ทดสอบกฎ Q14 เดิม")
         self.ready()
-        self.submit({"kind": "problem", "topic": "usage", "description": "บ้านข้างๆ ลักใช้ไฟ"})
+        from operations.models import District
+
+        self.submit(
+            {
+                "kind": "problem",
+                "topic": "usage",
+                "description": "บ้านข้างๆ ลักใช้ไฟ",
+                "meters": [
+                    {
+                        "number": "12345678",
+                        "district": District.objects.order_by("code").first().code,
+                    }
+                ],  # 25 Oct 2569 Q11
+            }
+        )
         run_once()
         self.assertFalse(AIKeywordRun.objects.exists())
         self.assertEqual(self.llm.bodies, [])
