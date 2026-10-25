@@ -1,0 +1,307 @@
+{
+ "version": "examples-v3",
+ "note": "Synthetic curated examples written 25 Oct 2569 for the menu path (owner Q17): the five กตฟ. topics with meters and districts, ติดตามสถานะการซ่อม by number or SAP number, a ศอค. topic, an unplaced meter, SAP slips with typed rows and a request across two divisions. Shown only to versions that read typed rows (and the menu path, for those keys). Never part of a held-out or locked set; staff-reviewed real examples replace these over time.",
+ "examples": [
+  {
+   "id": "X31",
+   "text": "พบการต่อสายไฟอ้อมมิเตอร์ที่บ้านลูกค้า เครื่องวัด 40506070 เขตคลองเตย",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "problem",
+     "sap_number": null,
+     "division": "กตฟ.",
+     "topic": "เครื่องวัดฯ มีการกระทำ",
+     "meters": [
+      [
+       "40506070",
+       "คลองเตย"
+      ]
+     ],
+     "items": [],
+     "fields": {
+      "description": "พบการต่อสายไฟอ้อมมิเตอร์ที่บ้านลูกค้า"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X32",
+   "text": "มิเตอร์ลูกค้าเดินทั้งที่ปิดไฟทั้งบ้าน เครื่องวัด 50607080 เขตยานนาวา",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "problem",
+     "sap_number": null,
+     "division": "กตฟ.",
+     "topic": "เครื่องวัดฯ ผิดปกติ",
+     "meters": [
+      [
+       "50607080",
+       "ยานนาวา"
+      ]
+     ],
+     "items": [],
+     "fields": {
+      "description": "มิเตอร์ลูกค้าเดินทั้งที่ปิดไฟทั้งบ้าน"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X33",
+   "text": "เครื่องวัดหน้าบ้านลูกค้าไหม้ หมายเลข 60708090",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "problem",
+     "sap_number": null,
+     "division": "กตฟ.",
+     "topic": "เครื่องวัดฯ ชำรุด",
+     "meters": [
+      [
+       "60708090",
+       null
+      ]
+     ],
+     "items": [],
+     "fields": {
+      "description": "เครื่องวัดหน้าบ้านลูกค้าไหม้"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X34",
+   "text": "ลูกค้าแจ้งว่าค่าไฟสูงผิดปกติติดกันสามเดือน เครื่องวัด 70809010 เขตสมุทรปราการ",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "problem",
+     "sap_number": null,
+     "division": "กตฟ.",
+     "topic": "ร้องเรียนไฟแพง",
+     "meters": [
+      [
+       "70809010",
+       "สมุทรปราการ"
+      ]
+     ],
+     "items": [],
+     "fields": {
+      "description": "ลูกค้าแจ้งว่าค่าไฟสูงผิดปกติติดกันสามเดือน"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X35",
+   "text": "ขอให้ทบทวนหน่วยไฟฟ้าย้อนหลังตามคำร้องของลูกค้า เครื่องวัด 80901020 เขตราษฎร์บูรณะ",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "problem",
+     "sap_number": null,
+     "division": "กตฟ.",
+     "topic": "ทบทวนหน่วยไฟฟ้าจากการร้องเรียน",
+     "meters": [
+      [
+       "80901020",
+       "ราษฎร์บูรณะ"
+      ]
+     ],
+     "items": [],
+     "fields": {
+      "description": "ขอให้ทบทวนหน่วยไฟฟ้าย้อนหลังตามคำร้องของลูกค้า"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X36",
+   "text": "ขอทราบสถานะงานซ่อมเครื่องทดสอบฉนวน หมายเลข IT-0450",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "repair",
+     "sap_number": null,
+     "division": "กคอ.",
+     "topic": null,
+     "meters": [],
+     "items": [
+      [
+       "TYPED_OTHER",
+       null,
+       "เครื่องทดสอบฉนวน",
+       [],
+       null,
+       "IT-0450"
+      ]
+     ],
+     "fields": {
+      "description": "ขอทราบสถานะงานซ่อม"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X37",
+   "text": "ติดตามงานซ่อมมิเตอร์ หมายเลขเครื่อง 22003344 SAP งานซ่อม 6000777888",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "repair",
+     "sap_number": "6000777888",
+     "division": "กคว.",
+     "topic": null,
+     "meters": [],
+     "items": [
+      [
+       "TYPED_METER",
+       null,
+       "มิเตอร์",
+       [
+        "22003344"
+       ],
+       null,
+       null
+      ]
+     ],
+     "fields": {
+      "description": "ติดตามงานซ่อมมิเตอร์"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X38",
+   "text": "ระบบ AMR ไม่อัปเดตข้อมูลตั้งแต่เมื่อวาน",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "problem",
+     "sap_number": null,
+     "division": "ศอค.",
+     "topic": "ปัญหา SMG-AMR",
+     "meters": [],
+     "items": [],
+     "fields": {
+      "description": "ระบบ AMR ไม่อัปเดตข้อมูลตั้งแต่เมื่อวาน"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X39",
+   "text": "มิเตอร์ 33004455 ใช้งานไม่ได้",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "problem",
+     "sap_number": null,
+     "division": null,
+     "topic": null,
+     "meters": [
+      [
+       "33004455",
+       null
+      ]
+     ],
+     "items": [],
+     "fields": {
+      "description": "มิเตอร์ใช้งานไม่ได้"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X40",
+   "text": "ขอเบิกมิเตอร์ 15(45)A 1 เครื่อง หมายเลข 44005566 ใบเบิก 4500333444 สำหรับติดตั้งใหม่",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "withdrawal",
+     "sap_number": "4500333444",
+     "division": "กคว.",
+     "topic": null,
+     "meters": [],
+     "items": [
+      [
+       "TYPED_METER",
+       1,
+       "มิเตอร์",
+       [
+        "44005566"
+       ],
+       "15(45)A",
+       null
+      ]
+     ],
+     "fields": {
+      "purpose": "ติดตั้งใหม่"
+     }
+    }
+   ]
+  },
+  {
+   "id": "X41",
+   "text": "ส่งคืนประแจทอร์ค ขนาด 1/2 นิ้ว 1 ชุด หมายเลข TW-0099 ใบส่งคืน 4900333555",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "return",
+     "sap_number": "4900333555",
+     "division": "กคอ.",
+     "topic": null,
+     "meters": [],
+     "items": [
+      [
+       "TYPED_OTHER",
+       1,
+       "ประแจทอร์ค",
+       [],
+       "1/2 นิ้ว",
+       "TW-0099"
+      ]
+     ],
+     "fields": {}
+    }
+   ]
+  },
+  {
+   "id": "X42",
+   "text": "ขอเบิก CT 200/5A 2 ตัว และ LBS 24kV 630A 1 ตัว หมายเลข LB-7001 ใบเบิก 4500333666",
+   "draft": null,
+   "requests": [
+    {
+     "intent": "withdrawal",
+     "sap_number": "4500333666",
+     "division": null,
+     "topic": null,
+     "meters": [],
+     "items": [
+      [
+       "TYPED_CT",
+       2,
+       "CT",
+       [],
+       "200/5A",
+       null
+      ],
+      [
+       "TYPED_LBS",
+       1,
+       "LBS",
+       [
+        "LB-7001"
+       ],
+       "24kV 630A",
+       null
+      ]
+     ],
+     "fields": {}
+    }
+   ]
+  }
+ ]
+}

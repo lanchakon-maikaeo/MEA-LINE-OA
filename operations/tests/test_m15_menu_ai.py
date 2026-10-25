@@ -283,3 +283,59 @@ class GateTests(MenuTestCase):
         self.assertIsNone(ai.activation_blocker(version))
         report["profiles"][-1]["metrics"]["ask_accuracy"] = 0.0  # guessed an unplaced meter
         self.assertFalse(ai_eval.gate_passed(report, version))
+
+
+class ExampleTests(MenuTestCase):
+    """examples-v3 (25 Oct 2569 Q17): installed anywhere by an AI editor, and shown only to
+    the versions that read what they answer."""
+
+    def test_an_ai_editor_installs_a_bundled_set_with_a_reason(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+
+        from operations.models import AIExample, AuditEvent
+
+        out = StringIO()
+        call_command(
+            "install_ai_examples", set="v3", username="dev", reason="ตัวอย่างใหม่", stdout=out
+        )
+        self.assertIn("12 ensured, 12 new", out.getvalue())
+        call_command("install_ai_examples", set="v3", username="dev", reason="ซ้ำ", stdout=out)
+        self.assertIn("12 ensured, 0 new", out.getvalue())
+        self.assertEqual(AIExample.objects.filter(source="curated:examples-v3").count(), 12)
+        event = AuditEvent.objects.filter(action="ai.examples_installed").first()
+        self.assertEqual((event.data["set"], len(event.data["sha256"])), ("examples-v3", 64))
+        with self.assertRaises(CommandError):
+            call_command("install_ai_examples", set="v3", username="dev", reason=" ")
+        from operations.tests.test_m02_cases import make_staff
+
+        make_staff("not-ai-editor")
+        with self.assertRaises(CommandError):
+            call_command("install_ai_examples", set="v3", username="not-ai-editor", reason="x")
+
+    def test_menu_examples_reach_menu_versions_only(self):
+        ai.install_examples(self.dev, "v3", "ทดสอบ")
+        typed = [i.code for i in ai._catalog(True)]
+        found = ai.retrieve_examples("สงสัยลักใช้ไฟ เครื่องวัด 1234 เขตบางนา", None, 5, typed)
+        self.assertFalse(any(ai._menu_example(e) for e in found))
+        found = ai.retrieve_examples("สงสัยลักใช้ไฟ เครื่องวัด 1234 เขตบางนา", None, 5, typed, menu=True)
+        theft = next(e for e in found if "อ้อมมิเตอร์" in e.text)
+        shown = ai._example_answer(theft, typed=True, menu=True)["requests"][0]
+        self.assertEqual(
+            (shown["division"], shown["topic"], shown["meters"]),
+            ("กตฟ.", "เครื่องวัดฯ มีการกระทำ", [{"number": "40506070", "district": "คลองเตย"}]),
+        )
+        slip = next(
+            e
+            for e in ai.retrieve_examples("ขอเบิกมิเตอร์ ใบเบิก 45001", None, 99, typed)
+            if "44005566" in e.text
+        )
+        shown = ai._example_answer(slip, typed=True)["requests"][0]
+        self.assertEqual(shown["sap_number"], "4500333444")
+        self.assertNotIn("division", shown)
+        self.assertEqual(shown["items"][0]["serials"], ["44005566"])
+        plain = [i.code for i in ai._catalog(False)]
+        found = ai.retrieve_examples("ขอเบิกมิเตอร์ ใบเบิก 45001", None, 99, plain)
+        self.assertFalse(any("44005566" in e.text for e in found))  # typed codes: typed only

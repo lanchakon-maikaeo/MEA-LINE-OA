@@ -417,7 +417,9 @@ def prepare(
             else:
                 fields[name] = value
         draft_context = {**draft_context, "fields": fields}
-    examples = ai.retrieve_examples(clean, draft_context, version.few_shot, codes)
+    examples = ai.retrieve_examples(
+        clean, draft_context, version.few_shot, codes, ai.menu_catalog(catalog)
+    )
     if cut:
         steps.append({"step": "minimize", "outcome": f"cut {cut} span(s)"})
     return clean, catalog, examples, steps, draft_context, screened_fields

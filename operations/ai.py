@@ -8,6 +8,7 @@ through the same validate → test → evaluate → activate path from the web a
 `manage.py import_ai_config`.
 """
 
+import hashlib
 import json
 import re
 import time
@@ -16,6 +17,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -801,23 +803,39 @@ else null.
 meter division (กคว.), leave division and topic null."""
 
 
-def _example_answer(example, typed=False):
+def _example_items(entry, typed=False, menu=False):
+    """An example's items in the answer's shape. examples-v3 (25 Oct 2569) adds serials, size
+    and equipment_number after (code, quantity, text); older examples have none."""
+    items = []
+    for code, quantity, text, *rest in entry["items"]:
+        serials, size, number = (*rest, [], None, None)[:3]
+        items.append(
+            {
+                "item_code": code,
+                "item_text": text,
+                "quantity": quantity,
+                "serials": serials or [],
+                **({"size": size} if typed else {}),
+                **({"equipment_number": number} if menu else {}),
+            }
+        )
+    return items
+
+
+def _example_answer(example, typed=False, menu=False):
     requests = []
     for entry in example.requests:
+        path = {
+            "division": entry.get("division"),
+            "topic": entry.get("topic"),
+            "meters": [{"number": n, "district": d} for n, d in entry.get("meters", [])],
+        }
         requests.append(
             {
                 "intent": entry["intent"],
-                **({"sap_number": None} if typed else {}),
-                "items": [
-                    {
-                        "item_code": code,
-                        "item_text": text,
-                        "quantity": quantity,
-                        "serials": [],
-                        **({"size": None} if typed else {}),
-                    }
-                    for code, quantity, text in entry["items"]
-                ],
+                **({"sap_number": entry.get("sap_number")} if typed else {}),
+                **(path if menu else {}),
+                "items": _example_items(entry, typed, menu),
                 **{name: entry.get("fields", {}).get(name) for name in TEXT_FIELDS},
                 "needed_by": None,
                 "evidence": [],
@@ -841,7 +859,9 @@ def _messages(text, draft_context, catalog, examples=(), system=SYSTEM_PROMPT):
     for example in examples:
         shown = {"message": example.text, "current_draft": example.draft}
         messages.append({"role": "user", "content": json.dumps(shown, ensure_ascii=False)})
-        answer = json.dumps(_example_answer(example, typed), ensure_ascii=False)
+        answer = json.dumps(
+            _example_answer(example, typed, menu_catalog(catalog)), ensure_ascii=False
+        )
         messages.append({"role": "assistant", "content": answer})
     payload = {
         "message": text,
@@ -864,10 +884,67 @@ def _grams(text):
     return {norm[i : i + 3] for i in range(max(len(norm) - 2, 1))}
 
 
-def retrieve_examples(text, draft_context, k, catalog_codes):
+# Bundled curated example sets; install_examples puts one in any database (25 Oct 2569 Q17).
+EXAMPLE_SETS = {
+    name: Path(__file__).resolve().parent / "fixtures" / f"ai_examples_{name}.json"
+    for name in ("v1", "v2", "v3")
+}
+
+
+@transaction.atomic
+def install_examples(actor, name, reason):
+    """One bundled example set, also on production (owner, 25 Oct 2569 Q17): an AI editor with
+    a reason, audited with the file's SHA-256. Examples change what a few-shot version is
+    shown, so imported evaluation evidence warns while they differ (ADR 0020 Q5)."""
+    identity.require_ai_editor(actor)
+    reason = identity._require_reason(reason)
+    if not reason:
+        raise ValidationError("ใส่เหตุผลก่อนเพิ่มชุดตัวอย่าง")
+    path = EXAMPLE_SETS.get(name)
+    if path is None:
+        raise ValidationError("ไม่รู้จักชุดตัวอย่างนี้")
+    raw = path.read_bytes()
+    data = json.loads(raw)
+    created, first = 0, None
+    for row in data["examples"]:
+        example, new = AIExample.objects.update_or_create(
+            text=row["text"],
+            defaults={
+                "draft": row["draft"],
+                "requests": row["requests"],
+                "source": f"curated:{data['version']}",
+                "is_active": True,
+            },
+        )
+        created += new
+        first = first or example
+    identity.audit(
+        actor,
+        "ai.examples_installed",
+        first,
+        reason,
+        set=data["version"],
+        count=len(data["examples"]),
+        created=created,
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
+    return len(data["examples"]), created
+
+
+def _menu_example(example):
+    """An example whose answer needs the menu path (examples-v3): for menu versions only. A
+    division alone does not count: without it the answer still holds for a typed version."""
+    return any(
+        entry["intent"] == "repair" or entry.get("topic") or entry.get("meters")
+        for entry in example.requests
+    )
+
+
+def retrieve_examples(text, draft_context, k, catalog_codes, menu=False):
     """Top-k active examples by character-trigram similarity (works for Thai without word
-    segmentation). Examples naming items outside the current catalog are never shown, and an
-    example identical to the message is excluded (no answer leakage)."""
+    segmentation). Examples naming items outside the current catalog are never shown, nor one
+    answering with the menu path to a version that does not read it, and an example identical
+    to the message is excluded (no answer leakage)."""
     if k <= 0:
         return []
     query, norm = _grams(text), _normalise(text)
@@ -875,7 +952,9 @@ def retrieve_examples(text, draft_context, k, catalog_codes):
     for example in AIExample.objects.filter(is_active=True).order_by("pk"):
         if _normalise(example.text) == norm:
             continue
-        codes = {code for entry in example.requests for code, _, _ in entry["items"] if code}
+        if _menu_example(example) and not menu:
+            continue
+        codes = {code for entry in example.requests for code, *_ in entry["items"] if code}
         if not codes <= set(catalog_codes):
             continue
         grams = _grams(example.text)
@@ -1268,7 +1347,9 @@ def extract(text, draft_context, version, budget_seconds=None, catalog=None):
         return ai_harness.extract(text, draft_context, version, budget, catalog=catalog)
     deadline = time.monotonic() + budget
     catalog = _catalog(reads_typed(version), reads_menu(version)) if catalog is None else catalog
-    examples = retrieve_examples(text, draft_context, version.few_shot, [i.code for i in catalog])
+    examples = retrieve_examples(
+        text, draft_context, version.few_shot, [i.code for i in catalog], menu_catalog(catalog)
+    )
     attempts = []
     for profile in version.chain():
         remaining = deadline - time.monotonic()
