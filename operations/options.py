@@ -45,6 +45,7 @@ ORDER_REMIND = "order_remind_days"
 CHAT_ANSWERS = "chat_answers"
 CHAT_FOLLOWUP = "chat_followup"
 CHAT_TYPED = "chat_typed_steps"
+USAGE_AI = "usage_ai"
 INFO_REPLY = "info_reply"
 LEARNED_ROUTES = "learned_routes"
 ROUTING_AI = "routing_ai"
@@ -304,6 +305,25 @@ OPTIONS = {
             ),
         ),
         "คำตอบจากคลังใช้ได้เมื่อเปิดการตอบคำถามในแชต ส่วน AI ใช้ได้เมื่อมีรุ่นที่เปิดใช้แล้ว",
+    ),
+    # ADR 0021 (owner, 25 Oct 2569): the owner's choice is the default; "never" is the Q14 rule
+    # of 10 Oct 2569, kept so an admin can close the path at once without a release.
+    USAGE_AI: Option(
+        "ข้อความเรื่องการใช้ไฟฟ้ากับ AI",
+        (
+            (
+                "masked",
+                "ส่งให้ AI ได้หลังปิดข้อมูลส่วนบุคคล",
+                "AI ทุกงานอ่านได้ ทั้งแชต การเติมร่าง การคัดกรอง การแนะนำกอง และคำที่ระบบจำ "
+                "เบอร์โทร เลขยาว และชื่อที่ระบบรู้จักถูกปิดก่อนส่งทุกครั้ง",
+            ),
+            (
+                "never",
+                "ไม่ส่งให้ AI",
+                "ข้อความและเรื่องการใช้ไฟฟ้าใช้ขั้นตอนตามปุ่มเท่านั้น เหมือนก่อน 25 ต.ค. 2569",
+            ),
+        ),
+        "เปลี่ยนเป็นไม่ส่งได้ทันทีถ้าพบข้อมูลผู้ใช้ไฟหลุดไปผู้ให้บริการ",
     ),
     INFO_REPLY: Option(
         "ข้อความที่ผู้แจ้งพิมพ์ ขณะเจ้าหน้าที่รอข้อมูลเพิ่มจากเขา",

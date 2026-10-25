@@ -265,7 +265,7 @@ class AIAnswerTests(AIAnswerCase):
         self.assertEqual(schema["properties"]["answer"]["enum"], ["greeting", "none"])
         self.assertNotIn("emergency", [r.key for r in ai_answer.choosable(rows)])
 
-    def test_usage_cases_and_other_people_never_reach_the_ai(self):
+    def test_other_people_never_reach_the_ai_and_usage_cases_only_when_allowed(self):
         alice, bob = self.approve(ALICE), self.approve(BOB)
         from operations.models import District
 
@@ -279,13 +279,18 @@ class AIAnswerTests(AIAnswerCase):
         )
         own = self.case_for(alice)
         self.case_for(bob)
+        facts = answers.facts(alice)  # ADR 0021: the number and status, never the text
+        self.assertEqual(len(facts), 2)
+        self.assertNotIn("ลักใช้ไฟ", " ".join(facts))
+        options.change(None, options.USAGE_AI, "never", "ทดสอบกฎ Q14 เดิม")
         facts = answers.facts(alice)
         self.assertEqual(len(facts), 1)
         self.assertIn(own.number, facts[0])
-        self.assertNotIn("ลักใช้ไฟ", " ".join(facts))
 
-    def test_usage_text_and_anonymous_reporters_never_go_to_the_ai(self):
+    def test_anonymous_reporters_never_go_to_the_ai_nor_usage_text_when_kept(self):
         self.mode("write")
+        self.assertFalse(ai_chat.private_text(None, "ร้องเรียนค่าไฟแพงผิดปกติ"))  # ADR 0021
+        options.change(None, options.USAGE_AI, "never", "ทดสอบกฎ Q14 เดิม")
         self.assertFalse(ai_chat.wants_ai(None, None, "ร้องเรียนค่าไฟแพงผิดปกติ"))
         anonymous = SimpleNamespace(anonymous=True)
         self.assertFalse(ai_chat.wants_ai(anonymous, None, "ต้องรอนานแค่ไหนครับ"))

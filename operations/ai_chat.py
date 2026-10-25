@@ -48,7 +48,10 @@ BUTTON_STEPS = {"kind", "category", "item", "more", "summary", "typed_group"}
 
 
 def private_text(draft, text):
-    """Real structure Q14: การใช้ไฟฟ้า matters often hold a customer's details; never to the AI."""
+    """การใช้ไฟฟ้า matters often hold a customer's details: kept from the AI only while
+    policy.usage_kept_from_ai() (Q14, lifted by ADR 0021 on 25 Oct 2569)."""
+    if not policy.usage_kept_from_ai():
+        return False
     in_usage_draft = draft is not None and draft.data.get("topic") == Case.Topic.USAGE
     return in_usage_draft or policy.usage_text(text)
 

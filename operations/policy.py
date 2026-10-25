@@ -1444,8 +1444,16 @@ def revoke_authority(actor, grant, reason):
 # --- AI triage requests ----------------------------------------------------------------------
 
 
+def usage_kept_from_ai():
+    """Whether การใช้ไฟฟ้า matters stay away from the AI: the Q14 rule, lifted by ADR 0021
+    (25 Oct 2569) unless an admin sets ตัวเลือกระบบ usage_ai back to "never"."""
+    from operations import options  # local: options reads policy for its defaults
+
+    return options.get(options.USAGE_AI) == "never"
+
+
 def usage_text(text, current=None):
-    """Words of an การใช้ไฟฟ้า matter in free text (Q14: such text never goes to the AI)."""
+    """Words of an การใช้ไฟฟ้า matter in free text."""
     current = current if current is not None else current_policy()
     if current is None or not text:
         return False
@@ -1454,7 +1462,10 @@ def usage_text(text, current=None):
 
 
 def private_topic(case):
-    """Q14: การใช้ไฟฟ้า cases often hold a customer's details, so the AI never reads them."""
+    """การใช้ไฟฟ้า cases often hold a customer's details: kept from the AI only while
+    usage_kept_from_ai() (ADR 0021)."""
+    if not usage_kept_from_ai():
+        return False
     if case.topic == USAGE:
         return True
     return usage_text("\n".join(case_text(case).values()))
