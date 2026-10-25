@@ -65,7 +65,7 @@ class KeywordTests(AnswerTestCase):
         self.approve(ALICE)
         reply = texts(self.type(ALICE, "สวัสดีครับ"))
         self.assertNotIn("ช่องทางนี้รับเรื่อง", reply)
-        self.assertIn("เลือกเมนูด้านล่าง", reply)
+        self.assertIn("เมนูด้านล่าง", reply)
 
     def test_greetings_and_questions_are_answered_from_the_bank(self):
         self.mode("faq")
@@ -73,7 +73,7 @@ class KeywordTests(AnswerTestCase):
         self.assertIn("ช่องทางนี้รับเรื่องเบิก", texts(self.type(ALICE, "สวัสดีครับ")))
         contact = self.type(ALICE, "ขอเบอร์ติดต่อหน่อย")
         self.assertIn("02-000-0001", texts(contact))
-        self.assertEqual(buttons(contact)["เบิกอุปกรณ์"], "m=equipment&kind=withdrawal")
+        self.assertNotIn("เบิกอุปกรณ์", buttons(contact))  # Q2: the rich menu is the menu
         # A greeting with a story is a report, not a greeting.
         reply = texts(self.type(ALICE, "สวัสดีครับ ขอแจ้งไฟดับที่ซอย 5 ตั้งแต่เมื่อคืน"))
         self.assertNotIn("ช่องทางนี้รับเรื่องเบิก", reply)
@@ -253,7 +253,8 @@ class AIAnswerTests(AIAnswerCase):
         self.approve(ALICE)
         _, run, reply = self.ask(ALICE, "พรุ่งนี้ฝนจะตกไหมครับ", answer_json("none"))
         self.assertIn("เรื่องนี้ตอบในแชตนี้ไม่ได้", texts(reply))
-        self.assertEqual(buttons(reply)["แจ้งปัญหา"], "m=problems")
+        # 25 Oct 2569 Q2: no service quick replies; the rich menu is the menu.
+        self.assertFalse(set(buttons(reply)) & {"เบิกอุปกรณ์", "แจ้งปัญหา", "หน้าหลัก"})
 
     def test_only_approved_keys_and_valid_json_are_accepted(self):
         rows = list(answers.approved())

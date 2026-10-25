@@ -232,7 +232,7 @@ class ServiceMenuFlowTests(MenuTestCase):
         self.type(ALICE, "เบิกอุปกรณ์")
         reply = self.type(ALICE, "CT")
         self.assertIn("ยังไม่มีรายการที่ใช้งานได้", texts(reply))
-        self.assertEqual(list(buttons(reply)), ["ย้อนกลับ", "หน้าหลัก", "ยกเลิกร่าง"])
+        self.assertEqual(list(buttons(reply)), ["ย้อนกลับ", "ยกเลิกร่าง"])
 
     def test_group_filter_is_kept_when_catalogue_requires_search(self):
         from operations.models import EquipmentType

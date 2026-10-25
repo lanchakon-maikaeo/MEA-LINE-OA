@@ -181,7 +181,7 @@ def respond(turn, draft, answer, written=None):
         return conversation._my_cases(turn)
     if answer.action == A.MY_CASES:
         # A written status reply still offers the requester's own cases to open.
-        return turn.say(text, [*_case_buttons(turn), *conversation.MENU][: conversation.MAX_QUICK])
+        return turn.say(text, _case_buttons(turn)[: conversation.MAX_QUICK])
     return conversation._menu(turn, text)
 
 

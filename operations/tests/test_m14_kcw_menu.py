@@ -33,16 +33,6 @@ from operations.tests.test_m13_line_menu import MenuTestCase
 TILE = "Meter, CT, VT"
 
 
-def card_texts(reply):
-    """Header texts of the Flex cards in one reply."""
-    found = []
-    for message in reply:
-        if message["type"] == "flex":
-            for bubble in message["contents"]["contents"]:
-                found += [c["text"] for c in bubble.get("header", {}).get("contents", [])]
-    return "\n".join(found)
-
-
 class KcwTestCase(MenuTestCase):
     def setUp(self):
         super().setUp()
@@ -106,19 +96,17 @@ class SetupTests(MenuTestCase):
 
 
 class CardTests(KcwTestCase):
-    def test_the_kcw_tile_asks_for_the_equipment_first_on_cards(self):
+    def test_the_kcw_tile_asks_for_the_equipment_first_with_quick_replies(self):
+        # 25 Oct 2569 Q1: the choices are quick replies under a text, not a Flex card.
         reply = self.open(TILE)
-        self.assertEqual(reply[0]["type"], "flex")
-        self.assertIn("เลือกอุปกรณ์", card_texts(reply))
-        self.assertEqual(
-            [b for b in buttons(reply) if b != "หน้าหลัก"],
-            ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น", "ติดตามเรื่อง"],
-        )
+        self.assertEqual([m["type"] for m in reply], ["text"])
+        self.assertIn("เลือกอุปกรณ์", texts(reply))
+        self.assertEqual(list(buttons(reply)), ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น", "ติดตามเรื่อง"])
         reply = self.press(ALICE, "CT")
-        self.assertIn(f"{TILE} · CT", card_texts(reply))
+        self.assertIn(f"{TILE} · CT", texts(reply))
         self.assertEqual(
             list(buttons(reply)),
-            ["ย้อนกลับ", "หน้าหลัก", "ติดตามใบเบิก", "ติดตามใบส่งคืน", "ติดตามสถานะการซ่อม"],
+            ["ติดตามใบเบิก", "ติดตามใบส่งคืน", "ติดตามสถานะการซ่อม", "ย้อนกลับ"],
         )
         self.type(ALICE, "ติดตามใบส่งคืน")  # typing a card label works like tapping it
         draft = ConversationDraft.objects.get(status="open")

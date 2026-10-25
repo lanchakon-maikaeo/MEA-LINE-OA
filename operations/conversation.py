@@ -1461,7 +1461,7 @@ def _shown(turn, case):
 def _info_waiting(turn, cases):
     lines = [f"{c.number}: {_info_asked(c)}" for c in cases[:3] if not _shown(turn, c)]
     head = "เจ้าหน้าที่รอข้อมูลเพิ่ม\n" + "\n".join(lines) + "\n" if lines else ""
-    turn.say(f"{head}กรุณาแจ้งข้อมูลในแชทนี้", MENU)
+    turn.say(f"{head}กรุณาแจ้งข้อมูลในแชทนี้")
 
 
 def _attach_reply(turn, case, message):
@@ -1505,7 +1505,7 @@ def _info_token(turn, token, draft):
     ).first()
     if case is None or message is None:
         turn.set_prompt()
-        turn.say("เรื่องนี้ไม่ได้รอข้อมูลจากคุณแล้ว หรือส่งข้อความนี้ไปแล้ว", MENU)
+        turn.say("เรื่องนี้ไม่ได้รอข้อมูลจากคุณแล้ว หรือส่งข้อความนี้ไปแล้ว")
         return
     return _attach_reply(turn, case, message)
 
@@ -1560,8 +1560,7 @@ def _static_postback(turn, data, draft):
                     ("usage", "การใช้ไฟฟ้า"),
                     ("suggestion", "ข้อเสนอแนะ"),
                 )
-            ]
-            + [("หน้าหลัก", "m=home")],
+            ],
         )
     if data in {"m=equipment&kind=withdrawal", "m=equipment&kind=return"}:
         if turn.internal or any(
@@ -1588,11 +1587,11 @@ def _static_postback(turn, data, draft):
         return turn.say(
             "เลือกหัวข้อที่ต้องการแจ้ง",
             [(item.label, f"m=item&id={item.pk}") for item in choices[:10]]
-            + [("ย้อนกลับ", "m=problems"), ("หน้าหลัก", "m=home")],
+            + [("ย้อนกลับ", "m=problems")],
         )
     if data in {"m=home", "m=roles"}:
         turn.set_prompt()
-        return _menu(turn, "เลือกบริการที่ต้องการ")
+        return _menu(turn, "เลือกบริการจากเมนูด้านล่าง")
     if data.startswith("m=item&id="):
         return _menu_item(turn, data.split("=", 2)[2])
     if data.startswith("m=act&"):
@@ -1673,7 +1672,6 @@ def _menu_item(turn, pk):
                 item.label,
                 "เลือกอุปกรณ์",
                 [(c.label, f"m=item&id={c.pk}") for c in choices],
-                [("หน้าหลัก", "m=home")],
             )
         turn.say(
             f"{item.label}\nเลือกเรื่องที่ต้องการ",
@@ -1743,41 +1741,12 @@ def _problems_only(turn):
 
 
 def _card(turn, title, prompt, buttons, quick=()):
-    """A Flex card whose buttons stay in the chat (23 Oct 2569: the กคว. menu): the title and
-    question in its header, the choices in its body, navigation as quick replies. Labels typed
-    instead of tapped still work (_remember_choices reads every postback)."""
-    header = [
-        {"type": "text", "text": title, "weight": "bold", "wrap": True},
-        {"type": "text", "text": prompt, "size": "sm", "wrap": True},
-    ]
-    body = [
-        {
-            "type": "button",
-            "style": "secondary",
-            "height": "sm",
-            # The choice shows in the chat as the requester's message, as quick replies do.
-            "action": {
-                "type": "postback",
-                "label": _fit(label, 20),
-                "data": data,
-                "displayText": label,
-            },
-        }
-        for label, data in buttons
-    ]
-    bubble = {
-        "type": "bubble",
-        "header": {"type": "box", "layout": "vertical", "contents": header},
-        "body": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": body},
-    }
-    message = {
-        "type": "flex",
-        "altText": f"{title} · {prompt}",
-        "contents": {"type": "carousel", "contents": [bubble]},
-    }
-    if quick:
-        message["quickReply"] = {"items": [_postback(*button) for button in quick]}
-    turn.replies.append(message)
+    """A choice of the menu as one message with its choices as quick replies (25 Oct 2569 Q1:
+    the owner wants the "ปุ่ม bubble" instead of the Flex card of 23 Oct): the title and question
+    as text, the choices first, then the step's navigation. LINE shows at most 13 quick replies
+    with labels of up to 20 characters; the full name goes into the chat as displayText. Labels
+    typed instead of tapped still work (_remember_choices reads every postback)."""
+    turn.say(f"{title}\n{prompt}", [*buttons, *quick][:MAX_QUICK])
 
 
 REPAIR = Case.Topic.REPAIR
@@ -1798,7 +1767,7 @@ def _action_card(turn, item):
         _menu_label(item),
         "เลือกสิ่งที่ต้องการ",
         [(label, f"m=act&id={item.pk}&do={kind}") for label, kind in ACTION_CARD],
-        [("ย้อนกลับ", f"m=item&id={item.parent_id}"), ("หน้าหลัก", "m=home")],
+        [("ย้อนกลับ", f"m=item&id={item.parent_id}")],
     )
 
 
@@ -1891,14 +1860,12 @@ def _menu_ask(turn, pk, lead=""):
 
 
 def _menu(turn, text):
-    from operations import line_menu, staff_line
+    from operations import staff_line
 
     extra = [("งานของกอง", "งานของกอง")] if staff_line.staff_of(turn.identity) else []
-    restricted = turn.internal or any(
-        getattr(turn.requester, flag, False)
-        for flag in ("is_internal", "is_external", "is_anonymous")
-    )
-    buttons = list(line_menu.SERVICE_BUTTONS[2:] if restricted else line_menu.SERVICE_BUTTONS)
+    # 25 Oct 2569 Q2: the service quick replies are gone (the rich menu is the menu); what
+    # stays is what belongs to this person now: a draft to finish, the staff menu.
+    buttons = []
     if turn.requester and _open_drafts(turn).exists():
         buttons.append(("ร่างที่ยังไม่ส่ง", "m=new"))
     if turn.requester and turn.requester.is_external:
@@ -1913,7 +1880,7 @@ def _reprompt(turn, draft):
     drafts = list(_open_drafts(turn)[:10])
     if drafts:
         return _choose_draft(turn, drafts)
-    _menu(turn, "เลือกเมนูด้านล่าง: ส่งเรื่องใหม่ ดูเรื่องของฉัน หรือติดตามเรื่อง")
+    _menu(turn, "เลือกบริการจากเมนูด้านล่าง หรือพิมพ์เรื่องที่ต้องการแจ้งได้เลย")
 
 
 # --- Status replies ---------------------------------------------------------------------------
@@ -1976,7 +1943,7 @@ def _case_list(turn, mode="open", page=1, item=None):
     if rows.has_next():
         quick.append(link("ถัดไป", number=rows.next_page_number()))
     quick += [link(label, selected=key) for key, label in modes.items() if key != mode]
-    quick += [turn.button("ค้นหาเลขเรื่อง", "case_search"), ("หน้าหลัก", "m=home")]
+    quick.append(turn.button("ค้นหาเลขเรื่อง", "case_search"))
     if item:
         quick.append(("ถามเรื่องอื่น", f"m=ask&id={item.pk}"))
     elif _open_drafts(turn).exists():
@@ -1995,10 +1962,7 @@ def _track_prompt(turn):
 
 def _search_cases(turn):
     turn.set_prompt("track")
-    turn.say(
-        "พิมพ์เลขเรื่องที่ต้องการติดตาม เช่น W69-000001 หรือเลขใบเบิก/ใบส่งคืน SAP",
-        [("เรื่องของฉัน", "m=mine"), ("หน้าหลัก", "m=home")],
-    )
+    turn.say("พิมพ์เลขเรื่องที่ต้องการติดตาม เช่น W69-000001 หรือเลขใบเบิก/ใบส่งคืน SAP")
 
 
 def _sap_cases(turn, text):
@@ -2019,7 +1983,7 @@ def _sap_cases(turn, text):
         turn.set_prompt()
         turn.say(
             f"เลข SAP {number} อยู่ใน {len(found)} เรื่อง กดเลขเรื่องเพื่อดูรายละเอียด",
-            [(c.number, f"c={c.number}") for c in found] + [("หน้าหลัก", "m=home")],
+            [(c.number, f"c={c.number}") for c in found],
         )
         return True
     return False
@@ -2030,7 +1994,7 @@ def _case_detail(turn, number):
     turn.set_prompt()
     if case is None:
         # Same answer for other people's cases and numbers that do not exist.
-        turn.say(f"ไม่พบเรื่อง {number} ในเรื่องของคุณ", MENU)
+        turn.say(f"ไม่พบเรื่อง {number} ในเรื่องของคุณ")
         return
     files = case.attachments.count()
     sap = (
@@ -2068,7 +2032,7 @@ def _case_detail(turn, number):
             turn.button(label, "info_target", {"case": str(case.pk)})
             for label in ["ตอบข้อมูลเพิ่ม", "แนบหลักฐาน"]
         ]
-    turn.say(text, [*buttons, *MENU][:MAX_QUICK])
+    turn.say(text, buttons[:MAX_QUICK])
 
 
 # --- Drafts -------------------------------------------------------------------------------------
@@ -2159,8 +2123,7 @@ def _token_action(turn, token, draft):
         turn.set_prompt("info_target", case=str(case.pk))
         turn.say(
             f"ตอบข้อมูลเพิ่มสำหรับ {case.number}\n{_info_asked(case)}\n"
-            "พิมพ์ข้อความหรือส่งรูป JPEG/PNG หรือไฟล์ PDF ในแชทนี้ได้",
-            [("เรื่องของฉัน", "m=mine"), ("หน้าหลัก", "m=home")],
+            "พิมพ์ข้อความหรือส่งรูป JPEG/PNG หรือไฟล์ PDF ในแชทนี้ได้"
         )
         return
     if action == "case_search":
@@ -2200,7 +2163,7 @@ def _token_action(turn, token, draft):
         return _reprompt(turn, draft)
     if bound.status == D.SUBMITTED and action == "confirm":
         # A repeated confirmation returns the original case, never a second one.
-        turn.say(f"ยื่นเรื่องนี้แล้ว เลขเรื่อง {bound.case.number}", MENU)
+        turn.say(f"ยื่นเรื่องนี้แล้ว เลขเรื่อง {bound.case.number}")
         return
     if bound.status != D.OPEN or bound.revision != token.draft_revision:
         turn.say("ปุ่มนี้เป็นของขั้นตอนก่อนหน้า ใช้คำถามล่าสุดแทน")
@@ -2233,8 +2196,6 @@ def _ask(turn, draft):
         navigation = []
         if draft.step.startswith("field:") and "ย้อนกลับ" not in labels:
             navigation.append(turn.button("ย้อนกลับ", "field_back", draft=draft))
-        if "หน้าหลัก" not in labels:
-            navigation.append(("หน้าหลัก", "m=home"))
         if "ยกเลิกร่าง" not in labels:
             navigation.append(turn.button("ยกเลิกร่าง", "discard", draft=draft))
         items.extend(_postback(*button) for button in navigation[: MAX_QUICK - len(items)])
@@ -3155,7 +3116,7 @@ def _attachment(turn, draft):
             return _choose_draft(turn, drafts)
         turn.say(
             "ได้รับไฟล์แล้ว ต้องการเริ่มเรื่องใหม่เพื่อแนบไฟล์นี้หรือไม่",
-            [turn.button("เริ่มเรื่องใหม่", "new_draft")] + MENU[1:],
+            [turn.button("เริ่มเรื่องใหม่", "new_draft")],
         )
         return
     turn.say("ได้รับไฟล์แล้ว ระบบกำลังตรวจความปลอดภัยของไฟล์")
