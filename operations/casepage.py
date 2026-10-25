@@ -16,6 +16,7 @@ from operations import (
     registry,
     returns,
     typed_lines,
+    usage_meters,
     workflow,
 )
 from operations.models import (
@@ -467,6 +468,7 @@ def build(case, now=None):
                 if case.sap_number and typed_lines.sap_label(case.kind, case.topic)
                 else []
             ),
+            *([("เครื่องวัดฯ", usage_meters.describe(case.meters))] if case.meters else []),
             *((label, getattr(case, name)) for name, label in TEXT_FIELDS if getattr(case, name)),
         ],
         "hazard_guidance": policy.hazard_guidance(case),

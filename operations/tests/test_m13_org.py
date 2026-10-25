@@ -189,7 +189,16 @@ class DirectRoutingTests(OrgTestCase):
         self.assertIn("ผู้ประสานระดับฝ่าย", rec.next_action)
 
     def test_a_usage_matter_goes_to_ktf_and_never_to_the_ai(self):
-        payload = {"kind": "problem", "topic": "usage", "description": "สงสัยลักใช้ไฟ บ้านเลขที่ 9"}
+        from operations.models import District
+
+        payload = {
+            "kind": "problem",
+            "topic": "usage",
+            "description": "สงสัยลักใช้ไฟ บ้านเลขที่ 9",
+            "meters": [
+                {"number": "12345678", "district": District.objects.order_by("code").first().code}
+            ],  # 25 Oct 2569 Q11
+        }
         with override_settings(AI_ENABLED=True):
             _, case = self.submit(payload)
         self.assertEqual((case.owner_division.code, case.topic), ("กตฟ.", "usage"))

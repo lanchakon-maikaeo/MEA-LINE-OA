@@ -247,6 +247,7 @@ class MutationTests(SimTestCase):
         def without_topic(draft):
             payload = real(draft)
             payload.pop("topic", None)
+            payload.pop("meters", None)  # else the contract refuses meters without the topic
             return payload
 
         with patch.object(conversation, "_payload", side_effect=without_topic):

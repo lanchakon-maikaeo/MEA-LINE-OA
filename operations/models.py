@@ -511,6 +511,8 @@ class Case(models.Model):
     is_example = models.BooleanField(default=False)
     # The LINE menu choice the case came from, e.g. "ระบบ SMG, ระบบ AMR · การจัดทำบิล" (Q20).
     menu_label = models.CharField(max_length=120, blank=True)
+    # เรื่องการใช้ไฟฟ้า (25 Oct 2569 Q11, Q23): [{"number": …, "district": District.code}].
+    meters = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-submitted_at"]

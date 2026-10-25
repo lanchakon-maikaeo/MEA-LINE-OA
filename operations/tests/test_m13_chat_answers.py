@@ -267,7 +267,16 @@ class AIAnswerTests(AIAnswerCase):
 
     def test_usage_cases_and_other_people_never_reach_the_ai(self):
         alice, bob = self.approve(ALICE), self.approve(BOB)
-        self.case_for(alice, topic="usage", description="สงสัยลักใช้ไฟ บ้านเลขที่ 9 (ทดสอบ)")
+        from operations.models import District
+
+        self.case_for(
+            alice,
+            topic="usage",
+            description="สงสัยลักใช้ไฟ บ้านเลขที่ 9 (ทดสอบ)",
+            meters=[
+                {"number": "12345678", "district": District.objects.order_by("code").first().code}
+            ],  # 25 Oct 2569 Q11
+        )
         own = self.case_for(alice)
         self.case_for(bob)
         facts = answers.facts(alice)

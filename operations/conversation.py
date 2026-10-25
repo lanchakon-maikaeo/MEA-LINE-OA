@@ -20,7 +20,7 @@ from django.db.models import Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from operations import identity as identity_services
-from operations import line_api, services, typed_lines, workflow
+from operations import line_api, services, typed_lines, usage_meters, workflow
 from operations.contracts import (
     Actor,
     CommandFailed,
@@ -75,9 +75,13 @@ SUGGESTION_FIELDS = [
     ("impact", "ถ้ามีรายละเอียดเพิ่ม เช่น สถานที่หรืองานที่เกี่ยวข้อง พิมพ์ต่อได้ หรือกดข้าม", False),
     ("related_case_number", "หากเกี่ยวข้องกับเรื่องเดิม กรุณาเลือกเรื่อง หรือเลือกข้าม", False),
 ]
+# 25 Oct 2569 Q11: after the meters and their districts; the details may be skipped.
 USAGE_FIELDS = [
-    ("description", "แจ้งเรื่องที่พบ เช่น สถานที่ สิ่งที่เห็น ช่วงเวลา", True),
-    ("impact", "ข้อมูลเพิ่มเติม เช่น เลขผู้ใช้ไฟ (CA) ถ้ามี หรือกดข้าม", False),
+    (
+        "description",
+        "รายละเอียดเพิ่มเติม เช่น สิ่งที่พบ ช่วงเวลา หรือเลขผู้ใช้ไฟ (CA) หรือกดข้าม",
+        False,
+    ),
     ("related_case_number", "หากเกี่ยวข้องกับเรื่องเดิม กรุณาเลือกเรื่อง หรือเลือกข้าม", False),
 ]
 # เมนู LINE (15 ต.ค. 2569 Q18, Q20): a question to the division the menu named, and a problem
@@ -178,7 +182,9 @@ def _fit(label, limit):
 LOCATION = "@location"  # a quick reply that opens LINE's location picker
 
 
-def _postback(label, data):
+def _postback(label, data, display=None):
+    """A quick reply; `display` is what shows in the chat when the label had to be shortened
+    (25 Oct 2569 Q3: "ทบทวนหน่วยไฟฟ้า" for ทบทวนหน่วยไฟฟ้าจากการร้องเรียน)."""
     if data == LOCATION:
         return {"type": "action", "action": {"type": "location", "label": _fit(label, 20)}}
     if data.startswith("https://") or data.startswith("http://"):
@@ -189,7 +195,7 @@ def _postback(label, data):
             "type": "postback",
             "label": _fit(label, 20),
             "data": data,
-            "displayText": label,
+            "displayText": display or label,
         },
     }
 
@@ -197,7 +203,7 @@ def _postback(label, data):
 def text_message(text, quick=None):
     message = {"type": "text", "text": text[:5000]}
     if quick:
-        message["quickReply"] = {"items": [_postback(lbl, data) for lbl, data in quick][:MAX_QUICK]}
+        message["quickReply"] = {"items": [_postback(*button) for button in quick][:MAX_QUICK]}
     return message
 
 
@@ -1516,9 +1522,15 @@ def _expects_text(draft):
     """Steps whose answer is typed; elsewhere a typed case number means 'show this case'."""
     if draft is None:
         return False
-    return draft.step in {"item_search", "quantity", "serials", "sap", "entry"} or (
-        draft.step.startswith("field:")
-    )
+    return draft.step in {
+        "item_search",
+        "quantity",
+        "serials",
+        "sap",
+        "entry",
+        "meter",
+        "district",
+    } or (draft.step.startswith("field:"))
 
 
 def reads_as(text):
@@ -1635,7 +1647,9 @@ def _menu_entry(pk):
 
 
 def _menu_label(item):
-    return f"{item.parent.label} · {item.label}" if item.parent_id else item.label
+    """The menu path, tile · choice; a choice whose label was shortened keeps its full name as
+    its note."""
+    return f"{item.parent.label} · {item.note or item.label}" if item.parent_id else item.label
 
 
 def _menu_item(turn, pk):
@@ -1680,7 +1694,7 @@ def _menu_item(turn, pk):
             )
         turn.say(
             f"{item.label}\nเลือกเรื่องที่ต้องการ",
-            [(c.label, f"m=item&id={c.pk}") for c in choices],
+            [(c.label, f"m=item&id={c.pk}", c.note or c.label) for c in choices],
         )
         return
     if action == A.EQUIPMENT:
@@ -1727,6 +1741,8 @@ def _menu_item(turn, pk):
     if action == A.PROBLEM:
         topic = item.topic or Case.Topic.OTHER
         draft = _menu_draft(turn, item, K.PROBLEM, "topic", topic=topic)
+        if topic == Case.Topic.USAGE:
+            return _set(turn, draft, "meter", meters=[])  # 25 Oct 2569 Q11
         if topic in CATEGORY_LABELS:
             return _set(turn, draft, "meter_group", equipment_menu="equipment")
         return _set(turn, draft, _next_field(draft))
@@ -2044,6 +2060,8 @@ def _case_detail(turn, number):
         if case.sap_number and typed_lines.sap_label(case.kind, case.topic)
         else ""
     )
+    if case.meters:
+        sap += f"\nเครื่องวัดฯ: {usage_meters.describe(case.meters)}"
     text = (
         f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}{sap}\n"
         f"สถานะ: {_status_label(case)}\nกองเจ้าภาพ: {case.owner_division.name}\n"
@@ -2336,6 +2354,20 @@ def _ask_question(turn, draft):
                 f"พิมพ์{label} ถ้าไม่มี กดข้ามแล้วพิมพ์หมายเลขอุปกรณ์ในขั้นถัดไป",
                 [b("ข้าม", "sap_skip", draft=draft)],
             )
+    elif step == "meter":
+        head = draft.data.get("menu_label") or "เรื่องการใช้ไฟฟ้า"
+        turn.say(f"{head}\nพิมพ์หมายเลขเครื่องวัดฯ")
+    elif step == "district":
+        turn.say(
+            f"เครื่องวัดฯ {draft.data.get('meter', '')} ติดตั้งอยู่เขตไหน "
+            f"พิมพ์ชื่อเขต เช่น {usage_meters.examples()}"
+        )
+    elif step == "meters_more":
+        meters = draft.data.get("meters", [])
+        buttons = [b("ไปต่อ", "meters_done", draft=draft)]
+        if len(meters) < usage_meters.MAX_METERS:
+            buttons.insert(0, b("เพิ่มเครื่องวัดฯ", "meter_add", draft=draft))
+        turn.say(f"เครื่องวัดฯ ที่แจ้ง: {usage_meters.describe(meters)}", buttons)
     elif step == "entry":
         return _ask_entry(turn, draft)
     elif step == "typed_group":
@@ -2372,6 +2404,8 @@ def _summary(draft):
     if data.get("sap_number"):
         label = typed_lines.sap_label(draft.kind, data.get("topic"))
         lines.append(f"{label}: {data['sap_number']}")
+    if data.get("meters"):
+        lines.append(f"เครื่องวัดฯ: {usage_meters.describe(data['meters'])}")
     items = {
         i.code: i
         for i in EquipmentType.objects.filter(code__in=[x["item_code"] for x in data["lines"]])
@@ -2468,6 +2502,8 @@ def _next_field(draft):
     filled = draft.data["fields"]
     if draft.data.get("sap_skipped") and _sap_missing(draft):
         return "sap"  # a repair skipped its SAP number but the rows name no piece (Q7)
+    if draft.data.get("topic") == Case.Topic.USAGE and not draft.data.get("meters"):
+        return "meter"  # 25 Oct 2569 Q11: every usage report names a meter and its district
     for name, _, _ in _fields(draft):
         if name not in filled:
             return f"field:{name}"
@@ -2581,6 +2617,10 @@ def _draft_button(turn, draft, action, value):
         if value.get("group") not in dict(_draft_groups(draft)):
             return _ask(turn, draft)
         return _start_row(turn, draft, value["group"])
+    if action == "meter_add" and draft.step == "meters_more":
+        return _set(turn, draft, "meter")
+    if action == "meters_done" and draft.step == "meters_more":
+        return _set(turn, draft, _next_field(draft))
     if action == "sap_skip" and draft.step == "sap" and data.get("topic") == Case.Topic.REPAIR:
         return _skip_sap(turn, draft)
     if action == "entry_skip" and draft.step == "entry":
@@ -2818,6 +2858,29 @@ def typed_topic(data):
     return label
 
 
+def _meter_text(turn, draft, text):
+    number = usage_meters.clean_number(text)
+    if not number:
+        turn.say("หมายเลขเครื่องวัดฯ ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว")
+        return _ask(turn, draft)
+    if number in {m["number"] for m in draft.data.get("meters", [])}:
+        turn.say(f"เครื่องวัดฯ {number} อยู่ในเรื่องนี้แล้ว")
+        return _set(turn, draft, "meters_more")
+    return _set(turn, draft, "district", meter=number)
+
+
+def _district_text(turn, draft, text):
+    district = usage_meters.match_district(text)
+    if district is None:
+        turn.say(f'ไม่พบเขต "{" ".join(text.split())[:40]}" ใน กฟน.')
+        return _ask(turn, draft)
+    meters = [
+        *draft.data.get("meters", []),
+        {"number": draft.data["meter"], "district": district.code},
+    ]
+    return _set(turn, draft, "meters_more", meters=meters, meter="")
+
+
 def _skip_sap(turn, draft):
     """ติดตามสถานะการซ่อม without its SAP repair number: the rows must then name the piece."""
     draft.data = dict(draft.data, sap_skipped=True)
@@ -2954,6 +3017,10 @@ def _draft_text(turn, draft, text):
     data = draft.data
     if step == "sap":
         return _sap_text(turn, draft, text)
+    if step == "meter":
+        return _meter_text(turn, draft, text)
+    if step == "district":
+        return _district_text(turn, draft, text)
     if step == "entry":
         return _entry_text(turn, draft, text)
     if step == "typed_group":
@@ -3086,9 +3153,15 @@ def _payload(draft):
         payload["menu_label"] = data["menu_label"]
     if data.get("sap_number") and typed_lines.sap_label(draft.kind, data.get("topic")):
         payload["sap_number"] = data["sap_number"]
+    if data.get("meters") and data.get("topic") == Case.Topic.USAGE:
+        payload["meters"] = data["meters"]
     for name, value in data["fields"].items():
         if value:
             payload[name] = value
+    if data.get("meters") and not payload.get("description"):
+        # Q11: the details may be skipped; the case still says what was reported.
+        topic = (data.get("menu_label") or "").split(" · ")[-1] or "เรื่องการใช้ไฟฟ้า"
+        payload["description"] = f"{topic}: เครื่องวัดฯ {usage_meters.describe(data['meters'])}"
     return payload
 
 

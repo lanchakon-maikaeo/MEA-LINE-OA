@@ -1121,7 +1121,17 @@ class Dialogue:
         result = services.submit_case(
             Actor.for_requester(reporter),
             idempotency_key=f"dialogue-sim-{self.number:06d}-{rng.getrandbits(32):08x}",
-            payload={"kind": "problem", "topic": topic, "description": text},
+            payload={
+                "kind": "problem",
+                "topic": topic,
+                "description": text,
+                # 25 Oct 2569 Q11: a usage report names its meter and the meter's district.
+                **(
+                    {"meters": [{"number": "SIM123456", "district": reporter.district.code}]}
+                    if topic == Case.Topic.USAGE
+                    else {}
+                ),
+            },
         )
         self.target = Case.objects.select_related("owner_division").get(pk=result.case_id)
         self.target_texts = [text, reporter.display_name]
@@ -1445,6 +1455,22 @@ def i_type_sap_number(d):
     dialogue, typed again if the bot asks again."""
     number = d.flags.setdefault("sap_number", f"45{d.rng.randint(10**7, 10**8 - 1)}")
     return d.text("type_sap_number", number)
+
+
+def i_type_meter_number(d):
+    """เรื่องการใช้ไฟฟ้า (25 Oct 2569 Q11): one synthetic meter number per dialogue."""
+    number = d.flags.setdefault("meter_number", f"SIM{d.rng.randint(10**5, 10**6 - 1)}")
+    return d.text("type_meter_number", number)
+
+
+def i_type_district(d):
+    """เขตของเครื่องวัด: the name of a real district, as a person would type it."""
+    from operations.models import District
+
+    names = [
+        n.replace("การไฟฟ้านครหลวงเขต", "") for n in District.objects.values_list("name", flat=True)
+    ]
+    return d.text("type_district", d.rng.choice(sorted(names) or ["วัดเลียบ"]))
 
 
 def i_type_entry(d):

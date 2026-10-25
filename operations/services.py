@@ -57,6 +57,7 @@ from operations.models import (
     CaseNumberCounter,
     ChildWork,
     Decision,
+    District,
     Division,
     EquipmentType,
     Handoff,
@@ -389,6 +390,24 @@ def _check_sap(submission, fields, requester, routes, intake):
         fail(ErrorCode.VALIDATION_ERROR, "ระบุเลขใบเบิกหรือใบส่งคืน SAP ก่อนส่งเรื่อง")
 
 
+def _check_meters(submission, fields, intake):
+    """เรื่องการใช้ไฟฟ้า (25 Oct 2569 Q11): each meter's district must be an active district, and
+    a LINE report names at least one meter."""
+    codes = {m["district"] for m in submission.meters}
+    known = set(
+        District.objects.filter(code__in=codes, is_active=True).values_list("code", flat=True)
+    )
+    if codes - known:
+        fail(ErrorCode.VALIDATION_ERROR, "เขตของเครื่องวัดไม่ถูกต้อง")
+    if (
+        fields.get("topic") == Case.Topic.USAGE
+        and submission.channel == Case.Channel.LINE
+        and intake is None
+        and not submission.meters
+    ):
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุหมายเลขเครื่องวัดและเขตก่อนส่งเรื่อง")
+
+
 def _submission_requester(ctx, submission, intake):
     if ctx.requester is not None:
         return ctx.requester
@@ -511,6 +530,7 @@ def submit_case(actor, *, idempotency_key, payload):
         routes = [(chosen, lines)] if chosen and intake is None else None
         routes = list(routes or _route(submission.kind, lines, intake, now))
         _check_sap(submission, fields, requester, routes, intake)
+        _check_meters(submission, fields, intake)
         for owner, group in routes:
             case = Case.objects.create(
                 number=_next_number(submission.kind, now),
@@ -524,6 +544,7 @@ def submit_case(actor, *, idempotency_key, payload):
                 reported_at=submission.reported_at,
                 related_case=related or (cases[0] if cases else None),
                 menu_label=submission.menu_label,
+                meters=list(submission.meters),
                 submitted_at=now,
                 updated_at=now,
                 **fields,

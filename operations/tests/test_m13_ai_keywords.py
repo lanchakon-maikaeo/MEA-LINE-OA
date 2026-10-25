@@ -128,7 +128,21 @@ class UseTests(KeywordTestCase):
 
     def test_usage_text_never_goes_to_the_ai(self):
         self.ready()
-        self.submit({"kind": "problem", "topic": "usage", "description": "บ้านข้างๆ ลักใช้ไฟ"})
+        from operations.models import District
+
+        self.submit(
+            {
+                "kind": "problem",
+                "topic": "usage",
+                "description": "บ้านข้างๆ ลักใช้ไฟ",
+                "meters": [
+                    {
+                        "number": "12345678",
+                        "district": District.objects.order_by("code").first().code,
+                    }
+                ],  # 25 Oct 2569 Q11
+            }
+        )
         run_once()
         self.assertFalse(AIKeywordRun.objects.exists())
         self.assertEqual(self.llm.bodies, [])
