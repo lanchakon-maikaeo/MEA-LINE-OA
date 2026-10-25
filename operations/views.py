@@ -1171,6 +1171,9 @@ def admin_ai_action(request, action, pk=None):
                     d["screen_profile"],
                     d["task"] or AIConfigVersion.Task.EXTRACT,
                     d["typed_fields"] and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
+                    d["menu_fields"]
+                    and d["typed_fields"]
+                    and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
                 ),
                 "สร้างรุ่นการตั้งค่าแล้ว (รอทดสอบและประเมิน)",
             )
@@ -1190,6 +1193,7 @@ def admin_ai_action(request, action, pk=None):
                     d["use_json_schema"],
                     d["task"] or AIConfigVersion.Task.EXTRACT,
                     d["typed_fields"],
+                    d["menu_fields"],
                 ),
                 "สร้างรุ่นใหม่จากโมเดลสำเร็จรูปแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อ → ประเมิน → เปลี่ยน",
             )

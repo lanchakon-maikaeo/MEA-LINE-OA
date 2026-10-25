@@ -1133,6 +1133,9 @@ class AIConfigVersion(models.Model):
     # Extraction only (user, 23 Oct 2569): also read the SAP slip number and the typed fields
     # of the equipment-first groups (typed_lines). Older versions keep the prompt they passed.
     typed_fields = models.BooleanField(default=False, db_default=False)
+    # Also reads where a message belongs on the LINE menu (owner, 25 Oct 2569 Q9): needs
+    # typed_fields; evaluated on menu-v1 as well.
+    menu_fields = models.BooleanField(default=False, db_default=False)
     profiles = models.ManyToManyField(AIProfile, through="AIConfigEntry", related_name="+")
     test_passed = models.BooleanField(null=True)
     test_result = models.JSONField(default=dict, blank=True)

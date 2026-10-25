@@ -128,6 +128,12 @@ class AIPresetForm(forms.Form):
         initial=True,
         required=False,
     )
+    menu_fields = forms.BooleanField(
+        label="อ่านว่าข้อความเป็นเรื่องของกองไหนและหัวข้อไหน เครื่องวัดและเขต หมายเลขอุปกรณ์ "
+        "และงานซ่อม (ต้องอ่านช่องที่พิมพ์ด้วย)",
+        initial=True,
+        required=False,
+    )
 
 
 class AIVersionForm(forms.Form):
@@ -163,6 +169,7 @@ class AIVersionForm(forms.Form):
         required=False,
     )
     typed_fields = AIPresetForm.base_fields["typed_fields"]
+    menu_fields = AIPresetForm.base_fields["menu_fields"]
     note = forms.CharField(label="หมายเหตุ", max_length=500, required=False)
 
     def profiles(self):

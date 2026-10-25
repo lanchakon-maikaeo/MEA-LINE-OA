@@ -20,17 +20,17 @@ def clean_number(text):
     return number if METER_NUMBER.match(number) else ""
 
 
-def _key(name):
+def name_key(name):
     return NOISE.sub("", str(name or "")).casefold()
 
 
 def match_district(text):
     """The active district whose own name the text is ("บางเขน", "เขตบางเขน"), or None."""
-    wanted = _key(text)
+    wanted = name_key(text)
     if not wanted:
         return None
     for district in District.objects.filter(is_active=True).order_by("code"):
-        if _key(district.name) == wanted:
+        if name_key(district.name) == wanted:
             return district
     return None
 

@@ -53,6 +53,7 @@ def portable_config(version):
         "pipeline": version.pipeline,
         "few_shot": version.few_shot,
         "typed_fields": ai.reads_typed(version),
+        **({"menu_fields": True} if ai.reads_menu(version) else {}),
         "runtime": [settings.AI_TOTAL_BUDGET_SECONDS, settings.AI_HEDGE_AFTER_SECONDS],
         "chain": [_profile(p) for p in version.chain()],
         "screen": _profile(version.screen_profile) if version.screen_profile else None,
@@ -271,6 +272,7 @@ def _local_version(actor, bundle):
         _local_profile(actor, config["screen"]) if config["screen"] else None,
         config["task"],
         config["typed_fields"],
+        config.get("menu_fields", False),
     )
     if portable_digest(version) != wanted:
         raise ValidationError("สร้างรุ่นบนเครื่องนี้ให้ตรงกับที่ประเมินไม่ได้ (ค่าระยะเวลาของระบบต่างกัน)")

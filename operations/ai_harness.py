@@ -406,7 +406,8 @@ def prepare(
         if step:
             steps.append(step)
     clean, cut = minimize(text) if minimize_input else (text, 0)
-    catalog = ai._catalog(ai.reads_typed(version)) if catalog is None else catalog
+    if catalog is None:
+        catalog = ai._catalog(ai.reads_typed(version), ai.reads_menu(version))
     codes = [i.code for i in catalog]
     if screened_fields is not None and draft_context:
         fields = {**(draft_context.get("fields") or {})}

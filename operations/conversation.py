@@ -1326,7 +1326,14 @@ def _requester_turn(turn):
 
         return problem_chat.on_text(turn, text)
     if text is not None and draft is None and turn.conversation.prompt == "equipment_name":
-        return _equipment_named(turn, text)
+        from operations import ai_chat  # local: ai_chat builds on this module
+
+        # Q8: a whole request typed at the name prompt goes to the AI; a name is a name.
+        if not (
+            reads_as(text) == "request" and turn.allow_agent and ai_chat.wants_ai(turn, None, text)
+        ):
+            return _equipment_named(turn, text)
+        turn.set_prompt()
     if command and CASE_NUMBER.fullmatch(command.upper()) and not _expects_text(draft):
         return _case_detail(turn, command.upper())
     if text is not None and turn.conversation.prompt in ("", "info_reply", "info_target"):
@@ -2354,6 +2361,23 @@ def _ask_question(turn, draft):
                 f"พิมพ์{label} ถ้าไม่มี กดข้ามแล้วพิมพ์หมายเลขอุปกรณ์ในขั้นถัดไป",
                 [b("ข้าม", "sap_skip", draft=draft)],
             )
+    elif step == "which_division":
+        # 25 Oct 2569 Q10: a meter the AI could not place, a customer's (กตฟ.) or equipment of กคว.
+        turn.say(
+            "มิเตอร์ในข้อความนี้เป็นแบบไหน",
+            [
+                (*b("มิเตอร์บ้านผู้ใช้ไฟ", "which_division", {"to": "usage"}, draft), USAGE_CHOICE),
+                (*b("มิเตอร์ของ กคว.", "which_division", {"to": "กคว."}, draft), KCW_CHOICE),
+            ],
+        )
+    elif step == "usage_topic":
+        turn.say(
+            "เลือกหัวข้อของเรื่องการใช้ไฟฟ้า",
+            [
+                (*b(c.label, "usage_topic", {"id": c.pk}, draft), c.note or c.label)
+                for c in _usage_topics()
+            ],
+        )
     elif step == "meter":
         head = draft.data.get("menu_label") or "เรื่องการใช้ไฟฟ้า"
         turn.say(f"{head}\nพิมพ์หมายเลขเครื่องวัดฯ")
@@ -2617,6 +2641,18 @@ def _draft_button(turn, draft, action, value):
         if value.get("group") not in dict(_draft_groups(draft)):
             return _ask(turn, draft)
         return _start_row(turn, draft, value["group"])
+    if action == "which_division" and draft.step == "which_division":
+        if value.get("to") == "usage":
+            draft.data = dict(data, topic=Case.Topic.USAGE, division="กตฟ.", lines=[], entry={})
+            return _set(turn, draft, "usage_topic")
+        draft.data = dict(data, division="กคว.")
+        return _set(turn, draft, _next_field(draft))
+    if action == "usage_topic" and draft.step == "usage_topic":
+        item = next((c for c in _usage_topics() if c.pk == value.get("id")), None)
+        if item is None:
+            return _ask(turn, draft)
+        draft.data = dict(data, menu_label=_menu_label(item))
+        return _next_meter(turn, draft)
     if action == "meter_add" and draft.step == "meters_more":
         return _set(turn, draft, "meter")
     if action == "meters_done" and draft.step == "meters_more":
@@ -2858,6 +2894,36 @@ def typed_topic(data):
     return label
 
 
+USAGE_CHOICE = "เครื่องวัดที่บ้านผู้ใช้ไฟ (กตฟ.)"
+KCW_CHOICE = "อุปกรณ์มิเตอร์ของ กคว."
+
+
+def _usage_topics():
+    """The กตฟ. tile's report topics, as the requester sees them on the menu."""
+    return list(
+        LineMenuItem.objects.filter(
+            place=LineMenuItem.Place.CHOICE,
+            topic=Case.Topic.USAGE,
+            action=LineMenuItem.Action.PROBLEM,
+            is_active=True,
+            parent__is_active=True,
+        )
+        .select_related("parent")
+        .order_by("position", "pk")
+    )
+
+
+def _next_meter(turn, draft):
+    """After the topic or a district: a meter the AI read without its district is asked next,
+    then any meter at all, then the fields (25 Oct 2569 Q11)."""
+    pending = list(draft.data.get("meters_pending") or [])
+    if pending:
+        return _set(turn, draft, "district", meter=pending[0], meters_pending=pending[1:])
+    if not draft.data.get("meters"):
+        return _set(turn, draft, "meter")
+    return _set(turn, draft, "meters_more")
+
+
 def _meter_text(turn, draft, text):
     number = usage_meters.clean_number(text)
     if not number:
@@ -2878,7 +2944,8 @@ def _district_text(turn, draft, text):
         *draft.data.get("meters", []),
         {"number": draft.data["meter"], "district": district.code},
     ]
-    return _set(turn, draft, "meters_more", meters=meters, meter="")
+    draft.data = dict(draft.data, meters=meters, meter="")
+    return _next_meter(turn, draft)
 
 
 def _skip_sap(turn, draft):
