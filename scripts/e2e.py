@@ -315,7 +315,8 @@ def real_structure(browser, base_url, password):
         description="สงสัยลักใช้ไฟ ต่อสายตรงไม่ผ่านมิเตอร์ (ข้อมูลจำลอง)",
     )
     expect(ktf.locator("dl.facts dd").first).to_contain_text("กตฟ. กองตรวจสอบการใช้ไฟฟ้า")
-    expect(ktf.locator("dl.facts")).to_contain_text("การใช้ไฟฟ้า (ไม่ส่งให้ AI)")
+    # ADR 0021 (25 Oct 2569): such a case may reach the AI after masking unless kept away.
+    expect(ktf.locator("dl.facts")).to_contain_text("การใช้ไฟฟ้า")
     finish_triage(ktf, section="แผนกตรวจสอบการใช้ไฟฟ้า 1")
     act(
         ktf,

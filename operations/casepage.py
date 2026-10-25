@@ -472,6 +472,8 @@ def build(case, now=None):
             *((label, getattr(case, name)) for name, label in TEXT_FIELDS if getattr(case, name)),
         ],
         "hazard_guidance": policy.hazard_guidance(case),
+        # ADR 0021: an การใช้ไฟฟ้า case reaches the AI unless ตัวเลือกระบบ usage_ai keeps it away.
+        "usage_private": case.topic == Case.Topic.USAGE and policy.usage_kept_from_ai(),
         "hazard": bool(triage and triage.priority_floor == "P0"),
         "proposal": proposal(case),
         "decisions": decisions_made(case, triage),
