@@ -11,7 +11,7 @@ import hashlib
 import io
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from io import StringIO
 
 from django.core.management import call_command
@@ -79,11 +79,13 @@ class Command(DemoCommand):
             matched = self.withdrawal(8, f"SIM-49{run}01")
             short = self.withdrawal(5, f"SIM-49{run}02")
             missing = self.withdrawal(3, f"SIM-49{run}03")
-        RegistryRecord.objects.filter(case__in=[matched, short, missing]).update(
-            recorded_at=timezone.now() - timedelta(days=3)
-        )
         today = timezone.localdate()
-        day = today - timedelta(days=3)
+        # A day the export covers: before its last working day, whatever holidays come between
+        # (on 25 Oct 2569 "three days ago" was the last working day itself, after วันปิยมหาราช).
+        day = registry.last_working_day(today) - timedelta(days=1)
+        RegistryRecord.objects.filter(case__in=[matched, short, missing]).update(
+            recorded_at=timezone.make_aware(datetime.combine(day, time(10)))
+        )
         rows = [
             [f"SIM-49{run}01", f"{day:%d.%m.%Y}", "261", CODES["FUSE_SYN_A"], "8-", matched.number],
             [f"SIM-49{run}02", f"{day:%d.%m.%Y}", "261", CODES["FUSE_SYN_A"], "4-", short.number],
