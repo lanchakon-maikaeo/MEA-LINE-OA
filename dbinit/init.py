@@ -3,23 +3,21 @@
 # objects ที่ import มาให้เรียงชื่อจาก A-Z โดยมีลำดับ: abc (fucntions, variables) , Abc (classes) , ABC (constants)
 
 # packages ที่มากับ Python อยู่แล้ว
-from enum import StrEnum
 
 # packages ที่ install เข้ามา
 
 # packages ที่เขียนเอง และใช้ร่วมกันใน Project
-from line_bot.ai_tasks.ai import AI
+from shared.db.main import models # ห้ามลบ ใช้สำหรับ initialize
+from shared.db.main.base import Base
+from shared.db.main.session import get_engine
 
-EMPLOYEE_ID_SYSTEM_PROMPT="""
-"""
 
-OTP_SYSTEM_PROMPT="""
-"""
+def main() -> None:
+    engine = get_engine()
+    Base.metadata.drop_all(engine)  # For Dev: ลบทุกตารางทิ้งก่อน
+    Base.metadata.create_all(engine)
+    engine.dispose()
 
-async def get_employee_id(message: str) -> str:
-    id = await AI.chat_text(EMPLOYEE_ID_SYSTEM_PROMPT, message)
-    return id
 
-async def get_otp(message: str) -> str:
-    otp = await AI.chat_text(OTP_SYSTEM_PROMPT, message)
-    return otp
+if __name__ == "__main__":
+    main()

@@ -9,16 +9,31 @@ from enum import StrEnum
 
 # packages ที่เขียนเอง และใช้ร่วมกันใน Project
 from line_bot.ai_tasks.ai import AI
-
-SYSTEM_PROMPT="""
-"""
-
-SCHEMA={}
+from line_bot.intents import Intent
 
 class ResponseField(StrEnum):
-    INTENTS = "intents"
+    INTENT = "intent"
 
-async def get_intents(message: str) -> list[str]:
+SYSTEM_PROMPT=f"""
+คุณคือระบบจำแนกเจตนา (intent) ของข้อความจากผู้ใช้
+ให้เลือก intent ที่ตรงกับข้อความมากที่สุดเพียง 1 อย่าง จากรายการนี้:
+{"\n".join(f"- {intent.value}" for intent in Intent)}
+"""
+
+SCHEMA={
+    "type": "object",
+    "properties": {
+        ResponseField.INTENT: {
+            "type": "string",
+            "description": "intent ของข้อความ",
+            "enum": [intent.value for intent in Intent]
+        }
+    },
+    "required": [ResponseField.INTENT],
+    "additionalProperties": False
+}
+
+async def get_intent(message: str) -> Intent:
     response = await AI.chat_json(SYSTEM_PROMPT, message, SCHEMA)
-    intents = response[ResponseField.INTENTS]
-    return intents
+    value = response.get(ResponseField.INTENT)
+    return Intent(value) if value in Intent else Intent.NONE_INTENT

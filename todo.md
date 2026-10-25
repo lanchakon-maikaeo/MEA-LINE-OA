@@ -1,83 +1,113 @@
 # TODO — line_oa_meter
 
-## ✅ ทำแล้ว (2026-10-24)
-- `Admin` เปลี่ยนเป็น `admin_index` (PK) + `employee_index` (FK, unique), orders ใช้ `admin_index` แทน `admin_employee_id` (แก้ models.py, schemas, query.sql แล้ว)
-- `register_user`: upsert ไม่เขียนทับ `department_index` เป็น None (coalesce)
-- `LineUserEmployeeSchema` → `UserInfo`, `get_user` / `cache_search` / `db_search` / `register_user` return `UserInfo | None`
-- สร้าง `line_bot/line/reply.py` (`reply`, `quick_reply`)
-- จัดไฟล์: `events.py` `reply.py` `signature.py` → `line_bot/line/`, `helpers.py` → `forms.py` (`ITEM_WITHDRAW` → `ASSET_REQUISITION`)
+> flow ทั้งหมดดูใน `story.md`
+
+## 1. ให้รันได้ก่อน
+- [ ] `.env` ใส่ค่าที่ยังว่าง: `AI_PROVIDER`, `AI_MODEL`, API key ของ AI ที่ใช้, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `LINE_REPLY_URL=https://api.line.me/v2/bot/message/reply`, `MEA_SMARTOFFICE_XAPI_KEY`
+- [ ] `docker-compose.yml`: comment service `api` ไว้ก่อน (โฟลเดอร์ `api/` ยังว่าง)
+- [ ] `process.py`: แก้ `get_intents` → `get_intent` (ไม่งั้น import พัง)
+- [ ] เช็คปุ่ม Rich Menu ส่งข้อความตรงกับ `intents.py` ทุกตัว
+
+## 2. `intents.py`
+- [ ] เพิ่ม `CANCEL = "ยกเลิก"`
+- [ ] ใส่เบอร์โทร / อีเมลจริงใน `FAQ_ANSWERS`
+
+## 3. สร้าง `line_bot/actions/`
+### 3.1 `actions/state.py` — เก็บว่า user ทำ action อะไรอยู่ (Redis)
+- [ ] `ACTION_TTL = 600` (วินาที)
+- [ ] `get_state_key(line_user_id)` → `"action:{line_user_id}"`
+- [ ] `get_state(line_user_id) -> dict | None`
+- [ ] `set_state(line_user_id, state)`
+- [ ] `clear_state(line_user_id)`
+- [ ] ค่าคงที่ปุ่ม: `CONFIRM = "ถูกต้อง"`, `EDIT = "แก้ไข"`, `YES = "ใช่"`, `NO = "ไม่"`
+
+หน้าตา state:
+```python
+{"intent": "ขอยืนยันตัวตน", "step": "wait_employee_id", "draft": None, "pending_intent": None, "data": {}}
+```
+- `draft` = คำตอบที่รอ user กดถูกต้อง/แก้ไข
+- `pending_intent` = action ใหม่ที่รอ user ตอบว่าจะยกเลิกของเดิมไหม
+
+### 3.2 ทุกไฟล์ action ต้องมี 4 อย่างนี้
+```python
+REQUIRES_AUTH: bool
+async def start(user, message) -> None          # เริ่ม action + set state + ถามคำถามแรก
+async def handle(user, message, state) -> bool  # True = ตรงรูปแบบ, False = ไม่ตรง (ส่งให้ AI)
+def prompt(state) -> str                        # คำถามของขั้นปัจจุบัน (ใช้ถามซ้ำ)
+```
+
+### 3.3 `actions/register.py` (ทำอันนี้ก่อน)
+- [ ] `REQUIRES_AUTH = False`
+- [ ] ย้าย `VERY_REAL_OTP` จาก `user/utils.py` มาไว้ใน `user/otp.py`
+- [ ] `class RegisterStep(StrEnum)`: `WAIT_EMPLOYEE_ID`, `WAIT_OTP`
+- [ ] `start`: ถ้ายืนยันแล้ว → "คุณยืนยันตัวตนแล้ว" / ยังไม่ → set state + "ขอรหัสพนักงานหน่อยครับ"
+- [ ] `handle` ขั้น `WAIT_EMPLOYEE_ID`
+  - ไม่ใช่ตัวเลขล้วน → `return False`
+  - `search_employee` ไม่เจอ → "ไม่พบรหัสพนักงาน โปรดกรอกอีกครั้ง" → `return True`
+  - เจอ → เก็บ `employee_id` ใน `data` → step = `WAIT_OTP` → "ขอ OTP ครับ" → `return True`
+- [ ] `handle` ขั้น `WAIT_OTP`
+  - ไม่ใช่ตัวเลขล้วน → `return False`
+  - `verify_otp` ผิด → "OTP ไม่ถูกต้อง โปรดกรอกอีกครั้ง" → `return True`
+  - ถูก → `register_user(employee_id, line_user_id)` → เช็ค None → `clear_state` → "ยืนยันตัวตนสำเร็จ" → `return True`
+
+### 3.4 action อื่น (โครงเปล่าไปก่อน)
+- [ ] `meter_report.py`, `asset_requisition.py`, `track_meter_report.py`, `track_asset_requisition.py`
+- [ ] `REQUIRES_AUTH = True`
+- [ ] `start` แค่ reply "กำลังพัฒนา" ไม่ต้อง set state
+
+### 3.5 `actions/__init__.py`
+- [ ] `ACTION_HANDLERS = {Intent.REGISTER: register, Intent.METER_REPORT: meter_report, ...}` (เก็บเป็น module)
+
+## 4. เขียน `process.py` ใหม่
+- [ ] ลบ `reply_messages`, return type → `None`
+- [ ] ใช้ `continue` ไม่ใช้ `return`
+- [ ] reply ได้ 1 ครั้งต่อ message → ถ้าตอบ FAQ แล้วต้องถามต่อ ให้รวมเป็นข้อความเดียว
+- [ ] เขียนฟังก์ชันช่วย `find_intent(text) -> Intent`: ตรงเป๊ะ → `Intent(text)` / ไม่ตรง → `get_intent(text)` (กัน `NONE_INTENT` ที่ user พิมพ์มาตรง ๆ)
+
+ลำดับใน loop:
+```
+user = get_user()
+state = get_state()
+
+ถ้ามี state:
+  1. "ยกเลิก"                 → clear_state → "ยกเลิกแล้ว"
+  2. มี pending_intent         → "ใช่" → clear_state → start(action ใหม่)
+                                 "ไม่" → ลบ pending_intent → prompt(state)
+  3. มี draft                  → "ถูกต้อง" / "แก้ไข" / ข้อความใหม่ (ให้ action จัดการใน handle)
+  4. ตรง FAQ เป๊ะ               → FAQ + prompt(state)
+  5. handle() == True          → จบ
+  6. handle() == False         → find_intent
+       FAQ                     → FAQ + prompt(state)
+       action เดิม / NONE       → "ไม่เข้าใจครับ" + prompt(state)
+       action อื่น              → set pending_intent → quick_reply "ต้องการยกเลิก X ไหม" [ใช่] [ไม่]
+
+ไม่มี state:
+  intent = find_intent
+  FAQ                          → ตอบ
+  action                       → REQUIRES_AUTH แต่ user เป็น None → "กรุณายืนยันตัวตนก่อน โดยกดปุ่ม 'ขอยืนยันตัวตน' ที่เมนูด้านล่าง"
+                                 ผ่าน → start()
+  NONE                         → "ขออภัย ไม่เข้าใจคำถาม กรุณาเลือกจากเมนูด้านล่าง"
+```
+
+## 5. ทดสอบ register
+- [ ] รัน compose → ส่งข้อความจาก LINE จริง
+- [ ] ไล่ Story 1–8, 10 ใน `story.md`
+
+## 6. หลังคุยกับเพื่อน (ดู `story.md` ข้อ 6)
+- [ ] ออกแบบขั้นตอน `meter_report` → เขียน + ใส่ recheck (`draft`) ในขั้นที่รับข้อความอิสระ
+- [ ] ออกแบบขั้นตอน `asset_requisition`
+- [ ] ทำ `track_*` (ดึงเรื่องจาก DB มาแสดง)
 
 ---
 
-## 🔴 ต้องทำก่อน (ไม่งั้นรันไม่ได้)
-- [ ] สร้าง `dbinit/Dockerfile` (+ script `create_all`) — compose build ไม่ผ่าน และ `line_bot` รอ `dbinit` อยู่
-- [ ] `api/`, `tests/` ยังว่าง → สร้าง Dockerfile หรือ comment service ออกจาก `docker-compose.yml` ไปก่อน
-- [ ] ลบตาราง `admins`, `meter_report_orders`, `asset_requisition_orders` (หรือลบ `dbdata/postgres/main`) เพราะ `create_all` ไม่แก้ตารางเดิม
-- [ ] `.env` ใส่ให้ครบ: `LINE_REPLY_URL=https://api.line.me/v2/bot/message/reply`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `AI_PROVIDER`, `AI_MODEL`, `MEA_SMARTOFFICE_XAPI_KEY`
-
-## 🟡 ลำดับงานพรุ่งนี้
-
-### 1. Register (OTP ปลอม)
-- [ ] `user/utils.py` เพิ่ม
-  - `VERY_REAL_OTP = "1234"  # TODO: ของปลอม`
-  - `REGISTER_TTL = 300`
-  - `class RegisterStep(StrEnum)`: `WAIT_EMPLOYEE_ID`, `WAIT_OTP`
-  - `get_register_key(line_user_id) -> f"register:{line_user_id}"`
-- [ ] `user/otp.py`: `verify_otp(user_otp: str) -> bool` (เทียบ `.strip()` กับ `VERY_REAL_OTP`)
-
-### 2. `line_bot/intents.py` (ห้าม import อะไรในโปรเจค กัน circular import)
-- [ ] `class Intent(StrEnum)` — ค่า = ข้อความบนปุ่ม/คำที่ match ตรงเป๊ะ
-  - FAQ: `CONTACT_NUMBER = "ขอเบอร์โทรติดต่อ"`
-  - action: `ASSET_REQUISITION = "เบิกของ"`, `CHECK_STATUS = "เช็คสถานะ"`, `METER_REPORT = "แจ้งปัญหามิเตอร์"`
-- [ ] `FAQ_ANSWERS = {Intent.CONTACT_NUMBER: "เบอร์โทรติดต่อ: xxx"}`
-
-### 3. `ai_tasks/classify_intent.py`
-- [ ] เปลี่ยน `get_intents` (list) → `get_intent(message) -> Intent | None`
-- [ ] `SCHEMA` ใช้ enum จาก `Intent`: `{"type": "string", "enum": [i.value for i in Intent] + ["none"]}` (ห่อเป็น object ตามที่ provider ต้องการ)
-- [ ] เขียน `SYSTEM_PROMPT`
-
-### 4. `line_bot/actions.py`
-- [ ] `handle_asset_requisition(user, message)`, `handle_check_status(...)`, `handle_meter_report(...)` (โครงเปล่า reply ข้อความไปก่อนได้)
-- [ ] ท้ายไฟล์: `ACTION_HANDLERS = {Intent.X: handle_x, ...}`
-
-### 5. `process.py` (เขียน flow ให้เห็นในไฟล์นี้ ไม่ซ่อนใน handle_register)
-ลำดับ:
-```
-1. text ตรง FAQ เป๊ะ                → reply FAQ (ใครก็ได้)
-2. user ยังไม่ register
-   ├─ ไม่มี register state
-   │    → AI จับ intent: FAQ → ตอบ / อื่น ๆ → set state WAIT_EMPLOYEE_ID + "โปรดกรอกรหัสพนักงาน"
-   ├─ WAIT_EMPLOYEE_ID → search_employee(text)
-   │    ไม่เจอ → "ไม่พบรหัสพนักงาน โปรดกรอกอีกครั้ง" (state เดิม)
-   │    เจอ   → set state WAIT_OTP + employee_id + "โปรดกรอก OTP"
-   └─ WAIT_OTP → verify_otp
-        ผิด → "OTP ไม่ถูกต้อง" (วนถาม OTP)
-        ถูก → register_user(employee_id, line_user_id) → เช็ค None → ลบ state → "ลงทะเบียนสำเร็จ"
-3. มี form ค้าง (forms.get_forms)     → ส่งต่อให้ handler ของ form นั้น
-4. text ตรง action เป๊ะ             → ACTION_HANDLERS[Intent(text)]
-5. AI get_intent
-   ├─ FAQ    → reply
-   ├─ action → handler
-   └─ None   → quick_reply เมนู list(Intent)
-```
-- [ ] ใช้ `continue` ไม่ใช่ `return` (ข้อความอื่นใน batch ยังต้องทำต่อ)
-- [ ] `reply_token` ใช้ได้ครั้งเดียว → reply 1 ครั้งต่อ message
-- [ ] ลบ `reply_messages` ที่ไม่ได้ใช้, เปลี่ยน return type เป็น `None`
-- [ ] import path ใหม่: `from line_bot.line.reply import quick_reply, reply`, `from line_bot.forms import ...`
-
-### 6. Forms (หลัง process.py รันได้)
-- [ ] state ของ form ใน Redis ผ่าน `form_key` / `get_forms` ใน `forms.py`
-- [ ] ทำ quick reply ในแต่ละขั้นของ form
-
----
-
-## ⚪ เก็บทีหลัง
-- [ ] `EmployeeSchema`: เปิด `user_password_hash: str = Field(exclude=True)` (ตอนนี้หลุดออกไปกับ model_dump) + ลบ import `Field` ถ้าไม่ใช้
-- [ ] `search_employee` ถูกเรียก 2 รอบ (ตอนเช็ครหัส + ใน `register_user`) → refactor
-- [ ] `extract_user_data.py`: prompt ยังว่าง (`get_employee_id`, `get_otp`) — ตอนนี้ใช้ `.strip()` แทนไปก่อน
-- [ ] OTP จริง: สุ่ม + เก็บใน Redis + ส่ง SMS (แก้แค่ `user/otp.py`)
-- [ ] `query.sql` ซ้ำกับ `models.py` → เลือก models.py เป็นต้นฉบับ
+## เก็บทีหลัง
+- [ ] ลบ `forms.py` (ใช้ `actions/state.py` แทน)
+- [ ] `EmployeeSchema`: ใช้ `user_password_hash: str = Field(exclude=True)` (ตอนนี้หลุดไปกับ `model_dump`)
+- [ ] `search_employee` ถูกเรียก 2 รอบ (ใน action + ใน `register_user`) → refactor
+- [ ] OTP จริง: สุ่ม + เก็บ Redis + ส่ง SMS (แก้แค่ `user/otp.py`)
+- [ ] `extract_user_data.py` ยังว่าง → ลบทิ้ง หรือใช้ทีหลัง
+- [ ] `query.sql` ซ้ำกับ `models.py` → ใช้ `models.py` เป็นหลัก
 - [ ] `docker-compose.yml` service `test`: ลบ `env_file: .env`
-- [ ] `shared/db/ai/` ยังว่าง (ai_db ยังไม่ได้ใช้)
-- [ ] `git init` ก่อน refactor
-- [ ] รวม `1_todo.txt` เข้ามาไฟล์นี้แล้วลบทิ้ง
+- [ ] `dbinit` ใช้ `drop_all` ทุกครั้ง → ข้อมูลหายทุกรอบที่ `compose up` (เอาออกก่อนขึ้นจริง)
+- [ ] `.gitignore` เพิ่ม `app.log`
+- [ ] commit `dbinit/`, `tests/`, `story.md`, `todo.md`

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 # packages ที่เขียนเอง และใช้ร่วมกันใน Project
 
 USER_CACHE_TTL = 1800 # วินาที (30 นาที)
+VERY_REAL_OTP = "1234" # TODO: otp ของปลอม
 
 class EmployeePayload(BaseModel):
     employee_id: str = Field(alias="empId")
