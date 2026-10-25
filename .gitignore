@@ -42,6 +42,7 @@ archive/
 !Docs/adr/0019-automatic-line-menus-and-confirmed-chat-orders.md
 !Docs/adr/0020-signed-ai-evaluation-evidence-for-production.md
 !Docs/adr/0021-electricity-usage-text-may-reach-the-ai-after-masking.md
+!Docs/adr/0022-the-ai-talks-and-fills-the-draft-the-program-files.md
 
 !operations/line_assets/*.jpg
 

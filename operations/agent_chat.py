@@ -10,7 +10,7 @@ from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db import transaction
 from django.utils import timezone
 
-from operations import agent_mcp, ai, ai_answer, answers, conversation, staff_line
+from operations import agent_intake, agent_mcp, ai, ai_answer, answers, conversation, staff_line
 from operations.models import AIRun, ConversationMessage, RoleGrant
 
 
@@ -138,13 +138,17 @@ list_orders or list_equipment, or get_case for an exact case number. Call prepar
 when the person asks to open a menu by its name, or for an operation: select a displayed choice \
 or construct one supported command. The person confirms every change afterwards; opening a menu \
 needs no confirmation.
-- action "intake": a new withdrawal, return or problem description. The existing intake flow \
-takes the message.
+- action "intake": a new withdrawal, return or problem description, including a report about \
+equipment, a meter, electricity use or the SMG/AMR or billing systems, and following up a repair \
+of a piece of equipment (ติดตามงานซ่อม, ติดตามสถานะการซ่อม). The existing intake flow takes the \
+message; never answer such a message yourself.
 Examples (arguments not shown are null):
 "ช่วยค้นรายการมิเตอร์" -> {"action":"tool","tool":"list_equipment","arguments":{"search":"มิเตอร์"}}
 "เรื่องที่แจ้งไว้ถึงไหนแล้ว" -> {"action":"tool","tool":"list_cases","arguments":{"scope":"own"}}
-"เปิดเมนูบริการ" -> {"action":"tool","tool":"prepare_action","arguments":{"command":"บริการ"}}
+"ขอดูเรื่องของฉัน" -> {"action":"tool","tool":"prepare_action","arguments":{"command":"ติดตามเรื่องของฉัน"}}
 "ขอเบิกฟิวส์ 2 ชิ้น" -> {"action":"intake"}
+"ระบบ SMG ดึงข้อมูลไม่ได้" -> {"action":"intake"}
+"ขอติดตามงานซ่อม สว่านไฟฟ้า หมายเลข DR-01" -> {"action":"intake"}
 After a tool_result, explain what was found using only that result, call one more tool when the \
 result does not answer the message, or ask one clarification. The application shows the rows \
 with detail buttons, so do not list every row.
@@ -224,7 +228,19 @@ def decision(raw, parameters):
     }
 
 
-def _decide(run, messages, schema, parameters, deadline, step, sources, numbers, attempts):
+def _decide(
+    run,
+    messages,
+    schema,
+    parameters,
+    deadline,
+    step,
+    sources,
+    numbers,
+    attempts,
+    allowed=(),
+    previous=(),
+):
     """One step through the chain (primary, then fallbacks on failure or an invalid answer):
     (decision, profile, latency_ms), or Nones when no model gave a usable one in time."""
     for profile in run.config_version.chain():
@@ -243,8 +259,11 @@ def _decide(run, messages, schema, parameters, deadline, step, sources, numbers,
                 max_tokens=min(profile.max_tokens, 700),
             )
             decided = decision(raw, parameters)
-            if decided["action"] == "reply" and ai_answer.reply_problem(
-                decided["reply"], sources, numbers
+            if decided["action"] == "reply" and (
+                agent_intake.problem(
+                    decided["reply"], sources, numbers, allowed, limit=ai_answer.MAX_REPLY
+                )
+                or " ".join(decided["reply"].split()) in previous
             ):
                 raise ValueError("invalid conversational reply")
         except (ai.AIError, ai.SchemaError, ValueError, TypeError, KeyError, ImproperlyConfigured):
@@ -266,6 +285,9 @@ def _for_model(result):
     return seen
 
 
+# "กด 'ส่งเรื่องใหม่' เลือก 'เบิก'" in older approved answers (ADR 0022 Q17).
+OLD_MENU = re.compile(r"กด\s*'ส่งเรื่องใหม่'(?:\s*(?:แล้ว)?\s*เลือก\s*'[^']+')?|'บริการ'")
+CURRENT_MENU = "เลือกเมนูด้านล่าง หรือพิมพ์เรื่องที่ต้องการในแชตนี้"
 PARTICLES = re.compile(r"\s*(?:นะ)?(?:ครับ|ค่ะ)(?=[\s.,!?]|$)")
 
 
@@ -274,9 +296,10 @@ def _neutral(text):
     return " ".join(PARTICLES.sub("", text).split())
 
 
-def plan(run, source, budget, trace=None):
+def plan(run, source, budget, trace=None, max_steps=MAX_STEPS):
     """The agent loop for one LINE message: (result for present(), or None to hand the message
-    to the intake flow; attempt records). `trace` (optional) receives each step as a dict."""
+    to the intake flow; attempt records). `trace` (optional) receives each step as a dict.
+    `max_steps`: fewer model calls when the intake agent already made one (ADR 0022 Q12)."""
     if not enabled() or budget < 2:
         return None, []
     tools = agent_mcp.Tools(run.identity_id, source)
@@ -292,14 +315,10 @@ def plan(run, source, budget, trace=None):
     knowledge = [guide]
     if not capability_question:
         for row in answers.approved().filter(short_only=False):
-            text = answers.compose(row)
-            for old, current in (
-                ("'ส่งเรื่องใหม่'", "'บริการ'"),
-                ("'เบิก'", "'เบิกอุปกรณ์'"),
-                ("'ส่งคืน'", "'ส่งคืนอุปกรณ์'"),
-            ):
-                text = text.replace(old, current)
-            knowledge.append(text)
+            # Older answers name menus that are gone (25 Oct 2569 Q2): the rich menu is the menu.
+            knowledge.append(OLD_MENU.sub(CURRENT_MENU, answers.compose(row)))
+    history = recent_dialogue(run)
+    previous = {" ".join(h["reply"].split()) for h in history}  # never the same reply again
     offered = agent_mcp.function_tools(exclude={"get_context"})
     parameters = {t["function"]["name"]: t["function"]["parameters"] for t in offered}
     schema = decision_schema(offered)
@@ -313,17 +332,28 @@ def plan(run, source, budget, trace=None):
                     "message": source,
                     "context": context,
                     "knowledge": knowledge,
-                    "history": recent_dialogue(run),
+                    "history": history,
                 },
                 ensure_ascii=False,
             ),
         },
     ]
     sources, numbers = "\n".join(knowledge), []
+    allowed = [*context["commands"], *context["choices"], *agent_intake.menus()]
     attempts, shown, calls = [], None, set()
-    for step in range(MAX_STEPS):
+    for step in range(max_steps):
         decided, profile, latency = _decide(
-            run, messages, schema, parameters, deadline, step, sources, numbers, attempts
+            run,
+            messages,
+            schema,
+            parameters,
+            deadline,
+            step,
+            sources,
+            numbers,
+            attempts,
+            allowed,
+            previous,
         )
         if decided is None:
             break

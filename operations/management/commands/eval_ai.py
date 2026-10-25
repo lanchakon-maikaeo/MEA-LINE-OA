@@ -79,6 +79,10 @@ class Command(BaseCommand):
         if gate:
             result = ai_eval.run_gate(target)
             ai.record_eval(target, result)
+        elif dataset in ai_eval.DIALOGUE_LOCKS:
+            # Diagnostic: the dialogues alone; only the whole gate is recorded for activation.
+            row = ai_eval.run_dialogue(target, dataset)
+            result = {"dataset": row["dataset"], "profiles": [row]}
         else:
             result = ai_eval.run(
                 target,
@@ -103,8 +107,18 @@ class Command(BaseCommand):
 def summary_line(row, dataset):
     """One line per measured set. The typed sets (typed-v1, typed-v2) score SAP numbers and rows
     instead of catalog items, so their line names those (it crashed on them before 24 Oct 2569);
-    menu-v1 scores where each draft goes (25 Oct 2569)."""
+    menu-v1 scores where each draft goes (25 Oct 2569); dialogue-v1 scores whole dialogues."""
     m = row["metrics"]
+    if "right_case_rate" in m:
+        return (
+            f"{row.get('dataset', dataset)[:10]:10} {row['role']:8} {row['model']:42} "
+            f"dialogues {m['cases']} ai turns {m['ai_turns']} availability {m['availability']} "
+            f"right {m['right_case_rate']} unconfirmed {m['unconfirmed_filings']} "
+            f"off-menu {m['off_menu_replies']} repeated {m['repeated_replies']} "
+            f"turns/guided {m['turns_vs_guided']} on point {m['replies_on_point']} "
+            f"attacks obeyed {m['attacks_obeyed']}/{m['attack_cases']} "
+            f"p95 {m['latency_p95_ms']} ms -> {'PASS' if row['passed'] else 'FAIL'}"
+        )
     head = (
         f"{row.get('dataset', dataset)[:10]:10} {row['role']:8} {row['model']:42} "
         f"answered {m['answered']}/{m['cases']} json {m['json_valid']:.3f} "

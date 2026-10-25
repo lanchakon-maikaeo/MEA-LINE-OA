@@ -85,7 +85,7 @@ class SchemaTests(MenuTestCase):
         self.assertIn("Menu path", menu_prompt)
         version = ai.create_version(self.dev, self.profiles, typed_fields=True, menu_fields=True)
         self.assertEqual(ai.schema_version_for(version), ai.MENU_SCHEMA_VERSION)
-        self.assertTrue(ai.eval_gate_for(version).endswith("+menu-v1"))
+        self.assertTrue(ai.eval_gate_for(version).endswith("+menu-v1+dialogue-v1"))
 
 
 class GroundingTests(MenuTestCase):
@@ -277,6 +277,16 @@ class SplitTests(MenuTestCase):
         )
         self.assertNotIn("division", draft.data)
         draft.delete()
+        # Also when the model names one division for the message (dialogue-v1 D11).
+        draft = self.chat(
+            "ขอเบิกมิเตอร์ 5(15)A 1 เครื่อง หมายเลข 11110001 และหม้อแปลง 160 kVA 1 เครื่อง "
+            "หมายเลข TR-1601 ใบเบิก 4500777003",
+            menu_request(
+                "withdrawal", meter, transformer, division="กคว.", sap_number="4500777003"
+            ),
+        )
+        self.assertNotIn("division", draft.data)
+        draft.delete()
         draft = self.chat(
             "ขอเบิกมิเตอร์ 5(15)A 1 เครื่อง หมายเลข 11110001 ใบเบิก 4500777002",
             menu_request("withdrawal", meter, sap_number="4500777002"),
@@ -285,7 +295,7 @@ class SplitTests(MenuTestCase):
 
 
 class GateTests(MenuTestCase):
-    def test_a_menu_version_needs_menu_v1_before_a_switch(self):
+    def test_a_menu_version_needs_menu_v1_and_dialogue_v1_before_a_switch(self):
         from operations import ai_eval
         from operations.tests.test_m14_typed_ai import passing_typed_gate
 
@@ -305,9 +315,23 @@ class GateTests(MenuTestCase):
             }
         )
         version = ai.record_eval(version, report)
+        self.assertFalse(version.eval_passed)  # dialogue-v1 too (ADR 0022 Q11)
+        dataset, _, dialogues = ai_eval.load(ai_eval.DATASETS["dialogue1"])
+        report["profiles"].append(
+            {
+                "dataset": dataset,
+                "dataset_sha256": ai_eval.DIALOGUE_SHA256,
+                "role": "application",
+                "metrics": {**ai_eval.DIALOGUE_THRESHOLDS, "cases": len(dialogues)},
+            }
+        )
+        version = ai.record_eval(version, report)
         self.assertTrue(version.eval_passed)
         self.assertIsNone(ai.activation_blocker(version))
-        report["profiles"][-1]["metrics"]["ask_accuracy"] = 0.0  # guessed an unplaced meter
+        report["profiles"][-1]["metrics"]["unconfirmed_filings"] = 1  # filed without a confirm
+        self.assertFalse(ai_eval.gate_passed(report, version))
+        report["profiles"][-1]["metrics"]["unconfirmed_filings"] = 0
+        report["profiles"][-2]["metrics"]["ask_accuracy"] = 0.0  # guessed an unplaced meter
         self.assertFalse(ai_eval.gate_passed(report, version))
 
 
