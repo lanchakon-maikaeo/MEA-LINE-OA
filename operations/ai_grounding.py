@@ -377,7 +377,13 @@ def labelled_serials(source, label=SERIAL_LABEL):
         " ".join(source),
     ):
         labelled += [t for t in re.findall(r"[a-z0-9_-]+", group) if t not in labelled]
-    return labelled
+    return [t for t in labelled if _has_digit(t)]
+
+
+def _has_digit(token):
+    """A serial has a digit: a word after the numbers ("หมายเลข TR-2501 SAP …") is not one
+    (found by menu-v1 on 25 Oct 2569: "sap" voided the transformer's number)."""
+    return any(c.isdigit() for c in token)
 
 
 def serial_tokens(source, label=SERIAL_LABEL):
@@ -388,7 +394,7 @@ def serial_tokens(source, label=SERIAL_LABEL):
         rf"{label}\s*[:：]?\s*([a-z0-9_-]+(?:[ ,]+[a-z0-9_-]+)*)",
         text,
     ):
-        labelled.update(re.findall(r"[a-z0-9_-]+", group))
+        labelled.update(t for t in re.findall(r"[a-z0-9_-]+", group) if _has_digit(t))
     mixed = {
         token
         for token in re.findall(r"(?<![a-z0-9_-])[a-z0-9][a-z0-9_-]*", text)

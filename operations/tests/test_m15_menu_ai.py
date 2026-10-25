@@ -256,3 +256,30 @@ class SplitTests(MenuTestCase):
             menu_request("withdrawal", meter, sap_number="4500777002"),
         )
         self.assertEqual(draft.data["division"], "กคว.")
+
+
+class GateTests(MenuTestCase):
+    def test_a_menu_version_needs_menu_v1_before_a_switch(self):
+        from operations import ai_eval
+        from operations.tests.test_m14_typed_ai import passing_typed_gate
+
+        version = ai.create_version(self.dev, self.profiles, typed_fields=True, menu_fields=True)
+        ai.test_version(self.dev, version)
+        report = passing_typed_gate(version)
+        report.update(gate=ai.MENU_EVAL_GATE, schema=ai.MENU_SCHEMA_VERSION)
+        version = ai.record_eval(version, report)  # typed sets only
+        self.assertFalse(version.eval_passed)
+        dataset, _, cases = ai_eval.load(ai_eval.DATASETS["menu1"])
+        report["profiles"].append(
+            {
+                "dataset": dataset,
+                "dataset_sha256": ai_eval.MENU_SHA256,
+                "role": "application",
+                "metrics": {**ai_eval.MENU_THRESHOLDS, "cases": len(cases)},
+            }
+        )
+        version = ai.record_eval(version, report)
+        self.assertTrue(version.eval_passed)
+        self.assertIsNone(ai.activation_blocker(version))
+        report["profiles"][-1]["metrics"]["ask_accuracy"] = 0.0  # guessed an unplaced meter
+        self.assertFalse(ai_eval.gate_passed(report, version))

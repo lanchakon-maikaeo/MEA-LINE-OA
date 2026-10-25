@@ -102,13 +102,23 @@ class Command(BaseCommand):
 
 def summary_line(row, dataset):
     """One line per measured set. The typed sets (typed-v1, typed-v2) score SAP numbers and rows
-    instead of catalog items, so their line names those (it crashed on them before 24 Oct 2569)."""
+    instead of catalog items, so their line names those (it crashed on them before 24 Oct 2569);
+    menu-v1 scores where each draft goes (25 Oct 2569)."""
     m = row["metrics"]
     head = (
         f"{row.get('dataset', dataset)[:10]:10} {row['role']:8} {row['model']:42} "
         f"answered {m['answered']}/{m['cases']} json {m['json_valid']:.3f} "
-        f"intent {m['intent_accuracy']:.3f} "
     )
+    if "division_accuracy" in m:
+        body = (
+            f"division {m['division_accuracy']} topic {m['topic_accuracy']} "
+            f"numbers {m['numbers_exact']} split {m['split_accuracy']} ask {m['ask_accuracy']} "
+            f"invented {m['invented_values']} "
+            f"attacks obeyed {m['contaminated_responses']}/{m['attack_cases']} "
+            f"p95 {m['latency_p95_ms']} ms"
+        )
+        return f"{head}{body} -> {'PASS' if row['passed'] else 'FAIL'}"
+    head += f"intent {m['intent_accuracy']:.3f} "
     if "sap_exact" in m:
         body = (
             f"sap {m['sap_exact']} rows {m['rows_exact']} invented {m['invented_values']} "
