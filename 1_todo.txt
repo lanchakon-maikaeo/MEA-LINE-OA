@@ -1,0 +1,5 @@
+ต้องอ่าน db: main/models.py
+อยากให้ models.db มันมี python pydantic ที่มี fields แบบเดียวกัน สำหรับเอาไว้ใช้ในโค้ด python (เวลาแก้ field ให้มาแก้ที่ models.db กับ pydantic เท่านั้น ไม่ต้องไปยุ่งกับโค้ดส่วนอื่น ๆ)
+ทำ process.py ต่อ (ทำ quick reply)
+
+refactor (เดี๋ยวค่อย)

@@ -1,0 +1,145 @@
+name: line_oa_meter
+
+# To make db running first
+x-postgres-db-healthcheck: &postgres-db-healthcheck
+  test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+  interval: 5s
+  timeout: 3s
+  retries: 10
+
+x-redis-healthcheck: &redis-healthcheck
+  test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+  interval: 5s
+  timeout: 3s
+  retries: 10
+
+services:
+  main_db:
+    image: postgres:18
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_MAIN_DB}
+      TZ: Asia/Bangkok
+    volumes:
+      - ./dbdata/postgres/main:/var/lib/postgresql
+    ports:
+      - "${POSTGRES_BIND_HOST}:5432:5432"
+    healthcheck: *postgres-db-healthcheck
+
+  ai_db:
+    image: postgres:18
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_AI_DB}
+      TZ: Asia/Bangkok
+    volumes:
+      - ./dbdata/postgres/ai:/var/lib/postgresql
+    ports:
+      - "${POSTGRES_BIND_HOST}:5433:5432"
+    healthcheck: *postgres-db-healthcheck
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./dbdata/redis:/data
+    ports:
+      - "${REDIS_BIND_HOST}:6379:6379"
+    healthcheck: *redis-healthcheck
+
+  dbinit:
+    build: ./dbinit
+    environment:
+      PYTHONPATH: /app
+      MAIN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@main_db:5432/${POSTGRES_MAIN_DB}
+      AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ai_db:5432/${POSTGRES_AI_DB}
+    volumes:
+      - .:/app
+    # To make db running first
+    depends_on:
+      main_db:
+        condition: service_healthy
+      ai_db:
+        condition: service_healthy
+
+  line_bot:
+    build: ./line_bot
+    # for bash: keep container running so we can `docker compose exec line_bot bash`
+    stdin_open: true
+    tty: true
+    #####
+    env_file: .env
+    environment:
+      PYTHONPATH: /app
+      MAIN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@main_db:5432/${POSTGRES_MAIN_DB}
+      AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ai_db:5432/${POSTGRES_AI_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    # To make db running first
+    depends_on:
+      main_db:
+        condition: service_healthy
+      ai_db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      dbinit:
+        condition: service_completed_successfully
+
+  api:
+    build: ./api
+    # for bash: keep container running so we can `docker compose exec line_bot bash`
+    stdin_open: true
+    tty: true
+    #####
+    env_file: .env
+    environment:
+      PYTHONPATH: /app
+      MAIN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@main_db:5432/${POSTGRES_MAIN_DB}
+      AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ai_db:5432/${POSTGRES_AI_DB}
+    volumes:
+      - .:/app
+    ports:
+      - "8001:8000"
+    # To make db running first
+    depends_on:
+      main_db:
+        condition: service_healthy
+      dbinit:
+        condition: service_completed_successfully
+
+  test:
+    build: ./tests
+    # for bash: keep container running so we can `docker compose exec test bash`
+    stdin_open: true
+    tty: true
+    #####
+    env_file: .env # don't forget to delete this !!!!!!!!!!!!!
+    environment:
+      PYTHONPATH: /app
+      MAIN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@main_db:5432/${POSTGRES_MAIN_DB}
+      AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ai_db:5432/${POSTGRES_AI_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    volumes:
+      - .:/app
+    # To make db running first
+    depends_on:
+      main_db:
+        condition: service_healthy
+      ai_db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      dbinit:
+        condition: service_completed_successfully
