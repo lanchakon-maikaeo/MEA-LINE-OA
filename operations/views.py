@@ -1208,6 +1208,14 @@ def admin_ai_action(request, action, pk=None):
                 "นำเข้าผลประเมินแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อบนเครื่องนี้ แล้วจึงเปลี่ยนไปใช้",
             )
             if imported is not None:
+                version = imported[0]
+                source = version.eval_result["imported"]["bundle"]["source_version"]
+                # This machine numbers its own versions, so say which one the evidence went to.
+                messages.info(
+                    request,
+                    f"ผลประเมินของ v{source} จากเครื่องที่ประเมินอยู่ที่ v{version.number} "
+                    "บนเครื่องนี้ ดูได้ในตารางรุ่นการตั้งค่า",
+                )
                 if imported[1]:
                     messages.warning(request, imported[1])
                 return redirect(f"{reverse('admin-ai')}#v{imported[0].number}")
