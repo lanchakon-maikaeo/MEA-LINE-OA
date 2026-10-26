@@ -97,27 +97,27 @@ services:
       dbinit:
         condition: service_completed_successfully
 
-  api:
-    build: ./api
-    # for bash: keep container running so we can `docker compose exec line_bot bash`
-    stdin_open: true
-    tty: true
-    #####
-    env_file: .env
-    environment:
-      PYTHONPATH: /app
-      MAIN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@main_db:5432/${POSTGRES_MAIN_DB}
-      AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ai_db:5432/${POSTGRES_AI_DB}
-    volumes:
-      - .:/app
-    ports:
-      - "8001:8000"
-    # To make db running first
-    depends_on:
-      main_db:
-        condition: service_healthy
-      dbinit:
-        condition: service_completed_successfully
+  # api:
+  #   build: ./api
+  #   # for bash: keep container running so we can `docker compose exec line_bot bash`
+  #   stdin_open: true
+  #   tty: true
+  #   #####
+  #   env_file: .env
+  #   environment:
+  #     PYTHONPATH: /app
+  #     MAIN_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@main_db:5432/${POSTGRES_MAIN_DB}
+  #     AI_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ai_db:5432/${POSTGRES_AI_DB}
+  #   volumes:
+  #     - .:/app
+  #   ports:
+  #     - "8001:8000"
+  #   # To make db running first
+  #   depends_on:
+  #     main_db:
+  #       condition: service_healthy
+  #     dbinit:
+  #       condition: service_completed_successfully
 
   test:
     build: ./tests
