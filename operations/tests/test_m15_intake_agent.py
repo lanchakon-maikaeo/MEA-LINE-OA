@@ -7,7 +7,7 @@ step got an off-topic answer, and the first reply did not say what was read."""
 import json
 from unittest.mock import patch
 
-from operations import agent_chat, agent_intake, ai, options
+from operations import agent_chat, agent_intake, ai, ai_dialogue, options
 from operations.management.commands.run_worker import run_once
 from operations.models import AIRun, Case, ConversationDraft, LineMenuItem
 from operations.tests.test_m03_line import ALICE, buttons, texts
@@ -202,6 +202,22 @@ class ConfirmTests(IntakeTestCase):
 
 
 class GuardTests(IntakeTestCase):
+    def test_confirmation_deadline_is_not_a_required_wait(self):
+        for text in ("รออีก 30 นาทีเพื่อยืนยันส่งเรื่อง", "รอให้ครบ ๓๐ นาทีแล้วค่อยยืนยัน"):
+            with self.subTest(text=text):
+                self.assertTrue(agent_intake.problem(text, "30 ๓๐", []))
+        for text in ("ยืนยันภายใน 30 นาที", "ไม่ต้องรออีก 30 นาที ยืนยันได้เลย"):
+            with self.subTest(text=text):
+                self.assertEqual(agent_intake.problem(text, "30", []), "")
+
+    def test_dialogue_accepts_typed_confirmations_but_rejects_unknown_buttons(self):
+        for text in ('พิมพ์คำว่า "ยืนยัน" เพื่อยืนยันส่งเรื่อง', "พิมพ์ 'ส่งเลย' ได้"):
+            with self.subTest(text=text):
+                self.assertEqual(ai_dialogue.off_menu(text, []), "")
+        for text in ('กด "ยืนยัน" ได้', 'พิมพ์คำว่า "ส่งเรื่องใหม่"', "กด 'บริการ'"):
+            with self.subTest(text=text):
+                self.assertTrue(ai_dialogue.off_menu(text, []))
+
     def test_a_reply_that_fails_the_checks_is_retried_once_then_standard(self):
         self.message(ORDER, "applied")
         bad = decided("reply", reply="ส่งเรื่องแล้ว กด 'บริการ' เพื่อดูต่อ")

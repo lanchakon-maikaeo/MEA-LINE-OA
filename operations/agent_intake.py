@@ -285,6 +285,9 @@ def problem(text, sources, numbers, allowed=(), limit=MAX_REPLY):
         return found
     if len(text) > limit:
         return "ยาวเกินไป"
+    # The confirmation window is a deadline, never a required wait.
+    if re.search(r"(?<!ไม่ต้อง)รอ(?:อีก|ให้ครบ)?\d+นาที", "".join(text.split())):
+        return "บอกให้รอแทนการยืนยันก่อนหมดเวลา"
     stale = next((m for m in STALE_MENUS if m in text), None)
     if stale:
         return f"อ้างถึงเมนูที่ไม่มีแล้ว ({stale})"

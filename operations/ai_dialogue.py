@@ -149,8 +149,13 @@ def off_menu(text, allowed):
     if stale:
         return f"stale menu {stale}"
     names = {" ".join(n.split()) for n in allowed}
-    for quoted in agent_intake.QUOTED.findall(text):
+    for match in agent_intake.QUOTED.finditer(text):
+        quoted = match.group(1)
         if " ".join(quoted.split()) not in names:
+            if agent_intake.confirming(quoted) and text[: match.start()].rstrip().endswith(
+                ("พิมพ์", "พิมพ์คำว่า")
+            ):
+                continue
             return f"unknown name '{quoted}'"
     return ""
 
