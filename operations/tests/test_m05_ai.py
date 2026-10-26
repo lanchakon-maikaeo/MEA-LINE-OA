@@ -1168,7 +1168,8 @@ class HarnessTests(AITestCase):
             self.assertEqual(hashlib.sha256(data).hexdigest(), digest, name)
         texts = [
             {
-                json.dumps([c["text"], c.get("draft")], sort_keys=True)
+                # A dialogue (dialogue-v1) is its turns.
+                json.dumps([c.get("text") or c["turns"], c.get("draft")], sort_keys=True)
                 for c in ai_eval.load(ai_eval.DATASETS[n])[2]
             }
             for n in ai_eval.DATASETS

@@ -125,7 +125,8 @@ class Tools:
         conv = Conversation.objects.get(identity=line)
         if name == "get_context":
             choices = list(conv.reply_choices.get("actions", {}))
-            commands = ["ติดตามเรื่องของฉัน", "แจ้งปัญหา", "บริการ"] if requester else []
+            # "บริการ" only says to use the rich menu (25 Oct 2569 Q2); it is not offered.
+            commands = ["ติดตามเรื่องของฉัน", "แจ้งปัญหา"] if requester else []
             if requester and not any(
                 getattr(requester, flag, False)
                 for flag in ("is_internal", "is_external", "is_anonymous")

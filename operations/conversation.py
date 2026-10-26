@@ -55,6 +55,8 @@ BUTTON_TTL = timedelta(days=7)
 MAX_QUICK = 13
 MAX_LINES = 50
 CASE_NUMBER = re.compile(r"^[WRP]\d{2}-\d{6}$")
+SUMMARY_HEAD = "สรุปเรื่อง:"
+CONFIRM_LABEL = "ยืนยันส่งเรื่อง"
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 
 KIND_LABELS = {K.WITHDRAWAL: "เบิก", K.RETURN: "ส่งคืน", K.PROBLEM: "แจ้งปัญหา/ข้อเสนอแนะ"}
@@ -356,7 +358,16 @@ def _dispatch(inbox, event_override=None, allow_agent=True):
         and (event.get("message") or {}).get("type") == "text"
     ):
         typed = " ".join(str(event["message"].get("text", "")).split())
-        selected = conversation.reply_choices.get("actions", {}).get(typed)
+        actions = conversation.reply_choices.get("actions", {})
+        selected = actions.get(typed)
+        if not selected and CONFIRM_LABEL in actions:
+            from operations import agent_intake  # local: it reads AI versions
+
+            # ADR 0022 Q13: "ยืนยัน" or "ส่งเลย" typed right after the latest summary is its
+            # confirm button; the button's token still checks that the draft is unchanged.
+            summary = conversation.reply_choices.get("summary", "")
+            if SUMMARY_HEAD in summary and agent_intake.confirming(typed) and agent_intake.active():
+                selected = actions[CONFIRM_LABEL]
         if not selected and typed not in MENU_WORDS:
             # Rich-menu labels are typable even before the bot has suggested them in chat.
             matches = list(
@@ -1615,6 +1626,8 @@ def _static_postback(turn, data, draft):
         return _menu(turn, "เลือกบริการจากเมนูด้านล่าง")
     if data.startswith("m=item&id="):
         return _menu_item(turn, data.split("=", 2)[2])
+    if data.startswith("m=go&id="):
+        return _menu_item(turn, data.split("=", 2)[2], go=True)
     if data.startswith("m=act&"):
         return _menu_act(turn, data)
     if data.startswith("m=ask&id="):
@@ -1659,8 +1672,23 @@ def _menu_label(item):
     return f"{item.parent.label} · {item.note or item.label}" if item.parent_id else item.label
 
 
-def _menu_item(turn, pk):
-    """A tap on the rich menu or on one of a topic's choices (15 ต.ค. 2569 Q17–Q20)."""
+def _held(turn):
+    """The open draft the AI has been filling with the requester, when it holds something
+    (ADR 0022 Q16): a menu tap asks before starting another."""
+    from operations import agent_intake  # local: it reads AI versions
+
+    draft = turn.conversation.active_draft
+    if draft is None or draft.status != D.OPEN or not draft.data.get("ai_run_id"):
+        return None
+    data = draft.data
+    if not any(data.get(k) for k in ("lines", "fields", "meters", "sap_number", "entry")):
+        return None
+    return draft if agent_intake.active() else None
+
+
+def _menu_item(turn, pk, go=False):
+    """A tap on the rich menu or on one of a topic's choices (15 ต.ค. 2569 Q17–Q20).
+    `go`: the requester chose to leave the draft the AI was filling and follow this tap."""
     item = _menu_entry(pk)
     if item is None:
         return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
@@ -1668,6 +1696,21 @@ def _menu_item(turn, pk):
         return _menu(turn, "เมนูนี้สำหรับเจ้าหน้าที่ที่เชื่อม LINE กับบัญชีแล้ว")
     action = item.action
     A = LineMenuItem.Action
+    held = None if go else _held(turn)
+    if held is not None and action not in {A.MINE, A.FIND, A.TRACK, A.REGISTER}:
+        what = _kind_label(held.kind, held.data.get("topic")) if held.kind else ""
+        turn.say(
+            f"มีร่าง{what}ที่ยังไม่ส่งค้างอยู่ จะทำต่อไหม",
+            [
+                turn.button("ทำต่อ", "select_draft", {"id": str(held.pk)}),
+                ("เริ่มตามเมนูที่กด", f"m=go&id={item.pk}"),
+            ],
+        )
+        return
+    if go and turn.conversation.active_draft_id:
+        # The draft stays among the open drafts; this tap starts from the menu.
+        turn.conversation.active_draft = None
+        turn.conversation.save(update_fields=["active_draft", "updated_at"])
     choices = (
         list(item.choices.filter(is_active=True).order_by("position", "pk")[:12])
         if action == A.TOPIC
@@ -2402,7 +2445,7 @@ def _ask_question(turn, draft):
         turn.say(
             _summary(draft),
             [
-                b("ยืนยันส่งเรื่อง", "confirm", draft=draft, ttl=CONFIRM_TTL),
+                b(CONFIRM_LABEL, "confirm", draft=draft, ttl=CONFIRM_TTL),
                 b("กรอกใหม่", "restart", draft=draft),
                 b("แนบหลักฐาน", "attach_help", draft=draft),
                 b("ยกเลิกร่าง", "discard", draft=draft),
@@ -2420,7 +2463,7 @@ def _skip_model(turn, draft):
 
 def _summary(draft):
     data = draft.data
-    lines = [f"สรุปเรื่อง: {_kind_label(draft.kind, data.get('topic'))}"]
+    lines = [f"{SUMMARY_HEAD} {_kind_label(draft.kind, data.get('topic'))}"]
     if data.get("menu_label"):
         lines.append(f"หัวข้อ: {data['menu_label']}")
     if data.get("division"):
@@ -3279,6 +3322,15 @@ def _confirm(turn, draft):
     if guidance:
         text += f"\n\nคำแนะนำเร่งด่วน: {guidance}"
     _menu(turn, text)
+    following = _open_drafts(turn).order_by("updated_at", "pk").first() if remaining else None
+    if following is not None:
+        # ADR 0022 Q15: several requests in one message are sent one at a time; the next one
+        # keeps what the message gave.
+        items = turn.replies[-1].setdefault("quickReply", {}).setdefault("items", [])
+        items.insert(
+            0, _postback(*turn.button("ทำเรื่องถัดไป", "select_draft", {"id": str(following.pk)}))
+        )
+        del items[MAX_QUICK:]
 
 
 # --- Attachments ---------------------------------------------------------------------------

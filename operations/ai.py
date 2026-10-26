@@ -49,7 +49,8 @@ SCHEMA_VERSION = "extraction-v5-grounded-fields"
 # rows of the equipment-first groups; it is evaluated on one more locked set as well.
 TYPED_SCHEMA_VERSION = "extraction-v6-sap-typed"
 TYPED_EVAL_GATE = f"{EVAL_GATE}+typed-v1+typed-v2"  # typed-v2: the กอจ. and กคอ. groups
-MENU_EVAL_GATE = f"{TYPED_EVAL_GATE}+menu-v1"
+# dialogue-v1 (ADR 0022 Q11): whole dialogues through the intake agent join the menu gate.
+MENU_EVAL_GATE = f"{TYPED_EVAL_GATE}+menu-v1+dialogue-v1"
 MAX_CHAIN = 4  # primary + 3 fallbacks
 MAX_REQUESTS = 3
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/-]{1,100}$")
@@ -1389,21 +1390,42 @@ def draft_context(draft):
     if draft is None:
         return None
     data = draft.data or {}
+    items = []
+    for line in data.get("lines", []):
+        if not line.get("details"):
+            items.append(
+                {
+                    "item_code": line.get("item_code"),
+                    "quantity": line.get("quantity"),
+                    "serials": line.get("serials", []),
+                }
+            )
+        for row in line.get("details", []):
+            items.append(_typed_item(line.get("item_code"), row))
+    entry = data.get("entry") or {}
+    if entry.get("group") and entry.get("line") is None:
+        # The row still being typed (ADR 0022): "ขอเปลี่ยนเป็น 2 เครื่อง" corrects it.
+        shared = EquipmentType.objects.filter(entry_group=entry["group"], is_active=True).first()
+        if shared is not None:
+            items.append(_typed_item(shared.code, entry.get("row", {})))
     return {
         "intent": draft.kind or None,
-        "items": [
-            {
-                "item_code": line.get("item_code"),
-                "quantity": line.get("quantity"),
-                "serials": line.get("serials", []),
-            }
-            for line in data.get("lines", [])
-        ],
+        "items": items,
         "fields": {
             k: v
             for k, v in (data.get("fields") or {}).items()
             if k in (*TEXT_FIELDS, "needed_by") and isinstance(v, str) and v
         },
+    }
+
+
+def _typed_item(code, row):
+    """A typed row as a draft item: its count, unit numbers and size."""
+    return {
+        "item_code": code,
+        "quantity": row.get("quantity"),
+        "serials": row.get("numbers", []),
+        **({"size": row["size"]} if row.get("size") else {}),
     }
 
 

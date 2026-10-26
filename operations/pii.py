@@ -59,6 +59,7 @@ LABEL = re.compile(r"\[(" + "|".join(w for w, _ in KINDS.values()) + r")\s*-\s*(
 TASKS = {
     "extract": "สกัดร่างจากแชต",
     "answer": "ตอบแชต",
+    "intake": "คุยและกรอกร่างในแชต",
     "screen": "กรองคำสั่งแฝง",
     "triage": "คัดกรองเรื่อง",
     "routing": "ส่งกองตามหน้าที่",

@@ -45,6 +45,7 @@ ORDER_REMIND = "order_remind_days"
 CHAT_ANSWERS = "chat_answers"
 CHAT_FOLLOWUP = "chat_followup"
 CHAT_TYPED = "chat_typed_steps"
+CHAT_MODE = "chat_mode"
 USAGE_AI = "usage_ai"
 INFO_REPLY = "info_reply"
 LEARNED_ROUTES = "learned_routes"
@@ -305,6 +306,26 @@ OPTIONS = {
             ),
         ),
         "คำตอบจากคลังใช้ได้เมื่อเปิดการตอบคำถามในแชต ส่วน AI ใช้ได้เมื่อมีรุ่นที่เปิดใช้แล้ว",
+    ),
+    # ADR 0022 (owner, 25 Oct 2569 Q18): the owner chose the AI as the default; "guided" is the
+    # step-by-step bot, kept so an admin can return to it at once without a release.
+    CHAT_MODE: Option(
+        "วิธีคุยในแชต",
+        (
+            (
+                "llm",
+                "AI คุยกับผู้ใช้ LINE และกรอกร่างจากข้อความเอง",
+                "AI อ่านข้อความเทียบกับร่างและคำถามล่าสุด ตอบคำถาม และเรียบเรียงคำถามถัดไป "
+                "ระบบยังตรวจทุกค่า สรุปจากร่าง และส่งเรื่องเมื่อผู้ใช้ยืนยันเท่านั้น",
+            ),
+            (
+                "guided",
+                "ถามทีละขั้นตามปุ่ม",
+                "ข้อความที่พิมพ์ในขั้นที่ให้พิมพ์เป็นคำตอบของขั้นนั้น เหมือนก่อน 25 ต.ค. 2569",
+            ),
+        ),
+        "AI คุยได้เมื่อรุ่น AI อ่านข้อความที่เปิดใช้ผ่านชุดทดสอบบทสนทนา (dialogue-v1) แล้ว "
+        "ถ้ายังไม่ผ่าน หรือ AI ตอบไม่ทัน แชตถามทีละขั้นเอง",
     ),
     # ADR 0021 (owner, 25 Oct 2569): the owner's choice is the default; "never" is the Q14 rule
     # of 10 Oct 2569, kept so an admin can close the path at once without a release.

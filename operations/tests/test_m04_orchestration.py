@@ -485,7 +485,12 @@ class MaintenanceTests(OrchestrationTestCase):
             "/v2/bot/message/quota": {"type": "limited", "value": 300},
             "/v2/bot/message/quota/consumption": {"totalUsage": 9},
         }
-        with patch.object(line_api, "call", side_effect=lambda path, *a, **k: answers[path]):
+        # The forecast only exceeds the cap early enough in the month.
+        now = timezone.now().replace(day=10)
+        with (
+            patch.object(line_api, "call", side_effect=lambda path, *a, **k: answers[path]),
+            patch.object(timezone, "now", return_value=now),
+        ):
             status, report = self.api("maintenance")
             self.assertEqual(status, 200)
             self.assertTrue(report["reconciled"])

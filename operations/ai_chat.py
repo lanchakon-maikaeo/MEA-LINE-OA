@@ -67,8 +67,14 @@ def version_for_chat():
 
 
 def wants_ai(turn, draft, text):
-    """Free text that the guided flow cannot use as an answer, when AI is configured."""
-    if not settings.AI_ENABLED or len(text.strip()) < 4 or version_for_chat() is None:
+    """Free text that the guided flow cannot use as an answer, when AI is configured. While the
+    AI talks (chat_mode, ADR 0022 Q8) every typed message goes to it."""
+    from operations import agent_intake
+
+    talking = agent_intake.active()
+    if not settings.AI_ENABLED or version_for_chat() is None:
+        return False
+    if len(text.strip()) < 4 and not (talking and draft is not None):
         return False
     if private_text(draft, text):
         return False
@@ -78,6 +84,8 @@ def wants_ai(turn, draft, text):
     if draft is None:
         # Several open drafts and none chosen: the user must pick one first (no guessing).
         return not conversation._open_drafts(turn).exists()
+    if talking:
+        return True
     if (
         draft.data.get("typed")
         and not ai.reads_typed(ai.active_version())
@@ -103,7 +111,7 @@ def queue(turn, draft, text, message=None):
     requester said 'ไม่ใช่ข้อมูลเพิ่ม' to a message first offered to staff)."""
     version = version_for_chat()
     # Messages already prepared this turn (e.g. "มีอัปเดตใหม่") go out with the AI answer.
-    from operations import agent_chat
+    from operations import agent_chat, agent_intake
 
     result = {"prefix": turn.replies[:2]}
     if agent_chat.enabled():
@@ -111,6 +119,13 @@ def queue(turn, draft, text, message=None):
     if message is not None:
         result["message"] = message.pk
     shape = conversation.off_step(draft, text)
+    if agent_intake.active(version):
+        # ADR 0022: the AI decides what the text is. A step that takes typed answers is kept
+        # so that, if the AI fails or is late, the step takes the text as before (Q10).
+        result["intake"] = {"draft": draft is not None}
+        shape = ""
+        if draft is not None and conversation._expects_text(draft):
+            result["typed"] = draft.step
     if shape:
         # Typed at a step that takes typed answers: when the AI finds no request and no
         # approved answer, the step takes the text as it would without AI. A question goes to
@@ -283,6 +298,11 @@ def process(run_id):
         if status:
             replies = _finish(run, status, [{"outcome": "blocked before provider"}], None, turn)
         context = ai.draft_context(_current_draft(turn)) if not status else None
+        seen = None
+        if not status and run.result.get("intake") is not None and _current_draft(turn):
+            from operations import agent_intake
+
+            seen = agent_intake.view(turn, _current_draft(turn))
     if status:
         conversation.send_reply(run.inbox_id, replies[:5])
         return status
@@ -297,23 +317,45 @@ def process(run_id):
     extraction, attempts = (None, [{"outcome": "skipped: no time left"}])
     started = time.monotonic()
     deadline = started + budget
-    from operations import agent_chat
+    from operations import agent_chat, agent_intake
 
-    agent_result, agent_attempts = (None, [])
-    if run.result.get("agent_context") is not None:
-        agent_result, agent_attempts = agent_chat.plan(run, source_text, budget)
+    # ADR 0022: with an open draft the intake agent decides first what the message is.
+    decided, act = None, None
+    if seen is not None and budget >= 2:
+        decided = agent_intake.decide(run, source_text, seen, budget)
+        act = decided["act"]
         budget = max(0, budget - (time.monotonic() - started))
+    calls = decided["calls"] if decided else 0
+    agent_result, agent_attempts = (None, [])
+    if run.result.get("agent_context") is not None and act in (None, "lookup"):
+        steps = agent_chat.MAX_STEPS if act is None else agent_intake.MAX_CALLS - calls
+        agent_result, agent_attempts = agent_chat.plan(run, source_text, budget, max_steps=steps)
+        calls += len({a["step"] for a in agent_attempts if "step" in a})
+        budget = max(0, budget - (time.monotonic() - started))
+    # Q10: no usable decision at a step that takes typed answers: the step takes the text.
+    fallback = seen is not None and act is None and bool(run.result.get("typed"))
+    numeric = act == "answer" and _number_as_text(seen["step"], decided["value"])
+    reads = (act in (None, "fill", "new") and not fallback) or (
+        act == "answer" and (not seen["typed"] or numeric)
+    )
     if agent_result is not None:
         attempts = agent_attempts
+    elif not reads:
+        attempts = []
     elif run.config_version.task == AIConfigVersion.Task.ANSWER:
         attempts = [{"outcome": "no extraction version: chat answer only"}]
     elif run.result.get("typed_as") == "question":
         attempts = [{"outcome": "a question at a typed step: chat answer only"}]
     elif message is not None and budget >= 2 and turn.requester is not None:
         extraction, attempts = ai.extract(source_text, context, run.config_version, budget)
+        calls += 1
+    if decided:
+        attempts = decided["attempts"] + attempts
     chat = None
     if (
         agent_result is None
+        and act is None
+        and not fallback
         and turn.requester is not None
         and message is not None
         and not _proposals(extraction)
@@ -333,8 +375,11 @@ def process(run_id):
             return "late"
         draft = _current_draft(turn) if usable else None
         status = _blocked(run, turn, usable)
+        wording = False
         if status:
             extraction = None
+        elif act is not None and agent_result is None and draft is not None:
+            status, wording = _intake(turn, draft, decided, extraction, run, source_text)
         elif agent_result is not None:
             status = R.ANSWERED if agent_result["kind"] == "reply" else R.APPLIED
             agent_chat.present(turn, run, agent_result)
@@ -360,9 +405,15 @@ def process(run_id):
             if draft is None and not _proposals(extraction):
                 questions.record(turn, source_text)  # neither a request nor an answer (Q11)
             apply(turn, draft, extraction, run)
+        talking = run.result.get("intake") is not None
+        if talking and status == R.APPLIED and _proposals(extraction):
+            wording = True  # the first reply says what was read (ADR 0022)
         replies = _finish(run, status, attempts, extraction, turn)
         draft = _current_draft(turn) if status == R.APPLIED and _proposals(extraction) else None
-    if draft is not None:
+    if wording and calls < agent_intake.MAX_CALLS:
+        before = seen["draft"] if seen else ""
+        replies = _worded(run, source_text, replies, deadline - time.monotonic(), before)
+    elif draft is not None and not talking:
         replies = _rephrase(run, draft, replies, deadline - time.monotonic())
     conversation.send_reply(run.inbox_id, replies[:5])
     return status
@@ -405,6 +456,214 @@ def _rephrase(run, draft, replies, budget):
     if not result["question"]:
         return replies
     return [*replies[:-1], {**last, "text": result["question"]}]
+
+
+# --- The intake agent's decision, carried out (ADR 0022) ------------------------------------
+
+
+def _record(run, **values):
+    run.result = {**run.result, "intake": {**run.result.get("intake", {}), **values}}
+
+
+def _with_step(turn, draft, text):
+    """The agent's text with the current step's buttons; at the summary the card follows
+    unchanged, so a typed confirmation still comes right after the latest summary (Q13)."""
+    before = len(turn.replies)
+    conversation._ask(turn, draft)
+    asked = turn.replies[before:]
+    if draft.step == "summary" or not asked:
+        turn.replies.insert(before, conversation.text_message(text))
+        return
+    quick = asked[-1].get("quickReply")
+    del turn.replies[before:]
+    turn.replies.append(conversation.text_message(text) | ({"quickReply": quick} if quick else {}))
+
+
+def _advance(turn, draft):
+    """Pass the steps a requester who says "send it" may leave, with the steps' own buttons
+    (no more items or meters, optional fields and row fields left empty); their questions are
+    not sent. Stops at the first thing the draft still needs, or at the summary."""
+    from operations import typed_lines
+
+    mark = len(turn.replies)
+    for _ in range(30):
+        step, data = draft.step, draft.data
+        if step == "more" and (data.get("lines") or draft.kind == Case.Kind.PROBLEM):
+            action = "lines_done"
+        elif step == "meters_more" and data.get("meters"):
+            action = "meters_done"
+        elif step.startswith("field:") and not next(
+            (r for n, _, r in conversation._fields(draft) if n == step.split(":", 1)[1]), True
+        ):
+            action = "skip_field"
+        elif step == "entry":
+            fields, at = conversation._row_fields(draft), data["entry"]["at"]
+            if at >= len(fields) or typed_lines.required(fields[at], draft.kind):
+                break
+            action = "entry_skip"
+        else:
+            break
+        revision = draft.revision
+        conversation._draft_button(turn, draft, action, {})
+        if draft.revision == revision:
+            break
+    del turn.replies[mark:]
+
+
+def _intake(turn, draft, decided, extraction, run, text):
+    """Carry out the agent's decision on a message typed with this draft open: (status,
+    whether the program's next message is then worded by the agent)."""
+    from operations import agent_intake
+
+    act = decided["act"]
+    _record(run, act=act, refused=decided.get("refused", ""))
+    if act == "reply":
+        need, _ = agent_intake.needed(draft)
+        said = decided["reply"] or f"ตอนนี้ร่างนี้ต้องการ {need} พิมพ์ได้เลยเมื่อพร้อม หรือเก็บร่างไว้ทำต่อภายหลัง"
+        _record(run, said=said, by="model" if decided["reply"] else "template")
+        _with_step(turn, draft, said)
+        return R.ANSWERED, False
+    if act == "cancel":
+        # The agent never drops a draft: the requester taps to confirm.
+        turn.say(
+            "ต้องการยกเลิกร่างนี้ใช่ไหม กดยกเลิกร่างเพื่อยืนยัน หรือกดทำต่อ",
+            [
+                turn.button("ยกเลิกร่าง", "discard", draft=draft),
+                turn.button("ทำต่อ", "select_draft", {"id": str(draft.pk)}),
+            ],
+        )
+        _record(run, said="ต้องการยกเลิกร่างนี้ใช่ไหม")
+        return R.ANSWERED, False
+    if act == "confirm":
+        # "ส่งเลย" passes what may be skipped and shows the summary; only a tap, or a
+        # confirming word right after that summary, files (Q13).
+        _advance(turn, draft)
+        if draft.step != "summary":
+            need, _ = agent_intake.needed(draft)
+            turn.say(f"ยังส่งเรื่องไม่ได้ เพราะยังขาด {need}")
+        conversation._ask(turn, draft)
+        return R.ANSWERED, True
+    if act == "lookup":
+        conversation._my_cases(turn)
+        turn.say("ร่างที่ทำอยู่ยังเก็บไว้ พิมพ์ต่อได้เลย")
+        _record(run, said="ร่างที่ทำอยู่ยังเก็บไว้ พิมพ์ต่อได้เลย")
+        return R.ANSWERED, False
+    numeric = act == "answer" and _number_as_text(draft.step, decided["value"])
+    if act == "answer" and conversation._expects_text(draft) and not numeric:
+        conversation._draft_text(turn, draft, decided["value"])
+        return R.TAKEN, True
+    if act == "fill" and draft.kind and _proposals(extraction):
+        same = [p for p in _proposals(extraction) if ai.KIND_FOR_INTENT[p.intent] == draft.kind]
+        if not same:
+            # Information for this draft read as another kind of request (dialogue-v1 D15:
+            # a purpose "ใช้ติดตั้งบ้านลูกค้า" read as a กตฟ. report): the steps take it. A new
+            # request is the decision "new".
+            if draft.step == "more" and draft.data.get("lines"):
+                mark = len(turn.replies)
+                conversation._draft_button(turn, draft, "lines_done", {})
+                del turn.replies[mark:]
+            if conversation._expects_text(draft):
+                conversation._draft_text(turn, draft, text)
+                return R.TAKEN, True
+            conversation._ask(turn, draft)
+            return R.APPLIED, True
+    if _proposals(extraction):
+        step, held, mark = draft.step, _core(draft.data), len(turn.replies)
+        apply(turn, draft, extraction, run)
+        current = _current_draft(turn)
+        if (
+            step.startswith("field:")
+            and current is not None
+            and current.pk == draft.pk
+            and (current.step, _core(current.data)) == (step, held)
+        ):
+            # Read as other information but nothing changed: the text answers the step
+            # (dialogue-v1 D03: a purpose typed at the purpose step was lost).
+            del turn.replies[mark:]
+            conversation._draft_text(turn, current, text)
+            return R.TAKEN, True
+        return R.APPLIED, True
+    if numeric:
+        need, _ = agent_intake.needed(draft)
+        turn.say(f"ข้อความนี้เป็นตัวเลข ช่องนี้ต้องการ {need}")
+        conversation._ask(turn, draft)
+        return R.ANSWERED, True
+    if conversation._expects_text(draft):
+        conversation._draft_text(turn, draft, text)
+        return R.TAKEN, True
+    turn.say("ยังไม่เข้าใจข้อความ กรุณาเลือกจากปุ่ม หรือพิมพ์รายละเอียดเพิ่ม")
+    conversation._reprompt(turn, draft)
+    return R.APPLIED, True
+
+
+def _core(data):
+    """A draft's data without the AI's bookkeeping, to tell whether a reading changed it."""
+    return {k: v for k, v in data.items() if k not in ("ai_run_id", "ai_proposal", "line")}
+
+
+def _number_as_text(step, value):
+    """A bare number or code given as the answer of a text field (a purpose of "4500100013")
+    is read by the extraction instead (dialogue-v1 D13)."""
+    from operations import typed_lines
+
+    value = " ".join(str(value or "").split())
+    return step.startswith("field:") and bool(typed_lines.SAP_NUMBER.fullmatch(value))
+
+
+def _worded(run, text, replies, budget, before=""):
+    """The agent words the program's next message (what was read, any problem, the next
+    question); the buttons and the summary card stay the program's. A wording that fails the
+    checks leaves the program's own messages (Q17)."""
+    from operations import agent_intake
+
+    lead = len(run.result.get("prefix", []))
+    own = replies[lead:]
+    draft = Conversation.objects.get(identity_id=run.identity_id).active_draft
+    if draft is not None and draft.status != D.OPEN:
+        draft = None
+    if not own or draft is None or budget < 2 or any(m.get("type") != "text" for m in own):
+        return replies
+    card = (
+        own[-1]
+        if draft.step == "summary" and own[-1]["text"].startswith(conversation.SUMMARY_HEAD)
+        else None
+    )
+    standard = "\n".join(m["text"] for m in (own[:-1] if card else own))
+    _, facts = agent_intake.needed(draft)
+    result = agent_intake.word(
+        run,
+        text,
+        standard,
+        before,
+        conversation._summary(draft).rsplit("\n", 1)[0],
+        facts,
+        agent_intake.menus(),
+        budget,
+        draft.step,
+        agent_intake.hints_for(draft),
+    )
+    record = {
+        "worded": result["reply"] or "",
+        "word_refused": result["refused"],
+        "word_written": result.get("written", ""),
+    }
+    said = result["reply"] or standard
+    current = AIRun.objects.get(pk=run.pk)
+    AIRun.objects.filter(pk=run.pk).update(
+        result={
+            **current.result,
+            "intake": {**current.result.get("intake", {}), **record, "said": said},
+        },
+        attempts=current.attempts + result["attempts"],
+    )
+    if not result["reply"]:
+        return replies
+    if card is not None:
+        return [*replies[:lead], conversation.text_message(result["reply"]), card]
+    message = conversation.text_message(result["reply"])
+    if own[-1].get("quickReply"):
+        message["quickReply"] = own[-1]["quickReply"]
+    return [*replies[:lead], message]
 
 
 def _proposals(extraction):
@@ -559,9 +818,13 @@ def apply(turn, draft, extraction, run):
         )
         _merge(turn, other, proposal, run)
     lines = [f"เติมข้อมูลจากข้อความแล้ว ({KIND_LABELS[draft.kind]}) กรุณาตรวจก่อนยืนยัน"]
+    if (getattr(run, "result", None) or {}).get("intake") is not None:
+        # ADR 0022: the reply says what was read, also when the agent's wording is not used.
+        read = conversation._summary(draft).split("\n")[1:-1]
+        lines = [f"อ่านได้ว่า{KIND_LABELS[draft.kind]}", *read] if read else lines
     lines += notes
     if extra:
-        lines.append(f"พบอีก {len(extra)} เรื่องในข้อความ บันทึกเป็นร่างไว้แล้ว (เลือกได้จาก 'ส่งเรื่องใหม่')")
+        lines.append(f"พบอีก {len(extra)} เรื่องในข้อความ บันทึกเป็นร่างไว้แล้ว ส่งเรื่องนี้ก่อน แล้วทำเรื่องถัดไปต่อ")
     turn.say("\n".join(lines))
     conversation._ask(turn, draft)
 
@@ -583,6 +846,11 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     if draft.kind and draft.kind != kind:
         kind = draft.kind
     path = _menu_path(proposal) if kind == Case.Kind.PROBLEM or proposal.division else {}
+    if kind != Case.Kind.PROBLEM:
+        # A withdrawal or return goes to an equipment division only, never to a report topic
+        # (dialogue-v1 D15: "ใช้ติดตั้งบ้านลูกค้า" made a meter withdrawal a กตฟ. report).
+        division = path.get("division")
+        path = {"division": division} if division in EQUIPMENT_DIVISIONS else {}
     if path.get("topic") in (Case.Topic.USAGE, Case.Topic.SYSTEM):
         proposal.items = []  # these topics list no items; a usage report names meters instead
     allowed = {name for name, _, _ in FIELDS[kind]}
@@ -652,7 +920,12 @@ def _merge(turn, draft, proposal, run, screened=None, typed=None):
     asked = typed.split(":", 1)[1] if typed and typed.startswith("field:") else None
     data["lines"] = list(lines.values())
     notes = []
-    entry = _typed_rows(turn, data, rows, kind, notes) if rows else None
+    # The row still being typed stays unless the message corrects it (dialogue-v1 D15).
+    typing = draft.data.get("entry") or {}
+    typing = (
+        typing if getattr(draft, "step", "") == "entry" and typing.get("line", 0) is None else None
+    )
+    entry = _typed_rows(turn, data, rows, kind, notes, typing) if rows else typing
     if data.get("menu_label"):
         data["menu_label"] = conversation.typed_topic(data)
     added = added or (rows and data["lines"] != list(lines.values()))
@@ -775,12 +1048,17 @@ def _unplaced_meter(proposal, data, kind, entry=None):
 TYPED_KEEP = ("typed", "division", "menu_label", "sap_number", "topic")
 
 
-def _typed_rows(turn, data, rows, kind, notes):
+def _typed_rows(turn, data, rows, kind, notes, typing=None):
     """Join the typed rows the AI read to data["lines"] (typed_lines.add) the way the chat
     does when they are typed by hand. Returns the first row that still lacks a field, as the
     chat's typed-row step (data["entry"]) asks it, or None. A draft of typed rows only is
     filed with its group's tile and goes to that tile's division."""
-    entry = None
+    entry, keep = (
+        None,
+        typing is not None
+        and all(equipment.entry_group != typing["group"] for equipment, _ in rows),
+    )
+    typed_row = {"group": typing["group"], **typing["row"]} if typing else None
     for equipment, proposed in rows:
         group = equipment.entry_group
         fields = typed_lines.fields(group, kind)
@@ -791,6 +1069,31 @@ def _typed_rows(turn, data, rows, kind, notes):
             "name": proposed.text if group == "other" and not _says_no_name(proposed.text) else "",
             "equipment_number": getattr(proposed, "equipment_number", ""),
         }
+        # Read again with the draft as context (ADR 0022 Q14), a row the draft already holds
+        # is not a new one, and a new count for a row of the same size corrects that row.
+        held = [r for line in data["lines"] for r in line.get("details", [])]
+        if any(_covers(old, group, values) for old in held):
+            continue
+        if typed_row is not None and _covers(typed_row, group, values):
+            keep = True  # the row being typed, read again
+            continue
+        held += [typed_row] if typed_row is not None else []
+        corrected = [
+            old
+            for old in held
+            if old["group"] == group
+            and (not values["size"] or old.get("size") == values["size"])
+            and values["quantity"]
+            and old.get("quantity") != values["quantity"]
+        ]
+        if len(corrected) == 1:
+            old = corrected[0]
+            if old is not typed_row:
+                data["lines"] = _without_row(data["lines"], old)
+            for key in ("size", "name", "equipment_number"):
+                values[key] = values[key] or old.get(key, "")
+            if not values["numbers"] and len(old.get("numbers", [])) == int(values["quantity"]):
+                values["numbers"] = " ".join(old["numbers"])
         row, missing = {}, []
         for f in fields:
             value = values.get(f.key, "")
@@ -807,6 +1110,8 @@ def _typed_rows(turn, data, rows, kind, notes):
             entry = {"group": group, "line": None, "row": row, "keys": missing, "at": 0}
         else:
             notes.append(f"{typed_lines.label_of(group)} อีกรายการ เพิ่มได้หลังรายการนี้")
+    if keep and entry is None:
+        entry = typing
     shared = {i.code for i in EquipmentType.objects.exclude(entry_group="")}
     if all(line["item_code"] in shared for line in data["lines"]):
         first = entry["group"] if entry else rows[0][0].entry_group
@@ -828,7 +1133,42 @@ def _typed_rows(turn, data, rows, kind, notes):
             tile = next(t for t in tiles if t.topic == first)
             data.setdefault("division", tile.division.code)
             data.setdefault("groups", conversation._tile_groups(tile))
+        elif len({next(iter(found)) for found in owners.values() if len(found) == 1}) > 1:
+            # Groups that each belong to a different division (a meter and a transformer):
+            # a division the model named does not hold them together (dialogue-v1 D11).
+            # อุปกรณ์อื่น, on several tiles, keeps the division the message named.
+            data.pop("division", None)
     return entry
+
+
+def _covers(old, group, values):
+    """Whether a row the draft holds already says everything these read values say."""
+    numbers = set(values["numbers"].split())
+    return (
+        old.get("group") == group
+        and all(not values[k] or old.get(k) == values[k] for k in ("size", "quantity", "name"))
+        and (
+            not values["equipment_number"]
+            or old.get("equipment_number") == values["equipment_number"]
+        )
+        and numbers <= set(old.get("numbers", []))
+    )
+
+
+def _without_row(lines, row):
+    """The draft lines without one typed row (its line's quantity follows the rest)."""
+    kept = []
+    for line in lines:
+        details = [r for r in line.get("details", []) if r is not row]
+        if len(details) == len(line.get("details", [])):
+            kept.append(line)
+            continue
+        if details:
+            line = {**line, "details": details}
+            if "quantity" in line:
+                line["quantity"] = str(sum(int(r.get("quantity", 0) or 0) for r in details))
+            kept.append(line)
+    return kept
 
 
 def _says_no_name(text):
