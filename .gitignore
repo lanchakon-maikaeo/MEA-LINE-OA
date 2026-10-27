@@ -43,6 +43,8 @@ archive/
 !Docs/adr/0020-signed-ai-evaluation-evidence-for-production.md
 !Docs/adr/0021-electricity-usage-text-may-reach-the-ai-after-masking.md
 !Docs/adr/0022-the-ai-talks-and-fills-the-draft-the-program-files.md
+!Docs/adr/0023-requester-flows-are-data-published-from-the-admin-web.md
+!Docs/adr/0024-staff-messages-from-the-web-wait-for-a-free-reply.md
 
 !operations/line_assets/*.jpg
 
