@@ -545,6 +545,7 @@ def submit_case(actor, *, idempotency_key, payload):
                 related_case=related or (cases[0] if cases else None),
                 menu_label=submission.menu_label,
                 meters=list(submission.meters),
+                intake_data=dict(submission.intake_data or {}),
                 submitted_at=now,
                 updated_at=now,
                 **fields,

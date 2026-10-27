@@ -5,6 +5,7 @@ so the same contract works for internal APIs and HTML views. Quantities travel a
 integers; floats are refused so no binary rounding ever reaches a stored amount.
 """
 
+import json
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
@@ -109,7 +110,7 @@ STAFF_CHANNELS = frozenset(
 )
 ON_BEHALF_FIELDS = {"requester_id", "channel", "intake_note", "reported_at"}
 # เมนู LINE (15 ต.ค. 2569 Q20): the division the person chose in the menu, and the choice's name.
-MENU_FIELDS = {"division_code", "menu_label"}
+MENU_FIELDS = {"division_code", "menu_label", "sap_kind", "intake_data"}
 # เวลาแจ้งจริง may go back this far (an outage plus a weekend), never into the future.
 REPORTED_AT_MAX_AGE = timedelta(days=30)
 REPORTED_AT_SKEW = timedelta(minutes=5)
@@ -284,6 +285,7 @@ class Submission:
     division_code: str = ""
     menu_label: str = ""
     meters: tuple = ()  # เครื่องวัดในเรื่องการใช้ไฟฟ้า (usage_meters)
+    intake_data: dict | None = None  # values a published LINE flow collected (ADR 0023)
 
 
 def parse_submission(payload, on_behalf):
@@ -313,9 +315,12 @@ def parse_submission(payload, on_behalf):
     }:
         fields[name] = _text(payload, name, False, 100 if name == "source_reference" else TEXT_MAX)
     if "sap_number" in spec["optional"]:
-        fields["sap_number"] = _text(payload, "sap_number", False, 20)
-        if fields["sap_number"] and not re.fullmatch(r"[A-Za-z0-9-]{4,20}", fields["sap_number"]):
-            fail(ErrorCode.VALIDATION_ERROR, "เลข SAP ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว")
+        fields["sap_number"] = _text(payload, "sap_number", False, 30)
+        if fields["sap_number"] and not re.fullmatch(r"[A-Za-z0-9/-]{4,30}", fields["sap_number"]):
+            fail(ErrorCode.VALIDATION_ERROR, "เลข SAP ใช้ตัวอักษร ตัวเลข ขีด หรือ / ได้ 4 ถึง 30 ตัว")
+        fields["sap_kind"] = _text(payload, "sap_kind", False, 16)
+        if fields["sap_kind"] not in ("", "slip", "return_slip", "work_order"):
+            fail(ErrorCode.VALIDATION_ERROR, "sap_kind must be slip, return_slip or work_order.")
     if "needed_by" in spec["optional"]:
         fields["needed_by"] = None
         if payload.get("needed_by"):
@@ -397,6 +402,9 @@ def parse_submission(payload, on_behalf):
             fail(ErrorCode.VALIDATION_ERROR, str(exc))
         if meters and fields.get("topic") != Case.Topic.USAGE:
             fail(ErrorCode.VALIDATION_ERROR, "ระบุเครื่องวัดได้เฉพาะเรื่องการใช้ไฟฟ้า")
+    intake_data = payload.get("intake_data") or {}
+    if not isinstance(intake_data, dict) or len(json.dumps(intake_data, ensure_ascii=False)) > 5000:
+        fail(ErrorCode.VALIDATION_ERROR, "intake_data must be a small object.")
     return Submission(
         kind,
         tuple(lines),
@@ -409,6 +417,7 @@ def parse_submission(payload, on_behalf):
         division_code,
         menu_label,
         meters,
+        intake_data,
     )
 
 

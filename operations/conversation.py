@@ -1288,6 +1288,10 @@ def _requester_turn(turn):
         turn.conversation.refresh_from_db()
         turn.say("ร่างเรื่องที่ไม่ได้ทำต่อเกิน 7 วันหมดอายุแล้ว")
     _updates(turn)
+    from operations import case_chat  # local: case_chat builds on this module (ADR 0024)
+
+    chat = case_chat.chatting(turn)  # read before held messages open a new chat
+    case_chat.deliver(turn)
     draft = turn.conversation.active_draft
     if draft is not None and draft.status != D.OPEN:
         draft = None
@@ -1328,6 +1332,13 @@ def _requester_turn(turn):
     command = " ".join(text.split()) if text is not None else None
     if command in MENU_WORDS and command not in turn.conversation.reply_choices.get("actions", {}):
         return _static_postback(turn, MENU_WORDS[command], draft)
+    in_chat = chat is not None and turn.conversation.prompt == "case_chat"
+    if text is not None and in_chat and not CASE_NUMBER.fullmatch((command or "").upper()):
+        return case_chat.on_text(turn, chat, text, message)
+    if text is not None and turn.conversation.prompt in ("track_slip", "track_meter"):
+        from operations import case_search  # local: case_search builds on this module
+
+        return case_search.on_text(turn, text)
     if text is not None and turn.conversation.prompt == "receipt":
         from operations import receipts  # local: receipts builds on this module (M07)
 
@@ -1357,6 +1368,11 @@ def _requester_turn(turn):
 
 def _free_text(turn, draft, text, message=None):
     """Agent first when enabled; otherwise approved answers, extraction and the current step."""
+    from operations import flow_runner  # local: flow_runner builds on this module
+
+    if text is not None and flow_runner.is_flow(draft) and turn.conversation.prompt != "track":
+        # ADR 0023 Q44: a published flow asks step by step with its own rules, without AI.
+        return flow_runner.on_text(turn, draft, text)
     if text is not None and turn.conversation.prompt != "track":
         from operations import agent_chat, ai_chat, answers  # local: build on this module
 
@@ -1540,6 +1556,10 @@ def _expects_text(draft):
     """Steps whose answer is typed; elsewhere a typed case number means 'show this case'."""
     if draft is None:
         return False
+    if draft.step == "flow":
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        return flow_runner.expects_text(draft)
     return draft.step in {
         "item_search",
         "quantity",
@@ -1578,6 +1598,14 @@ def off_step(draft, text):
 
 
 def _static_postback(turn, data, draft):
+    if data in ("m=find_slip", "m=find_meter") and turn.requester:
+        from operations import case_search  # local: case_search builds on this module
+
+        return case_search.ask(turn, data.removeprefix("m=find_"))
+    if data == "m=chat_end":
+        from operations import case_chat  # local: case_chat builds on this module
+
+        return case_chat.end(turn)
     if data == "m=register":
         return _ask_kind(turn, "ลงทะเบียนหรือยืนยันตัวตน")
     if data == "m=problems":
@@ -1711,6 +1739,13 @@ def _menu_item(turn, pk, go=False):
         # The draft stays among the open drafts; this tap starts from the menu.
         turn.conversation.active_draft = None
         turn.conversation.save(update_fields=["active_draft", "updated_at"])
+    if item.place == LineMenuItem.Place.TILE:
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        published = flow_runner.published_for(item.label)
+        if published is not None:  # ADR 0023: the flow an admin published for this tile
+            turn.set_prompt()
+            return flow_runner.start(turn, published)
     choices = (
         list(item.choices.filter(is_active=True).order_by("position", "pk")[:12])
         if action == A.TOPIC
@@ -2051,6 +2086,11 @@ def _case_list(turn, mode="open", page=1, item=None):
     if rows.has_next():
         quick.append(link("ถัดไป", number=rows.next_page_number()))
     quick += [link(label, selected=key) for key, label in modes.items() if key != mode]
+    if item is None and turn.requester and not turn.requester.is_anonymous:
+        from operations import case_search  # local: case_search builds on this module
+
+        # grill กคว. 27 Oct 2569 Q7: by slip number (its start is enough) or meter number.
+        quick += [(label, f"m=find_{by}") for by, label in case_search.LABELS.items()]
     quick.append(turn.button("ค้นหาเลขเรื่อง", "case_search"))
     if item:
         quick.append(("ถามเรื่องอื่น", f"m=ask&id={item.pk}"))
@@ -2118,13 +2158,25 @@ def _case_detail(turn, number):
         f"อัปเดตล่าสุด: {_when(case.updated_at)}" + (f"\nไฟล์แนบ: {files} ไฟล์" if files else "")
     )
     buttons = []
+    from operations import case_chat, warehouse  # local: both build on this module
+
+    stage_lines = warehouse.status_lines(case)
+    if stage_lines:
+        text += "\n" + "\n".join(stage_lines)
+        keyed = warehouse.stages(case).get(warehouse.S.KEYED)
+        if keyed and keyed.planned_on and not warehouse.stages(case).get(warehouse.S.ISSUED):
+            # Q31: ฟข. may change how the goods come until they are issued.
+            offer = warehouse.offer_buttons(case, turn.identity, keyed.planned_on)
+            buttons += [tuple(b) for b in offer]
+    if case_chat.M.objects.filter(case=case).exists():
+        text += "\nมีการคุยกับเจ้าหน้าที่ในเรื่องนี้ พิมพ์ในแชตนี้หลังข้อความของเจ้าหน้าที่เพื่อตอบ"
     if case.kind == K.WITHDRAWAL:
         from operations import receipts  # local: receipts builds on this module (M07)
 
         detail = receipts.status_text(case)
         if detail:
             text += "\n" + detail
-        buttons = receipts.pending_buttons(turn, case)
+        buttons = [*receipts.pending_buttons(turn, case), *buttons]
     elif case.kind == K.RETURN:
         from operations import returns  # local: returns builds on services (M08)
 
@@ -2135,7 +2187,7 @@ def _case_detail(turn, number):
         detail = problem_chat.status_text(case)
         if detail:
             text += "\n" + detail
-        buttons = problem_chat.buttons(turn, case)
+        buttons = [*problem_chat.buttons(turn, case), *buttons]
     if case.status == Case.Status.AWAITING_INFO:
         text += "\nเจ้าหน้าที่ขอ: " + _info_asked(case)
         buttons += [
@@ -2238,6 +2290,10 @@ def _token_action(turn, token, draft):
         return
     if action == "case_search":
         return _search_cases(turn)
+    if action == "delivery":
+        from operations import warehouse  # local: warehouse builds on this module
+
+        return warehouse.on_choice(turn, token)
     if action == "case_list":
         item = _menu_entry(token.value["item"]) if token.value.get("item") else None
         if token.value.get("item") and item is None:
@@ -2280,6 +2336,10 @@ def _token_action(turn, token, draft):
         return _reprompt(turn, draft)
     if draft is None or draft.pk != bound.pk:
         _activate(turn, bound)
+    if action == "flow":
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        return flow_runner.on_button(turn, bound, token.value)
     return _draft_button(turn, bound, action, token.value)
 
 
@@ -2317,6 +2377,10 @@ def _ask_question(turn, draft):
     step = draft.step
     data = draft.data
     b = turn.button
+    if step == "flow":
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        return flow_runner.render(turn, draft)
     if step == "kind":
         turn.say(
             "ต้องการแจ้งเรื่องประเภทใด\n1. เบิก\n2. ส่งคืน\n"

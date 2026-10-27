@@ -1,7 +1,8 @@
 """นำ flow ร่างแรกและ requirement ของกองเข้าระบบ (ADR 0023, grill กคว. 27 ต.ค. 2569).
 
 Safe to run again: a flow that already has a version keeps it, and a requirement whose text the
-division already has is not added twice.
+division already has is not added twice. --replace-draft puts the fixture into a flow's draft
+(nothing published changes); a flow without a tile gets the fixture's.
 """
 
 import json
@@ -12,7 +13,14 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from operations import identity, line_flows
-from operations.models import Division, DivisionRequirement, LineFlow, LineFlowVersion
+from operations.models import (
+    Calendar,
+    Division,
+    DivisionRequirement,
+    DivisionSchedule,
+    LineFlow,
+    LineFlowVersion,
+)
 
 FIXTURES = Path(settings.BASE_DIR) / "operations" / "fixtures"
 FLOWS = ("line_flow_meter_ct_vt_v1.json",)
@@ -21,6 +29,11 @@ REQUIREMENTS = "division_requirements_v1.json"
 
 class Command(BaseCommand):
     help = "Load the first LINE flow drafts and the divisions' requirements."
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--replace-draft", action="store_true", help="put the fixture into existing drafts"
+        )
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -35,10 +48,34 @@ class Command(BaseCommand):
                     "division": Division.objects.filter(code=spec["division"]).first(),
                 },
             )
+            if not flow.tile and spec.get("tile"):
+                flow.tile = spec["tile"]
+                flow.save(update_fields=["tile"])
+            for spec in data.get("calendars", []):
+                division = Division.objects.filter(code=spec["division"]).first()
+                if division is None:
+                    continue
+                Calendar.objects.get_or_create(
+                    key=spec["key"], defaults={"name": spec["name"], "division": division}
+                )
+                # กำหนดจ่ายและวันส่งรถ start empty; กคว. fills them in (Q17, Q30).
+                DivisionSchedule.objects.get_or_create(
+                    division=division, defaults={"issue_weekdays": [0, 1, 2, 3, 4]}
+                )
+            graph = line_flows.clean_graph(data["graph"])
+            draft = line_flows.draft_of(flow)
+            if options["replace_draft"] and draft is not None:
+                draft.graph, draft.checks = graph, line_flows.check(graph)
+                draft.revision += 1
+                draft.updated_by = actor
+                draft.save(
+                    update_fields=["graph", "checks", "revision", "updated_by", "updated_at"]
+                )
+                self.stdout.write(f"{flow.key}: แทนร่างรุ่น {draft.number} ด้วยข้อสรุป")
+                continue
             if flow.versions.exists():
                 self.stdout.write(f"{flow.key}: มีรุ่นอยู่แล้ว ไม่เปลี่ยน")
                 continue
-            graph = line_flows.clean_graph(data["graph"])
             LineFlowVersion.objects.create(
                 flow=flow,
                 number=1,

@@ -26,8 +26,9 @@ K = Case.Kind
 GROUPS = tuple(EquipmentType.LineGroup.values)  # meter, ct, vt, other, transformer, lbs, rmu
 # Groups whose rows name each unit by its number (the number is the unit's serial).
 NUMBERED = ("meter", "transformer", "lbs", "rmu")
-SAP_NUMBER = re.compile(r"^[A-Za-z0-9-]{4,20}$")
-METER_NUMBER = SAP_NUMBER  # the same loose shape until the real formats are known
+# grill กคว. 27 Oct 2569 Q9: a slip number is text up to 30 characters and may carry "/10".
+SAP_NUMBER = re.compile(r"^[A-Za-z0-9/-]{4,30}$")
+METER_NUMBER = re.compile(r"^[A-Za-z0-9-]{4,20}$")  # loose until the real formats are known
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 LIMITS = {"size": 40, "name": 100, "extra": 200}
 EQUIPMENT_NUMBER = re.compile(r"^[A-Za-z0-9-]{2,30}$")
@@ -93,7 +94,7 @@ def clean_sap(text):
     """(number, "") or ("", why not)."""
     value = re.sub(r"\s", "", str(text or "").translate(THAI_DIGITS))
     if not SAP_NUMBER.match(value):
-        return "", "เลข SAP ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว"
+        return "", "เลข SAP ใช้ตัวอักษร ตัวเลข ขีด หรือ / ได้ 4 ถึง 30 ตัว"
     return value, ""
 
 

@@ -4,7 +4,8 @@
  "flow": {
   "key": "meter-ct-vt",
   "name": "Meter, CT, VT",
-  "division": "กคว."
+  "division": "กคว.",
+  "tile": "Meter, CT, VT"
  },
  "graph": {
   "nodes": [
@@ -29,37 +30,43 @@
       "id": "c1.b0",
       "label": "มิเตอร์",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "group=meter"
      },
      {
       "id": "c1.b1",
       "label": "CT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "group=ct"
      },
      {
       "id": "c1.b2",
       "label": "VT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "group=vt"
      },
      {
       "id": "c1.b3",
       "label": "ชุดมิเตอร์ CT VT",
       "full": "เครื่องวัดฯ พร้อม CT หรือ CT, VT ยกชุด",
-      "note": ""
+      "note": "",
+      "set": "group=set"
      },
      {
       "id": "c1.b4",
       "label": "โน้ตบุ๊กและหัวอ่าน",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "c1.b5",
       "label": "ขอเครื่องวัดฯ คืน",
       "full": "ขอเครื่องวัดฯ กลับคืน",
-      "note": ""
+      "note": "",
+      "set": ""
      }
     ],
     "config": {},
@@ -77,13 +84,15 @@
       "id": "c2m.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "c2m.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=return"
      }
     ],
     "config": {},
@@ -101,19 +110,22 @@
       "id": "c2ct.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "c2ct.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=return"
      },
      {
       "id": "c2ct.b2",
       "label": "ติดตามสถานะการซ่อม",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=problem"
      }
     ],
     "config": {},
@@ -131,13 +143,15 @@
       "id": "c2set.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "c2set.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=return"
      }
     ],
     "config": {},
@@ -193,6 +207,39 @@
     "w": 260
    },
    {
+    "id": "grp",
+    "kind": "branch",
+    "title": "อุปกรณ์ที่เลือก",
+    "text": "ระบบดูจากปุ่มแรกที่ผู้ใช้กด",
+    "buttons": [
+     {
+      "id": "grp.b0",
+      "label": "มิเตอร์",
+      "full": "",
+      "note": "",
+      "set": "group=meter"
+     },
+     {
+      "id": "grp.b1",
+      "label": "CT",
+      "full": "",
+      "note": "",
+      "set": "group=ct"
+     },
+     {
+      "id": "grp.b2",
+      "label": "VT",
+      "full": "",
+      "note": "",
+      "set": "group=vt"
+     }
+    ],
+    "config": {},
+    "x": 1320,
+    "y": 40,
+    "w": 260
+   },
+   {
     "id": "rowm",
     "kind": "ask",
     "title": "มิเตอร์",
@@ -202,7 +249,7 @@
      "field": "rows.meter",
      "rule": "meter_row"
     },
-    "x": 1320,
+    "x": 1640,
     "y": 40,
     "w": 260
    },
@@ -216,7 +263,7 @@
      "field": "rows.ct",
      "rule": "size_quantity"
     },
-    "x": 1320,
+    "x": 1640,
     "y": 270,
     "w": 260
    },
@@ -230,8 +277,8 @@
      "field": "rows.vt",
      "rule": "size_quantity"
     },
-    "x": 2280,
-    "y": 40,
+    "x": 1640,
+    "y": 500,
     "w": 260
    },
    {
@@ -244,8 +291,8 @@
      "field": "rows.other",
      "rule": "name_size_quantity"
     },
-    "x": 2280,
-    "y": 270,
+    "x": 2600,
+    "y": 40,
     "w": 260
    },
    {
@@ -258,17 +305,19 @@
       "id": "more.b0",
       "label": "เพิ่มรายการ",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "more.b1",
       "label": "ไปต่อ",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      }
     ],
     "config": {},
-    "x": 1640,
+    "x": 1960,
     "y": 40,
     "w": 260
    },
@@ -282,35 +331,40 @@
       "id": "add.b0",
       "label": "มิเตอร์",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "add.b1",
       "label": "CT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "add.b2",
       "label": "VT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "add.b3",
       "label": "อุปกรณ์อื่น",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "add.b4",
       "label": "ไปต่อ",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      }
     ],
     "config": {},
-    "x": 1960,
+    "x": 2280,
     "y": 40,
     "w": 260
    },
@@ -324,30 +378,34 @@
       "id": "kind.b0",
       "label": "มิเตอร์ + CT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "set_kind=meter_ct"
      },
      {
       "id": "kind.b1",
       "label": "มิเตอร์ + CT + VT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "set_kind=meter_ct_vt"
      },
      {
       "id": "kind.b2",
       "label": "CT อย่างเดียว",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "set_kind=ct"
      },
      {
       "id": "kind.b3",
       "label": "CT + VT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "set_kind=ct_vt"
      }
     ],
     "config": {},
     "x": 1320,
-    "y": 500,
+    "y": 270,
     "w": 260
    },
    {
@@ -362,7 +420,7 @@
      "max_rows": "1"
     },
     "x": 1640,
-    "y": 270,
+    "y": 730,
     "w": 260
    },
    {
@@ -375,7 +433,8 @@
       "id": "setui.b0",
       "label": "ข้าม",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      }
     ],
     "config": {
@@ -384,7 +443,7 @@
      "optional": "1"
     },
     "x": 1640,
-    "y": 500,
+    "y": 960,
     "w": 260
    },
    {
@@ -411,20 +470,20 @@
       "id": "hasvt.b0",
       "label": "มี VT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "set_kind=meter_ct_vt|ct_vt"
      },
      {
       "id": "hasvt.b1",
       "label": "ไม่มี VT",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "set_kind=meter_ct|ct"
      }
     ],
-    "config": {
-     "condition": "set_kind"
-    },
+    "config": {},
     "x": 2280,
-    "y": 500,
+    "y": 270,
     "w": 260
    },
    {
@@ -438,7 +497,7 @@
      "rule": "size_quantity"
     },
     "x": 2600,
-    "y": 40,
+    "y": 270,
     "w": 260
    },
    {
@@ -452,7 +511,7 @@
      "rule": "multiplier"
     },
     "x": 2600,
-    "y": 270,
+    "y": 500,
     "w": 260
    },
    {
@@ -465,19 +524,19 @@
       "id": "wr.b0",
       "label": "เบิก",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "wr.b1",
       "label": "ส่งคืน",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": "case_kind=return"
      }
     ],
-    "config": {
-     "condition": "case_kind"
-    },
-    "x": 1960,
+    "config": {},
+    "x": 2280,
     "y": 500,
     "w": 260
    },
@@ -491,7 +550,7 @@
      "field": "purpose",
      "rule": "text"
     },
-    "x": 2280,
+    "x": 2600,
     "y": 730,
     "w": 260
    },
@@ -505,7 +564,8 @@
       "id": "need.b0",
       "label": "ข้าม",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      }
     ],
     "config": {
@@ -513,8 +573,8 @@
      "rule": "date",
      "optional": "1"
     },
-    "x": 2600,
-    "y": 500,
+    "x": 2920,
+    "y": 40,
     "w": 260
    },
    {
@@ -527,23 +587,26 @@
       "id": "sumw.b0",
       "label": "ยืนยันส่งเรื่อง",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "sumw.b1",
       "label": "กรอกใหม่",
       "full": "",
-      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก"
+      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก",
+      "set": ""
      },
      {
       "id": "sumw.b2",
       "label": "แนบหลักฐาน",
       "full": "",
-      "note": "ส่งรูปหรือไฟล์ แล้วกลับมาที่สรุป"
+      "note": "ส่งรูปหรือไฟล์ แล้วกลับมาที่สรุป",
+      "set": ""
      }
     ],
     "config": {},
-    "x": 2920,
+    "x": 3240,
     "y": 40,
     "w": 260
    },
@@ -557,7 +620,7 @@
      "case_kind": "withdrawal",
      "division": "กคว."
     },
-    "x": 3240,
+    "x": 3560,
     "y": 40,
     "w": 260
    },
@@ -568,7 +631,7 @@
     "text": "เลขเรื่อง: W69-000113\nขั้น: รอรับใบเบิก\nติดตามได้ที่ เรื่องของฉัน",
     "buttons": [],
     "config": {},
-    "x": 3560,
+    "x": 3880,
     "y": 40,
     "w": 260
    },
@@ -582,7 +645,7 @@
      "field": "condition_reason",
      "rule": "text"
     },
-    "x": 2280,
+    "x": 2600,
     "y": 960,
     "w": 260
    },
@@ -596,18 +659,20 @@
       "id": "sumr.b0",
       "label": "ยืนยันส่งเรื่อง",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "sumr.b1",
       "label": "กรอกใหม่",
       "full": "",
-      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก"
+      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก",
+      "set": ""
      }
     ],
     "config": {},
-    "x": 2600,
-    "y": 730,
+    "x": 2920,
+    "y": 270,
     "w": 260
    },
    {
@@ -620,7 +685,7 @@
      "case_kind": "return",
      "division": "กคว."
     },
-    "x": 2920,
+    "x": 3240,
     "y": 270,
     "w": 260
    },
@@ -631,7 +696,7 @@
     "text": "เลขเรื่อง: R69-000021\nติดตามได้ที่ เรื่องของฉัน",
     "buttons": [],
     "config": {},
-    "x": 3240,
+    "x": 3560,
     "y": 270,
     "w": 260
    },
@@ -659,18 +724,20 @@
       "id": "sumrep.b0",
       "label": "ยืนยันส่งเรื่อง",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "sumrep.b1",
       "label": "กรอกใหม่",
       "full": "",
-      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก"
+      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก",
+      "set": ""
      }
     ],
     "config": {},
     "x": 1320,
-    "y": 730,
+    "y": 500,
     "w": 260
    },
    {
@@ -685,7 +752,7 @@
      "division": "กคว."
     },
     "x": 1640,
-    "y": 730,
+    "y": 1190,
     "w": 260
    },
    {
@@ -696,7 +763,7 @@
     "buttons": [],
     "config": {},
     "x": 1960,
-    "y": 730,
+    "y": 500,
     "w": 260
    },
    {
@@ -738,7 +805,7 @@
      "division": "กคว."
     },
     "x": 1320,
-    "y": 960,
+    "y": 730,
     "w": 260
    },
    {
@@ -749,7 +816,7 @@
     "buttons": [],
     "config": {},
     "x": 1640,
-    "y": 960,
+    "y": 1420,
     "w": 260
    },
    {
@@ -776,7 +843,8 @@
       "id": "backmore.b0",
       "label": "ข้าม",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      }
     ],
     "config": {
@@ -798,18 +866,20 @@
       "id": "sumb.b0",
       "label": "ยืนยันส่งเรื่อง",
       "full": "",
-      "note": ""
+      "note": "",
+      "set": ""
      },
      {
       "id": "sumb.b1",
       "label": "กรอกใหม่",
       "full": "",
-      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก"
+      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก",
+      "set": ""
      }
     ],
     "config": {},
     "x": 1320,
-    "y": 1190,
+    "y": 960,
     "w": 260
    },
    {
@@ -824,7 +894,7 @@
      "division": "กคว."
     },
     "x": 1640,
-    "y": 1190,
+    "y": 1650,
     "w": 260
    },
    {
@@ -835,7 +905,7 @@
     "buttons": [],
     "config": {},
     "x": 1960,
-    "y": 960,
+    "y": 730,
     "w": 260
    },
    {
@@ -846,7 +916,7 @@
     "buttons": [],
     "config": {},
     "x": 40,
-    "y": 1490,
+    "y": 1950,
     "w": 260
    },
    {
@@ -857,7 +927,7 @@
     "buttons": [],
     "config": {},
     "x": 360,
-    "y": 1490,
+    "y": 1950,
     "w": 260
    },
    {
@@ -868,7 +938,7 @@
     "buttons": [],
     "config": {},
     "x": 680,
-    "y": 1490,
+    "y": 1950,
     "w": 260
    },
    {
@@ -879,7 +949,7 @@
     "buttons": [],
     "config": {},
     "x": 1000,
-    "y": 1490,
+    "y": 1950,
     "w": 260
    },
    {
@@ -890,7 +960,7 @@
     "buttons": [],
     "config": {},
     "x": 1320,
-    "y": 1490,
+    "y": 1950,
     "w": 260
    }
   ],
@@ -997,380 +1067,399 @@
     "id": "e15",
     "from": "docw",
     "port": null,
-    "to": "rowm",
-    "label": "มิเตอร์"
+    "to": "grp",
+    "label": ""
    },
    {
     "id": "e16",
-    "from": "docw",
+    "from": "docr",
     "port": null,
-    "to": "rowct",
-    "label": "CT หรือ VT"
+    "to": "grp",
+    "label": ""
    },
    {
     "id": "e17",
-    "from": "docr",
-    "port": null,
+    "from": "grp",
+    "port": "grp.b0",
     "to": "rowm",
-    "label": "มิเตอร์"
+    "label": ""
    },
    {
     "id": "e18",
-    "from": "docr",
-    "port": null,
+    "from": "grp",
+    "port": "grp.b1",
     "to": "rowct",
-    "label": "CT หรือ VT"
+    "label": ""
    },
    {
     "id": "e19",
+    "from": "grp",
+    "port": "grp.b2",
+    "to": "rowvt",
+    "label": ""
+   },
+   {
+    "id": "e20",
     "from": "rowm",
     "port": null,
     "to": "more",
     "label": ""
    },
    {
-    "id": "e20",
+    "id": "e21",
     "from": "rowct",
     "port": null,
     "to": "more",
     "label": ""
    },
    {
-    "id": "e21",
+    "id": "e22",
     "from": "rowvt",
     "port": null,
     "to": "more",
     "label": ""
    },
    {
-    "id": "e22",
+    "id": "e23",
     "from": "rowo",
     "port": null,
     "to": "more",
     "label": ""
    },
    {
-    "id": "e23",
+    "id": "e24",
     "from": "more",
     "port": "more.b0",
     "to": "add",
     "label": ""
    },
    {
-    "id": "e24",
+    "id": "e25",
     "from": "more",
     "port": "more.b1",
     "to": "wr",
     "label": ""
    },
    {
-    "id": "e25",
+    "id": "e26",
     "from": "add",
     "port": "add.b0",
     "to": "rowm",
     "label": ""
    },
    {
-    "id": "e26",
+    "id": "e27",
     "from": "add",
     "port": "add.b1",
     "to": "rowct",
     "label": ""
    },
    {
-    "id": "e27",
+    "id": "e28",
     "from": "add",
     "port": "add.b2",
     "to": "rowvt",
     "label": ""
    },
    {
-    "id": "e28",
+    "id": "e29",
     "from": "add",
     "port": "add.b3",
     "to": "rowo",
     "label": ""
    },
    {
-    "id": "e29",
+    "id": "e30",
     "from": "add",
     "port": "add.b4",
     "to": "wr",
     "label": ""
    },
    {
-    "id": "e30",
+    "id": "e31",
     "from": "docs",
     "port": null,
     "to": "kind",
     "label": ""
    },
    {
-    "id": "e31",
+    "id": "e32",
     "from": "kind",
     "port": "kind.b0",
     "to": "setm",
     "label": ""
    },
    {
-    "id": "e32",
+    "id": "e33",
     "from": "kind",
     "port": "kind.b1",
     "to": "setm",
     "label": ""
    },
    {
-    "id": "e33",
+    "id": "e34",
     "from": "kind",
     "port": "kind.b2",
     "to": "setui",
     "label": ""
    },
    {
-    "id": "e34",
+    "id": "e35",
     "from": "kind",
     "port": "kind.b3",
     "to": "setui",
     "label": ""
    },
    {
-    "id": "e35",
+    "id": "e36",
     "from": "setm",
     "port": null,
     "to": "setct",
     "label": ""
    },
    {
-    "id": "e36",
+    "id": "e37",
     "from": "setui",
     "port": "setui.b0",
     "to": "setct",
     "label": ""
    },
    {
-    "id": "e37",
+    "id": "e38",
     "from": "setui",
     "port": null,
     "to": "setct",
     "label": ""
    },
    {
-    "id": "e38",
+    "id": "e39",
     "from": "setct",
     "port": null,
     "to": "hasvt",
     "label": ""
    },
    {
-    "id": "e39",
+    "id": "e40",
     "from": "hasvt",
     "port": "hasvt.b0",
     "to": "setvt",
     "label": ""
    },
    {
-    "id": "e40",
+    "id": "e41",
     "from": "hasvt",
     "port": "hasvt.b1",
     "to": "mult",
     "label": ""
    },
    {
-    "id": "e41",
+    "id": "e42",
     "from": "setvt",
     "port": null,
     "to": "mult",
     "label": ""
    },
    {
-    "id": "e42",
+    "id": "e43",
     "from": "mult",
     "port": null,
     "to": "wr",
     "label": ""
    },
    {
-    "id": "e43",
+    "id": "e44",
     "from": "wr",
     "port": "wr.b0",
     "to": "purpose",
     "label": ""
    },
    {
-    "id": "e44",
+    "id": "e45",
     "from": "wr",
     "port": "wr.b1",
     "to": "cond",
     "label": ""
    },
    {
-    "id": "e45",
+    "id": "e46",
     "from": "purpose",
     "port": null,
     "to": "need",
     "label": ""
    },
    {
-    "id": "e46",
+    "id": "e47",
     "from": "need",
     "port": "need.b0",
     "to": "sumw",
     "label": ""
    },
    {
-    "id": "e47",
+    "id": "e48",
     "from": "need",
     "port": null,
     "to": "sumw",
     "label": ""
    },
    {
-    "id": "e48",
+    "id": "e49",
     "from": "sumw",
     "port": "sumw.b0",
     "to": "casew",
     "label": ""
    },
    {
-    "id": "e49",
+    "id": "e50",
     "from": "casew",
     "port": null,
     "to": "donew",
     "label": ""
    },
    {
-    "id": "e50",
+    "id": "e51",
     "from": "cond",
     "port": null,
     "to": "sumr",
     "label": ""
    },
    {
-    "id": "e51",
+    "id": "e52",
     "from": "sumr",
     "port": "sumr.b0",
     "to": "caser",
     "label": ""
    },
    {
-    "id": "e52",
+    "id": "e53",
     "from": "caser",
     "port": null,
     "to": "doner",
     "label": ""
    },
    {
-    "id": "e53",
+    "id": "e54",
     "from": "repair",
     "port": null,
     "to": "sumrep",
     "label": ""
    },
    {
-    "id": "e54",
+    "id": "e55",
     "from": "sumrep",
     "port": "sumrep.b0",
     "to": "caserep",
     "label": ""
    },
    {
-    "id": "e55",
+    "id": "e56",
     "from": "caserep",
     "port": null,
     "to": "donerep",
     "label": ""
    },
    {
-    "id": "e56",
+    "id": "e57",
     "from": "nb",
     "port": null,
     "to": "nbbook",
     "label": ""
    },
    {
-    "id": "e57",
+    "id": "e58",
     "from": "nbbook",
     "port": null,
     "to": "nbcase",
     "label": ""
    },
    {
-    "id": "e58",
+    "id": "e59",
     "from": "nbcase",
     "port": null,
     "to": "nbdone",
     "label": ""
    },
    {
-    "id": "e59",
+    "id": "e60",
     "from": "back",
     "port": null,
     "to": "backmore",
     "label": ""
    },
    {
-    "id": "e60",
+    "id": "e61",
     "from": "backmore",
     "port": "backmore.b0",
     "to": "sumb",
     "label": ""
    },
    {
-    "id": "e61",
+    "id": "e62",
     "from": "backmore",
     "port": null,
     "to": "sumb",
     "label": ""
    },
    {
-    "id": "e62",
+    "id": "e63",
     "from": "sumb",
     "port": "sumb.b0",
     "to": "caseb",
     "label": ""
    },
    {
-    "id": "e63",
+    "id": "e64",
     "from": "caseb",
     "port": null,
     "to": "doneb",
     "label": ""
    },
    {
-    "id": "e64",
+    "id": "e65",
     "from": "n_search",
     "port": null,
     "to": "c1",
     "label": ""
    },
    {
-    "id": "e65",
+    "id": "e66",
     "from": "n_stages",
     "port": null,
     "to": "donew",
     "label": ""
    },
    {
-    "id": "e66",
+    "id": "e67",
     "from": "n_appt",
     "port": null,
     "to": "donew",
     "label": ""
    },
    {
-    "id": "e67",
+    "id": "e68",
     "from": "n_ai",
     "port": null,
     "to": "c1",
     "label": ""
    },
    {
-    "id": "e68",
+    "id": "e69",
     "from": "n_rows",
     "port": null,
     "to": "rowm",
     "label": ""
    }
   ]
- }
+ },
+ "calendars": [
+  {
+   "key": "notebook",
+   "name": "โน้ตบุ๊กและหัวอ่าน",
+   "division": "กคว."
+  },
+  {
+   "key": "pickup",
+   "name": "นัดรับของ",
+   "division": "กคว."
+  }
+ ]
 }

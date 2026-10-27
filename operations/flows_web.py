@@ -1,8 +1,8 @@
 """หน้าแอดมิน flow LINE และ requirement ของกอง (ADR 0023, grill กคว. 27 ต.ค. 2569).
 
 The list of flows, the canvas editor of one flow's draft (saved as JSON, checked on every save),
-publishing (closed until the flow runner is ready), and the divisions' requirements, each of
-which opens the box it belongs to in the editor.
+ลองคุย (the editor plays the draft and asks the runner's own rules what typed text reads as),
+publishing, and the divisions' requirements, each of which opens the box it belongs to.
 """
 
 import json
@@ -14,7 +14,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST, require_safe
 
-from operations import line_flows
+from operations import flow_runner, line_flows, typed_input
 from operations.models import Division, DivisionRequirement, LineFlow, LineFlowVersion
 from operations.views import admin_required
 
@@ -95,6 +95,7 @@ def admin_flow(request, key):
         "limits": {"buttons": line_flows.MAX_BUTTONS, "label": line_flows.MAX_LABEL},
         "requirements": requirements,
         "saveUrl": reverse("admin-flow-save", args=[flow.key]),
+        "tryUrl": reverse("admin-flow-try", args=[flow.key]),
         "requirementsUrl": reverse("admin-requirements"),
         "focus": request.GET.get("node", ""),
         "runnerReady": line_flows.RUNNER_READY,
@@ -131,6 +132,30 @@ def admin_flow_save(request, key):
     except ValidationError as exc:
         return JsonResponse({"error": " ".join(exc.messages)}, status=409)
     return JsonResponse({"revision": version.revision, "checks": version.checks})
+
+
+@admin_required
+@require_POST
+def admin_flow_try(request, key):
+    """What the chat would read from typed text at an ask box: nothing is saved or sent."""
+    get_object_or_404(LineFlow, key=key)
+    try:
+        body = json.loads(request.body or b"{}")
+        rule, field, text = str(body["rule"]), str(body.get("field", "")), str(body["text"])[:5000]
+        rows = [r for r in body.get("rows") or [] if isinstance(r, dict)][:100]
+    except (ValueError, TypeError, KeyError):
+        return JsonResponse({"error": "ข้อมูลที่ส่งมาไม่ถูกต้อง"}, status=400)
+    if rule not in line_flows.RULES:
+        return JsonResponse({"error": "ไม่รู้จักกฎนี้"}, status=400)
+    value, shown, problem = flow_runner.read(rule, field, text)
+    answer = {"value": value, "shown": shown, "problem": problem}
+    if not problem and rule == "multiplier":
+        computed = typed_input.multiplier_of(rows)
+        answer["computed"] = None if computed is None else f"{computed:g}"
+        answer["ok"] = computed is not None and abs(float(value) - computed) < 0.001
+    if not problem and field.startswith("rows."):
+        answer["rows"] = [{**r, "text": flow_runner.row_text(r)} for r in value]
+    return JsonResponse(answer)
 
 
 @admin_required

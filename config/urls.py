@@ -13,6 +13,7 @@ from operations import (
     registry_web,
     routing_web,
     views,
+    warehouse_web,
     web,
 )
 
@@ -47,6 +48,13 @@ urlpatterns = [
     path("console/", web.home, name="console"),
     path("divisions/<str:code>/", web.division_queue, name="division-detail"),
     path("divisions/<str:code>/export.csv", web.division_export, name="division-export"),
+    path("divisions/<str:code>/warehouse/", warehouse_web.warehouse_page, name="warehouse"),
+    path(
+        "divisions/<str:code>/warehouse/schedule/",
+        warehouse_web.schedule_page,
+        name="warehouse-schedule",
+    ),
+    path("divisions/<str:code>/calendar/", warehouse_web.calendar_page, name="calendar"),
     path("queue/", web.all_queue, name="queue-all"),
     path("orders/", orders_web.orders, name="orders"),
     path("orders/new/", orders_web.order_new, name="order-new"),
@@ -64,6 +72,7 @@ urlpatterns = [
     path("cases/<str:number>/revision/", web.case_revision, name="case-revision"),
     path("cases/<str:number>/act/<slug:action>/", web.case_action, name="case-action"),
     path("cases/<str:number>/files/", web.case_upload, name="case-upload"),
+    path("cases/<str:number>/chat/", warehouse_web.case_chat_post, name="case-chat"),
     path("account/", web.account, name="account"),
     path("console/pii/", pii_web.page, name="pii"),
     path("routing/words/", routing_web.words, name="routing-words"),
@@ -113,6 +122,7 @@ urlpatterns = [
         "console/admin/flows/<slug:key>/start/", flows_web.admin_flow_start, name="admin-flow-start"
     ),
     path("console/admin/flows/<slug:key>/save/", flows_web.admin_flow_save, name="admin-flow-save"),
+    path("console/admin/flows/<slug:key>/try/", flows_web.admin_flow_try, name="admin-flow-try"),
     path(
         "console/admin/flows/<slug:key>/publish/",
         flows_web.admin_flow_publish,

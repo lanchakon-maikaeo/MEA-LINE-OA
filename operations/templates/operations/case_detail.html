@@ -1,6 +1,7 @@
 {% extends "operations/base.html" %}
-{% load ui %}
+{% load static ui %}
 {% block title %}{{ case.number }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}">{% endblock %}
 {% block page_id %}case{% endblock %}
 {% block page_kind %}{{ case.kind }}{% endblock %}
 {% block content %}
@@ -59,6 +60,8 @@
       {% if case.status == "awaiting_info" %}<p class="helptext">ถ้าข้อมูลครบแล้ว กด "ได้ข้อมูลครบแล้ว" ในสิ่งที่ทำได้ เพื่อให้เรื่องเดินต่อ</p>{% endif %}
     </section>
     {% endif %}
+
+    {% include "operations/_case_panel.html" %}
 
     {% if page.texts %}
     <section class="section" aria-labelledby="s-request">

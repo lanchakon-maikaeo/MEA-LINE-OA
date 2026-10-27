@@ -1,5 +1,5 @@
 """flow LINE ในหน้าแอดมิน (ADR 0023): drafts are checked graphs, only admins edit them, publishing
-waits for the flow runner, and every division requirement opens the box it belongs to."""
+needs the flow runner, and every division requirement opens the box it belongs to."""
 
 import copy
 import json
@@ -116,9 +116,9 @@ class DraftTests(FlowTestCase):
         with self.assertRaises(ValidationError):
             line_flows.save_draft(self.admin, draft, g, draft.revision)  # someone saved since
 
-    def test_publishing_waits_for_the_runner_then_keeps_the_old_version(self):
+    def test_publishing_needs_the_runner_and_keeps_the_old_version(self):
         draft = self.draft()
-        with self.assertRaises(ValidationError):
+        with patch.object(line_flows, "RUNNER_READY", False), self.assertRaises(ValidationError):
             line_flows.publish(self.admin, draft, "ลองเผยแพร่")
         with patch.object(line_flows, "RUNNER_READY", True):
             with self.assertRaises(ValidationError):

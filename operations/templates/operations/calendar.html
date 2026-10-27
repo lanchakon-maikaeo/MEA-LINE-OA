@@ -1,0 +1,80 @@
+{% extends "operations/base.html" %}
+{% load static ui %}
+{% block title %}ปฏิทินนัด {{ calendar.name }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}">{% endblock %}
+{% block page_id %}calendar{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow"><a href="{% url 'division-detail' division.code %}">คิว {{ division.code }}</a></span>
+    <h1>ปฏิทินนัด</h1>
+    <p class="lede">เปิดช่วงเวลาได้ตามสะดวก คำขอที่ยังไม่ยืนยันถือว่าช่วงนั้นไม่ว่าง ผู้แจ้งได้ข้อความตอนยืนยัน เปลี่ยน หรือไม่รับนัด</p>
+  </div>
+  <div class="page-head__actions">{% for c in calendars %}<a class="btn btn--sm{% if c != calendar %} btn--secondary{% endif %}" href="?cal={{ c.key }}&amp;week={{ start|date:'Y-m-d' }}"{% if c == calendar %} aria-current="page"{% endif %}>{{ c.name }}</a>{% endfor %}</div>
+</div>
+
+{% if waiting %}
+<section class="panel cal-waiting">
+  <div class="panel__head"><h2>รอยืนยัน {{ waiting|length }} คำขอ</h2></div>
+  {% for a in waiting %}
+  <div class="cal-req">
+    <div class="cal-req__what">
+      <strong>{% if a.slot %}{{ a.slot.starts_at|date:"D j M H:i" }}{% else %}ยังไม่เลือกช่วง{% endif %}</strong>
+      {% if a.case %}<a href="{% url 'case-detail' a.case.number %}">{{ a.case.number }}</a> · {{ a.case.district.name }}{% endif %}
+      {% if a.method %} · {{ a.get_method_display }}{% endif %}
+    </div>
+    <form method="post" class="cal-req__form">
+      {% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}">
+      <label class="visually-hidden" for="m{{ a.pk }}">วิธีรับของ</label>
+      <select id="m{{ a.pk }}" name="method"><option value="">วิธีรับเดิม</option>{% for v, l in methods %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select>
+      <label class="visually-hidden" for="s{{ a.pk }}">ช่วงใหม่</label>
+      <select id="s{{ a.pk }}" name="slot"><option value="">ช่วงใหม่ (เปลี่ยนนัด)</option>{% for s in free %}<option value="{{ s.pk }}">{{ s.starts_at|date:"D j M H:i" }}</option>{% endfor %}</select>
+      <label class="visually-hidden" for="n{{ a.pk }}">หมายเหตุถึงผู้แจ้ง</label>
+      <input type="text" id="n{{ a.pk }}" name="note" placeholder="หมายเหตุถึงผู้แจ้ง (ไม่รับนัดต้องใส่)">
+      <button class="btn btn--sm" name="action" value="confirm" type="submit">ยืนยันนัด</button>
+      <button class="btn btn--sm btn--secondary" name="action" value="move" type="submit">เปลี่ยนเป็นช่วงที่เลือก</button>
+      <button class="btn btn--sm btn--ghost" name="action" value="reject" type="submit">ไม่รับนัด</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<div class="cal-nav">
+  <a class="btn btn--sm btn--secondary" href="?cal={{ calendar.key }}&amp;week={{ previous|date:'Y-m-d' }}">← สัปดาห์ก่อน</a>
+  <strong>{{ start|thai_date }} ถึง {{ days.6.date|thai_date }}</strong>
+  <a class="btn btn--sm btn--secondary" href="?cal={{ calendar.key }}&amp;week={{ next|date:'Y-m-d' }}">สัปดาห์ถัดไป →</a>
+</div>
+<div class="cal-week">
+  {% for d in days %}
+  <section class="cal-day{% if d.date == today %} is-today{% endif %}" aria-label="{{ d.date|date:'l j F' }}">
+    <h3>{{ d.date|date:"D j M" }}</h3>
+    {% for s in d.slots %}
+      <div class="cal-slot{% if not s.is_open %} is-closed{% elif s.taken >= s.capacity %} is-full{% endif %}">
+        <div class="cal-slot__time">{{ s.starts_at|time:"H:i" }}–{{ s.ends_at|time:"H:i" }} <span class="muted">{{ s.taken }}/{{ s.capacity }}</span></div>
+        {% if s.note %}<div class="muted">{{ s.note }}</div>{% endif %}
+        {% for a in s.appointments.all %}{% if a.status == "requested" or a.status == "confirmed" %}
+          <div class="cal-slot__who">{% if a.case %}<a href="{% url 'case-detail' a.case.number %}">{{ a.case.number }}</a>{% else %}ร่างที่ยังไม่ส่ง{% endif %} · {{ a.get_status_display }}
+            {% if a.status == "confirmed" %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}"><button class="btn btn--ghost btn--sm" name="action" value="done" type="submit">ทำเสร็จ</button></form>{% endif %}
+          </div>
+        {% endif %}{% endfor %}
+        {% if s.is_open %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="slot" value="{{ s.pk }}"><button class="btn btn--ghost btn--sm" name="action" value="close" type="submit">ปิดช่วงนี้</button></form>{% else %}<span class="tag tag--muted">ปิดแล้ว</span>{% endif %}
+      </div>
+    {% empty %}<p class="muted">ไม่มีช่วงเวลา</p>{% endfor %}
+  </section>
+  {% endfor %}
+</div>
+
+<form method="post" class="panel cal-add">
+  {% csrf_token %}
+  <div class="panel__head"><h2>เปิดช่วงเวลา</h2><span class="panel__note">หลายเวลาในวันเดียวคั่นด้วย , เช่น 09:00, 10:30, 13:00</span></div>
+  <div class="wh-bulk__grid">
+    <div class="field"><label for="ca-day">วัน</label><input type="date" id="ca-day" name="day" min="{{ today|date:'Y-m-d' }}" required></div>
+    <div class="field"><label for="ca-times">เวลาเริ่ม</label><input type="text" id="ca-times" name="times" placeholder="09:00, 10:30" required></div>
+    <div class="field"><label for="ca-min">ช่วงละ (นาที)</label><input type="number" id="ca-min" name="minutes" value="60" min="5" max="480"></div>
+    <div class="field"><label for="ca-cap">รับได้ (คน)</label><input type="number" id="ca-cap" name="capacity" value="1" min="1" max="50"></div>
+    <div class="field"><label for="ca-note">หมายเหตุ</label><input type="text" id="ca-note" name="note" maxlength="200"></div>
+  </div>
+  <button class="btn" name="action" value="add" type="submit">เปิดช่วง</button>
+</form>
+{% endblock %}

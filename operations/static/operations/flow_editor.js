@@ -18,7 +18,6 @@
   ];
   var CONFIG_FIELDS = {
     ask: [["field", "ช่องที่เก็บ", "text", "เช่น purpose, sap_document, rows.meter"], ["rule", "กฎตรวจ", "rule"], ["choices", "ปุ่มเลือกชนิดก่อนพิมพ์", "text", "คั่นด้วย | เช่น เลขที่ใบเบิก|ใบสั่งงาน SAP"], ["optional", "ข้ามได้", "flag"], ["max_rows", "จำนวนแถวสูงสุด", "text", "ว่างไว้ถ้าไม่จำกัด"]],
-    branch: [["condition", "ระบบดูจากอะไร", "text", "เช่น case_kind, set_kind"]],
     create_case: [["case_kind", "ชนิดเรื่อง", "select", "withdrawal:เบิก|return:ส่งคืน|problem:แจ้งปัญหา"], ["division", "กองปลายทาง", "text", "เช่น กคว."], ["topic", "หัวข้อ", "text", "เช่น repair"]],
     find_case: [["by", "ค้นด้วย", "text", "เช่น sap_document, meter_number"]],
     book: [["calendar", "ปฏิทิน", "text", "เช่น notebook, pickup"]],
@@ -123,6 +122,7 @@
           var be = el("div", "fn__button" + (b.label.length > LIMITS.label ? " is-long" : ""), b.label || "(ปุ่มไม่มีชื่อ)");
           be.title = b.full ? "ชื่อเต็มในแชต: " + b.full : "";
           if (b.note && !graph.edges.some(function (e) { return e.from === n.id && e.port === b.id; })) be.append(el("span", "fn__note", "→ " + b.note));
+          if (b.set) be.append(el("span", "fn__set", (n.kind === "branch" ? "เมื่อ " : "ตั้ง ") + b.set));
           var p = el("span", "fn__port fn__port--out"); p.dataset.port = b.id; p.title = "ลากไปหากล่องที่ปุ่มนี้พาไป"; be.append(p);
           bs.append(be);
         });
@@ -162,7 +162,7 @@
     var cnt = $("#fe-issue-count"); cnt.textContent = errors ? String(errors) : ""; cnt.hidden = !errors;
     document.querySelectorAll(".fe__tab").forEach(function (t) { t.setAttribute("aria-selected", t.dataset.tab === tab ? "true" : "false"); });
     document.querySelectorAll(".fe__pane").forEach(function (p) { p.hidden = p.dataset.pane !== tab; });
-    if (tab === "node") renderNodePane(); else if (tab === "issues") renderIssues(); else renderPreview();
+    if (tab === "node") renderNodePane(); else if (tab === "issues") renderIssues(); else if (tab === "try") renderTry(); else renderPreview();
     var pub = $("#fe-publish"); if (pub && CFG.runnerReady) pub.disabled = errors > 0 || dirty;
   }
   function field(label, input, help) { var f = el("div", "fe__field"); var l = el("label", null, label); if (input.id) l.htmlFor = input.id; f.append(l, input); if (help) f.append(el("div", "fe__help", help)); return f; }
@@ -197,7 +197,7 @@
       else pane.append(field(spec[1], bindText(input, function () { return n.config[key]; }, function (v) { if (v) n.config[key] = v; else delete n.config[key]; })));
     });
     if (ROLES[n.kind] === "buttons" || n.kind === "ask" || (n.buttons && n.buttons.length)) {
-      var wrap = el("div", "fe__field"); wrap.append(el("span", "fe__label", "ปุ่มตอบกลับด่วน (ไม่เกิน " + LIMITS.buttons + " ปุ่ม ชื่อไม่เกิน " + LIMITS.label + " ตัวอักษร)"));
+      var wrap = el("div", "fe__field"); wrap.append(el("span", "fe__label", n.kind === "branch" ? "ทางแยก (ระบบเลือกทางแรกที่เงื่อนไขตรง ไม่ตรงเลยไปตามเส้นหลัก)" : "ปุ่มตอบกลับด่วน (ไม่เกิน " + LIMITS.buttons + " ปุ่ม ชื่อไม่เกิน " + LIMITS.label + " ตัวอักษร)"));
       (n.buttons || []).forEach(function (b, i) {
         var row = el("div", "fe__brow");
         var lab = document.createElement("input"); lab.setAttribute("aria-label", "ชื่อปุ่ม"); lab.placeholder = "ชื่อปุ่ม";
@@ -208,7 +208,11 @@
         bindText(full, function () { return b.full; }, function (v) { b.full = v; });
         var note = document.createElement("input"); note.className = "fe__bfull"; note.placeholder = "ถ้าไม่ต่อเส้น กดแล้วทำอะไร เช่น เริ่มกรอกใหม่"; note.setAttribute("aria-label", "กดแล้วทำอะไร");
         bindText(note, function () { return b.note; }, function (v) { b.note = v; });
-        row.append(lab, counter, full, note);
+        var set = document.createElement("input"); set.className = "fe__bfull fe__bset";
+        set.placeholder = n.kind === "branch" ? "เงื่อนไข เช่น case_kind=withdrawal หรือ set_kind=ct|ct_vt" : "ตั้งค่าเมื่อกด เช่น case_kind=withdrawal; group=meter";
+        set.setAttribute("aria-label", n.kind === "branch" ? "เงื่อนไขของทางนี้" : "ตั้งค่าเมื่อกด");
+        bindText(set, function () { return b.set; }, function (v) { b.set = v; });
+        row.append(lab, counter, full, note, set);
         if (EDITABLE) {
           var acts = el("div", "fe__bacts");
           var up = el("button", "fe__mini", "↑"); up.type = "button"; up.disabled = i === 0; up.onclick = function () { change(function () { n.buttons.splice(i - 1, 0, n.buttons.splice(i, 1)[0]); }); };
@@ -217,7 +221,7 @@
         }
         wrap.append(row);
       });
-      if (EDITABLE) { var add = el("button", "fe__mini", "+ เพิ่มปุ่ม"); add.type = "button"; add.onclick = function () { change(function () { n.buttons = n.buttons || []; n.buttons.push({ id: uid("b"), label: "ปุ่มใหม่", full: "", note: "" }); }); }; wrap.append(add); }
+      if (EDITABLE) { var add = el("button", "fe__mini", "+ เพิ่มปุ่ม"); add.type = "button"; add.onclick = function () { change(function () { n.buttons = n.buttons || []; n.buttons.push({ id: uid("b"), label: n.kind === "branch" ? "ทางใหม่" : "ปุ่มใหม่", full: "", note: "", set: "" }); }); }; wrap.append(add); }
       pane.append(wrap);
     }
     var reqs = reqsOf(n.id);
@@ -265,6 +269,119 @@
     if (n.kind === "ask") screen.append(el("div", "fe__typing", "ผู้ใช้พิมพ์ตอบ" + (n.config && n.config.rule ? " · ระบบตรวจ: " + (RULES[n.config.rule] || n.config.rule) : "")));
     phone.append(screen); pane.append(phone);
     pane.append(el("p", "fe__help", "ปุ่มที่ชื่อยาวเกินจะเป็นสีแดง LINE ตัดชื่อปุ่มที่ยาวเกิน " + LIMITS.label + " ตัวอักษร"));
+  }
+
+  /* ---------- ลองคุย: play the draft like the chat does ---------- */
+  // The same moves as flow_runner: boxes that wait for nothing run at once, a branch takes its
+  // first button whose condition holds, typed text is read by the server with the real rules.
+  var play = null;
+  var SAP_CHOICES = { "เลขที่ใบเบิก": ["slip", "withdrawal"], "เลขที่ใบส่งคืน": ["return_slip", "return"], "ใบสั่งงาน SAP": ["work_order", ""] };
+  function follow(id, port) { var e = graph.edges.find(function (x) { return x.from === id && (x.port || null) === (port || null); }); return e ? e.to : null; }
+  function assign(values, text) { String(text || "").split(";").forEach(function (p) { var i = p.indexOf("="); if (i > 0) values[p.slice(0, i).trim()] = p.slice(i + 1).trim(); }); }
+  function holds(values, text) {
+    var parts = String(text || "").split(";").filter(function (p) { return p.indexOf("=") > 0; });
+    return parts.length > 0 && parts.every(function (p) { var i = p.indexOf("="); return p.slice(i + 1).split("|").map(function (a) { return a.trim(); }).indexOf(String(values[p.slice(0, i).trim()] || "")) >= 0; });
+  }
+  function say(who, text) { play.log.push({ who: who, text: text }); }
+  function playStart() {
+    var entry = graph.nodes.find(function (n) { return n.kind === "entry"; });
+    play = { node: null, values: {}, rows: [], choice: {}, log: [], done: false, path: [] };
+    if (!entry) { say("bot", "flow นี้ยังไม่มีปุ่มเมนูเริ่มต้น"); play.done = true; return; }
+    say("user", "(กดปุ่ม " + (entry.title || "เมนู") + " บน rich menu)");
+    playGo(follow(entry.id));
+  }
+  function playGo(id) {
+    for (var hop = 0; hop < 40; hop++) {
+      var n = id && nodeById(id);
+      if (!n) { say("bot", "flow นี้ยังไม่มีขั้นถัดไป (ทางตัน)"); play.done = true; return; }
+      if (n.kind === "branch") { var hit = n.buttons.find(function (b) { return holds(play.values, b.set); }); id = hit ? follow(n.id, hit.id) : follow(n.id); continue; }
+      if (n.kind === "entry" || n.kind === "note" || n.kind === "ai_read") { id = follow(n.id); continue; }
+      if (n.kind === "create_case") {
+        play.node = n.id; say("sys", "ระบบสร้างเรื่องที่ " + (n.config.division || "กองตามกฎ") + " (ลองคุยไม่สร้างเรื่องจริง)");
+        id = follow(n.id); continue;
+      }
+      if (n.kind === "book") { say("sys", "ผู้ใช้เลือกช่วงเวลาว่างจากปฏิทิน " + (n.config.calendar || "") + " (ลองคุยข้ามขั้นนี้)"); id = follow(n.id); continue; }
+      if (n.kind === "find_case") { say("bot", "(แสดงรายการ เรื่องของฉัน)"); play.done = true; return; }
+      play.node = n.id;
+      if (n.kind === "result" || n.kind === "limit" || n.kind === "web" || n.kind === "handoff") { say("bot", [n.title, n.text].filter(Boolean).join("\n")); play.done = true; return; }
+      if (n.kind === "summary") { say("bot", playSummary(n)); return; }
+      if (n.kind === "ask" && n.config.choices && !play.choice[n.id]) { say("bot", n.title + "\nเลขที่จะพิมพ์เป็นแบบไหน กดเลือกก่อน"); return; }
+      say("bot", [n.kind === "ask" && play.choice[n.id] ? n.title + " (" + play.choice[n.id] + ")" : n.title, n.text].filter(Boolean).join("\n"));
+      return;
+    }
+    say("bot", "flow วนไม่จบ"); play.done = true;
+  }
+  function playSummary(n) {
+    var v = play.values, lines = [n.title];
+    var confirm = n.buttons.find(function (b) { return follow(n.id, b.id); }); var target = confirm && nodeById(follow(n.id, confirm.id));
+    if (target && target.config.division) lines.push("ส่งถึง: " + target.config.division);
+    if (v.set_kind) lines.push("ชุด: " + ({ meter_ct: "มิเตอร์ + CT", meter_ct_vt: "มิเตอร์ + CT + VT", ct: "CT อย่างเดียว", ct_vt: "CT + VT" })[v.set_kind]);
+    if (v.sap_document) lines.push(({ slip: "เลขที่ใบเบิก", return_slip: "เลขที่ใบส่งคืน", work_order: "ใบสั่งงาน SAP" })[v.sap_kind] + ": " + v.sap_document);
+    play.rows.forEach(function (r, i) { lines.push((i + 1) + ". " + r.text); });
+    if (v.multiplier_check) lines.push("ตัวคูณ: " + v.multiplier_check.given + (v.multiplier_check.ok ? " (ตรงกับที่คำนวณ)" : " (ให้เจ้าหน้าที่ตรวจ)"));
+    var names = { paired_meter: "ใช้คู่กับหมายเลขเครื่องวัดฯ", mea_numbers: "MEA No.", purpose: "วัตถุประสงค์", needed_by: "ต้องการใช้ภายใน", condition_reason: "สภาพและเหตุผลที่ส่งคืน", description: "รายละเอียด" };
+    Object.keys(names).forEach(function (k) { if (v[k]) lines.push(names[k] + ": " + [].concat(v[k]).join(", ")); });
+    lines.push("กดยืนยันภายใน 30 นาที");
+    return lines.join("\n");
+  }
+  function playTap(n, b) {
+    say("user", b.full || b.label);
+    var target = follow(n.id, b.id);
+    if (n.kind !== "summary") { assign(play.values, b.set); play.path.push(b.label); }
+    if (!target) { if (b.label.indexOf("กรอกใหม่") >= 0) { playStart(); say("bot", "เริ่มกรอกใหม่"); } else if (b.note) say("bot", b.note); renderTry(); return; }
+    playGo(target); renderTry();
+  }
+  function playChoose(n, c) {
+    say("user", c); play.choice[n.id] = c;
+    var sk = SAP_CHOICES[c]; if (sk) { play.values.sap_kind = sk[0]; if (sk[1] && !play.values.case_kind) play.values.case_kind = sk[1]; }
+    playGo(n.id); renderTry();
+  }
+  function playType(n, text) {
+    say("user", text); renderTry();
+    fetch(CFG.tryUrl, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
+      body: JSON.stringify({ rule: n.config.rule || "text", field: n.config.field || "", text: text, rows: play.rows }) })
+      .then(function (r) { return r.json(); })
+      .then(function (a) {
+        if (a.error || a.problem) { say("bot", a.error || a.problem); renderTry(); return; }
+        if (a.shown && a.shown !== text.trim()) say("bot", "อ่านเป็น: " + a.shown);
+        var field = n.config.field || "";
+        if (field.indexOf("rows.") === 0) play.rows = play.rows.concat(a.rows || []);
+        else if (n.config.rule === "multiplier") { play.values.multiplier_check = { given: a.value, ok: a.ok }; if (!a.ok) say("bot", "ตัวคูณไม่ตรงกับที่คำนวณจาก CT และ VT (" + (a.computed || "คำนวณไม่ได้") + ") ส่งต่อได้ ระบบจะบอกเจ้าหน้าที่ให้ตรวจ"); }
+        else play.values[field] = a.value;
+        playGo(follow(n.id)); renderTry();
+      })
+      .catch(function () { say("bot", "ตรวจข้อความไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่"); renderTry(); });
+  }
+  function renderTry() {
+    var pane = $('[data-pane="try"]'); pane.innerHTML = "";
+    if (!play) playStart();
+    var bar = el("div", "fe__bacts"); var again = el("button", "fe__mini", "เริ่มคุยใหม่"); again.type = "button"; again.onclick = function () { play = null; renderTry(); };
+    bar.append(again); pane.append(bar);
+    var phone = el("div", "fe__phone"), screen = el("div", "fe__screen fe__screen--try");
+    play.log.forEach(function (m) {
+      if (m.who === "user") screen.append(el("div", "fe__user", m.text));
+      else if (m.who === "sys") screen.append(el("div", "fe__typing", m.text));
+      else { var oa = el("div", "fe__oa"); oa.append(el("span", "fe__avatar", "ฝอจ"), el("div", "fe__bubble", m.text)); screen.append(oa); }
+    });
+    var n = !play.done && play.node && nodeById(play.node);
+    if (n) {
+      var quick = el("div", "fe__quick");
+      var picking = n.kind === "ask" && n.config.choices && !play.choice[n.id];
+      if (picking) n.config.choices.split("|").forEach(function (c) { c = c.trim(); if (!c) return; var q = el("button", "fe__qr", c); q.type = "button"; q.onclick = function () { playChoose(n, c); }; quick.append(q); });
+      else n.buttons.forEach(function (b) { var q = el("button", "fe__qr" + (b.label.length > LIMITS.label ? " is-long" : ""), b.label); q.type = "button"; q.onclick = function () { playTap(n, b); }; quick.append(q); });
+      if (quick.childNodes.length) screen.append(quick);
+      if (n.kind === "ask" && !picking) {
+        var form = el("form", "fe__say"); var input = document.createElement("textarea"); input.rows = 2; input.placeholder = "พิมพ์ตอบเหมือนในแชต (Enter ส่ง, Shift+Enter ขึ้นบรรทัด)"; input.setAttribute("aria-label", "ข้อความที่ผู้ใช้พิมพ์");
+        var send = el("button", "fe__mini", "ส่ง"); send.type = "submit";
+        input.addEventListener("keydown", function (ev) { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); form.requestSubmit(); } });
+        form.onsubmit = function (ev) { ev.preventDefault(); if (input.value.trim()) playType(n, input.value); };
+        form.append(input, send); screen.append(form);
+        requestAnimationFrame(function () { input.focus(); });
+      }
+    }
+    phone.append(screen); pane.append(phone);
+    pane.append(el("p", "fe__help", "ลองคุยตามร่างที่บันทึกล่าสุด ข้อความที่พิมพ์ตรวจด้วยกฎเดียวกับแชตจริง แต่ไม่สร้างเรื่องและไม่ส่งข้อความถึงใคร"));
+    screen.scrollTop = screen.scrollHeight;
   }
 
   /* ---------- editing ---------- */

@@ -1,0 +1,30 @@
+{% load ui %}
+{% if panel.warehouse or panel.milestones or panel.appointments %}
+<section class="section" aria-labelledby="s-warehouse">
+  <div class="section-head"><h2 id="s-warehouse">งานคลังและนัด</h2>{% if panel.warehouse %}<a class="btn btn--ghost btn--sm" href="{% url 'warehouse' case.owner_division.code %}">ไปหน้างานคลัง</a>{% endif %}</div>
+  {% if panel.milestones %}<ol class="wh-steps">{% for m in panel.milestones %}<li><strong>{{ m.get_stage_display }}</strong> {{ m.on|thai_date }}{% if m.planned_on %} · วันจ่าย {{ m.planned_on|thai_date }}{% endif %}{% if m.note %} · {{ m.note }}{% endif %} <span class="muted">{{ m.recorded_by.staff_profile.display_name|default:m.recorded_by.username }}</span></li>{% endfor %}</ol>{% elif panel.warehouse %}<p class="muted">ยังไม่ได้บันทึกขั้นงานคลัง</p>{% endif %}
+  {% for a in panel.appointments %}{% if a.status != "cancelled" %}<p>{{ a.calendar.name }}: {% if a.slot %}{{ a.slot.starts_at|thai_datetime }}{% else %}ยังไม่มีช่วงเวลา{% endif %}{% if a.method %} · {{ a.get_method_display }}{% endif %} · <span class="tag">{{ a.get_status_display }}</span>{% if a.note %} <span class="muted">{{ a.note }}</span>{% endif %}</p>{% endif %}{% endfor %}
+</section>
+{% endif %}
+{% if panel.chat or panel.chat_open %}
+<section class="section" id="chat" aria-labelledby="s-chat">
+  <div class="section-head"><h2 id="s-chat">คุยกับผู้แจ้ง</h2><span class="muted">{% if panel.chat_fresh %}ผู้แจ้งเพิ่งพิมพ์มา ส่งตอนนี้ถึงทันที{% else %}ข้อความจะถึงผู้แจ้งตอนเขาส่งข้อความมาครั้งถัดไป{% endif %}</span></div>
+  <div class="chat">
+    {% for m in panel.chat %}
+      <div class="chat__msg chat__msg--{{ m.direction }}">
+        <div class="chat__bubble">{{ m.text|linebreaksbr }}{% if m.contact %}<div class="chat__contact">ติดต่อ: {{ m.contact }}</div>{% endif %}</div>
+        <div class="chat__meta">{% if m.direction == "staff" %}{{ m.author.staff_profile.display_name|default:"ระบบ" }} · {{ m.get_status_display }}{% else %}ผู้แจ้ง{% endif %} · {{ m.created_at|date:"d/m H:i" }}</div>
+      </div>
+    {% empty %}<p class="muted">ยังไม่มีข้อความ</p>{% endfor %}
+  </div>
+  {% if panel.chat_open %}
+  <form method="post" action="{% url 'case-chat' case.number %}" class="chat__form">
+    {% csrf_token %}
+    <label class="visually-hidden" for="chat-text">ข้อความถึงผู้แจ้ง</label>
+    <textarea id="chat-text" name="text" rows="2" maxlength="2000" required placeholder="พิมพ์ข้อความถึงผู้แจ้ง เหมือนแชต LINE"></textarea>
+    {% if panel.chat_contact %}<div class="field"><label for="chat-contact">ชื่อและเบอร์ติดต่อของคุณ (ต่อท้ายข้อความแรก)</label><input type="text" id="chat-contact" name="contact" value="{{ panel.chat_contact }}" maxlength="200" required></div>{% endif %}
+    <button class="btn btn--sm" type="submit">ส่ง</button>
+  </form>
+  {% else %}<p class="muted">ผู้แจ้งเรื่องนี้ไม่ได้ใช้ LINE หรือคุณไม่ได้อยู่ในกองเจ้าภาพ</p>{% endif %}
+</section>
+{% endif %}

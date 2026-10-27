@@ -31,6 +31,7 @@ from operations import (
     services,
     support,
     uploads,
+    warehouse_web,
     web_actions,
     wording,
     work_orders,
@@ -417,6 +418,7 @@ def case_detail(request, number):
             "irreversible": ", ".join(o.label for o in offers if o.irreversible),
             "hints": web_actions.hints(st, offers),
             "can_upload": uploads.may_upload(st),
+            "panel": warehouse_web.case_panel(request.user, case),
         },
     )
 

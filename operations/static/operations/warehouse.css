@@ -1,0 +1,34 @@
+/* งานคลัง ปฏิทินนัด การคุยในเรื่อง (grill กคว. 27 ต.ค. 2569) */
+.wh-bulk { margin-bottom: var(--s-24); }
+.wh-bulk__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 var(--s-18); align-items: start; }
+.wh-bulk__grid textarea { min-height: 80px; }
+.wh-table td, .wh-table th { vertical-align: top; }
+.wh-table input[type="number"] { max-width: 110px; }
+.wh-days { display: flex; flex-wrap: wrap; gap: var(--s-8); }
+.wh-steps { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; gap: var(--s-12); margin: var(--s-18) 0; }
+.cal-week { display: grid; grid-template-columns: repeat(7, minmax(130px, 1fr)); gap: var(--s-8); overflow-x: auto; margin-bottom: var(--s-24); }
+.cal-day { border: 1px solid var(--hairline-soft); border-radius: 14px; padding: var(--s-8); min-height: 140px; }
+.cal-day.is-today { border-color: var(--ink); }
+.cal-day h3 { font-size: 14px; margin: 0 0 var(--s-8); }
+.cal-slot { background: var(--cloud); border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
+.cal-slot.is-full { background: #fff4e5; }
+.cal-slot.is-closed { opacity: .55; }
+.cal-slot__time { font-weight: 600; }
+.cal-slot__who { margin-top: 2px; }
+.cal-slot .btn--sm { min-height: 28px; padding: 0 8px; font-size: 12px; }
+.inline-form { display: inline; }
+.cal-waiting { margin-bottom: var(--s-18); }
+.cal-req { border-top: 1px solid var(--hairline-soft); padding: var(--s-8) 0; }
+.cal-req__form { display: flex; flex-wrap: wrap; gap: var(--s-8); align-items: center; margin-top: 6px; }
+.cal-req__form select, .cal-req__form input { width: auto; min-width: 150px; }
+.chat { display: flex; flex-direction: column; gap: var(--s-8); background: #8cabd9; border-radius: 18px; padding: var(--s-12); max-height: 460px; overflow-y: auto; }
+.chat__msg { display: flex; flex-direction: column; max-width: 78%; }
+.chat__msg--staff { align-self: flex-end; align-items: flex-end; }
+.chat__msg--requester { align-self: flex-start; }
+.chat__bubble { background: #fff; border-radius: 16px; padding: 8px 12px; font-size: 14px; word-break: break-word; }
+.chat__msg--staff .chat__bubble { background: #85e249; }
+.chat__contact { font-size: 12px; margin-top: 4px; }
+.chat__meta { font-size: 11.5px; color: #1f2937; margin-top: 2px; }
+.chat__form { display: grid; gap: var(--s-8); margin-top: var(--s-12); }
+@media (max-width: 720px) { .cal-week { grid-template-columns: repeat(7, 160px); } }

@@ -3,9 +3,14 @@
 A flow is the conversation one rich menu button starts. Its graph is data: boxes (nodes) of the
 kinds below and lines (edges) from a box, or from one of its buttons, to the next box. Admins
 change it in a draft, the program checks it (no dead ends, LINE's limits, every question has a
-field and a rule), and an admin publishes it with a reason. Publishing waits for the flow runner
-(RUNNER_READY); until then drafts are designs the divisions can review in the admin web.
+field and a rule), and an admin publishes it with a reason. The chat then follows the published
+version (flow_runner) when someone taps the tile the flow names.
+
+A button may set values ("case_kind=withdrawal; group=meter"); a branch box follows its first
+button whose condition holds ("set_kind=ct_vt|meter_ct_vt") and otherwise its plain line.
 """
+
+import re
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -15,7 +20,7 @@ from operations import identity
 from operations.models import DivisionRequirement, LineFlow, LineFlowVersion
 
 V = LineFlowVersion.Status
-RUNNER_READY = False  # the runtime that reads published flows comes in the next stage
+RUNNER_READY = True  # flow_runner reads published flows (stage 2 of ADR 0023)
 MAX_NODES = 300
 MAX_EDGES = 800
 MAX_TEXT = 5000
@@ -55,6 +60,7 @@ RULES = {
     "district": "ชื่อเขต (18 เขต)",
 }
 ACTIONS = {"create_case", "find_case", "book", "ai_read", "handoff"}
+SETTING = re.compile(r"[a-z_]{1,30}\s*=\s*[^=;|]{1,40}(?:\|[^=;|]{1,40})*")
 
 
 def _text(value, limit=MAX_TEXT):
@@ -91,6 +97,7 @@ def clean_graph(graph):
                     "label": _text(b.get("label"), 60),
                     "full": _text(b.get("full"), 200),
                     "note": _text(b.get("note"), 300),
+                    "set": _text(b.get("set"), 200),
                 }
             )
         config = n.get("config") if isinstance(n.get("config"), dict) else {}
@@ -159,6 +166,12 @@ def check(graph):
                 )
             if not any(e["port"] == b["id"] for e in edges) and not b["note"].strip():
                 add("error", n["id"], f"ปุ่ม '{b['label']}' ยังไม่ได้บอกว่าพาไปไหน")
+            if b["set"].strip() and not all(
+                SETTING.fullmatch(p.strip()) for p in b["set"].split(";") if p.strip()
+            ):
+                add("error", n["id"], f"ปุ่ม '{b['label']}' ตั้งค่าไม่ถูกรูปแบบ ใช้ ชื่อ=ค่า; ชื่อ=ค่า")
+            if n["kind"] == "branch" and not b["set"].strip():
+                add("error", n["id"], f"ทาง '{b['label']}' ยังไม่มีเงื่อนไข เช่น case_kind=withdrawal")
         if role in ("next",) and not any(e["port"] is None for e in edges):
             if not (n["kind"] == "ask" and n["buttons"]):
                 add("error", n["id"], f"{name} '{n['title']}' ยังไม่มีกล่องถัดไป (ทางตัน)")
@@ -169,6 +182,8 @@ def check(graph):
                 add("error", n["id"], f"ถามข้อมูล '{n['title']}' ยังไม่ได้บอกว่าเก็บลงช่องไหน")
             if n["config"].get("rule") not in RULES:
                 add("error", n["id"], f"ถามข้อมูล '{n['title']}' ยังไม่ได้เลือกกฎตรวจ")
+        if n["kind"] == "create_case" and not n["config"].get("division"):
+            add("warn", n["id"], f"สร้างเรื่อง '{n['title']}' ยังไม่ได้บอกกอง ระบบจะเลือกกองตามกฎ")
     if len(entries) == 1:
         seen, todo = set(), [entries[0]["id"]]
         while todo:

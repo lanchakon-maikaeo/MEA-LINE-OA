@@ -1,0 +1,50 @@
+{% extends "operations/base.html" %}
+{% load static ui %}
+{% block title %}ตารางกำหนดจ่าย {{ division.code }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}">{% endblock %}
+{% block page_id %}warehouse{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow"><a href="{% url 'warehouse' division.code %}">งานคลัง {{ division.code }}</a></span>
+    <h1>ตารางกำหนดจ่ายและวันส่งรถ</h1>
+    <p class="lede">กำหนดจ่ายนับเป็นวันทำการหลังวันรับใบเบิก ใช้แถวที่ช้าที่สุดของใบ แล้วเลื่อนไปวันจ่ายประจำที่ใกล้ที่สุด ขนาดที่ไม่มีแถวของตัวเองใช้แถวที่ขนาดว่างของกลุ่มนั้น</p>
+  </div>
+</div>
+<form method="post" class="stack">
+  {% csrf_token %}
+  <section class="panel">
+    <div class="panel__head"><h2>กำหนดจ่ายตามขนาด</h2><span class="panel__note">ลบแถวโดยล้างทุกช่องของแถวนั้น</span></div>
+    <div class="table-wrap"><table class="wh-table">
+      <thead><tr><th scope="col">กลุ่ม</th><th scope="col">ขนาด (ว่าง = ทุกขนาด)</th><th scope="col">วันทำการ</th></tr></thead>
+      <tbody>
+      {% for row in sla %}
+        <tr>
+          <td><select name="sla_group" aria-label="กลุ่ม แถว {{ forloop.counter }}"><option value=""></option>{% for v, l in groups %}<option value="{{ v }}"{% if row.group == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></td>
+          <td><input type="text" name="sla_size" value="{{ row.size }}" maxlength="40" placeholder="เช่น 5(100)A" aria-label="ขนาด แถว {{ forloop.counter }}"></td>
+          <td><input type="number" name="sla_days" value="{{ row.days }}" min="0" max="120" aria-label="วันทำการ แถว {{ forloop.counter }}"></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+  <section class="panel">
+    <div class="panel__head"><h2>วันจ่ายประจำ</h2></div>
+    <div class="wh-days">{% for n, name in weekdays %}<label class="check-pill"><input type="checkbox" name="issue" value="{{ n }}"{% if n in issue %} checked{% endif %}> {{ name }}</label>{% endfor %}</div>
+  </section>
+  <section class="panel">
+    <div class="panel__head"><h2>วันส่งรถของแต่ละ ฟข.</h2><span class="panel__note">วันที่รถ กคว. ไปส่งของที่เขต ระบบเสนอวันส่งรถถัดจากวันจ่าย</span></div>
+    <div class="table-wrap"><table class="wh-table">
+      <thead><tr><th scope="col">เขต</th>{% for n, name in weekdays %}<th scope="col">{{ name }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for d, days in districts %}
+        <tr><th scope="row">{{ d.name }}</th>{% for n, name in weekdays %}<td><input type="checkbox" name="truck_{{ d.code }}" value="{{ n }}"{% if n in days %} checked{% endif %} aria-label="{{ d.name }} วัน{{ name }}"></td>{% endfor %}</tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+  <div class="field"><label for="sc-reason">เหตุผลที่แก้</label><input type="text" id="sc-reason" name="reason" required maxlength="300"></div>
+  <button class="btn" type="submit">บันทึกตาราง</button>
+  {% if schedule.updated_by %}<p class="muted">แก้ล่าสุดโดย {{ schedule.updated_by.staff_profile.display_name|default:schedule.updated_by.username }} {{ schedule.updated_at|thai_datetime }}</p>{% endif %}
+</form>
+{% endblock %}

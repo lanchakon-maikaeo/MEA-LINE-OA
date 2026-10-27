@@ -26,7 +26,7 @@
       <summary class="fe__btn fe__btn--primary">เผยแพร่</summary>
       <form method="post" action="{% url 'admin-flow-publish' flow.key %}" class="fe__publish-form">
         {% csrf_token %}
-        {% if not runner_ready %}<p class="fe__help">ยังเผยแพร่ไม่ได้ แชตยังไม่อ่าน flow จากระบบ (ช่วงถัดไป) ตอนนี้ใช้ร่างออกแบบและตรวจกับกองได้</p>{% endif %}
+        {% if not runner_ready %}<p class="fe__help">ยังเผยแพร่ไม่ได้ แชตยังไม่อ่าน flow จากระบบ</p>{% else %}<p class="fe__help">เผยแพร่แล้ว คนที่กดปุ่ม {{ flow.tile|default:flow.name }} บน rich menu จะคุยตามรุ่นนี้ทันที คนที่คุยค้างอยู่ทำต่อตามรุ่นเดิมจนจบ ลองคุยในแท็บ ลองคุย ก่อนเผยแพร่</p>{% endif %}
         <div class="fe__field"><label for="fe-reason">เหตุผลที่เผยแพร่</label><textarea id="fe-reason" name="reason" rows="2" required></textarea></div>
         <button class="fe__btn fe__btn--primary" type="submit" id="fe-publish"{% if not runner_ready or blocked %} disabled{% endif %}>ยืนยันเผยแพร่รุ่น {{ draft.number }}</button>
       </form>
@@ -44,10 +44,12 @@
       <button class="fe__tab" type="button" role="tab" data-tab="node">กล่องนี้</button>
       <button class="fe__tab" type="button" role="tab" data-tab="issues">จุดที่ต้องแก้<span class="fe__count" id="fe-issue-count" hidden></span></button>
       <button class="fe__tab" type="button" role="tab" data-tab="preview">หน้าจอ LINE</button>
+      <button class="fe__tab" type="button" role="tab" data-tab="try">ลองคุย</button>
     </div>
     <div class="fe__pane" data-pane="node"></div>
     <div class="fe__pane" data-pane="issues" hidden></div>
     <div class="fe__pane" data-pane="preview" hidden></div>
+    <div class="fe__pane" data-pane="try" hidden></div>
   </aside>
 </div>
 {% endblock %}
