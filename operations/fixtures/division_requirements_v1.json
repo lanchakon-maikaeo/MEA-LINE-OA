@@ -1,0 +1,196 @@
+{
+ "version": "division-requirements-v1",
+ "note": "requirement ของกองจากเว็บออกแบบเมนู (26 ต.ค. 2569) กคว. ตกลงแล้วจาก grill 27 ต.ค. 2569 ผูกกับกล่องใน flow Meter, CT, VT ส่วน กอจ. ยังรอคุย",
+ "requirements": [
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "ฟข ตามงานควรจะเลือกได้ เช่น เลข SAP(เลขที่ใบเบิก/10), เลข คว.(UI) map เช็คจาก google sheet, เลขที่ OpAc มากับเลขที่ใบเบิก เช่น เลขที่ใบเบิก/OpAc, ขนาด คว., โครงการ",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ค้นที่ เรื่องของฉัน ด้วยเลขที่ใบเบิก (รวมใบสั่งงาน SAP) หรือหมายเลขเครื่องวัดฯ (UI และเลขตู้เป็นชื่อเรียกอื่น) ไม่ใช้ OpAc เลขใบเบิกเก็บเป็นข้อความ รับ / ได้ ผู้ใช้พิมพ์ /10 เอง ค้นจาก Google Sheet ทำเฟสถัดไป",
+   "flow": "meter-ct-vt",
+   "node": "n_search"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "วันนึงใบเบิกประมาณ 500 peak/day ปกติ 200-300",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "หน้าเว็บทำทีละมาก: สแกนหรือวางรายการเลขใบเบิก แล้วเปลี่ยนขั้นรับใบเบิก คีย์จ่าย และจ่ายแล้วพร้อมกัน",
+   "flow": "meter-ct-vt",
+   "node": "n_stages"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "คลังจะรับใบเบิกจาก ฟข เซ็นแล้วถือเป็นวันรับงาน",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ขั้น รับใบเบิกแล้ว คือวันรับงาน และเริ่มนับกำหนดจ่าย",
+   "flow": "meter-ct-vt",
+   "node": "n_stages"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "วันคีย์จ่าย กับ วันที่จ่ายให้เขต",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ขั้น คีย์จ่ายแล้ว และ จ่ายแล้ว เก็บวันที่แยกกัน",
+   "flow": "meter-ct-vt",
+   "node": "n_stages"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "มารับเอง กับ ส่งให้ผ่านตู้ จำนวนวันที่ใช้จ่าย (เขตได้รับ คว.)",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ส่งตู้ คือรถของ กคว. ไปส่งที่แต่ละ ฟข. ตามวันประจำ จ.–ศ. แก้ได้ หรือมารับเองตามช่วงในปฏิทิน ฟข. เลือกวิธีรับตอนยืนยันนัด และเปลี่ยนทีหลังได้",
+   "flow": "meter-ct-vt",
+   "node": "n_appt"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "ตอบ ฟข คร่าวๆถึงขั้นตอน",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ข้อความสถานะบอก ฟข. ด้วยคำธรรมดาว่างานถึงขั้นไหน พร้อมกำหนดจ่ายและวิธีรับ",
+   "flow": "meter-ct-vt",
+   "node": "n_stages"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "มีกำหนด SLA ว่าขนาดนี้ควรจ่ายกี่วัน",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ตารางกำหนดจ่ายตามขนาด เจ้าหน้าที่แก้ได้ในเว็บ กำหนดจ่าย = วันรับงาน + จำนวนวันตามขนาด",
+   "flow": "meter-ct-vt",
+   "node": "n_stages"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "มีกำหนดวันจ่ายตายตัว",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "วันจ่ายประจำ เจ้าหน้าที่แก้ได้ในเว็บ กำหนดจ่ายเลื่อนไปวันจ่ายประจำหรือวันส่งรถของเขตนั้น",
+   "flow": "meter-ct-vt",
+   "node": "n_stages"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "ฟข เขียนระบุวันที่รับของ",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "คงคำถาม ต้องการใช้ภายในวันที่ (ข้ามได้) วันจ่ายจริง กคว. เป็นคนตั้ง",
+   "flow": "meter-ct-vt",
+   "node": "need"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "1 ใบเบิกมีได้ 1 UI แต่สมารถมีทั้งชุดได้เช่น คว. CT, VT",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ปุ่ม ชุดมิเตอร์ CT VT มีสี่แบบ ชุดหนึ่งมีมิเตอร์ 1 เครื่อง หมายเลขเครื่องวัดฯ ที่อยู่ในเรื่องอื่นที่ยังไม่จบ รับไว้แต่เตือน",
+   "flow": "meter-ct-vt",
+   "node": "kind"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "แก้ไขเอกสาร เช่น ตัวคูณไม่สัมพันธ์กัน คนเช็คทีละหน้า",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ถามตัวคูณในใบเบิก ระบบเทียบกับที่คำนวณจาก CT และ VT ไม่ตรงบอกผู้ใช้ก่อนสรุป และเตือนเจ้าหน้าที่",
+   "flow": "meter-ct-vt",
+   "node": "mult"
+  },
+  {
+   "division": "กคว.",
+   "topic": "want",
+   "text": "ลง SW, เช็คหัวอ่าน",
+   "status": "agreed",
+   "priority": "medium",
+   "remark": "ปุ่ม โน้ตบุ๊กและหัวอ่าน พิมพ์รายละเอียด แล้วขอนัดจากปฏิทินของงานนี้ เจ้าหน้าที่ยืนยัน",
+   "flow": "meter-ct-vt",
+   "node": "nb"
+  },
+  {
+   "division": "กอจ.",
+   "topic": "problem",
+   "text": "TR, ใช้เลขที่ใบเบิกพัสดุ",
+   "status": "open",
+   "priority": "medium",
+   "remark": "",
+   "flow": "",
+   "node": ""
+  },
+  {
+   "division": "กอจ.",
+   "topic": "problem",
+   "text": "App sheet export from SAP",
+   "status": "open",
+   "priority": "medium",
+   "remark": "",
+   "flow": "",
+   "node": ""
+  },
+  {
+   "division": "กอจ.",
+   "topic": "problem",
+   "text": "ใบเบิกมาพร้อมวันรับหม้อแปลง",
+   "status": "open",
+   "priority": "medium",
+   "remark": "",
+   "flow": "",
+   "node": ""
+  },
+  {
+   "division": "กอจ.",
+   "topic": "problem",
+   "text": "จองวันนัดหมายไปรับ มารับพร้อมใบเบิก",
+   "status": "open",
+   "priority": "medium",
+   "remark": "",
+   "flow": "",
+   "node": ""
+  },
+  {
+   "division": "กอจ.",
+   "topic": "problem",
+   "text": "ดูจำนวน สถานะคงค้าง จำนวนในคลัง เช่น ขอเบิกหม้อแปลง 500kVA เหลือในคลังเท่าไร",
+   "status": "open",
+   "priority": "medium",
+   "remark": "",
+   "flow": "",
+   "node": ""
+  },
+  {
+   "division": "กอจ.",
+   "topic": "problem",
+   "text": "LV Cap, LBS FRTU, VT",
+   "status": "open",
+   "priority": "medium",
+   "remark": "",
+   "flow": "",
+   "node": ""
+  },
+  {
+   "division": "กอจ.",
+   "topic": "other",
+   "text": "1.เบิก TR ตัดจ่ายใน SAP ย้อนหลัง, คืน TR มีเลขที่ใบโอนขอคืน ฟข จะสอบถามมีพื้นที่ให้คืนมั้ย\n2. LBS, RMU ขั้นตอนเหมือนกันกับ TR\n3. ซจ รับแจ้งผ่าน M/N / เลขใบแจ้งซ่อมแล้วบันทึกใน AppSheet ถ้าเสร็จเป็น Msign เช่นงาน ทดสอบ RMU ใหม่, สอบถามสถานะงาน\n4. ซม รับจากภายใน คือคลังหม้อแปลง กระบวนการคล้าย ซจ\n5. ซอ คล้าย ซจ รับ M/N จาก ฟข สอบถามสถานะ",
+   "status": "open",
+   "priority": "medium",
+   "remark": "",
+   "flow": "",
+   "node": ""
+  }
+ ]
+}

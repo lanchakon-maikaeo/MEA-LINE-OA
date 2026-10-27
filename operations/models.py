@@ -2995,3 +2995,108 @@ class LineMenuRelease(models.Model):
     status = models.CharField(max_length=16, default="pending")
     error = models.CharField(max_length=200, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class LineFlow(models.Model):
+    """flow ผู้แจ้งของปุ่ม rich menu หนึ่งปุ่ม (ADR 0023): ขั้นสนทนาเป็นข้อมูลที่มีรุ่น แอดมินแก้ในร่าง
+    แล้วเผยแพร่ในระบบ ไม่ต้อง deploy โค้ด"""
+
+    key = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=120)
+    division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class LineFlowVersion(models.Model):
+    """One version of a flow's graph ({"nodes": [...], "edges": [...]}). A flow has at most one
+    draft and one published version; publishing retires the previous one, which stays for
+    rollback. `revision` counts saves of a draft so two editors never overwrite each other."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "ร่าง"
+        PUBLISHED = "published", "เผยแพร่อยู่"
+        RETIRED = "retired", "รุ่นเก่า"
+
+    flow = models.ForeignKey(LineFlow, on_delete=models.CASCADE, related_name="versions")
+    number = models.PositiveIntegerField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.DRAFT)
+    graph = models.JSONField(default=dict)
+    note = models.TextField(blank=True)
+    checks = models.JSONField(default=list, blank=True)
+    revision = models.PositiveIntegerField(default=1)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+    publish_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["flow", "-number"]
+        constraints = [
+            models.UniqueConstraint(fields=["flow", "number"], name="line_flow_version_number"),
+            models.UniqueConstraint(
+                fields=["flow"], condition=Q(status="draft"), name="line_flow_one_draft"
+            ),
+            models.UniqueConstraint(
+                fields=["flow"], condition=Q(status="published"), name="line_flow_one_published"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.flow} รุ่น {self.number}"
+
+
+class DivisionRequirement(models.Model):
+    """requirement ของกอง: สิ่งที่กองต้องการซึ่งวาดเป็น flow ไม่ได้ทั้งหมด ผูกกับกล่องหนึ่งใน flow ได้
+    (grill กคว. 27 ต.ค. 2569 Q28, Q36)"""
+
+    class Topic(models.TextChoices):
+        PROBLEM = "problem", "ปัญหาที่เจอตอนนี้"
+        WANT = "want", "สิ่งที่อยากได้"
+        ASK = "ask", "ข้อมูลที่ต้องถามผู้แจ้ง"
+        TIME = "time", "ความเร่งด่วนและระยะเวลา"
+        OTHER = "other", "อื่น ๆ"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "รอคุย"
+        AGREED = "agreed", "ตกลงทำ"
+        DECLINED = "declined", "ไม่ทำ"
+        DONE = "done", "ทำแล้ว"
+
+    class Priority(models.TextChoices):
+        HIGH = "high", "สูง"
+        MEDIUM = "medium", "กลาง"
+        LOW = "low", "ต่ำ"
+
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="requirements")
+    topic = models.CharField(max_length=12, choices=Topic.choices, default=Topic.WANT)
+    text = models.TextField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.OPEN)
+    priority = models.CharField(max_length=8, choices=Priority.choices, default=Priority.MEDIUM)
+    remark = models.TextField(blank=True)
+    proposed_by = models.CharField(max_length=120, blank=True)
+    flow = models.ForeignKey(
+        LineFlow, null=True, blank=True, on_delete=models.SET_NULL, related_name="requirements"
+    )
+    node_id = models.CharField(max_length=40, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["division", "topic", "created_at", "pk"]

@@ -1,0 +1,29 @@
+{% extends "operations/admin_base.html" %}
+{% block title %}flow LINE · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>flow LINE</h1>
+    <p class="lede">ขั้นสนทนาที่ผู้ใช้ LINE เจอเมื่อกดปุ่มบน rich menu แก้ในร่างแบบลากวาง ระบบตรวจทางตันและข้อจำกัดของ LINE ทุกครั้งที่บันทึก แล้วแอดมินเผยแพร่พร้อมเหตุผล</p>
+  </div>
+</div>
+{% if not runner_ready %}<p class="notice">ตอนนี้ร่างใช้ออกแบบและตรวจกับกองได้ แต่ยังเผยแพร่ไม่ได้ เพราะแชตยังไม่อ่าน flow จากระบบ ส่วนนี้มาในช่วงถัดไป</p>{% endif %}
+<section class="section" aria-labelledby="f-list">
+  <div class="section-head"><h2 id="f-list">flow ทั้งหมด</h2><span class="muted">{{ rows|length }} flow</span></div>
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">flow</th><th scope="col">กอง</th><th scope="col">เผยแพร่อยู่</th><th scope="col">ร่าง</th><th scope="col">ต้องแก้ / ควรดู</th><th scope="col">requirement</th><th scope="col"></th></tr></thead>
+    <tbody>
+    {% for row in rows %}<tr>
+      <td class="cell--wide" data-label="flow"><strong>{{ row.flow.name }}</strong></td>
+      <td data-label="กอง">{{ row.flow.division.code|default:"-" }}</td>
+      <td data-label="เผยแพร่อยู่">{% if row.published %}รุ่น {{ row.published.number }}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</td>
+      <td data-label="ร่าง">{% if row.draft %}รุ่น {{ row.draft.number }} · แก้ล่าสุด {{ row.draft.updated_at|date:"j M H:i" }}{% else %}<span class="muted">ไม่มี</span>{% endif %}</td>
+      <td data-label="ต้องแก้ / ควรดู">{% if row.errors %}<span class="tag tag--alert">ต้องแก้ {{ row.errors }}</span>{% endif %}{% if row.warnings %} <span class="tag tag--outline">ควรดู {{ row.warnings }}</span>{% endif %}{% if not row.errors and not row.warnings %}<span class="tag tag--closed">ผ่าน</span>{% endif %}</td>
+      <td data-label="requirement">{{ row.requirements }}</td>
+      <td class="cell--end">{% if row.draft or row.published %}<a class="btn btn--sm" href="{% url 'admin-flow' row.flow.key %}">{% if row.draft %}แก้ร่าง{% else %}ดู{% endif %}</a>{% endif %}{% if not row.draft %}<form method="post" action="{% url 'admin-flow-start' row.flow.key %}" class="inline">{% csrf_token %}<button class="btn btn--secondary btn--sm" type="submit">เริ่มร่าง</button></form>{% endif %}</td>
+    </tr>{% empty %}<tr><td colspan="7">ยังไม่มี flow</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

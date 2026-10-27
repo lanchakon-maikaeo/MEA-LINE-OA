@@ -74,6 +74,17 @@ GROUPS = (
         "บอท LINE และ AI",
         "คำตอบของบอท คำถามที่ยังตอบไม่ได้ และการปิดข้อมูลก่อนส่ง AI",
         (
+            Page(
+                "admin-flows",
+                "flow LINE",
+                "ขั้นสนทนาของผู้แจ้ง แก้แบบลากวาง ตรวจ แล้วเผยแพร่",
+                ("admin-flow", "admin-flow-start", "admin-flow-save", "admin-flow-publish"),
+            ),
+            Page(
+                "admin-requirements",
+                "requirement ของกอง",
+                "สิ่งที่แต่ละกองต้องการ กดไปที่กล่องใน flow ได้",
+            ),
             Page("admin-answers", "คลังคำตอบ", "คำตอบที่บอทใช้ตอบคำถามทั่วไป"),
             Page(
                 "admin-questions",

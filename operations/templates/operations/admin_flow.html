@@ -1,0 +1,53 @@
+{% extends "operations/admin_base.html" %}
+{% load static %}
+{% block title %}{{ flow.name }} · flow LINE · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/flows.css' %}">{{ config|json_script:"flow-config" }}<script src="{% static 'operations/flow_editor.js' %}" defer></script>{% endblock %}
+{% block page_class %}page--flow{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow"><a href="{% url 'admin-flows' %}">flow LINE</a></span>
+    <h1>{{ flow.name }}</h1>
+    <p class="lede">{% if version.status == 'draft' %}ร่างรุ่น {{ version.number }} แก้แล้วบันทึกให้เอง{% else %}รุ่น {{ version.number }} ({{ version.get_status_display }}) ดูได้อย่างเดียว{% endif %}{% if published %} · เผยแพร่อยู่: รุ่น {{ published.number }}{% endif %}{% if version.note %} · {{ version.note }}{% endif %}</p>
+  </div>
+</div>
+<form class="visually-hidden">{% csrf_token %}</form>
+<div class="fe" id="fe">
+  <div class="fe__bar">
+    <span class="fe__title">{{ flow.name }}</span>
+    <span class="fe__pill{% if version.status == 'draft' %} fe__pill--draft{% endif %}">{% if version.status == 'draft' %}ร่าง{% else %}{{ version.get_status_display }}{% endif %} รุ่น {{ version.number }}</span>
+    <button class="fe__btn" type="button" id="fe-undo" title="ย้อนกลับ (Ctrl+Z)">↶ ย้อน</button>
+    <button class="fe__btn" type="button" id="fe-redo" title="ทำซ้ำ (Ctrl+Shift+Z)">↷ ทำซ้ำ</button>
+    <button class="fe__btn" type="button" id="fe-arrange">จัดเรียงอัตโนมัติ</button>
+    <button class="fe__btn" type="button" id="fe-fit">พอดีจอ</button>
+    <span class="fe__state" id="fe-state" role="status">พร้อม</span>
+    {% if draft %}
+    <details class="fe__publish">
+      <summary class="fe__btn fe__btn--primary">เผยแพร่</summary>
+      <form method="post" action="{% url 'admin-flow-publish' flow.key %}" class="fe__publish-form">
+        {% csrf_token %}
+        {% if not runner_ready %}<p class="fe__help">ยังเผยแพร่ไม่ได้ แชตยังไม่อ่าน flow จากระบบ (ช่วงถัดไป) ตอนนี้ใช้ร่างออกแบบและตรวจกับกองได้</p>{% endif %}
+        <div class="fe__field"><label for="fe-reason">เหตุผลที่เผยแพร่</label><textarea id="fe-reason" name="reason" rows="2" required></textarea></div>
+        <button class="fe__btn fe__btn--primary" type="submit" id="fe-publish"{% if not runner_ready or blocked %} disabled{% endif %}>ยืนยันเผยแพร่รุ่น {{ draft.number }}</button>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+  <aside class="fe__palette" id="fe-palette" aria-label="ชนิดกล่อง"></aside>
+  <div class="fe__canvas" id="fe-canvas" aria-label="ผืนผ้าใบ flow">
+    <div class="fe__world" id="fe-world"><svg class="fe__edges" id="fe-edges" width="1" height="1" aria-hidden="true"></svg></div>
+    <div class="fe__hint">ลากพื้นที่ว่างเพื่อเลื่อน ใช้ล้อเมาส์ซูม ลากจากจุดวงกลมขวาของกล่องหรือปุ่มเพื่อต่อเส้น กด Delete เพื่อลบ</div>
+    <div class="fe__zoom"><button type="button" id="fe-zoom-out" aria-label="ซูมออก">−</button><button type="button" id="fe-zoom-in" aria-label="ซูมเข้า">+</button></div>
+  </div>
+  <aside class="fe__side" aria-label="รายละเอียด">
+    <div class="fe__tabs" role="tablist">
+      <button class="fe__tab" type="button" role="tab" data-tab="node">กล่องนี้</button>
+      <button class="fe__tab" type="button" role="tab" data-tab="issues">จุดที่ต้องแก้<span class="fe__count" id="fe-issue-count" hidden></span></button>
+      <button class="fe__tab" type="button" role="tab" data-tab="preview">หน้าจอ LINE</button>
+    </div>
+    <div class="fe__pane" data-pane="node"></div>
+    <div class="fe__pane" data-pane="issues" hidden></div>
+    <div class="fe__pane" data-pane="preview" hidden></div>
+  </aside>
+</div>
+{% endblock %}

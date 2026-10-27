@@ -3,6 +3,7 @@ from django.urls import path
 
 from operations import (
     duties_web,
+    flows_web,
     internal_api,
     items_web,
     line,
@@ -106,6 +107,18 @@ urlpatterns = [
         name="admin-requester-action",
     ),
     path("console/admin/line/", views.admin_line, name="admin-line"),
+    path("console/admin/flows/", flows_web.admin_flows, name="admin-flows"),
+    path("console/admin/flows/<slug:key>/", flows_web.admin_flow, name="admin-flow"),
+    path(
+        "console/admin/flows/<slug:key>/start/", flows_web.admin_flow_start, name="admin-flow-start"
+    ),
+    path("console/admin/flows/<slug:key>/save/", flows_web.admin_flow_save, name="admin-flow-save"),
+    path(
+        "console/admin/flows/<slug:key>/publish/",
+        flows_web.admin_flow_publish,
+        name="admin-flow-publish",
+    ),
+    path("console/admin/requirements/", flows_web.admin_requirements, name="admin-requirements"),
     path("console/admin/policy/", views.admin_policy, name="admin-policy"),
     path(
         "console/admin/policy/<slug:action>/<int:pk>/",
