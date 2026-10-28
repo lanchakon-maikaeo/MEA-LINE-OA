@@ -604,7 +604,10 @@ class FriendlyFlowTests(WebTestCase):
         page = self.client_for(self.trf_staff).get(f"/cases/{case.number}/")
         self.assertContains(page, "ตัวเลือกที่ย้อนกลับไม่ได้ (ยกเลิกเรื่อง, ปิดเรื่อง)")
         self.post(
-            self.trf_staff, case, "close", {"reason": "เขตไม่ตอบ", "confirm_irreversible": "1"}
+            self.trf_staff,
+            case,
+            "close",
+            {"reason": "เขตไม่ตอบ", "notice": "ปิดเรื่องแล้ว", "confirm_irreversible": "1"},
         )
         self.assertEqual(Case.objects.get(pk=case.pk).status, S.CLOSED)
 

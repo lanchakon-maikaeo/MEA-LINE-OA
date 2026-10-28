@@ -22,6 +22,7 @@ from operations import (
     problems,
     queues,
     registry,
+    requester_steps,
     returns,
     routing_words,
     typed_lines,
@@ -1192,6 +1193,7 @@ def build_form(action, st, params, demo=False):
                 help="ไม่บังคับ สแกนหรือรูปเอกสาร SAP ที่ตรงกับเลขเอกสาร ได้ถึง 5 ไฟล์ JPG, PNG หรือ PDF",
             )
         )
+    _status_notes(form, action, case, spec)
     if st.support and not demo:
         # ADR 0007: every การทำแทนกอง by ผู้ช่วยเหลือระบบ carries a reason.
         reason = next((f for f in form.fields if f.name == "reason"), None)
@@ -1204,6 +1206,32 @@ def build_form(action, st, params, demo=False):
             )
         )
     return form
+
+
+def _status_notes(form, action, case, spec):
+    """ADR 0028: a status change carries a notice for the requester and an internal note. An
+    action whose own reason or message reaches the requester uses that field instead."""
+    targets = spec.targets(case.kind, case.status)
+    if not any(t != case.status for t in targets):
+        return
+    own = requester_steps.REASON_IS_NOTICE | requester_steps.MESSAGE_IS_NOTICE
+    if action in own:
+        for f in form.fields:
+            if f.name == "reason" and not f.help:
+                f.help = "ผู้แจ้งเห็นข้อความนี้ใน LINE"
+    else:
+        required = all(requester_steps.notice_required(action, case.status, t) for t in targets)
+        form.fields.append(
+            Field(
+                "notice",
+                "ข้อความแจ้งสถานะ",
+                "textarea",
+                required,
+                help="ผู้แจ้งเห็นในรายละเอียดเรื่องใน LINE" + ("" if required else " ไม่บังคับ"),
+            )
+        )
+    if not any(f.name == "internal_note" for f in form.fields):
+        form.fields.append(Field("internal_note", "บันทึกภายใน (ผู้แจ้งไม่เห็น)", "textarea"))
 
 
 def _levels():

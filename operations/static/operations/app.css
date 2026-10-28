@@ -680,6 +680,7 @@ a.stat--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 .timeline__what { font-weight: 600; }
 .timeline__who { font-size: 14px; color: var(--mute); }
 .timeline__why { margin-top: var(--s-4); font-size: 15px; overflow-wrap: anywhere; }
+.timeline__note { color: var(--mute); }
 .timeline__system .timeline__what { color: var(--danger); }
 @media (max-width: 599px) { .timeline > li { grid-template-columns: minmax(0, 1fr); gap: var(--s-2); } }
 

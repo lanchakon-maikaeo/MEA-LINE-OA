@@ -610,6 +610,36 @@ OPTIONS = {
 }
 
 
+# ADR 0028: the step a requester sees in LINE for each open status; closed, rejected and
+# cancelled are fixed (เสร็จแล้ว, and no step bar for the other two).
+STEP_PREFIX = "requester_step:"
+STEP_CHOICES = {
+    "received": ("รับเรื่องแล้ว", "แถบขั้น ●○○○"),
+    "working": ("กำลังดำเนินการ", "แถบขั้น ●●○○"),
+    "need_you": ("รอข้อมูลจากคุณ", "แถบขั้น ●●●○"),
+    "done_confirm": ("เสร็จแล้ว รอคุณยืนยัน", "แถบขั้น ●●●● พร้อมปุ่มยืนยัน"),
+}
+STEP_DEFAULTS = (
+    ("submitted", "รอคัดกรอง", "received"),
+    ("triage", "กำลังคัดกรอง", "received"),
+    ("awaiting_approval", "รออนุมัติ", "received"),
+    ("awaiting_execution", "รอดำเนินการ", "received"),
+    ("in_progress", "กำลังดำเนินการ", "working"),
+    ("on_hold", "พักเรื่อง", "working"),
+    ("awaiting_info", "รอข้อมูลเพิ่ม", "need_you"),
+    ("awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย) ยืนยัน", "done_confirm"),
+)
+for _status, _label, _default in STEP_DEFAULTS:
+    OPTIONS[STEP_PREFIX + _status] = Option(
+        f"ขั้นที่ผู้แจ้งเห็นใน LINE: สถานะ{_label}",
+        (
+            (_default, STEP_CHOICES[_default][0], "ค่าที่ตกลงไว้ (ADR 0028)"),
+            *((v, title, bar) for v, (title, bar) in STEP_CHOICES.items() if v != _default),
+        ),
+        "ผู้แจ้งเห็นขั้นนี้ใน เรื่องของฉัน พร้อมสถานะจริงเป็นบรรทัดรอง",
+    )
+
+
 def get(key):
     """The current value, or the option's safe default."""
     option = OPTIONS[key]

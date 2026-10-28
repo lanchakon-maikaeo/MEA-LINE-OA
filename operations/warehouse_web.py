@@ -544,6 +544,7 @@ def case_panel(user, case):
         "methods": [m for m in Appointment.Method.choices if m[0]],
         "chat": (chat := case_chat.thread(case)),
         "chat_last": case_chat.last_from_requester(chat),
+        "chat_any": any(i["who"] != "status" for i in chat),  # strips alone open no window
         "chat_open": can_chat and case_chat._identity(case) is not None,
         "chat_contact": case_chat.contact_of(user) if case_chat.needs_contact(user, case) else "",
         "chat_fresh": bool(can_chat and case_chat.fresh_inbox(case)),

@@ -255,6 +255,8 @@
                   <div class="timeline__what">{{ e.what }}{% if e.support %} <span class="tag tag--outline">ผู้ช่วยเหลือระบบทำแทน {{ e.support }}</span>{% endif %}</div>
                   <div class="timeline__who">{{ e.who }}{% if e.status %} · {{ e.status }}{% endif %}</div>
                   {% if e.why %}<p class="timeline__why">{{ e.why }}</p>{% endif %}
+                  {% if e.notice %}<p class="timeline__why">ข้อความแจ้งสถานะ: {{ e.notice }}</p>{% endif %}
+                  {% if e.note %}<p class="timeline__why timeline__note">บันทึกภายใน: {{ e.note }}</p>{% endif %}
                 </div>
               </li>
             {% endfor %}

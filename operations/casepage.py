@@ -203,6 +203,9 @@ def timeline(case):
                 )
                 if moved
                 else "",
+                # ADR 0028: what the requester read, and the note only staff read.
+                "notice": data.get("notice", "") if data.get("notice") != decision.reason else "",
+                "note": data.get("internal_note", ""),
                 "system": False,
             }
         )

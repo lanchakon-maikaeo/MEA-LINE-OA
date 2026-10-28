@@ -937,7 +937,11 @@ class ReceiptTests(FulfilmentTestCase):
     def test_staff_close_only_after_seven_days_without_an_answer(self):
         case = self.approved(1)
         self.issue(self.issuer, case, 1, ["MTR_SYN_001"])
-        close = {"reason": "ผู้แจ้งไม่ตอบ", "reference": "SIM-ISS69-000001"}
+        close = {
+            "reason": "ผู้แจ้งไม่ตอบ",
+            "reference": "SIM-ISS69-000001",
+            "notice": "ปิดเรื่องเพราะไม่ได้รับคำตอบภายใน 7 วัน",  # ADR 0028
+        }
         self.assertFails(ErrorCode.VALIDATION_ERROR, self.act, self.meter, case, "close", close)
         Delivery.objects.filter(case=case).update(issued_at=timezone.now() - timedelta(days=8))
         self.assertFails(

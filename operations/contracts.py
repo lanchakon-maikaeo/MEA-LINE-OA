@@ -150,7 +150,8 @@ TRACKING_PATTERNS = {
     "project": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "ชื่อโครงการยาว 2 ถึง 60 ตัว"),
 }
 NO_ITEM_TOPICS = {Case.Topic.USAGE, Case.Topic.SUGGESTION, Case.Topic.INQUIRY, Case.Topic.SYSTEM}
-ACTION_FIELDS = {"reason"}
+# ADR 0028: any action may carry a status notice for the requester and an internal note.
+ACTION_FIELDS = {"reason", "notice", "internal_note"}
 ACTION_EXTRA_FIELDS = {
     "assign": {"assignee_id"},
     "request_handoff": {"to_division", "reason_category", "keywords"},

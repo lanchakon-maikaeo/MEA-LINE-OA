@@ -20,7 +20,7 @@ from django.db.models import Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from operations import identity as identity_services
-from operations import line_api, services, typed_lines, usage_meters, workflow
+from operations import line_api, requester_steps, services, typed_lines, usage_meters, workflow
 from operations.contracts import (
     Actor,
     CommandFailed,
@@ -1431,21 +1431,55 @@ def _updates(turn):
     status_changed = Decision.objects.filter(case=OuterRef("pk"), created_at__gt=since).exclude(
         from_status=F("to_status")
     )
-    changed = list(
+    changed = (
         services.visible_cases(_actor(turn))
         .filter(Exists(status_changed))
-        .order_by("-updated_at")[:3]
+        .order_by("-updated_at")[:10]
     )
-    lines = []
+    lines, opening = [], _opening_case(turn)
     for case in changed:
-        line = f"{case.number} · {case.get_status_display()}"
+        if case.number == opening:
+            continue  # its card shows the step and the notice in this same reply
+        if not _news(case, since):
+            continue  # ADR 0028: a move inside the same step is not news for the requester
+        if len(lines) == 3:
+            break
+        line = f"{case.number} · {requester_steps.label(case)}"
         if case.status == Case.Status.AWAITING_INFO:
             asked = case.decisions.filter(action="request_info").order_by("-id").first()
             if asked is not None:
                 line += f"\nเจ้าหน้าที่ขอข้อมูล: {asked.reason}"
+        else:
+            latest = next(iter(requester_steps.notices(case)), None)
+            if latest is not None and latest[0].created_at > since:
+                line += f"\nข้อความจากเจ้าหน้าที่: {latest[1]}"
         lines.append(line)
     if lines:
         turn.say("มีอัปเดตใหม่\n" + "\n".join(lines))
+
+
+def _news(case, since):
+    """The requester's step changed since they last looked, or staff wrote them a notice."""
+    moves = list(
+        case.decisions.filter(created_at__gt=since)
+        .exclude(from_status=F("to_status"))
+        .order_by("id")
+    )
+    if any(isinstance(d.data, dict) and d.data.get("notice") for d in moves):
+        return True
+    return bool(moves) and (
+        requester_steps.key(moves[0].from_status) != requester_steps.key(case.status)
+    )
+
+
+def _opening_case(turn):
+    """The case number this turn opens with its card (a tapped or typed number), else ''."""
+    event = getattr(turn, "event", None) or {}
+    data = (event.get("postback") or {}).get("data", "")
+    if data.startswith("c="):
+        return data[2:].upper()
+    text = ((event.get("message") or {}).get("text") or "").strip().upper()
+    return text if CASE_NUMBER.fullmatch(text) else ""
 
 
 def _awaiting_info(turn, draft):
@@ -2086,8 +2120,8 @@ def _when(moment):
     return f"{local.day:02d}/{local.month:02d}/{local.year + 543} {local:%H:%M} น."
 
 
-def _status_label(case):
-    label = case.get_status_display()
+def _status_label(case, label=None):
+    label = label or case.get_status_display()
     if case.kind == K.WITHDRAWAL:
         from operations import fulfilment
 
@@ -2124,7 +2158,12 @@ def _case_list(turn, mode="open", page=1, item=None):
         return turn.button(label, "case_list", {**scope, "mode": selected, "page": number})
 
     title = _menu_label(item) if item else "เรื่องของฉัน"
-    lines = [f"{c.number} · {_kind_label(c.kind, c.topic)} · {_status_label(c)}" for c in rows]
+    lines = [
+        " · ".join(
+            (c.number, _kind_label(c.kind, c.topic), _status_label(c, requester_steps.label(c)))
+        )
+        for c in rows
+    ]
     text = f"{title} · {modes[mode]} {rows.paginator.count} เรื่อง\n"
     text += "\n".join(lines) if lines else "ยังไม่มีเรื่องในรายการนี้"
     text += f"\nหน้า {rows.number}/{rows.paginator.num_pages} · กดเลขเรื่องเพื่อดูรายละเอียด"
@@ -2200,12 +2239,26 @@ def _case_detail(turn, number):
     )
     if case.meters:
         sap += f"\nเครื่องวัดฯ: {usage_meters.describe(case.meters)}"
+    bar = requester_steps.bar(case.status)
+    step = (
+        f"{bar} {requester_steps.label(case)}\nสถานะในระบบ: {_status_label(case)}"
+        if bar
+        else f"สถานะ: {_status_label(case)}"
+    )
     text = (
         f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}{sap}\n"
-        f"สถานะ: {_status_label(case)}\nกองเจ้าภาพ: {case.owner_division.name}\n"
+        f"{step}\nกองเจ้าภาพ: {case.owner_division.name}\n"
         f"อัปเดตล่าสุด: {_when(case.updated_at)}" + (f"\nไฟล์แนบ: {files} ไฟล์" if files else "")
     )
     buttons = []
+    notices = requester_steps.notices(case)
+    if notices and not (
+        case.status == Case.Status.AWAITING_INFO and notices[0][0].action == "request_info"
+    ):
+        text += "\n" + _notice_text(*notices[0])
+        buttons.append(turn.button("ตอบเจ้าหน้าที่", "case_reply", {"case": str(case.pk)}))
+        if len(notices) > 1:
+            buttons.append(turn.button("ดูข้อความก่อนหน้า", "case_notices", {"case": str(case.pk)}))
     from operations import case_chat, warehouse  # local: both build on this module
 
     stage_lines = warehouse.status_lines(case)
@@ -2243,6 +2296,36 @@ def _case_detail(turn, number):
             for label in ["ตอบข้อมูลเพิ่ม", "แนบหลักฐาน"]
         ]
     turn.say(text, buttons[:MAX_QUICK])
+
+
+def _notice_text(decision, text):
+    """ข้อความแจ้งสถานะ as the requester reads it: who wrote it, when, and the words."""
+    profile = getattr(decision.actor, "staff_profile", None) if decision.actor_id else None
+    who = profile.display_name if profile else "เจ้าหน้าที่"
+    return f"ข้อความจากเจ้าหน้าที่ ({_when(decision.created_at)} · {who})\n{text}"
+
+
+def _case_reply(turn, case):
+    """ตอบเจ้าหน้าที่ (ADR 0028 Q13): the notice was one way; this opens the case's chat."""
+    from operations import case_chat  # local: case_chat builds on this module
+
+    until = (turn.now + case_chat.OPEN_FOR).isoformat()
+    turn.set_prompt("case_chat", case=str(case.pk), until=until)
+    turn.say(
+        f"พิมพ์ข้อความถึงเจ้าหน้าที่เรื่อง {case.number} ได้เลย ข้อความจะเข้าเรื่องนี้",
+        [(case_chat.END_LABEL, case_chat.END_POSTBACK)],
+    )
+
+
+def _case_notices(turn, case):
+    rows = requester_steps.notices(case)[:10]
+    if not rows:
+        return _case_detail(turn, case.number)
+    turn.say(
+        f"ข้อความจากเจ้าหน้าที่ เรื่อง {case.number}\n\n"
+        + "\n\n".join(_notice_text(d, t) for d, t in rows),
+        [(case.number, f"c={case.number}")],
+    )
 
 
 # --- Drafts -------------------------------------------------------------------------------------
@@ -2340,6 +2423,11 @@ def _token_action(turn, token, draft):
             "พิมพ์ข้อความหรือส่งรูป JPEG/PNG หรือไฟล์ PDF ในแชทนี้ได้"
         )
         return
+    if action in ("case_reply", "case_notices"):
+        case = services.visible_cases(_actor(turn)).filter(pk=token.value.get("case")).first()
+        if case is None:
+            return _menu(turn, "ไม่พบเรื่องนี้ในเรื่องของคุณ")
+        return (_case_reply if action == "case_reply" else _case_notices)(turn, case)
     if action == "case_search":
         return _search_cases(turn)
     if action == "delivery":

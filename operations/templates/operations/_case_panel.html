@@ -10,7 +10,7 @@
     <div class="wh-next__fields">
       <div class="field"><label for="st-on">วันที่</label><input type="date" id="st-on" name="on" value="{{ panel.today|date:'Y-m-d' }}" max="{{ panel.today|date:'Y-m-d' }}" required></div>
       {% if panel.next_stage == "keyed" %}<div class="field"><label for="st-plan">วันจ่าย</label><input type="date" id="st-plan" name="planned_on"{% if panel.suggested %} value="{{ panel.suggested|date:'Y-m-d' }}"{% endif %}><span class="helptext">{% if panel.suggested %}ระบบเสนอตามตาราง แก้ได้{% else %}ใส่วันจ่าย ตารางยังไม่มีกำหนดของชนิดนี้{% endif %} ผู้แจ้งได้ข้อความวันจ่ายและปุ่มเลือกวิธีรับ</span></div>{% endif %}
-      <div class="field"><label for="st-note">หมายเหตุ</label><input type="text" id="st-note" name="note" maxlength="300"></div>
+      <div class="field"><label for="st-note">บันทึกภายใน</label><input type="text" id="st-note" name="note" maxlength="300"></div>
     </div>
     <button class="btn btn--sm" type="submit">บันทึก{{ panel.next_label }}</button>
   </form>
@@ -36,12 +36,15 @@
   {% endfor %}
 </section>
 {% endif %}
-{% if panel.chat or panel.chat_open %}
+{% if panel.chat_any or panel.chat_open %}
 <div class="chatwin" id="chat" data-case="{{ case.number }}" data-last="{{ panel.chat_last }}">
-  <button class="chatwin__toggle" type="button" aria-expanded="false" aria-controls="chatwin-panel">แชตกับผู้แจ้ง<span class="chatwin__dot" hidden>ใหม่</span></button>
-  <section class="chatwin__panel" id="chatwin-panel" aria-label="แชตกับผู้แจ้ง" hidden>
+  <section class="chatwin__panel" id="chatwin-panel" aria-labelledby="chatwin-title" hidden>
     <header class="chatwin__head">
-      <strong>{{ case.number }} · คุยกับผู้แจ้ง</strong>
+      <span class="chatwin__avatar" aria-hidden="true">{% icon "chat" %}</span>
+      <div class="chatwin__title">
+        <strong id="chatwin-title">คุยกับผู้แจ้ง</strong>
+        <span>{{ case.number }} · {{ case.district.name }}</span>
+      </div>
       <button class="chatwin__close" type="button" aria-label="ปิดหน้าต่างแชต">×</button>
     </header>
     <p class="chatwin__hint" data-hint>{% if panel.chat_fresh %}ผู้แจ้งเพิ่งพิมพ์มา ส่งตอนนี้ถึงทันที{% else %}ข้อความจะถึงผู้แจ้งตอนเขาทักมาครั้งถัดไป{% endif %}</p>
@@ -52,11 +55,12 @@
       {% if panel.chat_contact %}<label class="chatwin__contact">ชื่อและเบอร์ของคุณ (ต่อท้ายข้อความแรก)<input type="text" name="contact" value="{{ panel.chat_contact }}" maxlength="200" required></label>{% endif %}
       <div class="chatwin__send">
         <label class="visually-hidden" for="chat-text">ข้อความถึงผู้แจ้ง</label>
-        <textarea id="chat-text" name="text" rows="2" maxlength="2000" required placeholder="พิมพ์ข้อความ Enter ส่ง Shift+Enter ขึ้นบรรทัด"></textarea>
-        <button class="btn btn--sm" type="submit">ส่ง</button>
+        <textarea id="chat-text" name="text" rows="1" maxlength="2000" required placeholder="พิมพ์ข้อความ" title="Enter ส่ง Shift+Enter ขึ้นบรรทัด"></textarea>
+        <button class="chatwin__sendbtn" type="submit" aria-label="ส่งข้อความ">{% icon "send" %}</button>
       </div>
     </form>
     {% else %}<p class="chatwin__hint">ผู้แจ้งเรื่องนี้ไม่ได้ใช้ LINE หรือคุณไม่ได้อยู่ในกองเจ้าภาพ</p>{% endif %}
   </section>
+  <button class="chatwin__toggle" type="button" aria-expanded="false" aria-controls="chatwin-panel" aria-label="แชตกับผู้แจ้ง">{% icon "chat" %}<span class="chatwin__dot" hidden>ใหม่</span></button>
 </div>
 {% endif %}

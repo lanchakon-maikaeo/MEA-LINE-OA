@@ -35,24 +35,49 @@
 .wh-next { border: 1px solid var(--hairline-soft); border-radius: 14px; padding: var(--s-12); margin: var(--s-12) 0; }
 .wh-next__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 var(--s-12); }
 .wh-appt { border-top: 1px solid var(--hairline-soft); padding-top: var(--s-8); margin-top: var(--s-8); }
-/* หน้าต่างแชตลอย (Q15) */
-.chatwin { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
-.chatwin__toggle { border-radius: 999px; padding: 0 20px; min-height: 48px; box-shadow: 0 6px 20px rgba(0,0,0,.18); display: inline-flex; align-items: center; gap: 8px; }
-.chatwin__dot { background: var(--danger, #d92d20); color: #fff; border-radius: 999px; font-size: 12px; padding: 1px 8px; }
-.chatwin__panel { width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--canvas, #fff); border: 1px solid var(--hairline-soft); border-radius: 18px; box-shadow: 0 12px 40px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; }
+/* หน้าต่างแชตลอย (Q15; ADR 0028 แบบ A): a round button that unfolds into a chat card above it */
+.chatwin { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.chatwin .chatwin__toggle { position: relative; width: 60px; height: 60px; min-height: 60px; padding: 0; border-radius: 50%; background: var(--ink); color: var(--on-primary); box-shadow: 0 10px 28px rgba(17,17,17,.24); display: grid; place-items: center; transition: transform .15s ease; }
+.chatwin .chatwin__toggle:hover { transform: translateY(-2px); }
+.chatwin__toggle .icon { width: 26px; height: 26px; }
+.chatwin.is-open .chatwin__toggle { background: var(--charcoal); }
+.chatwin__dot { position: absolute; top: -4px; right: -4px; background: var(--danger); color: #fff; border-radius: 999px; font-size: 11.5px; line-height: 20px; padding: 0 7px; border: 2px solid var(--canvas); }
+.chatwin__panel { width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--canvas); border: 1px solid var(--hairline-soft); border-radius: 22px; box-shadow: 0 16px 48px rgba(17,17,17,.18); display: flex; flex-direction: column; overflow: hidden; transform-origin: bottom right; animation: chatwin-pop .18s ease-out; }
 .chatwin__panel[hidden] { display: none; }
-.chatwin__head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--hairline-soft); }
-.chatwin .chatwin__close { background: transparent; color: var(--ink); min-height: 32px; width: 32px; padding: 0; font-size: 20px; border-radius: 50%; }
-.chatwin__hint { font-size: 12.5px; color: var(--mute); padding: 6px 14px; margin: 0; }
-.chatwin__body { flex: 1; overflow-y: auto; background: #8cabd9; padding: 12px; }
-.chat__list { display: flex; flex-direction: column; gap: 8px; }
-.chat__empty { color: #1f2937; font-size: 13px; }
+@keyframes chatwin-pop { from { transform: scale(.94); opacity: .4; } to { transform: none; opacity: 1; } }
+.chatwin__head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 14px; border-bottom: 1px solid var(--hairline-soft); }
+.chatwin__avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--cloud-deep); display: grid; place-items: center; flex: none; }
+.chatwin__avatar .icon { width: 18px; height: 18px; }
+.chatwin__title { flex: 1; min-width: 0; display: grid; line-height: 1.35; }
+.chatwin__title strong { font-size: 14.5px; }
+.chatwin__title span { font-size: 12.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chatwin .chatwin__close { background: transparent; color: var(--ink); min-height: 34px; width: 34px; padding: 0; font-size: 22px; border-radius: 50%; }
+.chatwin .chatwin__close:hover { background: var(--cloud); }
+.chatwin__hint { font-size: 12px; color: var(--mute); padding: 6px 14px; margin: 0; background: var(--cloud); }
+.chatwin__body { flex: 1; overflow-y: auto; background: var(--canvas); padding: 14px; }
+.chat__list { display: flex; flex-direction: column; gap: 10px; }
+.chatwin .chat__msg { max-width: 80%; }
+.chatwin .chat__bubble { background: var(--cloud); border-radius: 18px; border-bottom-left-radius: 6px; padding: 9px 13px; }
+.chatwin .chat__msg--staff .chat__bubble { background: var(--ink); color: var(--on-primary); border-radius: 18px; border-bottom-right-radius: 6px; }
+.chatwin .chat__meta { color: var(--mute); }
+.chat__strip { align-self: center; max-width: 92%; text-align: center; font-size: 12.5px; color: var(--ash); background: var(--cloud); border: 1px solid var(--hairline-soft); border-radius: 12px; padding: 6px 12px; }
+.chat__strip strong { color: var(--ink); font-weight: 600; }
+.chat__strip-text { display: block; color: var(--ink); margin-top: 2px; }
+.chat__empty { color: var(--mute); font-size: 13px; }
 .chat__msg.is-faint { opacity: .6; }
-.chatwin__form { border-top: 1px solid var(--hairline-soft); padding: 8px; display: grid; gap: 6px; }
+.chatwin__form { border-top: 1px solid var(--hairline-soft); padding: 10px; display: grid; gap: 6px; }
 .chatwin__contact { font-size: 12.5px; display: grid; gap: 4px; }
-.chatwin__send { display: flex; gap: 6px; align-items: flex-end; }
-.chatwin__send textarea { min-height: 44px; flex: 1; }
-@media (max-width: 600px) { .chatwin { right: 12px; bottom: 12px; } }
+.chatwin__send { display: flex; gap: 8px; align-items: flex-end; }
+.chatwin__send textarea { flex: 1; min-height: 42px; max-height: 120px; border-radius: 21px; padding: 9px 14px; resize: none; background: var(--cloud); }
+.chatwin .chatwin__sendbtn { width: 42px; height: 42px; min-height: 42px; padding: 0; border-radius: 50%; flex: none; display: grid; place-items: center; }
+.chatwin__sendbtn .icon { width: 18px; height: 18px; }
+@media (max-width: 600px) {
+  .chatwin { right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .chatwin.is-open { inset: 0; gap: 0; }
+  .chatwin.is-open .chatwin__panel { width: 100%; height: 100%; border-radius: 0; border: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .chatwin.is-open .chatwin__toggle { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .chatwin__panel { animation: none; } .chatwin .chatwin__toggle { transition: none; } }
 /* ปฏิทินรายเดือน (รอบใหม่ Q10) */
 .cal-nav__month { font-size: 18px; }
 .mcal { border: 1px solid var(--hairline-soft); border-radius: 14px; overflow: hidden; margin-bottom: var(--s-8); }

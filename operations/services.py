@@ -46,6 +46,7 @@ from operations.contracts import (
     clean_idempotency_key,
     clean_reason,
     clean_revision,
+    clean_text,
     fail,
     parse_action_payload,
     parse_submission,
@@ -761,7 +762,10 @@ def perform_form_action(actor, case_id, action, *, expected_revision, idempotenc
             "set_priority",
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
-            payload={"priority": priority, **payload},
+            payload={
+                "priority": priority,
+                **{k: v for k, v in payload.items() if k not in ("notice", "internal_note")},
+            },
         )
         expected_revision += 1
     return perform_action(
@@ -772,6 +776,32 @@ def perform_form_action(actor, case_id, action, *, expected_revision, idempotenc
         idempotency_key=idempotency_key,
         payload=payload,
     )
+
+
+def _with_notes(ctx, case, action, from_status, payload, reason, data):
+    """ADR 0028: the status notice the requester reads and the internal note staff keep."""
+    from operations import requester_steps  # local: requester_steps reads options
+
+    notice = clean_text(payload, "notice", False) if "notice" in payload else ""
+    internal = clean_text(payload, "internal_note", False) if "internal_note" in payload else ""
+    if case.status == from_status:
+        notice = ""  # a notice belongs to a status change
+    else:
+        notice = requester_steps.notice_of(action, {**payload, "notice": notice}, reason)
+        staff = ctx.requester is None
+        if (
+            staff
+            and not notice
+            and requester_steps.notice_required(action, from_status, case.status)
+        ):
+            fail(ErrorCode.VALIDATION_ERROR, "เขียนข้อความแจ้งสถานะถึงผู้แจ้งก่อนบันทึก")
+    if not (notice or internal) or (data is not None and not isinstance(data, dict)):
+        return data
+    return {
+        **(data or {}),
+        **({"notice": notice} if notice else {}),
+        **({"internal_note": internal} if internal else {}),
+    }
 
 
 @_dependency_guard
@@ -816,6 +846,7 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
             case.section = policy.section_for(case)  # Q12: the new owner's own แผนก, if any
         if acting_for is not None:
             data = {**(data or {}), "support": acting_for}
+        data = _with_notes(ctx, case, action, from_status, payload, reason, data)
         if len(targets) > 1 and case.status not in targets:
             raise RuntimeError(f"{action} chose {case.status}, outside the matrix.")
         coordination.after_action(case)  # M09: R09 child work ends with its lines or the case

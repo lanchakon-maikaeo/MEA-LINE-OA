@@ -531,7 +531,7 @@ class MaintenanceTests(OrchestrationTestCase):
         self.act(case, "request_info", reason="ขอรูปหน้าปัด")
         reply = self.say(self.postback(ALICE, "m=mine"))
         everything = "\n".join(m.get("text", "") for m in self.sent[-1])
-        self.assertIn(f"มีอัปเดตใหม่\n{case.number} · รอข้อมูลเพิ่ม", everything)
+        self.assertIn(f"มีอัปเดตใหม่\n{case.number} · รอข้อมูลจากคุณ", everything)  # ADR 0028
         self.assertIn("ขอรูปหน้าปัด", everything)
         self.say(self.postback(ALICE, "m=mine"))
         self.assertNotIn("มีอัปเดตใหม่", "\n".join(m.get("text", "") for m in self.sent[-1]))

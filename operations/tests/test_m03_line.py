@@ -541,7 +541,7 @@ class DraftConversationTests(LineTestCase):
         mine = Case.objects.get()
         self.approve(BOB)  # same district, different person
         reply = self.say(self.postback(ALICE, "m=mine"))
-        self.assertIn(f"{mine.number} · เบิก · รอคัดกรอง", texts(reply))
+        self.assertIn(f"{mine.number} · เบิก · รับเรื่องแล้ว", texts(reply))  # ADR 0028
         reply = self.press(ALICE, mine.number, reply)
         self.assertIn("กองเจ้าภาพ: ", texts(reply))
         for attempt in (self.text(BOB, mine.number), self.postback(BOB, f"c={mine.number}")):

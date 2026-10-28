@@ -272,6 +272,23 @@ def thread(case):
                 "id": f"d{c.pk}",
             }
         )
+    statuses = dict(case.Status.choices)
+    for d in case.decisions.exclude(from_status="").select_related("actor__staff_profile"):
+        if d.from_status == d.to_status:
+            continue
+        # ADR 0028 Q17: a status change is a strip across the chat, with the notice if any.
+        notice = d.data.get("notice", "") if isinstance(d.data, dict) else ""
+        items.append(
+            {
+                "who": "status",
+                "text": notice,
+                "at": d.created_at,
+                "meta": statuses.get(d.to_status, d.to_status),
+                "faint": False,
+                "contact": "",
+                "id": f"s{d.pk}",
+            }
+        )
     return sorted(items, key=lambda i: i["at"])
 
 
