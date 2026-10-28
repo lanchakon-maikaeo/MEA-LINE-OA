@@ -106,6 +106,26 @@ def truck_day(case, on_or_after):
     return next_weekday(on_or_after, weekdays) if weekdays else None
 
 
+def preview(schedule, group, district_code, received_on):
+    """Q5's worked example: a slip of the group's every-size row received on a day, and the
+    first truck day for that district from the issue day. (None, None) when not set."""
+    rule = next(
+        (
+            r
+            for r in (schedule.sla if schedule else [])
+            if r.get("group") == group and not r.get("size")
+        ),
+        None,
+    )
+    if rule is None:
+        return None, None
+    issue = next_weekday(
+        working_days_after(received_on, int(rule["days"])), schedule.issue_weekdays
+    )
+    weekdays = (schedule.truck_days or {}).get(district_code, [])
+    return issue, next_weekday(issue, weekdays) if weekdays else None
+
+
 @transaction.atomic
 def save_schedule(actor, division, sla, issue_weekdays, truck_days, reason):
     """กำหนดจ่ายตามขนาด, issue days and truck days; staff of the division, with a reason."""
@@ -118,7 +138,8 @@ def save_schedule(actor, division, sla, issue_weekdays, truck_days, reason):
     clean = []
     for row in sla:
         group, size = str(row.get("group", "")).strip(), str(row.get("size", "")).strip()[:40]
-        if not group and not size and not str(row.get("days", "")).strip():
+        # A row with no days is left out: clearing the days removes it (28 ต.ค. 2569 Q5).
+        if not str(row.get("days", "")).strip():
             continue
         if group not in ("meter", "ct", "vt", "set", "other"):
             raise ValidationError("กลุ่มต้องเป็น มิเตอร์ CT VT ชุด หรืออุปกรณ์อื่น")
@@ -196,6 +217,9 @@ def record(actor, cases, stage, on, planned_on=None, note=""):
     for case in cases:
         if not identity.holds(scope, case.owner_division_id) and not scope.is_admin:
             skipped.append((case, "ไม่ใช่งานของกองคุณ"))
+            continue
+        if case.status == Case.Status.AWAITING_APPROVAL:  # ADR 0025, 28 ต.ค. 2569 Q4
+            skipped.append((case, "ยังรออนุมัติ บันทึกขั้นงานคลังได้หลังกองอนุมัติ"))
             continue
         have = stages(case)
         if stage in have:

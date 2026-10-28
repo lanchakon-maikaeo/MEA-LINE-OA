@@ -224,7 +224,7 @@ def _attention(user, scope, report, link):
     if scope.is_admin:
         add("การแจ้งเตือนที่ส่งไม่สำเร็จ", waiting["line"], reverse("admin-line"), alert=True)
         add("คำถามที่บอทตอบไม่ได้", waiting["questions"], reverse("admin-questions"))
-        add("Monitoring มีเรื่องที่ควรดู", waiting["monitoring"], reverse("admin-monitoring"), True)
+        add("ตัวเลขติดตามระบบมีเรื่องที่ควรดู", waiting["monitoring"], reverse("admin-monitoring"), True)
     return items
 
 
@@ -246,10 +246,12 @@ def _queue(request, division, admin_all=False):
         number = int(request.GET.get("page", "1"))
     except ValueError:
         number = 1
+    shown = request.GET.get("shown", "")
+    shown = min(int(shown), 2000) if shown.isdigit() else 0
     orders = queues.order_queryset(request.user, tab, division, now, filters)
     sort = request.GET.get("sort", "newest")
     sort = sort if sort in queues.SORTS else "newest"
-    items, pager = queues.page(cases, tab, number, orders, sort)
+    items, pager = queues.page(cases, tab, number, orders, sort, shown)
     if division or admin_all:
         request.session["division"] = division.code if division else ALL_QUEUE
     context = {
@@ -261,6 +263,7 @@ def _queue(request, division, admin_all=False):
         "base_query": urlencode(filters.query()),
         "rows": queues.build_rows(items, now),
         "pager": pager,
+        "shown": shown,
         "now": now,
         "kinds": Case.Kind.choices,
         "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "ยังไม่ตั้งระดับ")],

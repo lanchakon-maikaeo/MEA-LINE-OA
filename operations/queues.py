@@ -334,14 +334,17 @@ def level_of(triage):
 def summary_text(case):
     text = case.description or case.purpose or case.return_reason or case.intake_note
     text = " ".join(text.split())
-    lines = ", ".join(
-        f"{line.item.code} ×{line.requested_quantity.normalize():f}"
-        if line.requested_quantity is not None
-        else line.item.code
-        for line in case.lines.all()
-    )
+
+    # 28 ต.ค. 2569: the item's name reads better than its code in a queue row.
+    def one(line):
+        name = line.item.name or line.item.code
+        if line.requested_quantity is None:
+            return name
+        return f"{name} {line.requested_quantity.normalize():f} {line.item.unit}".strip()
+
+    lines = ", ".join(one(line) for line in case.lines.all())
     if text and lines:
-        return f"{lines} — {text}"
+        return f"{lines} · {text}"
     return text or lines
 
 
@@ -540,13 +543,22 @@ def ordered(cases, tab, orders=(), sort="newest"):
     return sorted(cases, key=key)
 
 
-def page(cases, tab, number, orders=(), sort="newest"):
+def page(cases, tab, number, orders=(), sort="newest", shown=0):
+    """One page of PAGE_SIZE rows, or the first `shown` rows once "แสดงเพิ่มเติม" has been
+    pressed (28 ต.ค. 2569 Q8); `more` and `next` drive that button."""
     items = ordered(cases, tab, orders, sort)
     total = len(items)
     pages = max(1, -(-total // PAGE_SIZE))
     number = min(max(1, number), pages)
-    start = (number - 1) * PAGE_SIZE
-    return items[start : start + PAGE_SIZE], {"number": number, "pages": pages, "total": total}
+    start = 0 if shown else (number - 1) * PAGE_SIZE
+    end = max(PAGE_SIZE, shown) if shown else start + PAGE_SIZE
+    return items[start:end], {
+        "number": number,
+        "pages": pages,
+        "total": total,
+        "more": max(0, total - end),
+        "next": end + PAGE_SIZE,
+    }
 
 
 def prefetch(cases):

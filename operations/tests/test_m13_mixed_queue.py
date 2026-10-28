@@ -136,7 +136,13 @@ class MixedQueueTests(WebTestCase):
             order.number for order in orders[:50]
         ]
         self.assertEqual(self.numbers(first) + self.numbers(second), expected)
-        self.assertEqual(first.context["pager"], {"number": 1, "pages": 2, "total": 53})
+        self.assertEqual(
+            first.context["pager"], {"number": 1, "pages": 2, "total": 53, "more": 3, "next": 100}
+        )
+        # 28 ต.ค. 2569 Q8: "แสดงเพิ่มเติม" grows the list instead of paging it.
+        grown = client.get(url, {"sort": "urgent", "shown": 100})
+        self.assertEqual(self.numbers(grown), expected)
+        self.assertEqual(grown.context["pager"]["more"], 0)
         poll = client.get(url, {"sort": "urgent"}, HTTP_HX_REQUEST="true")
         self.assertEqual(self.numbers(poll), self.numbers(first))
         self.assertEqual(poll.context["pager"], first.context["pager"])

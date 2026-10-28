@@ -39,6 +39,27 @@ GROUPS = [
     ("other", "อุปกรณ์อื่น"),
 ]
 WEEKDAYS = list(enumerate(calendars.DAY_NAMES[:5]))
+TABS = [
+    ("all", "ทั้งหมดที่ต้องทำ"),
+    ("none", "ยังไม่รับใบเบิก"),
+    (S.RECEIVED, "รับใบเบิกแล้ว"),
+    (S.KEYED, "คีย์จ่ายแล้ว"),
+    (S.ISSUED, "จ่ายแล้ว"),
+    (S.DELIVERED, "เขตได้รับแล้ว"),
+    ("approval", "รออนุมัติ"),
+]
+# Calendar colours on the month (Q6): นัดรับของ orange like the logo, notebooks blue.
+TONES = {"pickup": "orange", "notebook": "blue"}
+SPARE_TONES = ["green", "purple", "teal"]
+# The button on each row names what the clerk does next.
+NEXT_LABELS = {
+    S.RECEIVED: "รับใบเบิก",
+    S.KEYED: "คีย์จ่าย",
+    S.ISSUED: "จ่ายแล้ว",
+    S.DELIVERED: "เขตได้รับแล้ว",
+}
+# The stage the selection bar offers first on each tab.
+BULK_DEFAULT = {"none": S.RECEIVED, S.RECEIVED: S.KEYED, S.KEYED: S.ISSUED, S.ISSUED: S.DELIVERED}
 
 
 def _division(request, code):
@@ -60,6 +81,9 @@ def _day(text, default=None):
 def warehouse_page(request, code):
     division = _division(request, code)
     if request.method == "POST":
+        back = reverse("warehouse", args=[code]) + (
+            f"?tab={request.POST['tab']}" if request.POST.get("tab", "").isalpha() else ""
+        )
         numbers = warehouse.read_numbers(request.POST.get("numbers", ""))
         numbers += request.POST.getlist("case")
         stage = request.POST.get("stage", "")
@@ -67,7 +91,7 @@ def warehouse_page(request, code):
         planned = _day(request.POST.get("planned_on"))
         if on is None or (request.POST.get("planned_on") and planned is None):
             messages.error(request, "วันที่ไม่ถูกต้อง")
-            return redirect("warehouse", code=code)
+            return redirect(back)
         cases, missing = warehouse.find_cases(request.user, division, numbers)
         try:
             done, skipped = warehouse.record(
@@ -75,14 +99,14 @@ def warehouse_page(request, code):
             )
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
-            return redirect("warehouse", code=code)
+            return redirect(back)
         if done:
             messages.success(request, f"บันทึก{S(stage).label} {len(done)} ใบ")
         for case, why in skipped[:20]:
             messages.error(request, f"{case.number} ({case.sap_number or '-'}): {why}")
         if missing:
             messages.error(request, "ไม่พบในงานที่ยังไม่จบ: " + ", ".join(missing[:30]))
-        return redirect("warehouse", code=code)
+        return redirect(back)
     kinds = [Case.Kind.WITHDRAWAL, Case.Kind.RETURN]
     cases = (
         Case.objects.filter(owner_division=division, kind__in=kinds)
@@ -91,40 +115,51 @@ def warehouse_page(request, code):
         .prefetch_related("milestones", "lines", "appointments")
         .order_by("submitted_at")
     )
-    stage = request.GET.get("stage", "")
-    rows = []
+    today = timezone.localdate()
+    by_tab = {key: [] for key, _ in TABS}
     for case in cases[:500]:
         done = {m.stage: m for m in case.milestones.all()}
         now = next((done[s] for s in reversed(CaseMilestone.ORDER) if s in done), None)
-        shown = now.stage if now else "none"
-        if stage and stage != shown:
-            continue
+        waiting = case.status == Case.Status.AWAITING_APPROVAL
         keyed = done.get(S.KEYED)
         received = done.get(S.RECEIVED)
+        planned = keyed.planned_on if keyed else None
         method = next(
             (a for a in case.appointments.all() if a.status in Appointment.HOLDING and a.method),
             None,
         )
-        rows.append(
-            {
-                "case": case,
-                "stage": now,
-                "planned": keyed.planned_on if keyed else None,
-                "suggested": (
-                    warehouse.suggested_issue(case, received.on) if received and not keyed else None
-                ),
-                "method": method,
-            }
-        )
+        nxt = None if waiting else _next_stage(case, done)
+        row = {
+            "case": case,
+            "stage": now,
+            "planned": planned,
+            "suggested": (
+                warehouse.suggested_issue(case, received.on) if received and not keyed else None
+            ),
+            "late": bool(planned and planned < today and S.ISSUED not in done),
+            "method": method,
+            "next": nxt,
+            "next_label": NEXT_LABELS.get(nxt, ""),
+        }
+        if waiting:
+            by_tab["approval"].append(row)
+            continue
+        by_tab[now.stage if now else "none"].append(row)
+        by_tab["all"].append(row)
+    # 28 ต.ค. 2569 Q3: tabs by stage, each with its count; all open work by default.
+    tab = request.GET.get("tab", "all")
+    tab = tab if tab in by_tab else "all"
     return render(
         request,
         "operations/warehouse.html",
         {
             "division": division,
-            "rows": rows,
+            "rows": by_tab[tab],
+            "tabs": [(key, label, len(by_tab[key])) for key, label in TABS],
+            "tab": tab,
             "stages": S.choices,
-            "stage": stage,
-            "today": timezone.localdate(),
+            "bulk_stage": BULK_DEFAULT.get(tab, S.RECEIVED),
+            "today": today,
             "schedule": warehouse.schedule_of(division),
         },
     )
@@ -160,19 +195,41 @@ def schedule_page(request, code):
         else:
             messages.success(request, "บันทึกตารางแล้ว")
         return redirect("warehouse-schedule", code=code)
-    sla = list(schedule.sla if schedule else []) + [{"group": "", "size": "", "days": ""}] * 3
+    rows = list(schedule.sla if schedule else [])
     trucks = schedule.truck_days if schedule else {}
+    # 28 ต.ค. 2569 Q5: one box per group, its every-size row first, then each size.
+    groups = [
+        {
+            "key": key,
+            "label": label,
+            "default": next((r["days"] for r in rows if r["group"] == key and not r["size"]), ""),
+            "sizes": [r for r in rows if r["group"] == key and r["size"]],
+        }
+        for key, label in GROUPS
+    ]
+    today = timezone.localdate()
+    pick_group = request.GET.get("pg", "meter")
+    pick_district = request.GET.get("pd", districts[0].code if districts else "")
+    issue, truck = warehouse.preview(schedule, pick_group, pick_district, today)
     return render(
         request,
         "operations/warehouse_schedule.html",
         {
             "division": division,
-            "sla": sla,
-            "groups": GROUPS,
+            "groups": groups,
+            "group_choices": GROUPS,
             "weekdays": WEEKDAYS,
+            "short_days": list(enumerate(["จ.", "อ.", "พ.", "พฤ.", "ศ."])),
             "issue": schedule.issue_weekdays if schedule else [],
             "districts": [(d, trucks.get(d.code, [])) for d in districts],
             "schedule": schedule,
+            "example": {
+                "group": pick_group,
+                "district": pick_district,
+                "today": calendars.day_label(today),
+                "issue": calendars.day_label(issue) if issue else "",
+                "truck": calendars.day_label(truck) if truck else "",
+            },
         },
     )
 
@@ -180,31 +237,48 @@ def schedule_page(request, code):
 @login_required
 def calendar_page(request, code):
     division = _division(request, code)
-    choices = list(Calendar.objects.filter(division=division, is_active=True))
+    choices = list(Calendar.objects.filter(division=division, is_active=True).order_by("pk"))
     if not choices:
         messages.info(request, "กองนี้ยังไม่มีปฏิทินนัด")
         return redirect("division-detail", code=code)
-    calendar = next((c for c in choices if c.key == request.GET.get("cal")), choices[0])
+    # 28 ต.ค. 2569 Q6: every calendar of the division in one month, told apart by colour;
+    # ?cal=KEY narrows it to one.
+    tones = {
+        c.pk: TONES.get(c.key) or SPARE_TONES[i % len(SPARE_TONES)] for i, c in enumerate(choices)
+    }
+    for c in choices:
+        c.tone = tones[c.pk]
+    picked_cal = next((c for c in choices if c.key == request.GET.get("cal")), None)
+    shown = [picked_cal] if picked_cal else choices
     today = timezone.localdate()
-    # รอบใหม่ Q10: a month on one page, Sunday first, as on the picture the owner sent.
     start = (_day(request.GET.get("month"), today) or today).replace(day=1)
     if request.method == "POST":
-        return _calendar_post(request, code, calendar, start)
-    weeks = calendars.month(request.user, calendar, start)
+        return _calendar_post(request, code, choices, picked_cal, start)
+    weeks = calendars.month(request.user, shown, start)
+    for week in weeks:
+        for d in week:
+            for slot in d["slots"]:
+                slot.tone = tones[slot.calendar_id]
     picked = _day(request.GET.get("day"))
     picked_day = next((d for week in weeks for d in week if picked and d["date"] == picked), None)
-    waiting = (
-        Appointment.objects.filter(calendar=calendar, status=Appointment.Status.REQUESTED)
-        .select_related("slot", "case__district")
+    waiting = list(
+        Appointment.objects.filter(calendar__in=shown, status=Appointment.Status.REQUESTED)
+        .select_related("slot", "case__district", "calendar")
         .order_by("requested_at")
     )
+    free = {c.key: calendars.free_slots(c.key) for c in shown}
+    for a in waiting:
+        a.tone = tones[a.calendar_id]
+        a.free = free.get(a.calendar.key, [])
+    cal_query = f"cal={picked_cal.key}&" if picked_cal else ""
     return render(
         request,
         "operations/calendar.html",
         {
             "division": division,
             "calendars": choices,
-            "calendar": calendar,
+            "calendar": picked_cal,
+            "cal_query": cal_query,
             "weeks": weeks,
             "weekdays": ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."],
             "start": start,
@@ -213,26 +287,27 @@ def calendar_page(request, code):
             "next": (start + timedelta(days=32)).replace(day=1),
             "picked": picked_day,
             "waiting": waiting,
-            "free": calendars.free_slots(calendar.key),
             "methods": [m for m in Appointment.Method.choices if m[0]],
             "today": today,
         },
     )
 
 
-def _calendar_post(request, code, calendar, start):
+def _calendar_post(request, code, choices, picked_cal, start):
     day = _day(request.POST.get("day"))
-    back = f"{reverse('calendar', args=[code])}?cal={calendar.key}&month={start.isoformat()}"
+    base = reverse("calendar", args=[code]) + "?" + (f"cal={picked_cal.key}&" if picked_cal else "")
+    back = f"{base}month={start.isoformat()}"
     if day is not None:
-        month = day.replace(day=1).isoformat()
-        back = f"{reverse('calendar', args=[code])}?cal={calendar.key}&month={month}"
-        back += f"&day={day.isoformat()}"
+        back = f"{base}month={day.replace(day=1).isoformat()}&day={day.isoformat()}"
     action = request.POST.get("action", "")
     try:
         if action == "add":
-            day = _day(request.POST.get("day"))
             if day is None:
                 raise ValidationError("เลือกวันก่อน")
+            key = request.POST.get("calendar") or (picked_cal.key if picked_cal else "")
+            calendar = next((c for c in choices if c.key == key), None)
+            if calendar is None:
+                raise ValidationError("เลือกว่าเป็นนัดเรื่องไหน")
             times = [t for t in request.POST.get("times", "").replace(" ", ",").split(",") if t]
             made = calendars.add_slots(
                 request.user,
@@ -244,19 +319,21 @@ def _calendar_post(request, code, calendar, start):
                 request.POST.get("note", ""),
                 on_holiday=request.POST.get("on_holiday") == "1",
             )
-            messages.success(request, f"เปิด {len(made)} ช่วง")
+            messages.success(request, f"เปิด {len(made)} ช่วงใน{calendar.name}")
         elif action == "close":
-            slot = get_object_or_404(CalendarSlot, pk=request.POST.get("slot"), calendar=calendar)
+            slot = get_object_or_404(
+                CalendarSlot, pk=request.POST.get("slot"), calendar__in=choices
+            )
             calendars.close_slot(request.user, slot)
             messages.success(request, "ปิดช่วงนี้แล้ว คนที่ขอไว้ยังอยู่")
         elif action in ("confirm", "move", "reject", "done"):
             appointment = get_object_or_404(
-                Appointment, pk=request.POST.get("appointment"), calendar=calendar
+                Appointment, pk=request.POST.get("appointment"), calendar__in=choices
             )
             slot = None
             if action == "move":
                 slot = get_object_or_404(
-                    CalendarSlot, pk=request.POST.get("slot"), calendar=calendar
+                    CalendarSlot, pk=request.POST.get("slot"), calendar=appointment.calendar
                 )
             calendars.decide(
                 request.user,
@@ -324,69 +401,6 @@ def admin_holidays(request):
             "year_label": start.year + 543,
             "today": today,
         },
-    )
-
-
-@admin_required
-def admin_emergency(request):
-    """ผู้รับแจ้งเรื่องฉุกเฉิน (Q33): per division, the staff told of a new emergency case."""
-    from operations.models import EmergencyContact, RoleGrant
-
-    if request.method == "POST":
-        division = get_object_or_404(Division, pk=request.POST.get("division"), is_active=True)
-        wanted = {int(x) for x in request.POST.getlist("user") if x.isdigit()}
-        members = set(
-            RoleGrant.objects.filter(division=division, revoked_at__isnull=True).values_list(
-                "user_id", flat=True
-            )
-        )
-        wanted &= members
-        current = set(
-            EmergencyContact.objects.filter(division=division).values_list("user_id", flat=True)
-        )
-        EmergencyContact.objects.filter(division=division, user_id__in=current - wanted).delete()
-        for user_id in wanted - current:
-            EmergencyContact.objects.create(
-                division=division, user_id=user_id, added_by=request.user
-            )
-        identity.audit(request.user, "division.emergency_contacts", division, people=sorted(wanted))
-        messages.success(request, f"บันทึกผู้รับแจ้งเรื่องฉุกเฉินของ {division.code} แล้ว")
-        return redirect("admin-emergency")
-    rows = []
-    for division in Division.objects.filter(is_active=True).order_by("code"):
-        grants = (
-            RoleGrant.objects.filter(
-                division=division, revoked_at__isnull=True, user__is_active=True
-            )
-            .select_related("user__staff_profile", "user__line_identity")
-            .order_by("user__username")
-        )
-        chosen = set(
-            EmergencyContact.objects.filter(division=division).values_list("user_id", flat=True)
-        )
-        people, seen = [], set()
-        for g in grants:
-            if g.user_id in seen:
-                continue
-            seen.add(g.user_id)
-            profile = getattr(g.user, "staff_profile", None)
-            line = getattr(g.user, "line_identity", None)
-            people.append(
-                {
-                    "user": g.user,
-                    "name": profile.display_name if profile else g.user.username,
-                    "role": g.get_role_display(),
-                    "line": line is not None,
-                    "chosen": g.user_id in chosen,
-                }
-            )
-        rows.append({"division": division, "people": people, "count": len(chosen)})
-    from operations import notifications
-
-    return render(
-        request,
-        "operations/admin_emergency.html",
-        {"rows": rows, "budget": notifications.budget_state()},
     )
 
 
@@ -465,6 +479,9 @@ def case_stage(request, number):
                 messages.error(request, why)
             if done:
                 messages.success(request, f"บันทึก{S(request.POST['stage']).label}แล้ว")
+    back = request.POST.get("back", "")
+    if back.startswith(reverse("warehouse", args=[case.owner_division.code])):
+        return redirect(back)
     return redirect(f"{reverse('case-detail', args=[case.number])}#s-warehouse")
 
 

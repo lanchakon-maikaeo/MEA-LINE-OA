@@ -208,14 +208,7 @@ a:hover { color: var(--charcoal); }
   display: flex; align-items: center; gap: var(--s-24);
 }
 .brand { display: inline-flex; align-items: center; gap: var(--s-12); text-decoration: none; color: var(--ink); flex: none; }
-.brand__mark {
-  display: inline-grid; place-items: center;
-  width: 40px; height: 40px; border-radius: var(--r-full);
-  background: var(--ink); color: var(--on-primary);
-  font-size: 13px; font-weight: 700; letter-spacing: 0;
-}
-.brand__name { font-weight: 600; font-size: 17px; line-height: 1.2; }
-.brand__name small { display: block; font-size: 12px; color: var(--mute); font-weight: 500; }
+.brand__logo { display: block; height: 48px; width: auto; }
 
 .mainnav { display: flex; align-items: stretch; gap: var(--s-30); height: 100%; flex: 1; justify-content: center; }
 .mainnav a {
@@ -309,18 +302,19 @@ a:hover { color: var(--charcoal); }
   .topbar .search input::placeholder { color: transparent; }
   .topbar .search input:focus { position: fixed; left: var(--gutter); right: var(--gutter); top: 12px; width: auto; padding: 0 var(--s-18) 0 40px; color: var(--ink); cursor: text; z-index: 60; }
   .search .icon { left: 12px; }
-  .brand__name small { display: none; }
   .topbar__inner { gap: var(--s-12); }
   .brand { margin-right: auto; }
 }
 @media (max-width: 599px) {
-  .brand__name { display: none; }
+  .brand__logo { height: 38px; }
   .division-switch .chip__label { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 420px) {
   /* The division switch keeps its name in aria-label; the icon alone fits a 390px phone. */
   .division-switch .chip__label { display: none; }
-  .topbar__tools { gap: var(--s-8); }
+  .topbar__tools { gap: var(--s-4); }
+  .topbar__inner { gap: var(--s-8); }
+  .brand__logo { height: 30px; }
 }
 
 /* Sub-navigation strip (admin) */
@@ -553,7 +547,12 @@ a.stat--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 }
 .qrow:hover { background: var(--cloud); }
 .qrow--hazard { box-shadow: inset 4px 0 0 var(--danger); }
-.qrow__prio { padding-top: 2px; }
+.qrow__prio { padding-top: 2px; display: flex; align-items: center; gap: var(--s-8); }
+/* The row link covers the whole row; the bulk-approve tick must sit above it. */
+.qrow__pick { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -6px 0 -6px -6px; border-radius: var(--r-full); cursor: pointer; }
+.qrow__pick:hover { background: var(--hairline-soft); }
+.qrow__pick input { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); cursor: pointer; }
+.qrow:has(.qrow__pick input:checked) { background: var(--cloud); }
 .qrow__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-4) var(--s-12); }
 .qrow__link { font-weight: 600; font-size: 17px; text-decoration: none; font-variant-numeric: tabular-nums; }
 .qrow__link::after { content: ""; position: absolute; inset: 0; }
@@ -1251,3 +1250,17 @@ a.kpi--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 .menu-item-form .cluster input { flex: 1 1 220px; }
 .menu-choice { padding: var(--s-12) 0; border-top: 1px solid var(--hairline-soft); }
 .menu-choice__title { margin: 0 0 var(--s-8); font-weight: 600; }
+
+/* 28 ต.ค. 2569 Q8: long lists fold after their first rows (app.js). */
+.is-folded { display: none !important; }
+.more-button {
+  display: flex; align-items: center; justify-content: center; width: 100%;
+  min-height: 44px; margin: var(--s-12) 0; padding: 0 var(--s-18);
+  border: 1px dashed var(--hairline); border-radius: var(--r-pill); background: transparent;
+  color: var(--ink); font: inherit; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer;
+}
+.more-button:hover { border-style: solid; border-color: var(--ink); background: var(--cloud); }
+.more-button[hidden] { display: none; }
+/* Q9: the approve bar stays in reach while ticking. */
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-12); }
+.bulk-bar button:disabled { opacity: .55; cursor: not-allowed; }

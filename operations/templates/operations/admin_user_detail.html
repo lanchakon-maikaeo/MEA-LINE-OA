@@ -1,4 +1,5 @@
 {% extends "operations/admin_base.html" %}
+{% block title %}{{ target.staff_profile.display_name|default:target.username }} · บัญชีเจ้าหน้าที่ · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% load koj_ui %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · บัญชีเจ้าหน้าที่</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>

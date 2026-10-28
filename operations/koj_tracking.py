@@ -295,7 +295,8 @@ def apply_snapshot(source_id, matrix, *, expected_config=None, token=None, now=N
 
 
 def request_refresh(actor, source):
-    if not staff_can_read(actor):
+    # 28 ต.ค. 2569: only admins pull a source between the hourly rounds (ADR 0026).
+    if not identities.staff_scope(actor).is_admin:
         raise PermissionDenied
     if source.provider != "google":
         raise ValidationError("แหล่ง CSV ใช้ปุ่มนำเข้าไฟล์ใหม่")

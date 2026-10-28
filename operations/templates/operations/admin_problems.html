@@ -28,7 +28,7 @@
 <p class="muted">{{ page.paginator.count }} เรื่อง · ไฟล์ CSV ใช้ตัวกรองเดียวกัน ไม่มีชื่อ รหัสแทนตัว ข้อความที่แจ้ง พิกัด หรือชื่อเจ้าหน้าที่ และทุกการดาวน์โหลดถูกบันทึก</p>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">เลขเรื่อง</th><th scope="col">หัวข้อ</th><th scope="col">ข้อความที่แจ้ง</th><th scope="col">ผู้แจ้ง</th><th scope="col">ช่องทาง</th><th scope="col">วันเวลาแจ้ง</th><th scope="col">กองเจ้าภาพ</th><th scope="col">สถานะ</th></tr></thead>
-  <tbody>
+  <tbody data-more data-more-noun="เรื่อง">
   {% for row in rows %}{% with case=row.case %}
     <tr>
       <td class="nowrap"><a href="{% url 'case-detail' case.number %}">{{ case.number }}</a></td>

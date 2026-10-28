@@ -2,7 +2,7 @@
 {% load ui %}
 {% block title %}ติดตามงาน กอจ.{% endblock %}
 {% block content %}
-<div class="page-head"><div class="page-head__text"><span class="eyebrow">กอจ. · ข้อมูลจากระบบเดิม</span><h1>ติดตามงาน กอจ.</h1><p class="lede">อัปเดตทุก 1 ชั่วโมง หรือกด refresh ระหว่างวัน ข้อมูลรอบที่อ่านไม่สำเร็จจะใช้รอบล่าสุดที่อ่านได้</p></div></div>
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">กอจ. · ข้อมูลจากระบบเดิม</span><h1>ติดตามงาน กอจ.</h1><p class="lede">ระบบอ่านชีทใหม่ทุกชั่วโมง แอดมินกดอ่านใหม่ระหว่างวันได้ ถ้ารอบไหนอ่านไม่สำเร็จ ระบบใช้ข้อมูลรอบล่าสุดที่อ่านได้</p></div></div>
 {% if unmapped %}<p class="notice notice--error">มี {{ unmapped }} แถวที่ยังจับคู่เขตไม่ได้ ผู้แจ้งจะยังค้นแถวเหล่านี้ไม่พบ ให้แอดมินตรวจตารางจับคู่เขต</p>{% endif %}
 {% for source in sources %}
 <section class="card mb-24">
@@ -10,14 +10,14 @@
   <p>{% if source.service == 'repair' %}ติดตามสถานะการซ่อม{% elif source.service == 'withdrawal' %}ติดตามใบเบิก{% else %}ติดตามใบส่งคืน{% endif %}</p>
   <dl class="facts">
     <div><dt>ข้อมูลล่าสุด</dt><dd>{{ source.last_synced_at|thai_datetime }}</dd></div>
-    <div><dt>ผล refresh</dt><dd>{{ source.last_error|default:"—" }}{% if source.refresh_requested %} · รอ refresh{% endif %}{% if source.syncing_until %} · กำลังดึงข้อมูล{% endif %}</dd></div>
+    <div><dt>ผลการอ่านล่าสุด</dt><dd>{{ source.last_error|default:"อ่านได้ปกติ" }}{% if source.refresh_requested %} · รออ่านใหม่{% endif %}{% if source.syncing_until %} · กำลังดึงข้อมูล{% endif %}</dd></div>
   </dl>
-{% if source.provider == 'google' %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="refresh"><input type="hidden" name="source" value="{{ source.pk }}"><button type="submit">Refresh ตอนนี้</button></form>{% elif can_configure %}<form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="action" value="import"><input type="hidden" name="source" value="{{ source.pk }}"><label>ไฟล์ CSV <input type="file" name="file" accept=".csv" required></label><button type="submit">นำเข้า CSV</button></form>{% endif %}
+{% if source.provider == 'google' %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="refresh"><input type="hidden" name="source" value="{{ source.pk }}"><button type="submit">อ่านข้อมูลใหม่ตอนนี้</button></form>{% elif can_configure %}<form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="action" value="import"><input type="hidden" name="source" value="{{ source.pk }}"><label>ไฟล์ CSV <input type="file" name="file" accept=".csv" required></label><button type="submit">นำเข้า CSV</button></form>{% endif %}
 {% if can_configure %}<p><a href="?edit={{ source.pk }}">แก้การตั้งค่า</a></p>{% endif %}
 </section>
 {% empty %}<p>ยังไม่มีแหล่งข้อมูล ให้แอดมินตั้งค่าภายในหน่วยงานก่อนเปิดติดตาม</p>{% endfor %}
 {% if can_configure %}<section class="card"><h2>{% if selected %}แก้แหล่งข้อมูล: {{ selected.name }}{% else %}เพิ่มแหล่งข้อมูล{% endif %}</h2>
 <p>เลือกเฉพาะคอลัมน์ที่ต้องใช้ รหัสแถวต้องเป็นค่าถาวรที่ไม่ซ้ำ แม้เลขเอกสารจะซ้ำหลายแถวได้</p>
-<p class="helptext">Google Sheets อ่านด้วย service account แบบอ่านอย่างเดียวที่ผู้ดูแลเซิร์ฟเวอร์ตั้งไว้ แชร์เฉพาะชีทที่อนุญาตให้บัญชีนั้นอ่านได้ ข้อมูลผ่านการจับคู่เขตก่อนแสดงให้ผู้แจ้ง</p>
+<p class="helptext">ระบบอ่าน Google Sheets ด้วยบัญชีสำหรับอ่านอย่างเดียวที่ผู้ดูแลเซิร์ฟเวอร์ตั้งไว้ แชร์ให้บัญชีนั้นเฉพาะชีทที่อนุญาต ข้อมูลต้องจับคู่เขตได้ก่อน ผู้แจ้งจึงจะเห็น</p>
 <form method="post">{% csrf_token %}<input type="hidden" name="action" value="save"><input type="hidden" name="source" value="{{ selected.pk|default:'' }}">{{ form.as_p }}<button type="submit">บันทึกแหล่งข้อมูล</button>{% if selected %} <a href="{% url 'koj-sources' %}">เพิ่มแหล่งใหม่</a>{% endif %}</form></section>{% endif %}
 {% endblock %}

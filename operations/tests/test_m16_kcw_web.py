@@ -2,7 +2,7 @@
 the case card (Q38, Q9); the floating chat window and its thread, with the answers typed while
 filing (Q15, Q16); the month calendar (Q10); วันหยุด picked by admins, skipped as working days
 and asked about before slots open on them (Q11); and the people an admin chose to hear of an
-emergency (Q33)."""
+emergency (Q33), set on the LINE account page since 28 ต.ค. 2569."""
 
 from datetime import date, timedelta
 
@@ -123,18 +123,64 @@ class CalendarTests(WorkTestCase):
 
 
 class EmergencyTests(WorkTestCase):
-    def test_an_admin_chooses_who_hears_of_an_emergency(self):
+    """28 ต.ค. 2569 Q7, Q12: set on the LINE account page only; the divisions page lists them."""
+
+    def test_an_admin_chooses_who_hears_of_an_emergency_on_the_line_page(self):
+        from operations.models import ChannelIdentity, District, Requester
+
         admin = make_staff("emergency-admin", (Role.ADMIN, None))
         on_call = make_staff("kcw-on-call", (Role.STAFF, "กคว."))
+        requester = Requester.objects.create(
+            display_name="เวรกคว.",
+            district=District.objects.order_by("code").first(),
+            approved_by=admin,
+        )
+        ChannelIdentity.objects.create(
+            channel="line", external_id="U" + "e" * 32, requester=requester, staff_user=on_call
+        )
         client = Client()
         client.force_login(admin)
-        self.assertEqual(client.get("/console/admin/emergency/").status_code, 200)
+        self.assertEqual(client.get("/console/admin/emergency/").status_code, 404)
+        page = client.get(f"/console/admin/requesters/{requester.pk}/").content.decode()
+        self.assertIn("เรื่องฉุกเฉินของ กคว.", page)
         division = Division.objects.get(code="กคว.")
-        client.post("/console/admin/emergency/", {"division": division.pk, "user": [on_call.pk]})
+        other = Division.objects.exclude(pk=division.pk).filter(is_active=True).first()
+        client.post(
+            f"/console/admin/requesters/{requester.pk}/emergency/",
+            {"user": on_call.pk, "division": [division.pk, other.pk]},
+        )
+        # Only the divisions the person works in count.
         self.assertEqual(
-            list(EmergencyContact.objects.values_list("user_id", flat=True)), [on_call.pk]
+            list(EmergencyContact.objects.values_list("user_id", "division_id")),
+            [(on_call.pk, division.pk)],
         )
         self.assertEqual(
             [u.pk for u in staff_email._with_email(c.user for c in EmergencyContact.objects.all())],
             [on_call.pk],
         )
+        self.assertContains(
+            client.get("/console/admin/divisions/"), f"/console/admin/requesters/{requester.pk}/"
+        )
+        client.post(f"/console/admin/requesters/{requester.pk}/emergency/", {"user": on_call.pk})
+        self.assertFalse(EmergencyContact.objects.exists())
+
+    def test_a_line_not_linked_to_staff_cannot_be_chosen(self):
+        from operations.models import ChannelIdentity, District, Requester
+
+        admin = make_staff("emergency-admin-2", (Role.ADMIN, None))
+        requester = Requester.objects.create(
+            display_name="ผู้ใช้ทั่วไป",
+            district=District.objects.order_by("code").first(),
+            approved_by=admin,
+        )
+        ChannelIdentity.objects.create(
+            channel="line", external_id="U" + "f" * 32, requester=requester
+        )
+        client = Client()
+        client.force_login(admin)
+        page = client.get(f"/console/admin/requesters/{requester.pk}/").content.decode()
+        self.assertIn("ยังไม่ได้เชื่อมกับบัญชีเจ้าหน้าที่", page)
+        response = client.post(
+            f"/console/admin/requesters/{requester.pk}/emergency/", {"user": admin.pk}
+        )
+        self.assertEqual(response.status_code, 404)

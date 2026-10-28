@@ -7,9 +7,11 @@
   document.documentElement.classList.add("js");
 
   // Polling (hx-trigger "every Ns") pauses while the tab is hidden and catches up on return.
+  // It also waits while cases are ticked for approval, so a refresh never clears the ticks.
   document.addEventListener("htmx:beforeRequest", function (event) {
     var source = event.detail && event.detail.elt;
-    if (source && source.hasAttribute("data-poll") && document.hidden) {
+    if (!source || !source.hasAttribute("data-poll")) return;
+    if (document.hidden || source.querySelector("input[name=case]:checked")) {
       event.preventDefault();
     }
   });
@@ -177,10 +179,97 @@
       if (el) el.classList.toggle("is-set", Boolean(filter[1]));
     });
     var count = tools.querySelector("[data-list-count]");
-    if (count) count.textContent = "แสดง " + shown + " จาก " + items.length + " รายการ";
+    var narrowed = words.length || filters.some(function (filter) { return filter[1]; });
+    if (count) count.textContent = narrowed ? "พบ " + shown + " จาก " + items.length + " รายการ" : "ทั้งหมด " + items.length + " รายการ";
     var empty = document.querySelector('[data-list-empty="' + tools.getAttribute("data-list") + '"]');
     if (empty) empty.hidden = shown !== 0;
+    var box = document.querySelector('[data-list-items="' + tools.getAttribute("data-list") + '"]');
+    if (box) {
+      // A search or filter shows its matches from the top again.
+      box.removeAttribute("data-more-shown");
+      applyMore(box);
+    }
   }
+  // 28 ต.ค. 2569 Q8: a long list shows its first rows (10, or data-more="N") and a
+  // "แสดงเพิ่มเติม" button that opens 20 more at a time. data-more-end keeps the last rows
+  // instead (older chat messages). Rows hidden by a search stay out of the count.
+  var MORE_STEP = 20, moreKept = {};
+  function moreItems(box) {
+    var rows = box.querySelectorAll(":scope > [data-item], :scope > tr, :scope > li, :scope > [data-more-item]");
+    return Array.prototype.filter.call(rows, function (row) { return !row.hidden; });
+  }
+  function applyMore(box) {
+    if (!box.hasAttribute("data-more") && !box.hasAttribute("data-list-items")) return;
+    var first = parseInt(box.getAttribute("data-more"), 10) || 10;
+    // A list the server refreshes every few seconds (the case chat) keeps what was opened.
+    var key = box.getAttribute("data-more-key");
+    if (key && moreKept[key] && !box.hasAttribute("data-more-shown")) box.setAttribute("data-more-shown", moreKept[key]);
+    var limit = parseInt(box.getAttribute("data-more-shown"), 10) || first;
+    var fromEnd = box.hasAttribute("data-more-end");
+    var rows = moreItems(box);
+    if (fromEnd) rows.reverse();
+    rows.forEach(function (row, n) { row.classList.toggle("is-folded", n >= limit); });
+    var left = Math.max(0, rows.length - limit);
+    var anchor = box.closest(".table-wrap") || box.closest("table") || box;
+    var button = box.moreButton;
+    if (!button) {
+      // A list swapped in by htmx leaves the old list's button behind.
+      var near = fromEnd ? anchor.previousElementSibling : anchor.nextElementSibling;
+      if (near && near.matches(".more-button[data-more-for]")) near.remove();
+      if (!left) return;
+      button = document.createElement("button");
+      button.setAttribute("data-more-for", "");
+      button.type = "button";
+      button.className = "more-button";
+      button.addEventListener("click", function () {
+        var now = parseInt(box.getAttribute("data-more-shown"), 10) || first;
+        box.setAttribute("data-more-shown", String(now + MORE_STEP));
+        if (box.getAttribute("data-more-key")) moreKept[box.getAttribute("data-more-key")] = String(now + MORE_STEP);
+        applyMore(box);
+      });
+      anchor.parentNode.insertBefore(button, fromEnd ? anchor : anchor.nextSibling);
+      box.moreButton = button;
+    }
+    button.hidden = left === 0;
+    var noun = box.getAttribute("data-more-noun") || "รายการ";
+    button.textContent = (fromEnd ? "ดูก่อนหน้า" : "แสดงเพิ่มเติม") + " (อีก " + left + " " + noun + ")";
+  }
+  function initMore(root) {
+    (root || document).querySelectorAll("[data-more], [data-list-items]").forEach(applyMore);
+  }
+  document.addEventListener("htmx:afterSwap", function () { initMore(); });
+
+  // Approve many at once (Q9): tick every waiting case on the page and count the ticks.
+  function bulkState(form) {
+    var boxes = document.querySelectorAll('input[name=case][form="' + form.id + '"]');
+    var ticked = Array.prototype.filter.call(boxes, function (b) { return b.checked; }).length;
+    var all = form.querySelector("[data-bulk-all]");
+    if (all) {
+      all.checked = boxes.length > 0 && ticked === boxes.length;
+      all.indeterminate = ticked > 0 && ticked < boxes.length;
+      all.disabled = boxes.length === 0;
+    }
+    var submit = form.querySelector("[data-bulk-submit]");
+    if (submit) {
+      submit.disabled = ticked === 0;
+      submit.textContent = ticked ? submit.getAttribute("data-label").replace("{n}", ticked) : submit.getAttribute("data-empty");
+    }
+  }
+  function bulkForms() {
+    document.querySelectorAll("form[data-bulk]").forEach(bulkState);
+  }
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    if (target.matches && target.matches("[data-bulk-all]")) {
+      var form = target.closest("form");
+      document.querySelectorAll('input[name=case][form="' + form.id + '"]').forEach(function (b) {
+        b.checked = target.checked;
+      });
+    }
+    if (target.matches && target.matches("[data-bulk-all], input[name=case][form]")) bulkForms();
+  });
+  document.addEventListener("htmx:afterSwap", bulkForms);
+
   ["input", "change"].forEach(function (type) {
     document.addEventListener(type, function (event) {
       var tools = event.target.closest && event.target.closest("[data-list]");
@@ -196,6 +285,8 @@
     });
   });
   document.querySelectorAll("[data-list]").forEach(applyList);
+  initMore();
+  bulkForms();
   // A link to #key opens that item.
   if (window.location.hash) {
     var target = document.getElementById(window.location.hash.slice(1));

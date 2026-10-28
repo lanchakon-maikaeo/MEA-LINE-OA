@@ -1,50 +1,91 @@
 {% extends "operations/base.html" %}
 {% load static ui %}
 {% block title %}ตารางกำหนดจ่าย {{ division.code }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
-{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}">{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}"><script src="{% static 'operations/warehouse.js' %}" defer></script>{% endblock %}
 {% block page_id %}warehouse{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow"><a href="{% url 'warehouse' division.code %}">งานคลัง {{ division.code }}</a></span>
     <h1>ตารางกำหนดจ่ายและวันส่งรถ</h1>
-    <p class="lede">กำหนดจ่ายนับเป็นวันทำการหลังวันรับใบเบิก ใช้แถวที่ช้าที่สุดของใบ แล้วเลื่อนไปวันจ่ายประจำที่ใกล้ที่สุด ขนาดที่ไม่มีแถวของตัวเองใช้แถวที่ขนาดว่างของกลุ่มนั้น</p>
+    <p class="lede">กำหนดจ่ายนับเป็นวันทำการหลังวันรับใบเบิก ไม่นับวันหยุด ใบที่มีหลายขนาดใช้ขนาดที่ช้าที่สุด แล้วเลื่อนไปวันจ่ายประจำวันแรกที่ถึง</p>
   </div>
 </div>
+
+<nav class="chips sc-tabs js-only" aria-label="ส่วนของตาราง">
+  <button class="chip" type="button" data-sc-tab="sla" aria-current="page">กำหนดจ่าย</button>
+  <button class="chip" type="button" data-sc-tab="truck">วันส่งรถ</button>
+</nav>
+
 <form method="post" class="stack">
   {% csrf_token %}
-  <section class="panel">
-    <div class="panel__head"><h2>กำหนดจ่ายตามขนาด</h2><span class="panel__note">ลบแถวโดยล้างทุกช่องของแถวนั้น</span></div>
-    <div class="table-wrap"><table class="wh-table">
-      <thead><tr><th scope="col">กลุ่ม</th><th scope="col">ขนาด (ว่าง = ทุกขนาด)</th><th scope="col">วันทำการ</th></tr></thead>
-      <tbody>
-      {% for row in sla %}
-        <tr>
-          <td><select name="sla_group" aria-label="กลุ่ม แถว {{ forloop.counter }}"><option value=""></option>{% for v, l in groups %}<option value="{{ v }}"{% if row.group == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></td>
-          <td><input type="text" name="sla_size" value="{{ row.size }}" maxlength="40" placeholder="เช่น 5(100)A" aria-label="ขนาด แถว {{ forloop.counter }}"></td>
-          <td><input type="number" name="sla_days" value="{{ row.days }}" min="0" max="120" aria-label="วันทำการ แถว {{ forloop.counter }}"></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table></div>
-  </section>
-  <section class="panel">
-    <div class="panel__head"><h2>วันจ่ายประจำ</h2></div>
+  <section class="panel" data-sc-part="sla">
+    <div class="panel__head"><h2>กำหนดจ่าย</h2><span class="panel__note">ขนาดที่ไม่มีแถวของตัวเองใช้แถว "ทุกขนาด" ของกลุ่ม ลบแถวโดยล้างช่องจำนวนวัน</span></div>
+    <div class="sc-groups">
+    {% for g in groups %}
+      <fieldset class="sc-group" data-sc-group="{{ g.key }}">
+        <legend>{{ g.label }}</legend>
+        <div class="sc-row">
+          <input type="hidden" name="sla_group" value="{{ g.key }}"><input type="hidden" name="sla_size" value="">
+          <span class="sc-row__size">ทุกขนาด</span>
+          <label class="sc-row__days">จ่ายภายใน <input type="number" name="sla_days" value="{{ g.default }}" min="0" max="120" aria-label="{{ g.label }} ทุกขนาด จำนวนวันทำการ"> วันทำการ</label>
+        </div>
+        <div data-sc-sizes>
+        {% for r in g.sizes %}
+          <div class="sc-row">
+            <input type="hidden" name="sla_group" value="{{ g.key }}">
+            <input class="sc-row__size" type="text" name="sla_size" value="{{ r.size }}" maxlength="40" placeholder="ขนาด เช่น 5(100)A" aria-label="{{ g.label }} ขนาด">
+            <label class="sc-row__days">จ่ายภายใน <input type="number" name="sla_days" value="{{ r.days }}" min="0" max="120" aria-label="{{ g.label }} {{ r.size }} จำนวนวันทำการ"> วันทำการ</label>
+            <button class="btn btn--ghost btn--sm js-only" type="button" data-sc-remove>ลบ</button>
+          </div>
+        {% endfor %}
+          <div class="sc-row" data-sc-blank>
+            <input type="hidden" name="sla_group" value="{{ g.key }}">
+            <input class="sc-row__size" type="text" name="sla_size" value="" maxlength="40" placeholder="ขนาด เช่น 5(100)A" aria-label="{{ g.label }} ขนาดใหม่">
+            <label class="sc-row__days">จ่ายภายใน <input type="number" name="sla_days" value="" min="0" max="120" aria-label="{{ g.label }} ขนาดใหม่ จำนวนวันทำการ"> วันทำการ</label>
+            <button class="btn btn--ghost btn--sm js-only" type="button" data-sc-remove>ลบ</button>
+          </div>
+        </div>
+        <button class="btn btn--ghost btn--sm js-only" type="button" data-sc-add>+ เพิ่มขนาด</button>
+      </fieldset>
+    {% endfor %}
+    </div>
+    <h3 class="mt-18">วันจ่ายประจำ</h3>
+    <p class="muted">ไม่เลือกเลย หมายถึงจ่ายได้ทุกวันทำการ</p>
     <div class="wh-days">{% for n, name in weekdays %}<label class="check-pill"><input type="checkbox" name="issue" value="{{ n }}"{% if n in issue %} checked{% endif %}> {{ name }}</label>{% endfor %}</div>
   </section>
-  <section class="panel">
-    <div class="panel__head"><h2>วันส่งรถของแต่ละ ฟข.</h2><span class="panel__note">วันที่รถ กคว. ไปส่งของที่เขต ระบบเสนอวันส่งรถถัดจากวันจ่าย</span></div>
-    <div class="table-wrap"><table class="wh-table">
-      <thead><tr><th scope="col">เขต</th>{% for n, name in weekdays %}<th scope="col">{{ name }}</th>{% endfor %}</tr></thead>
-      <tbody>
-      {% for d, days in districts %}
-        <tr><th scope="row">{{ d.name }}</th>{% for n, name in weekdays %}<td><input type="checkbox" name="truck_{{ d.code }}" value="{{ n }}"{% if n in days %} checked{% endif %} aria-label="{{ d.name }} วัน{{ name }}"></td>{% endfor %}</tr>
-      {% endfor %}
-      </tbody>
-    </table></div>
+
+  <section class="panel" data-sc-part="truck">
+    <div class="panel__head"><h2>วันส่งรถ</h2><span class="panel__note">วันที่รถ กคว. ไปส่งของที่เขต ระบบเสนอวันส่งรถวันแรกตั้งแต่วันจ่าย</span></div>
+    <div class="sc-truck sc-truck--all js-only">
+      <span class="sc-truck__name">ตั้งวันเดียวกันทุกเขต</span>
+      <span class="sc-days">{% for n, name in short_days %}<label class="day-pill"><input type="checkbox" data-sc-all value="{{ n }}" aria-label="ทุกเขต {{ name }}"><span>{{ name }}</span></label>{% endfor %}</span>
+      <button class="btn btn--secondary btn--sm" type="button" data-sc-apply>ใช้กับทุกเขต</button>
+    </div>
+    <div class="sc-trucks" data-more="10" data-more-noun="เขต">
+    {% for d, days in districts %}
+      <div class="sc-truck" data-more-item>
+        <span class="sc-truck__name">{{ d.name }}</span>
+        <span class="sc-days">{% for n, name in short_days %}<label class="day-pill"><input type="checkbox" name="truck_{{ d.code }}" value="{{ n }}"{% if n in days %} checked{% endif %} aria-label="{{ d.name }} {{ name }}"><span>{{ name }}</span></label>{% endfor %}</span>
+      </div>
+    {% endfor %}
+    </div>
   </section>
-  <div class="field"><label for="sc-reason">เหตุผลที่แก้</label><input type="text" id="sc-reason" name="reason" required maxlength="300"></div>
-  <button class="btn" type="submit">บันทึกตาราง</button>
-  {% if schedule.updated_by %}<p class="muted">แก้ล่าสุดโดย {{ schedule.updated_by.staff_profile.display_name|default:schedule.updated_by.username }} {{ schedule.updated_at|thai_datetime }}</p>{% endif %}
+
+  <div class="panel sc-save">
+    <div class="field"><label for="sc-reason">เหตุผลที่แก้</label><input type="text" id="sc-reason" name="reason" required maxlength="300" placeholder="เช่น ปรับตามรอบรถเดือนใหม่"></div>
+    <button class="btn" type="submit">บันทึกตาราง</button>
+    {% if schedule.updated_by %}<p class="muted">แก้ล่าสุดโดย {{ schedule.updated_by.staff_profile.display_name|default:schedule.updated_by.username }} {{ schedule.updated_at|thai_datetime }}</p>{% endif %}
+  </div>
 </form>
+
+<section class="panel mt-24" aria-labelledby="sc-try">
+  <div class="panel__head"><h2 id="sc-try">ลองคำนวณจากตารางที่บันทึกแล้ว</h2></div>
+  <form method="get" class="cluster">
+    <label>รับใบเบิก <select name="pg">{% for v, l in group_choices %}<option value="{{ v }}"{% if v == example.group %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+    <label>ของเขต <select name="pd">{% for d, days in districts %}<option value="{{ d.code }}"{% if d.code == example.district %} selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></label>
+    <button class="btn btn--secondary btn--sm" type="submit">คำนวณ</button>
+  </form>
+  <p class="mt-8">ถ้ารับใบเบิกวันนี้ ({{ example.today }}) {% if example.issue %}จ่ายได้ <strong>{{ example.issue }}</strong>{% if example.truck %} และรถไปส่งที่เขต <strong>{{ example.truck }}</strong>{% else %} เขตนี้ยังไม่มีวันส่งรถ จึงต้องมารับเองตามนัด{% endif %}{% else %}ยังคำนวณไม่ได้ เพราะกลุ่มนี้ยังไม่มีแถว "ทุกขนาด"{% endif %}</p>
+</section>
 {% endblock %}

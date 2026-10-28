@@ -1,11 +1,11 @@
 {% extends "operations/admin_base.html" %}
 {% load ui %}
-{% block title %}Monitoring · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}ติดตามระบบและ AI · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
-    <h1>Monitoring</h1>
+    <h1>ติดตามระบบและ AI</h1>
     <p class="lede">ตัวเลขรายวันของ AI คลังคำตอบ และระบบ เก็บเฉพาะตัวเลขรวม ไม่มีข้อความของใคร Evidently ทำงานในระบบนี้เอง ไม่ส่งข้อมูลออกไปข้างนอก{% if latest %} · คำนวณล่าสุด {{ latest.computed_at|thai_datetime }}{% endif %}</p>
   </div>
   <div class="page-head__actions cluster">

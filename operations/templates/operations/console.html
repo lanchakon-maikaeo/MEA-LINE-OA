@@ -110,7 +110,7 @@
       <summary>ดูเป็นตาราง</summary>
       <div class="disclosure__body table-wrap"><table>
         <thead><tr><th scope="col">วันที่</th><th scope="col" class="num">เข้า</th><th scope="col" class="num">จบ</th><th scope="col" class="num">เข้าสะสม</th><th scope="col" class="num">จบสะสม</th></tr></thead>
-        <tbody>
+        <tbody data-more>
           {% for c in t.columns reversed %}
             <tr><td>{{ c.day }}</td><td class="num">{% if c.new %}<a href="{{ c.href }}">{{ c.new }}</a>{% else %}0{% endif %}</td><td class="num">{% if c.ended %}<a href="{{ c.ended_href }}">{{ c.ended }}</a>{% else %}0{% endif %}</td><td class="num">{{ c.new_total }}</td><td class="num">{{ c.ended_total }}</td></tr>
           {% endfor %}
@@ -142,7 +142,7 @@
         {% if scope.is_admin and not chosen %}<th scope="col" class="num">ยกระดับ</th><th scope="col" class="num">ตอบรับเฉลี่ย</th>{% endif %}
         <th scope="col"><span class="visually-hidden">รายงานของกอง</span></th>
       </tr></thead>
-      <tbody>
+      <tbody data-more data-more-noun="กอง">
         {% for c in busy_cards %}
           <tr>
             <th scope="row"><a class="ov-table__division" href="{% url 'division-detail' c.division.code %}"><strong>{{ c.division.code }}</strong><span class="muted">{{ c.division.name }}</span></a></th>
@@ -234,7 +234,7 @@
     <summary id="r-support">การทำแทนกองโดยผู้ช่วยเหลือระบบ <span class="muted">{{ days }} วันล่าสุด · {{ support_actions|length }} ครั้ง</span></summary>
     <div class="disclosure__body table-wrap"><table>
       <thead><tr><th scope="col">เมื่อ</th><th scope="col">เรื่อง</th><th scope="col">ทำแทนกอง</th><th scope="col">ขั้น</th><th scope="col">เหตุผล</th><th scope="col">ผู้ทำ</th></tr></thead>
-      <tbody>
+      <tbody data-more>
         {% for d in support_actions %}
           <tr><td>{{ d.created_at|thai_short }}</td><td><a href="{% url 'case-detail' d.case.number %}">{{ d.case.number }}</a></td><td>{{ d.data.support.division }}</td><td>{{ d.action|action_label }}</td><td>{{ d.reason }}</td><td>{{ d.actor.staff_profile.display_name|default:d.actor.username }}</td></tr>
         {% endfor %}

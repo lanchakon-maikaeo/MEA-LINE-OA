@@ -13,7 +13,7 @@
 
 <dl class="facts">
   <div><dt>ตัวตน</dt><dd>{{ row.proof }}</dd></div>
-  <div><dt>ตำแหน่ง · ฝ่าย</dt><dd>{{ row.position|default:"—" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</dd></div>
+  <div><dt>ตำแหน่ง · ฝ่าย</dt><dd>{{ row.position|default:"ไม่ระบุ" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</dd></div>
   <div><dt>บทบาทในระบบ</dt><dd>{{ row.role }}</dd></div>
   <div><dt>ช่องทาง</dt><dd>{{ row.channel }}</dd></div>
   <div><dt>รับรองโดย</dt><dd>{{ requester.approved_by.staff_profile.display_name|default:requester.approved_by.username }} · {{ requester.approved_at|thai_datetime }}</dd></div>
@@ -37,7 +37,6 @@
 {% endif %}
 
 <section class="section" aria-labelledby="rq-line">
-  {% if managed %}{% for line in lines %}{% if line.staff_user %}{% koj_recipients line.staff_user %}{% endif %}{% endfor %}{% endif %}
   <div class="section-head"><h2 id="rq-line">บัญชี LINE</h2></div>
   {% if lines %}
   <ul>
@@ -47,6 +46,22 @@
   </ul>
   {% else %}
   <p>ไม่มีบัญชี LINE ที่ผูกอยู่</p>
+  {% endif %}
+  {% if managed %}
+  {% for alert in alerts %}
+  <form method="post" action="{% url 'admin-requester-action' requester.pk 'emergency' %}">
+    {% csrf_token %}<input type="hidden" name="user" value="{{ alert.user.pk }}">
+    <fieldset><legend>รับแจ้งเรื่องฉุกเฉินใหม่ทาง LINE และอีเมล</legend>
+      <p class="helptext">เมื่อมีเรื่องฉุกเฉินใหม่ ระบบแจ้งเฉพาะคนที่ติ๊กไว้ของกองนั้น กองที่ยังไม่ได้ติ๊กใคร ระบบส่งอีเมลถึงสมาชิกกองทุกคน และส่ง LINE ถึงหัวหน้ากอง เดือนนี้ส่ง LINE ไปแล้ว {{ budget.used }} จาก {{ budget.budget }} ข้อความ</p>
+      {% for division, chosen in alert.divisions %}<label class="choice"><input type="checkbox" name="division" value="{{ division.pk }}"{% if chosen %} checked{% endif %}><span>เรื่องฉุกเฉินของ {{ division.code }} {{ division.name }}</span></label>
+      {% empty %}<p class="muted">บัญชีเจ้าหน้าที่นี้ยังไม่มีสิทธิ์ในกองไหน จึงยังตั้งไม่ได้</p>{% endfor %}
+      {% if alert.divisions %}<p><button type="submit">บันทึกการรับแจ้งเรื่องฉุกเฉิน</button></p>{% endif %}
+    </fieldset>
+  </form>
+  {% koj_recipients alert.user request.get_full_path %}
+  {% empty %}
+  {% if lines %}<p class="muted">บัญชี LINE นี้ยังไม่ได้เชื่อมกับบัญชีเจ้าหน้าที่ จึงยังตั้งให้รับแจ้งเรื่องฉุกเฉินหรืองาน กอจ. ไม่ได้</p>{% endif %}
+  {% endfor %}
   {% endif %}
 </section>
 

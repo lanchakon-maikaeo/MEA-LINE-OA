@@ -1,12 +1,12 @@
 {% extends "operations/admin_base.html" %}
 {% load static %}
-{% block title %}requirement ของกอง · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}สิ่งที่แต่ละกองต้องการ · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block scripts %}<link rel="stylesheet" href="{% static 'operations/flows.css' %}">{{ boxes|json_script:"req-boxes" }}<script src="{% static 'operations/requirements.js' %}" defer></script>{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
-    <h1>requirement ของกอง</h1>
+    <h1>สิ่งที่แต่ละกองต้องการ</h1>
     <p class="lede">สิ่งที่แต่ละกองต้องการ สถานะ สิ่งที่ตกลง และกล่องใน flow ที่เกี่ยวข้อง กดชื่อกล่องเพื่อเปิดตัวแก้ flow ที่กล่องนั้น</p>
   </div>
 </div>
@@ -35,8 +35,8 @@
         </form>
       </details>
     </article>
-  {% endwith %}{% empty %}<p class="muted">กองนี้ยังไม่มี requirement</p>{% endfor %}
+  {% endwith %}{% empty %}<p class="muted">กองนี้ยังไม่ได้บอกสิ่งที่ต้องการ</p>{% endfor %}
   </div>
 </section>
-{% else %}<p class="muted">ยังไม่มี requirement ของกองใด</p>{% endif %}
+{% else %}<p class="muted">ยังไม่มีกองไหนบอกสิ่งที่ต้องการ</p>{% endif %}
 {% endblock %}

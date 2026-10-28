@@ -105,15 +105,22 @@ def remove_holiday(actor, day):
 
 def month(actor, calendar, first):
     """Weeks (Sunday first, as on the requested picture) of the month that holds first, each
-    day with its slots and holiday, for the calendar page (รอบใหม่ Q10)."""
-    require_member(actor, calendar)
+    day with its slots and holiday, for the calendar page (รอบใหม่ Q10). `calendar` may be a
+    list: the page shows every calendar of the division in one month (28 ต.ค. 2569 Q6)."""
+    shown = list(calendar) if isinstance(calendar, (list, tuple)) else [calendar]
+    for one in shown:
+        require_member(actor, one)
     first = first.replace(day=1)
     start = first - timedelta(days=(first.weekday() + 1) % 7)
     end = start + timedelta(days=42)
     begin = timezone.make_aware(datetime(start.year, start.month, start.day))
     slots = (
-        _open_or_closed(calendar)
+        CalendarSlot.objects.filter(calendar__in=shown)
+        .annotate(
+            taken=Count("appointments", filter=Q(appointments__status__in=Appointment.HOLDING))
+        )
         .filter(starts_at__gte=begin, starts_at__lt=begin + timedelta(days=42))
+        .select_related("calendar")
         .prefetch_related("appointments__case")
         .order_by("starts_at")
     )

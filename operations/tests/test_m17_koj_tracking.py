@@ -32,7 +32,6 @@ from operations.models import (
     LineMenuItem,
     NotificationDelivery,
     Role,
-    RoleGrant,
     SystemOption,
 )
 from operations.tests.test_m02_cases import make_staff
@@ -582,11 +581,13 @@ class SourceTests(KojTestCase):
         with patch("operations.koj_sheets.fetch", return_value=self.matrix) as fetch:
             self.assertTrue(tracking.sync_due())
             self.assertFalse(tracking.sync_due())
-            tracking.request_refresh(self.staff, self.source)
+            tracking.request_refresh(self.admin_koj, self.source)
             self.assertTrue(tracking.sync_due())
             self.assertEqual(fetch.call_count, 2)
         before = KojRecord.objects.count()
-        tracking.request_refresh(self.staff, self.source)
+        with self.assertRaises(PermissionDenied):
+            tracking.request_refresh(self.staff, self.source)
+        tracking.request_refresh(self.admin_koj, self.source)
         with patch(
             "operations.koj_sheets.fetch",
             side_effect=RuntimeError("private content must not escape"),
@@ -628,11 +629,11 @@ class SourceTests(KojTestCase):
         self.assertEqual(
             client.post(f"/koj/recipients/{self.staff.pk}/", {"koj_groups": []}).status_code, 403
         )
+        # 28 ต.ค. 2569: กอจ. staff wait for the hourly round; the page is admin only.
         client.force_login(self.staff)
-        self.assertContains(client.get("/koj/"), self.source.name)
-        self.assertEqual(client.post("/koj/", {"action": "save"}).status_code, 403)
-        RoleGrant.objects.filter(user=self.staff).update(revoked_at=timezone.now())
         self.assertEqual(client.get("/koj/").status_code, 403)
+        self.assertEqual(client.get(f"/koj/sources/{self.source.pk}/").status_code, 403)
+        self.assertEqual(client.post("/koj/", {"action": "save"}).status_code, 403)
 
     def test_admin_configures_columns_without_disclosing_source_data(self):
         client = Client()
@@ -695,7 +696,7 @@ class SourceTests(KojTestCase):
 
         def fetch(source):
             self.assertFalse(tracking.sync_due())
-            tracking.request_refresh(self.staff, source)
+            tracking.request_refresh(self.admin_koj, source)
             return self.matrix
 
         with patch("operations.koj_sheets.fetch", side_effect=fetch):

@@ -25,6 +25,7 @@ from operations import (
     answers,
     attachments,
     email_codes,
+    emergency,
     employees,
     forms,
     identity,
@@ -536,6 +537,11 @@ def admin_requester_detail(request, pk):
         .order_by("-pk")[:50]
     )
     row = _requester_rows([requester])[0]
+    lines = list(
+        ChannelIdentity.objects.filter(requester=requester).select_related(
+            "staff_user__staff_profile"
+        )
+    )
     history = []
     for event in events:
         actor = event.actor
@@ -561,9 +567,14 @@ def admin_requester_detail(request, pk):
             "grant_form": forms.GrantRoleForm(),
             "row": row,
             "districts": District.objects.filter(is_active=True).order_by("code"),
-            "lines": ChannelIdentity.objects.filter(requester=requester).select_related(
-                "staff_user__staff_profile"
-            ),
+            "lines": lines,
+            # 28 ต.ค. 2569 Q7: LINE alerts for the staff account this LINE is linked to.
+            "alerts": [
+                {"user": line.staff_user, "divisions": emergency.choices(line.staff_user)}
+                for line in lines
+                if line.staff_user
+            ],
+            "budget": notifications.budget_state(),
             "history": history,
             "message_count": ConversationMessage.objects.filter(requester=requester).count(),
             "case_count": requester.cases.count(),
@@ -652,6 +663,17 @@ def admin_requester_action(request, pk, action):
             lambda: identity.unlink_requester_employee(actor, requester, reason),
             "ยกเลิกการผูกกับทะเบียนพนักงานแล้ว",
         )
+    elif action == "emergency":
+        if not data.get("user", "").isdigit():
+            raise Http404
+        staff = get_object_or_404(
+            ChannelIdentity, requester=requester, staff_user_id=int(data["user"])
+        ).staff_user
+        _run(
+            request,
+            lambda: emergency.set_for(actor, staff, data.getlist("division")),
+            "บันทึกการรับแจ้งเรื่องฉุกเฉินแล้ว",
+        )
     elif action == "district":
         _run(
             request,
@@ -718,7 +740,10 @@ def admin_divisions(request):
                 "เพิ่มกองแล้ว",
             )
             return redirect("admin-divisions")
-    divisions = Division.objects.all()
+    contacts = emergency.by_division()
+    divisions = list(Division.objects.all())
+    for division in divisions:
+        division.emergency_contacts = contacts.get(division.pk, [])
     return render(
         request,
         "operations/admin_divisions.html",
@@ -793,9 +818,27 @@ def admin_line(request):
             "dead": OutboxEvent.objects.filter(status=OutboxEvent.Status.FAILED).order_by("-id")[
                 :50
             ],
-            "health": orchestration.health(),
+            "health": (health := orchestration.health()),
+            # 28 ต.ค. 2569: each kind of waiting job by its Thai name, in minutes.
+            "waiting_jobs": [
+                (EVENT_LABELS.get(kind, kind), seconds // 60)
+                for kind, seconds in health["oldest_pending_seconds"].items()
+            ],
         },
     )
+
+
+EVENT_LABELS = {
+    orchestration.EVENT_CONVERSATION: "ข้อความเข้าจาก LINE",
+    orchestration.EVENT_CASE_SUBMITTED: "เรื่องใหม่",
+    orchestration.EVENT_DECISION: "การตัดสินในเรื่อง",
+    orchestration.EVENT_REGISTRATION: "ผลการลงทะเบียน",
+    orchestration.EVENT_NOTIFICATION: "การแจ้งเตือน",
+    orchestration.EVENT_AI: "AI ตอบแชต",
+    orchestration.EVENT_TRIAGE_AI: "AI อ่านข้อเท็จจริงของเรื่อง",
+    orchestration.EVENT_ROUTING_AI: "AI เลือกกอง",
+    orchestration.EVENT_KEYWORDS_AI: "AI หาคำสำคัญ",
+}
 
 
 @admin_required

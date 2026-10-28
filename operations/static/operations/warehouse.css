@@ -83,3 +83,80 @@
 .mcal--pick .mcal__pick.is-out { background: #fafafa; }
 .mcal__day.is-picked, .mcal--pick .mcal__pick.is-picked { outline: 2px solid var(--ink); outline-offset: -2px; }
 .hol-form { margin: var(--s-18) 0; }
+
+/* 28 ต.ค. 2569 Q3: stage tabs, a next-step button per row, a bar for ticked slips. */
+.wh-tabs { margin-bottom: var(--s-18); flex-wrap: wrap; }
+.wh-paste { margin-bottom: var(--s-18); }
+.wh-paste .disclosure__body { padding-top: var(--s-12); }
+.wh-table .wh-pick { width: 40px; }
+.wh-table tr.is-late td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.wh-act { text-align: right; white-space: nowrap; }
+.wh-act form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-8); justify-content: flex-end; }
+.wh-act__keyed > summary { list-style: none; cursor: pointer; }
+.wh-act__keyed > summary::-webkit-details-marker { display: none; }
+.wh-act__keyed[open] > summary { margin-bottom: var(--s-8); }
+.wh-act__keyed label { display: inline-flex; align-items: center; gap: var(--s-8); }
+.wh-act__keyed .helptext { flex-basis: 100%; text-align: right; white-space: normal; }
+.wh-bar {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-18);
+  margin-top: var(--s-18); padding: var(--s-12) var(--s-18);
+  background: var(--canvas); border: 1px solid var(--ink); border-radius: 16px;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, .08);
+}
+.wh-bar label { display: inline-flex; align-items: center; gap: var(--s-8); font-size: 15px; white-space: nowrap; }
+.wh-bar [hidden] { display: none; }
+.js .wh-bar.is-empty { display: none; }
+@media (max-width: 959px) {
+  .wh-act { text-align: left; white-space: normal; }
+  .wh-act form { justify-content: flex-start; }
+  .wh-act__keyed .helptext { text-align: left; }
+  .wh-table.table--cards tr > td.wh-pick { grid-column: 3; grid-row: 1; text-align: right; }
+  .wh-table.table--cards tr > td.wh-pick + td { grid-column: 1 / 3; grid-row: 1; font-weight: 600; }
+}
+
+/* 28 ต.ค. 2569 Q5: schedule as two tabs, a box per group, day pills per district. */
+.sc-tabs { margin-bottom: var(--s-18); }
+.sc-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--s-18); }
+.sc-group { border: 1px solid var(--hairline); border-radius: 16px; padding: var(--s-12) var(--s-18); margin: 0; min-width: 0; }
+.sc-group legend { font-weight: 700; padding: 0 var(--s-8); }
+.sc-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-12); padding: var(--s-8) 0; border-bottom: 1px solid var(--hairline-soft); }
+.sc-row__size { flex: 1 1 140px; min-width: 0; }
+span.sc-row__size { font-weight: 600; }
+.sc-row__days { display: inline-flex; align-items: center; gap: var(--s-8); white-space: nowrap; font-size: 15px; }
+.sc-row__days input { width: 76px; }
+.sc-group [data-sc-add] { margin-top: var(--s-8); }
+.sc-truck { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-18); padding: var(--s-8) 0; border-bottom: 1px solid var(--hairline-soft); }
+.sc-truck--all { background: var(--cloud); border-radius: 12px; padding: var(--s-12); border-bottom: 0; margin-bottom: var(--s-8); }
+.sc-truck__name { flex: 1 1 220px; font-weight: 600; }
+.sc-days { display: inline-flex; gap: var(--s-4); }
+.day-pill { position: relative; display: inline-flex; }
+.day-pill input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.day-pill span { display: inline-grid; place-items: center; min-width: 44px; height: 36px; padding: 0 var(--s-8); border: 1px solid var(--hairline); border-radius: var(--r-pill); font-size: 14px; font-weight: 600; }
+.day-pill input:checked + span { background: var(--ink); color: var(--on-primary); border-color: var(--ink); }
+.day-pill input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sc-save { position: sticky; bottom: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: end; gap: var(--s-12) var(--s-18); }
+.sc-save .field { flex: 1 1 260px; margin: 0; }
+
+/* 28 ต.ค. 2569 Q6: one month for every calendar of the division, told apart by colour. */
+.cal-filter { margin-bottom: var(--s-18); flex-wrap: wrap; }
+.cal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.cal-dot--orange { background: #e8590c; }
+.cal-dot--blue { background: #1c7ed6; }
+.cal-dot--green { background: #2f9e44; }
+.cal-dot--purple { background: #7048e8; }
+.cal-dot--teal { background: #0c8599; }
+.mcal__chip--orange { border-left-color: #e8590c !important; }
+.mcal__chip--blue { border-left-color: #1c7ed6 !important; }
+.mcal__chip--green { border-left-color: #2f9e44 !important; }
+.mcal__chip--purple { border-left-color: #7048e8 !important; }
+.mcal__chip--teal { border-left-color: #0c8599 !important; }
+.mcal__chip.is-free.mcal__chip--orange { background: #fff4e6; }
+.mcal__chip.is-free.mcal__chip--blue { background: #e7f5ff; }
+.cal-tag { border-left: 3px solid transparent; }
+.cal-tag--orange { background: #fff4e6; color: #1f2937; border-left-color: #e8590c; }
+.cal-tag--blue { background: #e7f5ff; color: #1f2937; border-left-color: #1c7ed6; }
+.cal-tag--green { background: #ebfbee; color: #1f2937; border-left-color: #2f9e44; }
+.cal-tag--purple { background: #f3f0ff; color: #1f2937; border-left-color: #7048e8; }
+.cal-tag--teal { background: #e3fafc; color: #1f2937; border-left-color: #0c8599; }
+.cal-dayview__group { display: flex; align-items: center; margin: var(--s-18) 0 var(--s-8); font-size: 17px; }

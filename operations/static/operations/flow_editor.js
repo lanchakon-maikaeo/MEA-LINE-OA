@@ -115,7 +115,7 @@
       if (n.kind === "koj_tracking") { chips.append(el("span", "fn__chip", [c.equipment, c.service].filter(Boolean).join(" · ") || "เมนู กอจ.")); }
       if (n.kind === "book" && c.calendar) chips.append(el("span", "fn__chip", "ปฏิทิน " + c.calendar));
       if (n.kind === "branch" && c.condition) chips.append(el("span", "fn__chip", "ดูจาก " + c.condition));
-      var reqs = reqsOf(n.id); if (reqs.length) { var rc = el("span", "fn__chip fn__chip--req", "requirement " + reqs.length + " ข้อ"); rc.dataset.req = "1"; rc.title = reqs.map(function (r) { return r.text; }).join("\n"); chips.append(rc); }
+      var reqs = reqsOf(n.id); if (reqs.length) { var rc = el("span", "fn__chip fn__chip--req", "สิ่งที่กองต้องการ " + reqs.length + " ข้อ"); rc.dataset.req = "1"; rc.title = reqs.map(function (r) { return r.text; }).join("\n"); chips.append(rc); }
       var errs = issuesOf(n.id).filter(function (i) { return i.level === "error"; }); if (errs.length) { var ec = el("span", "fn__chip fn__chip--err", "ต้องแก้ " + errs.length); ec.title = errs.map(function (i) { return i.message; }).join("\n"); chips.append(ec); }
       if (chips.childNodes.length) box.append(chips);
       if (n.buttons && n.buttons.length) {
@@ -227,7 +227,7 @@
       pane.append(wrap);
     }
     var reqs = reqsOf(n.id);
-    if (reqs.length) { var rw = el("div", "fe__field"); rw.append(el("span", "fe__label", "requirement ที่ผูกกับกล่องนี้")); var rl = el("div", "fe__reqs"); reqs.forEach(function (r) { var a = el("a", "fe__req", r.division + " · " + r.status + " · " + r.text); a.href = CFG.requirementsUrl + "?division=" + encodeURIComponent(r.division) + "#r" + r.id; rl.append(a); }); rw.append(rl); pane.append(rw); }
+    if (reqs.length) { var rw = el("div", "fe__field"); rw.append(el("span", "fe__label", "สิ่งที่กองต้องการที่ผูกกับกล่องนี้")); var rl = el("div", "fe__reqs"); reqs.forEach(function (r) { var a = el("a", "fe__req", r.division + " · " + r.status + " · " + r.text); a.href = CFG.requirementsUrl + "?division=" + encodeURIComponent(r.division) + "#r" + r.id; rl.append(a); }); rw.append(rl); pane.append(rw); }
     var issues = issuesOf(n.id); if (issues.length) { var iw = el("div", "fe__field"); iw.append(el("span", "fe__label", "สิ่งที่ต้องดูในกล่องนี้")); issues.forEach(function (i) { var d = el("div", "fe__issue"); d.append(el("span", "fe__lvl fe__lvl--" + i.level, i.level === "error" ? "ต้องแก้" : "ควรดู"), el("span", null, i.message)); iw.append(d); }); pane.append(iw); }
     if (EDITABLE) {
       var dup = el("button", "fe__mini", "ทำซ้ำกล่อง"); dup.type = "button"; dup.onclick = function () { change(function () { var c = JSON.parse(JSON.stringify(n)); c.id = uid("n"); c.x += 30; c.y += 30; c.buttons.forEach(function (b) { b.id = uid("b"); }); graph.nodes.push(c); sel.node = c.id; }); };

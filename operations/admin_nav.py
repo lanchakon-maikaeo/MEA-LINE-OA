@@ -67,10 +67,14 @@ GROUPS = (
                 ("admin-policy-action",),
             ),
             Page("admin-holidays", "วันหยุด", "วันที่ไม่นับเป็นวันทำการ และขึ้นในปฏิทินนัด"),
-            Page("admin-emergency", "ผู้รับแจ้งเรื่องฉุกเฉิน", "ใครได้อีเมลและ LINE เมื่อมีเรื่องฉุกเฉินใหม่"),
             Page("admin-inventory", "คลังของ", "รายการของและยอดคลัง", ("admin-inventory-action",)),
             Page("admin-items", "รายการอุปกรณ์", "หมวดเมนู LINE และรหัสพัสดุ SAP ของแต่ละรายการ"),
-            Page("koj-sources", "ติดตามงาน กอจ.", "แหล่งสถานะงานและการ refresh", ("koj-history",)),
+            Page(
+                "koj-sources",
+                "ติดตามงาน กอจ.",
+                "ชีทสถานะงานที่ระบบอ่าน และการสั่งอ่านใหม่",
+                ("koj-history",),
+            ),
         ),
     ),
     Group(
@@ -85,8 +89,8 @@ GROUPS = (
             ),
             Page(
                 "admin-requirements",
-                "requirement ของกอง",
-                "สิ่งที่แต่ละกองต้องการ กดไปที่กล่องใน flow ได้",
+                "สิ่งที่แต่ละกองต้องการ",
+                "ความต้องการของแต่ละกองที่ผูกกับกล่องใน flow กดไปดูกล่องนั้นได้",
             ),
             Page("admin-answers", "คลังคำตอบ", "คำตอบที่บอทใช้ตอบคำถามทั่วไป"),
             Page(
@@ -104,7 +108,7 @@ GROUPS = (
             ),
             Page(
                 "admin-monitoring",
-                "Monitoring",
+                "ติดตามระบบและ AI",
                 "ตัวเลขรายวันของ AI คลังคำตอบ และระบบ",
                 ("admin-monitoring-report",),
                 badge="monitoring",

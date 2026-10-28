@@ -1,5 +1,5 @@
 {% load ui %}<div id="queue-body"
-     hx-get="{{ request.path }}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;sort={{ sort }}&amp;page={{ pager.number }}"
+     hx-get="{{ request.path }}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;sort={{ sort }}{% if shown %}&amp;shown={{ shown }}{% else %}&amp;page={{ pager.number }}{% endif %}"
      hx-trigger="every 60s, poll"
      hx-swap="outerHTML"
      data-poll>
@@ -20,10 +20,11 @@
     <span class="poll-note">อัปเดต {{ now|thai_short }} น.</span>
   </div>
   {% if may_approve and tab != "closed" %}
-  <form method="post" action="{% url 'division-approve' division.code %}" id="bulk-approve" class="cluster mb-18">
+  <form method="post" action="{% url 'division-approve' division.code %}" id="bulk-approve" class="bulk-bar mb-18" data-bulk>
     {% csrf_token %}
-    <button class="btn btn--sm" type="submit">อนุมัติเรื่องที่ติ๊ก</button>
-    <span class="muted">ใช้ระดับที่ระบบเสนอ เรื่องที่ไม่อนุมัติให้เปิดทีละเรื่องเพื่อใส่เหตุผล</span>
+    <label class="check-pill js-only"><input type="checkbox" data-bulk-all> เลือกทั้งหมดที่รออนุมัติในหน้านี้</label>
+    <button class="btn btn--sm" type="submit" data-bulk-submit data-label="อนุมัติ {n} เรื่องที่เลือก" data-empty="เลือกเรื่องที่จะอนุมัติก่อน">อนุมัติเรื่องที่ติ๊ก</button>
+    <span class="muted">ใช้ระดับที่ระบบเสนอ ถ้าจะไม่อนุมัติ ให้เปิดเรื่องนั้นเพื่อใส่เหตุผล</span>
   </form>
   {% endif %}
 
@@ -31,12 +32,10 @@
     <ol class="queue" aria-label="รายการเรื่อง">
       {% for row in rows %}{% include "operations/_queue_row.html" %}{% endfor %}
     </ol>
-    {% if pager.pages > 1 %}
-      <nav class="pager" aria-label="หน้า">
-        {% if pager.number > 1 %}<a class="btn btn--secondary btn--sm" href="?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;sort={{ sort }}&amp;page={{ pager.number|add:'-1' }}">ก่อนหน้า</a>{% else %}<span></span>{% endif %}
-        <span>หน้า {{ pager.number }} / {{ pager.pages }}</span>
-        {% if pager.number < pager.pages %}<a class="btn btn--secondary btn--sm" href="?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;sort={{ sort }}&amp;page={{ pager.number|add:'1' }}">ถัดไป</a>{% else %}<span></span>{% endif %}
-      </nav>
+    {% if pager.more %}
+      <a class="more-button" href="?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;sort={{ sort }}&amp;shown={{ pager.next }}"
+         hx-get="{{ request.path }}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}&amp;sort={{ sort }}&amp;shown={{ pager.next }}"
+         hx-target="#queue-body" hx-swap="outerHTML">แสดงเพิ่มเติม (อีก {{ pager.more }} เรื่อง)</a>
     {% endif %}
   {% else %}
     <div class="empty">

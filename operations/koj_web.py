@@ -6,11 +6,11 @@ from io import StringIO
 from django import forms
 from django.contrib import messages
 from django.contrib.auth import get_user_model
-from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_POST
 
 from operations import identity
@@ -56,7 +56,7 @@ class SourceForm(forms.ModelForm):
             "provider": "วิธีรับข้อมูล",
             "service": "บริการ",
             "default_equipment": "ชนิดอุปกรณ์เมื่อไม่ได้จับคู่คอลัมน์",
-            "spreadsheet_id": "Spreadsheet ID",
+            "spreadsheet_id": "รหัสชีท (จากลิงก์ Google Sheets)",
             "sheet_name": "ชื่อแท็บ",
             "contact": "ช่องทางติดต่อเมื่อค้นไม่พบ",
         }
@@ -121,22 +121,18 @@ class SourceForm(forms.ModelForm):
         return values
 
 
-@login_required
+@admin_required
 @require_http_methods(["GET", "POST"])
 def sources(request):
-    if not tracking.staff_can_read(request.user):
-        raise PermissionDenied
-    admin = identity.staff_scope(request.user).is_admin
+    # 28 ต.ค. 2569: the sources page sits in the admin menu only (ADR 0026).
     selected = (
         get_object_or_404(KojSource, pk=request.GET["edit"])
-        if admin and request.GET.get("edit", "").isdigit()
+        if request.GET.get("edit", "").isdigit()
         else None
     )
-    form = SourceForm(instance=selected) if admin else None
+    form = SourceForm(instance=selected)
     if request.method == "POST":
         action = request.POST.get("action")
-        if action in {"save", "import"} and not admin:
-            raise PermissionDenied
         if action == "save":
             pk = request.POST.get("source", "")
             if pk and not pk.isdigit():
@@ -159,7 +155,7 @@ def sources(request):
                     if previous is not None and previous != tracking._config(source):
                         source.records.update(present=False)
                         KojSource.objects.filter(pk=source.pk).update(
-                            last_error="ตั้งค่าใหม่แล้ว รอ refresh ข้อมูล"
+                            last_error="ตั้งค่าใหม่แล้ว รออ่านข้อมูลรอบถัดไป"
                         )
                 identity.audit(request.user, "koj.source_saved", source)
                 messages.success(request, "บันทึกแหล่งข้อมูล กอจ. แล้ว")
@@ -172,7 +168,7 @@ def sources(request):
             try:
                 if action == "refresh":
                     tracking.request_refresh(request.user, source)
-                    messages.success(request, "รับคำขอ refresh แล้ว ดูผลจากเวลาข้อมูลล่าสุด")
+                    messages.success(request, "สั่งอ่านใหม่แล้ว ดูผลที่เวลาข้อมูลล่าสุด")
                 else:
                     upload = request.FILES.get("file")
                     if source.provider != "csv" or upload is None or upload.size > 20_000_000:
@@ -196,7 +192,7 @@ def sources(request):
             "sources": KojSource.objects.all(),
             "form": form,
             "selected": selected,
-            "can_configure": admin,
+            "can_configure": True,
             "equipment": tracking.EQUIPMENT,
             "services": tracking.SERVICES,
             "unmapped": KojRecord.objects.filter(present=True, district=None).count(),
@@ -213,13 +209,14 @@ def recipients(request, pk):
         messages.success(request, "บันทึกชุดรับแจ้ง กอจ. แล้ว")
     except ValidationError as exc:
         messages.error(request, "; ".join(exc.messages))
+    back = request.POST.get("next", "")
+    if back and url_has_allowed_host_and_scheme(back, {request.get_host()}):
+        return redirect(back)
     return redirect("admin-user-detail", pk=user.pk)
 
 
-@login_required
+@admin_required
 def history(request, pk):
-    if not tracking.staff_can_read(request.user):
-        raise PermissionDenied
     source = get_object_or_404(KojSource, pk=pk)
     records = source.records.order_by("reference_key", "pk")
     query = request.GET.get("q", "").strip()

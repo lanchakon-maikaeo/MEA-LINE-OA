@@ -1,4 +1,5 @@
 {% extends layout %}
+{% block title %}ผู้ใช้ LINE OA · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
@@ -12,7 +13,7 @@
   <div class="section-head"><h2 id="reg-pending">รอรับรอง</h2><span class="muted">{{ pending|length }} คำขอ</span></div>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">ชื่อที่แจ้ง</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)ที่ขอ</th><th scope="col">ส่งเมื่อ</th><th scope="col">ตัดสิน</th></tr></thead>
-  <tbody>
+  <tbody data-more>
   {% for reg in pending %}
     <tr>
       <td>{{ reg.submitted_name }}{% if reg.employee %}<br><span class="tag">ตรงทะเบียนพนักงาน {{ reg.employee.employee_id }}</span>{% if reg.verified_by %} <span class="tag tag--outline">ยืนยันด้วย{{ reg.get_verified_by_display }}</span>{% endif %}{% endif %}{% if reg.latitude %}<br><a href="https://www.google.com/maps?q={{ reg.latitude }},{{ reg.longitude }}" target="_blank" rel="noopener">ดูตำแหน่งที่ส่ง</a>{% endif %}</td><td class="cell--wide" data-label="หน่วยงาน (เขต/ฝ่าย)ที่ขอ">{{ reg.requested_district.name }}</td><td class="cell--end" data-label="ส่งเมื่อ">{{ reg.created_at|date:"Y-m-d H:i" }}</td>
@@ -44,7 +45,7 @@
       <td class="cell--end" data-label="รหัส">{{ requester.pk }}</td>
       <td class="cell--title">{% if is_admin %}<a href="{% url 'admin-requester-detail' requester.pk %}">{{ requester.display_name }}</a>{% else %}{{ requester.display_name }}{% endif %}</td>
       <td class="cell--wide" data-label="ตัวตน">{{ row.proof }}<br><span class="muted">{{ row.channel }}</span></td>
-      <td data-label="ตำแหน่ง · ฝ่าย">{{ row.position|default:"—" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</td>
+      <td data-label="ตำแหน่ง · ฝ่าย">{{ row.position|default:"ไม่ระบุ" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</td>
       <td class="cell--two" data-label="หน่วยงาน (เขต/ฝ่าย)">{{ row.where }}</td>
       <td data-label="บทบาท">{{ row.role }}</td>
       <td class="cell--two" data-label="สถานะ">{% if requester.status == "active" %}{{ requester.get_status_display }}{% else %}<span class="tag tag--muted">{{ requester.get_status_display }}</span>{% endif %}</td>
@@ -61,7 +62,7 @@
     <p class="muted">เรื่องและข้อความเดิมยังอยู่ครบ ถ้าจะใช้ LINE อีกต้องลงทะเบียนใหม่และได้รหัสผู้ใช้ใหม่</p>
     <div class="table-wrap"><table class="table--cards">
       <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ตัวตน</th><th scope="col">หน่วยงาน (เขต/ฝ่าย)</th></tr></thead>
-      <tbody>
+      <tbody data-more>
       {% for row in revoked %}{% with requester=row.requester %}
         <tr><td class="cell--end" data-label="รหัส">{{ requester.pk }}</td><td class="cell--title">{% if is_admin %}<a href="{% url 'admin-requester-detail' requester.pk %}">{{ requester.display_name }}</a>{% else %}{{ requester.display_name }}{% endif %}</td><td class="cell--wide" data-label="ตัวตน">{{ row.proof }}</td><td class="cell--wide" data-label="หน่วยงาน (เขต/ฝ่าย)">{{ row.where }}</td></tr>
       {% endwith %}{% endfor %}

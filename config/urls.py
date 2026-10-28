@@ -146,7 +146,6 @@ urlpatterns = [
     ),
     path("console/admin/requirements/", flows_web.admin_requirements, name="admin-requirements"),
     path("console/admin/holidays/", warehouse_web.admin_holidays, name="admin-holidays"),
-    path("console/admin/emergency/", warehouse_web.admin_emergency, name="admin-emergency"),
     path("console/admin/policy/", views.admin_policy, name="admin-policy"),
     path(
         "console/admin/policy/<slug:action>/<int:pk>/",

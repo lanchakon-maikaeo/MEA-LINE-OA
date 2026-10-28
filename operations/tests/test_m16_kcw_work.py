@@ -12,6 +12,7 @@ from django.utils import timezone
 from operations import case_chat, warehouse
 from operations.models import (
     Appointment,
+    AuthorityGrant,
     Calendar,
     CalendarSlot,
     Case,
@@ -36,12 +37,29 @@ class WorkTestCase(FlowTestCase):
         super().setUpTestData()
         cls.kcw = make_staff("kcw-clerk", (Role.STAFF, "กคว."))
         cls.division = Division.objects.get(code="กคว.")
+        cls.approver = make_staff("kcw-work-approver", (Role.STAFF, "กคว."))
+        AuthorityGrant.objects.create(
+            user=cls.approver,
+            activity=AuthorityGrant.Activity.WITHDRAWAL_APPROVAL,
+            division=None,
+            valid_from=timezone.now() - timedelta(minutes=1),
+            reason="ทดสอบ",
+            approval_reference="TEST-ADR-0025",
+            granted_by=cls.flow_admin,
+        )
 
-    def withdraw(self, slip, meter="12345678", size="5(100)A", user=ALICE):
+    def withdraw(self, slip, meter="12345678", size="5(100)A", user=ALICE, approve=True):
         self.track("มิเตอร์", "ติดตามใบเบิก", number=slip, user=user)
         self.type(user, f"มิเตอร์ {meter} ขนาด {size} 1 เครื่อง ใช้ติดตั้ง")
         self.press(user, "ยืนยันส่งเรื่อง")
-        return Case.objects.order_by("-submitted_at").first()
+        case = Case.objects.order_by("-submitted_at").first()
+        if approve:  # the warehouse records stages after the division approves (28 ต.ค. Q4)
+            from operations import approvals
+
+            done, skipped = approvals.bulk_approve(self.approver, [case])
+            self.assertEqual((len(done), skipped), (1, []))
+            case.refresh_from_db()
+        return case
 
 
 class SearchTests(WorkTestCase):

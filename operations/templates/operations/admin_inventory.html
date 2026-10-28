@@ -1,4 +1,5 @@
 {% extends "operations/admin_base.html" %}
+{% block title %}คลังของ · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>คลังของ</h1></div></div>
 <p>ยอดคลังทางการอยู่ใน SAP ระบบนี้ไม่ได้ถือยอดเอง ตอนนี้ใช้แบบ<strong>{% if mode == "fake" %}คลังจำลอง ใช้แทน SAP ในเครื่องทดสอบ ยอดและเลขเครื่องเป็นข้อมูลจำลอง{% else %}อ้างเลขเอกสาร เจ้าหน้าที่จ่ายใน SAP ก่อน แล้วกรอกเลขเอกสารในระบบนี้ ยอดด้านล่างใช้ประกอบเท่านั้น ยอดที่เก่ากว่า {{ stale_hours }} ชั่วโมงถือว่าเก่า{% endif %}</strong></p>
@@ -6,7 +7,7 @@
 <h2>ยอดพร้อมจ่ายและส่วนค้าง</h2>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">รายการ</th><th scope="col">พร้อมจ่าย</th><th scope="col">ส่วนค้างจ่ายรวม</th><th scope="col">แย่งกัน</th><th scope="col">จัดสรรที่ยังไม่จ่าย</th><th scope="col">รายละเอียด</th></tr></thead>
-  <tbody>
+  <tbody data-more>
   {% for r in rows %}
     <tr>
       <td>{{ r.item.code }}<br>{{ r.item.name }} ({{ r.item.unit }})</td>
@@ -23,7 +24,7 @@
 <h2>การจัดสรรที่มีผล</h2>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">เรื่อง</th><th scope="col">รายการ</th><th scope="col">จัดสรร/จ่ายแล้ว</th><th scope="col">ผู้จัดสรร</th><th scope="col">เหตุผล</th></tr></thead>
-  <tbody>
+  <tbody data-more>
   {% for a in allocations %}
     <tr><td>{{ a.case.number }}</td><td class="cell--end" data-label="รายการ">{{ a.item.code }}</td><td data-label="จัดสรร/จ่ายแล้ว">{{ a.quantity }} / {{ a.used_quantity }}</td><td class="cell--two" data-label="ผู้จัดสรร">{{ a.allocated_by.username }}</td><td class="cell--wide" data-label="เหตุผล">{{ a.reason }}</td></tr>
   {% empty %}<tr><td colspan="5">ไม่มี</td></tr>{% endfor %}
@@ -42,7 +43,7 @@
 <h2>ความเคลื่อนไหวคลังจำลองล่าสุด</h2>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">เวลา</th><th scope="col">รายการ</th><th scope="col">ชนิด</th><th scope="col">จำนวน</th><th scope="col">เอกสาร/เรื่อง</th><th scope="col">เหตุผล</th></tr></thead>
-  <tbody>
+  <tbody data-more>
   {% for m in movements %}
     <tr><td>{{ m.created_at|date:"Y-m-d H:i" }}</td><td class="cell--end" data-label="รายการ">{{ m.item.code }}</td><td data-label="ชนิด">{{ m.get_kind_display }}</td><td data-label="จำนวน">{{ m.quantity }}{% if m.serials %}<br>{{ m.serials|join:", " }}{% endif %}</td><td data-label="เอกสาร/เรื่อง">{{ m.document_number }}{% if m.case %}<br>{{ m.case.number }}{% endif %}</td><td class="cell--wide" data-label="เหตุผล">{{ m.reason }}</td></tr>
   {% empty %}<tr><td colspan="6">ยังไม่มี</td></tr>{% endfor %}

@@ -81,7 +81,7 @@
         {% if case.kind == "withdrawal" %}
         <table>
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอ</th><th scope="col" class="num">อนุมัติ</th><th scope="col" class="num">จ่ายแล้ว</th><th scope="col" class="num">หน่วยงาน (เขต/ฝ่าย)รับแล้ว</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างจ่าย</th></tr></thead>
-          <tbody>
+          <tbody data-more>
           {% for l in page.lines.lines %}
             <tr>
               <td class="num">{{ l.line_no }}</td>
@@ -99,7 +99,7 @@
         {% elif case.kind == "return" %}
         <table>
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอคืน</th><th scope="col" class="num">มาถึง</th><th scope="col" class="num">พร้อมใช้</th><th scope="col" class="num">ซ่อม</th><th scope="col" class="num">อื่น ๆ</th><th scope="col" class="num">รอตรวจ</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างส่งคืน</th></tr></thead>
-          <tbody>
+          <tbody data-more>
           {% for l in page.lines.lines %}
             <tr>
               <td class="num">{{ l.line_no }}</td>
@@ -113,7 +113,7 @@
         {% else %}
         <table>
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">จำนวน</th><th scope="col">เลขเครื่อง</th></tr></thead>
-          <tbody>
+          <tbody data-more>
           {% for l in page.lines.lines %}
             <tr><td class="num">{{ l.line_no }}</td><td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }}</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}</td><td class="num">{{ l.requested }}</td><td>{{ l.serials|join:", "|default:"-" }}</td></tr>
           {% empty %}<tr><td colspan="4" class="muted">ไม่ได้ระบุรายการของ</td></tr>
@@ -147,7 +147,7 @@
       {% if page.lines.units %}
       <div class="table-wrap"><table>
         <thead><tr><th scope="col">หน่วย</th><th scope="col">รายการ</th><th scope="col">เลขเครื่อง/จำนวน</th><th scope="col">สถานะ</th><th scope="col">หมายเหตุ</th></tr></thead>
-        <tbody>
+        <tbody data-more>
         {% for u in page.lines.units %}
           <tr><td class="num">{{ u.unit }} <span class="muted">(ครั้งที่ {{ u.arrival }})</span></td><td>{{ u.item }}</td><td>{{ u.serial|default:u.quantity }}</td><td>{{ u.status_label }}</td>
             <td>{% if u.discrepancy %}<span class="t-alert">{{ u.discrepancy }}</span>{% if u.resolution %} → {{ u.resolution }}{% endif %}<br>{% endif %}{% if u.flag %}<span class="t-alert">{{ u.flag }}</span><br>{% endif %}{% if u.source %}<span class="muted">มาจาก {{ u.source }}</span>{% endif %}</td></tr>
@@ -247,7 +247,7 @@
       <details class="disclosure" open>
         <summary id="s-timeline">ไทม์ไลน์ ({{ page.timeline|length }})</summary>
         <div class="disclosure__body">
-          <ol class="timeline">
+          <ol class="timeline" data-more="5" data-more-end>
             {% for e in page.timeline %}
               <li class="{% if e.system %}timeline__system{% endif %}">
                 <time datetime="{{ e.at|date:'c' }}">{{ e.at|thai_datetime }}</time>
