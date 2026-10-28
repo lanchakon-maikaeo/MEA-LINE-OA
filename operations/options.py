@@ -29,6 +29,7 @@ class Option:
 
 
 DIVISION_WORK = "division_work"
+SCREENING = "screening"
 SEPARATION = "separation_of_duties"
 LINE_AUDIENCE = "line_audience"
 REGISTRATION = "registration_approver"
@@ -72,6 +73,23 @@ MONITOR_JUDGE = "monitoring_judge"
 AI_RIGHT = {MONITOR_ERROR, MONITOR_P95, MONITOR_UNANSWERED, MONITOR_EMAIL, MONITOR_JUDGE}
 
 OPTIONS = {
+    SCREENING: Option(
+        "ขั้นคัดกรองเรื่องใหม่",
+        (
+            (
+                "off",
+                "ไม่มีขั้นคัดกรอง: เรื่องใหม่เข้ารออนุมัติของกองเจ้าภาพทันที",
+                "กองตั้งระดับความเร่งด่วนตอนอนุมัติ เรื่องฉุกเฉินเริ่มงานทันที "
+                "เรื่องที่ระบบบอกกองไม่ได้ยังรอผู้ประสานก่อน (ADR 0025)",
+            ),
+            (
+                "on",
+                "มีขั้นคัดกรอง: เรื่องใหม่รอคัดกรองแล้วค่อยส่งเข้าขั้นดำเนินงาน",
+                "แบบก่อน 27 ต.ค. 2569",
+            ),
+        ),
+        "มีผลกับเรื่องใหม่ เรื่องที่อยู่ในขั้นอื่นแล้วไม่เปลี่ยน",
+    ),
     DIVISION_WORK: Option(
         "หน้าที่ในกอง",
         (

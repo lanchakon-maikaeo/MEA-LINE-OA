@@ -11,6 +11,15 @@ from django.db.models import F, Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
+from operations.koj_models import (  # noqa: F401 - register and re-export กอจ. models
+    KojHistory,
+    KojNotice,
+    KojRecipient,
+    KojRecord,
+    KojSource,
+    KojWatch,
+)
+
 
 class District(models.Model):
     """Real MEA district name; `code` is the prototype D01-D18 key, never an official code."""
@@ -500,8 +509,10 @@ class Case(models.Model):
     source_reference = models.CharField(max_length=100, blank=True)
     # เลขใบเบิก/ใบส่งคืน SAP the requester gave (user, 23 Oct 2569); staff may correct it.
     # grill กคว. 27 Oct 2569 Q9, Q21: kept as typed ("4500012345/10"), and which document it is.
-    sap_number = models.CharField(max_length=30, blank=True, db_index=True)
-    sap_kind = models.CharField(max_length=16, blank=True)  # slip, return_slip, work_order
+    # รอบใหม่ Q1–Q2: เลขติดตาม may also be a meter number or a project name (up to 60).
+    sap_number = models.CharField(max_length=60, blank=True, db_index=True)
+    sap_kind = models.CharField(max_length=16, blank=True)  # slip, return_slip, work_order,
+    # meter or project
     description = models.TextField(blank=True)
     impact = models.TextField(blank=True)
     related_case = models.ForeignKey(
@@ -3239,6 +3250,42 @@ class DivisionSchedule(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class Holiday(models.Model):
+    """วันหยุด (grill กคว. รอบใหม่ Q11): a day nobody works, chosen by an admin. It is not a
+    working day for กำหนดจ่าย and shows on the appointment calendars."""
+
+    day = models.DateField(unique=True)
+    name = models.CharField(max_length=120)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["day"]
+
+    def __str__(self):
+        return f"{self.day} {self.name}"
+
+
+class EmergencyContact(models.Model):
+    """ผู้รับแจ้งเรื่องฉุกเฉินของกอง (grill กคว. รอบใหม่ Q33): when a division has any, a new
+    emergency case is told to them (email, and LINE if linked) instead of to the whole division
+    and its heads. An admin keeps the list."""
+
+    division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name="+")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["division", "user"], name="emergency_contact_once")
+        ]
 
 
 class CaseMessage(models.Model):

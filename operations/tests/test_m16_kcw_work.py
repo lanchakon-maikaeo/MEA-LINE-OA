@@ -38,11 +38,8 @@ class WorkTestCase(FlowTestCase):
         cls.division = Division.objects.get(code="กคว.")
 
     def withdraw(self, slip, meter="12345678", size="5(100)A", user=ALICE):
-        self.slip("มิเตอร์", "ติดตามใบเบิก", number=slip, user=user)
-        self.type(user, f"{meter}, {size}")
-        self.press(user, "ไปต่อ")
-        self.type(user, "ติดตั้ง")
-        self.press(user, "ข้าม")
+        self.track("มิเตอร์", "ติดตามใบเบิก", number=slip, user=user)
+        self.type(user, f"มิเตอร์ {meter} ขนาด {size} 1 เครื่อง ใช้ติดตั้ง")
         self.press(user, "ยืนยันส่งเรื่อง")
         return Case.objects.order_by("-submitted_at").first()
 
@@ -118,6 +115,10 @@ class WarehouseTests(WorkTestCase):
         chosen = Appointment.objects.get(case=first)
         self.assertEqual((chosen.method, chosen.status), ("truck", "confirmed"))
         warehouse.record(self.kcw, [first], S.ISSUED, monday + timedelta(days=3))
+        warehouse.record(self.kcw, [second], S.ISSUED, monday + timedelta(days=3))
+        warehouse.record(self.kcw, [second], S.DELIVERED, monday + timedelta(days=4))
+        second.refresh_from_db()
+        self.assertEqual(second.status, "closed")  # Q37: the district has it, the case ends
         reply = self.type(ALICE, "ขอบคุณ")
         self.assertIn("จ่ายแล้ว", texts(reply))
         self.assertIn("วิธีรับ: รถ กคว. ไปส่ง", texts(reply))
@@ -201,6 +202,7 @@ class CalendarTests(WorkTestCase):
         self.press(ALICE, "โน้ตบุ๊กและหัวอ่าน")
         reply = self.type(ALICE, "ขอติดตั้งโปรแกรมอ่านมิเตอร์")
         self.press(ALICE, next(iter(buttons(reply))))
+        self.press(ALICE, "ยืนยันส่งเรื่อง")  # รอบใหม่ Q8: the slot is confirmed at the summary
         appointment = Appointment.objects.get()
         page = client.get("/divisions/กคว./calendar/?cal=notebook")
         self.assertContains(page, "รอยืนยัน 1 คำขอ")

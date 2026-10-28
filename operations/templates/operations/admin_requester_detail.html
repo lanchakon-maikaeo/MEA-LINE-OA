@@ -1,5 +1,5 @@
 {% extends "operations/admin_base.html" %}
-{% load ui %}
+{% load ui koj_ui %}
 {% block title %}{{ requester.display_name }} · ผู้ใช้ LINE OA · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -37,6 +37,7 @@
 {% endif %}
 
 <section class="section" aria-labelledby="rq-line">
+  {% if managed %}{% for line in lines %}{% if line.staff_user %}{% koj_recipients line.staff_user %}{% endif %}{% endfor %}{% endif %}
   <div class="section-head"><h2 id="rq-line">บัญชี LINE</h2></div>
   {% if lines %}
   <ul>

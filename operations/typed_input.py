@@ -82,6 +82,46 @@ def sap_rule(text):
     return number, number, ""
 
 
+PROJECT = re.compile(r"^[\w\u0E00-\u0E7F ./()-]{2,60}$")  # Thai marks are not \w
+
+
+def tracking_rule(text, kind):
+    """เลขติดตาม by its kind (รอบใหม่ Q1, Q2): SAP documents keep "/", a meter number is a
+    code, a project is a name that may hold Thai and spaces."""
+    if kind == "meter":
+        value = code(tidy(text))
+        if not typed_lines.METER_NUMBER.match(value):
+            return _fail("หมายเลขเครื่องวัดฯ ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว")
+        return value, value, ""
+    if kind == "project":
+        value = " ".join(tidy(text).split())
+        if not PROJECT.match(value):
+            return _fail("พิมพ์ชื่อหรือรหัสโครงการ 2 ถึง 60 ตัว")
+        return value, value, ""
+    return sap_rule(text)
+
+
+def size_rule(text):
+    """One size such as 100/5A or 11000/110V (a CT or VT of a set)."""
+    value = size(tidy(text))
+    if not value or len(value) > typed_lines.LIMITS["size"]:
+        return _fail("พิมพ์ขนาด เช่น 100/5A")
+    if ratio(value) is None:
+        return _fail("พิมพ์ขนาดแบบ ตัวเลข/ตัวเลข เช่น 100/5A หรือ 11000/110V")
+    return value, value, ""
+
+
+def multiplier_from(ct_size, vt_size=""):
+    """CT ratio × VT ratio (VT only when the set has one), or None when unreadable."""
+    ct = ratio(ct_size)
+    if ct is None:
+        return None
+    if not vt_size:
+        return ct
+    vt = ratio(vt_size)
+    return None if vt is None else ct * vt
+
+
 def meter_rows(text, group="meter"):
     """หมายเลขเครื่องวัดฯ, ขนาด: one meter per line."""
     rows, shown = [], []

@@ -227,9 +227,12 @@ class FulfilmentTestCase(Staffing, TestCase):
 
 class MatrixTests(FulfilmentTestCase):
     def test_m07_actions_belong_to_withdrawals_only(self):
+        # ADR 0025: approval belongs to every kind; the rest stays with withdrawals.
+        for name in ("approve", "deny_approval"):
+            self.assertEqual(
+                workflow.ACTIONS[name].enabled_kinds, [K.WITHDRAWAL, K.RETURN, K.PROBLEM], name
+            )
         for name in (
-            "approve",
-            "deny_approval",
             "allocate",
             "issue",
             "terminate_outstanding",

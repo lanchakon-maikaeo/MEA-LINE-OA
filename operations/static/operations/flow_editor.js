@@ -10,13 +10,14 @@
   var CFG = JSON.parse(cfgEl.textContent);
   var KINDS = CFG.kinds, ROLES = CFG.roles, RULES = CFG.rules, LIMITS = CFG.limits;
   var EDITABLE = CFG.version.editable;
-  var ICONS = { entry: "▶", message: "💬", ask: "✎", branch: "⑂", summary: "≡", create_case: "＋", find_case: "⌕", book: "▦", ai_read: "AI", handoff: "☎", web: "↗", limit: "⛔", result: "✓", note: "✱" };
+  var ICONS = { entry: "▶", message: "💬", ask: "✎", branch: "⑂", summary: "≡", create_case: "＋", find_case: "⌕", koj_tracking: "⌕", book: "▦", ai_read: "AI", handoff: "☎", web: "↗", limit: "⛔", result: "✓", note: "✱" };
   var PALETTE = [
     ["คุยกับผู้ใช้", ["message", "ask", "branch", "summary", "result"]],
-    ["ระบบทำงาน", ["create_case", "find_case", "book", "ai_read", "handoff"]],
+    ["ระบบทำงาน", ["create_case", "find_case", "koj_tracking", "book", "ai_read", "handoff"]],
     ["อื่น ๆ", ["entry", "web", "limit", "note"]],
   ];
   var CONFIG_FIELDS = {
+    koj_tracking: [["equipment", "อุปกรณ์ (ว่างเปิดเมนู กอจ.)", "select", ":เมนู กอจ.|transformer:หม้อแปลง|lbs:LBS|rmu:RMU|metering:ตู้ metering|frtu:LBS FRTU|bushing:bushing box|vt_lbs:VT ประกอบ LBS|lv_cap:LV Cap.|other:อุปกรณ์อื่น"], ["service", "บริการ (ว่างให้ผู้ใช้เลือก)", "select", ":เลือกบริการ|withdrawal:ติดตามใบเบิก|return:ติดตามใบส่งคืน|repair:ติดตามสถานะการซ่อม|watches:รายการติดตาม กอจ."]],
     ask: [["field", "ช่องที่เก็บ", "text", "เช่น purpose, sap_document, rows.meter"], ["rule", "กฎตรวจ", "rule"], ["choices", "ปุ่มเลือกชนิดก่อนพิมพ์", "text", "คั่นด้วย | เช่น เลขที่ใบเบิก|ใบสั่งงาน SAP"], ["optional", "ข้ามได้", "flag"], ["max_rows", "จำนวนแถวสูงสุด", "text", "ว่างไว้ถ้าไม่จำกัด"]],
     create_case: [["case_kind", "ชนิดเรื่อง", "select", "withdrawal:เบิก|return:ส่งคืน|problem:แจ้งปัญหา"], ["division", "กองปลายทาง", "text", "เช่น กคว."], ["topic", "หัวข้อ", "text", "เช่น repair"]],
     find_case: [["by", "ค้นด้วย", "text", "เช่น sap_document, meter_number"]],
@@ -111,6 +112,7 @@
       var c = n.config || {};
       if (n.kind === "ask") { if (c.field) chips.append(el("span", "fn__chip", "ช่อง " + c.field)); if (c.rule) chips.append(el("span", "fn__chip", RULES[c.rule] || c.rule)); if (c.choices) chips.append(el("span", "fn__chip", "เลือก: " + c.choices.split("|").join(" / "))); }
       if (n.kind === "create_case") { chips.append(el("span", "fn__chip", [c.case_kind, c.division, c.topic].filter(Boolean).join(" · "))); }
+      if (n.kind === "koj_tracking") { chips.append(el("span", "fn__chip", [c.equipment, c.service].filter(Boolean).join(" · ") || "เมนู กอจ.")); }
       if (n.kind === "book" && c.calendar) chips.append(el("span", "fn__chip", "ปฏิทิน " + c.calendar));
       if (n.kind === "branch" && c.condition) chips.append(el("span", "fn__chip", "ดูจาก " + c.condition));
       var reqs = reqsOf(n.id); if (reqs.length) { var rc = el("span", "fn__chip fn__chip--req", "requirement " + reqs.length + " ข้อ"); rc.dataset.req = "1"; rc.title = reqs.map(function (r) { return r.text; }).join("\n"); chips.append(rc); }
@@ -275,7 +277,10 @@
   // The same moves as flow_runner: boxes that wait for nothing run at once, a branch takes its
   // first button whose condition holds, typed text is read by the server with the real rules.
   var play = null;
-  var SAP_CHOICES = { "เลขที่ใบเบิก": ["slip", "withdrawal"], "เลขที่ใบส่งคืน": ["return_slip", "return"], "ใบสั่งงาน SAP": ["work_order", ""] };
+  var SAP_CHOICES = { "เลขที่ใบเบิก": ["slip", "withdrawal"], "เลขที่ใบส่งคืน": ["return_slip", "return"], "ใบสั่งงานจาก SAP": ["work_order", ""], "ใบสั่งงาน SAP": ["work_order", ""], "หมายเลขเครื่องวัดฯ": ["meter", ""], "โครงการ": ["project", ""] };
+  var KIND_LABELS = { slip: "เลขที่ใบเบิก", return_slip: "เลขที่ใบส่งคืน", work_order: "ใบสั่งงานจาก SAP", meter: "หมายเลขเครื่องวัดฯ", project: "โครงการ" };
+  var EDIT_LABELS = { tracking: "เลขติดตาม", sap_document: "เลข SAP งานซ่อม", details: "รายละเอียด", description: "รายละเอียด", "rows.meter": "มิเตอร์", ct_size: "ขนาด CT", vt_size: "ขนาด VT", multiplier: "ตัวคูณ", mea_numbers: "MEA No." };
+  function does(b, what) { var v = {}; assign(v, b.set); return v["do"] ? v["do"] === what : b.label.indexOf(what === "edit" ? "แก้ไข" : "กรอกใหม่") >= 0; }
   function follow(id, port) { var e = graph.edges.find(function (x) { return x.from === id && (x.port || null) === (port || null); }); return e ? e.to : null; }
   function assign(values, text) { String(text || "").split(";").forEach(function (p) { var i = p.indexOf("="); if (i > 0) values[p.slice(0, i).trim()] = p.slice(i + 1).trim(); }); }
   function holds(values, text) {
@@ -285,7 +290,7 @@
   function say(who, text) { play.log.push({ who: who, text: text }); }
   function playStart() {
     var entry = graph.nodes.find(function (n) { return n.kind === "entry"; });
-    play = { node: null, values: {}, rows: [], choice: {}, log: [], done: false, path: [] };
+    play = { node: null, values: {}, rows: [], choice: {}, log: [], done: false, path: [], answered: [], editing: false, summary: null, menu: false };
     if (!entry) { say("bot", "flow นี้ยังไม่มีปุ่มเมนูเริ่มต้น"); play.done = true; return; }
     say("user", "(กดปุ่ม " + (entry.title || "เมนู") + " บน rich menu)");
     playGo(follow(entry.id));
@@ -302,10 +307,11 @@
       }
       if (n.kind === "book") { say("sys", "ผู้ใช้เลือกช่วงเวลาว่างจากปฏิทิน " + (n.config.calendar || "") + " (ลองคุยข้ามขั้นนี้)"); id = follow(n.id); continue; }
       if (n.kind === "find_case") { say("bot", "(แสดงรายการ เรื่องของฉัน)"); play.done = true; return; }
+      if (n.kind === "koj_tracking") { say("bot", n.config.service === "watches" ? "เปิดรายการติดตาม กอจ. (ลองคุยใช้ข้อมูลจำลอง)" : "เปิดติดตามงานต้นทาง กอจ. · " + (n.config.equipment || "เลือกอุปกรณ์") + " · " + (n.config.service || "เลือกบริการ") + " (ลองคุยไม่อ่านชีทจริงและไม่สมัครรับแจ้ง)"); play.done = true; return; }
       play.node = n.id;
       if (n.kind === "result" || n.kind === "limit" || n.kind === "web" || n.kind === "handoff") { say("bot", [n.title, n.text].filter(Boolean).join("\n")); play.done = true; return; }
-      if (n.kind === "summary") { say("bot", playSummary(n)); return; }
-      if (n.kind === "ask" && n.config.choices && !play.choice[n.id]) { say("bot", n.title + "\nเลขที่จะพิมพ์เป็นแบบไหน กดเลือกก่อน"); return; }
+      if (n.kind === "summary") { play.summary = n.id; say("bot", playSummary(n)); return; }
+      if (n.kind === "ask" && n.config.choices && !play.choice[n.id]) { say("bot", n.title + "\nเลือกก่อนว่าจะติดตามด้วยอะไร"); return; }
       say("bot", [n.kind === "ask" && play.choice[n.id] ? n.title + " (" + play.choice[n.id] + ")" : n.title, n.text].filter(Boolean).join("\n"));
       return;
     }
@@ -316,19 +322,25 @@
     var confirm = n.buttons.find(function (b) { return follow(n.id, b.id); }); var target = confirm && nodeById(follow(n.id, confirm.id));
     if (target && target.config.division) lines.push("ส่งถึง: " + target.config.division);
     if (v.set_kind) lines.push("ชุด: " + ({ meter_ct: "มิเตอร์ + CT", meter_ct_vt: "มิเตอร์ + CT + VT", ct: "CT อย่างเดียว", ct_vt: "CT + VT" })[v.set_kind]);
-    if (v.sap_document) lines.push(({ slip: "เลขที่ใบเบิก", return_slip: "เลขที่ใบส่งคืน", work_order: "ใบสั่งงาน SAP" })[v.sap_kind] + ": " + v.sap_document);
-    play.rows.forEach(function (r, i) { lines.push((i + 1) + ". " + r.text); });
+    if (v.tracking) lines.push((KIND_LABELS[v.sap_kind] || "เลขติดตาม") + ": " + v.tracking);
+    if (v.sap_document) lines.push("เลข SAP งานซ่อม: " + v.sap_document);
+    play.rows.forEach(function (r) { lines.push(r.text); });
+    if (v.ct_size) lines.push("ขนาด CT: " + v.ct_size);
+    if (v.vt_size) lines.push("ขนาด VT: " + v.vt_size);
     if (v.multiplier_check) lines.push("ตัวคูณ: " + v.multiplier_check.given + (v.multiplier_check.ok ? " (ตรงกับที่คำนวณ)" : " (ให้เจ้าหน้าที่ตรวจ)"));
-    var names = { paired_meter: "ใช้คู่กับหมายเลขเครื่องวัดฯ", mea_numbers: "MEA No.", purpose: "วัตถุประสงค์", needed_by: "ต้องการใช้ภายใน", condition_reason: "สภาพและเหตุผลที่ส่งคืน", description: "รายละเอียด" };
+    var names = { details: "รายละเอียด", description: "รายละเอียด", mea_numbers: "MEA No." };
     Object.keys(names).forEach(function (k) { if (v[k]) lines.push(names[k] + ": " + [].concat(v[k]).join(", ")); });
-    lines.push("กดยืนยันภายใน 30 นาที");
+    lines.push("ข้อมูลถูกต้องกดยืนยันภายใน 30 นาที ถ้าพิมพ์ผิดกดแก้ไข");
     return lines.join("\n");
   }
   function playTap(n, b) {
     say("user", b.full || b.label);
     var target = follow(n.id, b.id);
-    if (n.kind !== "summary") { assign(play.values, b.set); play.path.push(b.label); }
-    if (!target) { if (b.label.indexOf("กรอกใหม่") >= 0) { playStart(); say("bot", "เริ่มกรอกใหม่"); } else if (b.note) say("bot", b.note); renderTry(); return; }
+    if (n.kind === "summary" && !target && does(b, "edit")) { play.menu = true; say("bot", "ต้องการแก้ข้อไหน"); renderTry(); return; }
+    if (n.kind === "summary" && !target && does(b, "restart")) { playStart(); say("bot", "เริ่มกรอกใหม่"); renderTry(); return; }
+    if (n.kind !== "summary") { assign(play.values, b.set); if (n.kind !== "ask") play.path.push(b.label); }
+    if (n.kind === "ask") { delete play.values[n.config.field]; if (play.editing) { play.editing = false; playGo(play.summary); renderTry(); return; } }
+    if (!target) { if (b.note) say("bot", b.note); renderTry(); return; }
     playGo(target); renderTry();
   }
   function playChoose(n, c) {
@@ -339,16 +351,18 @@
   function playType(n, text) {
     say("user", text); renderTry();
     fetch(CFG.tryUrl, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
-      body: JSON.stringify({ rule: n.config.rule || "text", field: n.config.field || "", text: text, rows: play.rows }) })
+      body: JSON.stringify({ rule: n.config.rule || "text", field: n.config.field || "", text: text, kind: play.values.sap_kind || "", values: play.values }) })
       .then(function (r) { return r.json(); })
       .then(function (a) {
         if (a.error || a.problem) { say("bot", a.error || a.problem); renderTry(); return; }
         if (a.shown && a.shown !== text.trim()) say("bot", "อ่านเป็น: " + a.shown);
         var field = n.config.field || "";
-        if (field.indexOf("rows.") === 0) play.rows = play.rows.concat(a.rows || []);
+        if (field.indexOf("rows.") === 0) { var g = field.slice(5); if (play.editing) play.rows = play.rows.filter(function (r) { return r.group !== g; }); play.rows = play.rows.concat(a.rows || []); }
         else if (n.config.rule === "multiplier") { play.values.multiplier_check = { given: a.value, ok: a.ok }; if (!a.ok) say("bot", "ตัวคูณไม่ตรงกับที่คำนวณจาก CT และ VT (" + (a.computed || "คำนวณไม่ได้") + ") ส่งต่อได้ ระบบจะบอกเจ้าหน้าที่ให้ตรวจ"); }
         else play.values[field] = a.value;
-        playGo(follow(n.id)); renderTry();
+        play.answered = play.answered.filter(function (x) { return x !== n.id; }).concat([n.id]);
+        if (play.editing) { play.editing = false; playGo(play.summary); } else playGo(follow(n.id));
+        renderTry();
       })
       .catch(function () { say("bot", "ตรวจข้อความไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่"); renderTry(); });
   }
@@ -367,7 +381,12 @@
     if (n) {
       var quick = el("div", "fe__quick");
       var picking = n.kind === "ask" && n.config.choices && !play.choice[n.id];
-      if (picking) n.config.choices.split("|").forEach(function (c) { c = c.trim(); if (!c) return; var q = el("button", "fe__qr", c); q.type = "button"; q.onclick = function () { playChoose(n, c); }; quick.append(q); });
+      if (play.menu) {
+        var seen = {};
+        play.answered.forEach(function (id) { var a = nodeById(id); if (!a || a.kind !== "ask") return; var l = EDIT_LABELS[a.config.field] || a.title.slice(0, 20); if (seen[l]) return; seen[l] = 1;
+          var q = el("button", "fe__qr", l); q.type = "button"; q.onclick = function () { say("user", "แก้" + l); play.menu = false; play.editing = true; play.node = a.id; delete play.choice[a.id]; say("bot", "แก้ " + a.title + (a.config.choices ? "" : "\n" + (a.text || ""))); renderTry(); }; quick.append(q); });
+        var back = el("button", "fe__qr", "กลับไปที่สรุป"); back.type = "button"; back.onclick = function () { play.menu = false; playGo(play.summary); renderTry(); }; quick.append(back);
+      } else if (picking) n.config.choices.split("|").forEach(function (c) { c = c.trim(); if (!c) return; var q = el("button", "fe__qr", c); q.type = "button"; q.onclick = function () { playChoose(n, c); }; quick.append(q); });
       else n.buttons.forEach(function (b) { var q = el("button", "fe__qr" + (b.label.length > LIMITS.label ? " is-long" : ""), b.label); q.type = "button"; q.onclick = function () { playTap(n, b); }; quick.append(q); });
       if (quick.childNodes.length) screen.append(quick);
       if (n.kind === "ask" && !picking) {

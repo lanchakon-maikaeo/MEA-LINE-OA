@@ -140,6 +140,15 @@ KIND_FIELDS = {
     },
 }
 LINE_FIELDS = {"item_code", "quantity", "serials", "details"}
+SAP_PATTERN = (r"[A-Za-z0-9/-]{4,30}", "เลข SAP ใช้ตัวอักษร ตัวเลข ขีด หรือ / ได้ 4 ถึง 30 ตัว")
+TRACKING_PATTERNS = {
+    "": SAP_PATTERN,
+    "slip": SAP_PATTERN,
+    "return_slip": SAP_PATTERN,
+    "work_order": SAP_PATTERN,
+    "meter": (r"[A-Za-z0-9-]{4,20}", "หมายเลขเครื่องวัดฯ ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว"),
+    "project": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "ชื่อโครงการยาว 2 ถึง 60 ตัว"),
+}
 NO_ITEM_TOPICS = {Case.Topic.USAGE, Case.Topic.SUGGESTION, Case.Topic.INQUIRY, Case.Topic.SYSTEM}
 ACTION_FIELDS = {"reason"}
 ACTION_EXTRA_FIELDS = {
@@ -315,12 +324,17 @@ def parse_submission(payload, on_behalf):
     }:
         fields[name] = _text(payload, name, False, 100 if name == "source_reference" else TEXT_MAX)
     if "sap_number" in spec["optional"]:
-        fields["sap_number"] = _text(payload, "sap_number", False, 30)
-        if fields["sap_number"] and not re.fullmatch(r"[A-Za-z0-9/-]{4,30}", fields["sap_number"]):
-            fail(ErrorCode.VALIDATION_ERROR, "เลข SAP ใช้ตัวอักษร ตัวเลข ขีด หรือ / ได้ 4 ถึง 30 ตัว")
+        # เลขติดตาม (grill กคว. 27 ต.ค. 2569 รอบใหม่ Q1, Q2): the kind says which pattern applies.
         fields["sap_kind"] = _text(payload, "sap_kind", False, 16)
-        if fields["sap_kind"] not in ("", "slip", "return_slip", "work_order"):
-            fail(ErrorCode.VALIDATION_ERROR, "sap_kind must be slip, return_slip or work_order.")
+        if fields["sap_kind"] not in TRACKING_PATTERNS:
+            fail(
+                ErrorCode.VALIDATION_ERROR,
+                "sap_kind must be slip, return_slip, work_order, meter or project.",
+            )
+        fields["sap_number"] = _text(payload, "sap_number", False, 60)
+        pattern, problem = TRACKING_PATTERNS[fields["sap_kind"]]
+        if fields["sap_number"] and not re.fullmatch(pattern, fields["sap_number"]):
+            fail(ErrorCode.VALIDATION_ERROR, problem)
     if "needed_by" in spec["optional"]:
         fields["needed_by"] = None
         if payload.get("needed_by"):
@@ -342,7 +356,8 @@ def parse_submission(payload, on_behalf):
     raw_lines = payload.get("lines") or []
     if not isinstance(raw_lines, list) or len(raw_lines) > MAX_LINES:
         fail(ErrorCode.VALIDATION_ERROR, f"lines must be a list of at most {MAX_LINES}.")
-    if kind != Case.Kind.PROBLEM and not raw_lines:
+    # A tracking case (เลขติดตาม with its kind) lists no items: they live in SAP (Q3, Q4).
+    if kind != Case.Kind.PROBLEM and not raw_lines and not fields.get("sap_kind"):
         fail(ErrorCode.VALIDATION_ERROR, "At least one item line is required.")
     lines = []
     for raw in raw_lines:

@@ -27,27 +27,54 @@ def _versions(flow):
     return published, draft
 
 
+def _row(flow):
+    published, draft = _versions(flow)
+    checks = (draft or published).checks if (draft or published) else []
+    return {
+        "flow": flow,
+        "published": published,
+        "draft": draft,
+        "errors": sum(1 for c in checks if c["level"] == "error"),
+        "warnings": sum(1 for c in checks if c["level"] == "warn"),
+        "requirements": flow.requirements.count(),
+    }
+
+
 @admin_required
-@require_safe
 def admin_flows(request):
-    rows = []
-    for flow in LineFlow.objects.select_related("division"):
-        published, draft = _versions(flow)
-        checks = (draft or published).checks if (draft or published) else []
-        rows.append(
-            {
-                "flow": flow,
-                "published": published,
-                "draft": draft,
-                "errors": sum(1 for c in checks if c["level"] == "error"),
-                "warnings": sum(1 for c in checks if c["level"] == "warn"),
-                "requirements": flow.requirements.count(),
-            }
-        )
+    """One tab per button of the real rich menu (27 ต.ค. 2569): its flow, or a starter."""
+    from operations.models import LineMenuItem
+
+    if request.method == "POST":
+        item = get_object_or_404(LineMenuItem, pk=request.POST.get("tile"))
+        try:
+            flow = line_flows.flow_for_tile(request.user, item)
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return redirect(f"{reverse('admin-flows')}?tile={item.pk}")
+        return redirect("admin-flow", key=flow.key)
+    tabs = line_flows.menu_tabs()
+    wanted = request.GET.get("tile", "")
+    current = next((t for t in tabs if str(t["item"].pk) == wanted), tabs[0] if tabs else None)
+    if current is not None:
+        current = {
+            **current,
+            "row": _row(current["flow"]) if current["flow"] else None,
+            "choices": list(
+                current["item"].choices.filter(is_active=True).order_by("position", "pk")
+            ),
+        }
+    on_menu = {t["flow"].pk for t in tabs if t["flow"]}
+    others = [_row(f) for f in LineFlow.objects.select_related("division") if f.pk not in on_menu]
     return render(
         request,
         "operations/admin_flows.html",
-        {"rows": rows, "runner_ready": line_flows.RUNNER_READY},
+        {
+            "tabs": tabs,
+            "current": current,
+            "others": others,
+            "runner_ready": line_flows.RUNNER_READY,
+        },
     )
 
 
@@ -104,6 +131,7 @@ def admin_flow(request, key):
         request,
         "operations/admin_flow.html",
         {
+            "tabs": line_flows.menu_tabs(),
             "flow": flow,
             "version": version,
             "published": published,
@@ -142,15 +170,17 @@ def admin_flow_try(request, key):
     try:
         body = json.loads(request.body or b"{}")
         rule, field, text = str(body["rule"]), str(body.get("field", "")), str(body["text"])[:5000]
-        rows = [r for r in body.get("rows") or [] if isinstance(r, dict)][:100]
+        kind = str(body.get("kind", ""))[:16]
+        values = body.get("values") if isinstance(body.get("values"), dict) else {}
     except (ValueError, TypeError, KeyError):
         return JsonResponse({"error": "ข้อมูลที่ส่งมาไม่ถูกต้อง"}, status=400)
     if rule not in line_flows.RULES:
         return JsonResponse({"error": "ไม่รู้จักกฎนี้"}, status=400)
-    value, shown, problem = flow_runner.read(rule, field, text)
+    value, shown, problem = flow_runner.read(rule, field, text, kind)
     answer = {"value": value, "shown": shown, "problem": problem}
     if not problem and rule == "multiplier":
-        computed = typed_input.multiplier_of(rows)
+        vt = str(values.get("vt_size", "")) if values.get("set_kind") in flow_runner.WITH_VT else ""
+        computed = typed_input.multiplier_from(str(values.get("ct_size", "")), vt)
         answer["computed"] = None if computed is None else f"{computed:g}"
         answer["ok"] = computed is not None and abs(float(value) - computed) < 0.001
     if not problem and field.startswith("rows."):

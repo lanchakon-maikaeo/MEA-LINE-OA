@@ -11,6 +11,7 @@
     <p class="lede">{% if version.status == 'draft' %}ร่างรุ่น {{ version.number }} แก้แล้วบันทึกให้เอง{% else %}รุ่น {{ version.number }} ({{ version.get_status_display }}) ดูได้อย่างเดียว{% endif %}{% if published %} · เผยแพร่อยู่: รุ่น {{ published.number }}{% endif %}{% if version.note %} · {{ version.note }}{% endif %}</p>
   </div>
 </div>
+{% include "operations/_flow_tabs.html" %}
 <form class="visually-hidden">{% csrf_token %}</form>
 <div class="fe" id="fe">
   <div class="fe__bar">

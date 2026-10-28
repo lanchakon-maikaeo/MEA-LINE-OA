@@ -6,6 +6,7 @@ from operations import (
     flows_web,
     internal_api,
     items_web,
+    koj_web,
     line,
     orders_web,
     pii_web,
@@ -18,6 +19,9 @@ from operations import (
 )
 
 urlpatterns = [
+    path("koj/", koj_web.sources, name="koj-sources"),
+    path("koj/sources/<int:pk>/", koj_web.history, name="koj-history"),
+    path("koj/recipients/<int:pk>/", koj_web.recipients, name="koj-recipients"),
     path("", views.index, name="index"),
     path("health/live/", views.live, name="health-live"),
     path("health/ready/", views.ready, name="health-ready"),
@@ -48,6 +52,7 @@ urlpatterns = [
     path("console/", web.home, name="console"),
     path("divisions/<str:code>/", web.division_queue, name="division-detail"),
     path("divisions/<str:code>/export.csv", web.division_export, name="division-export"),
+    path("divisions/<str:code>/approve/", web.division_approve, name="division-approve"),
     path("divisions/<str:code>/warehouse/", warehouse_web.warehouse_page, name="warehouse"),
     path(
         "divisions/<str:code>/warehouse/schedule/",
@@ -73,6 +78,17 @@ urlpatterns = [
     path("cases/<str:number>/act/<slug:action>/", web.case_action, name="case-action"),
     path("cases/<str:number>/files/", web.case_upload, name="case-upload"),
     path("cases/<str:number>/chat/", warehouse_web.case_chat_post, name="case-chat"),
+    path(
+        "cases/<str:number>/chat/thread/",
+        warehouse_web.case_chat_thread,
+        name="case-chat-thread",
+    ),
+    path("cases/<str:number>/stage/", warehouse_web.case_stage, name="case-stage"),
+    path(
+        "cases/<str:number>/appointment/",
+        warehouse_web.case_appointment,
+        name="case-appointment",
+    ),
     path("account/", web.account, name="account"),
     path("console/pii/", pii_web.page, name="pii"),
     path("routing/words/", routing_web.words, name="routing-words"),
@@ -129,6 +145,8 @@ urlpatterns = [
         name="admin-flow-publish",
     ),
     path("console/admin/requirements/", flows_web.admin_requirements, name="admin-requirements"),
+    path("console/admin/holidays/", warehouse_web.admin_holidays, name="admin-holidays"),
+    path("console/admin/emergency/", warehouse_web.admin_emergency, name="admin-emergency"),
     path("console/admin/policy/", views.admin_policy, name="admin-policy"),
     path(
         "console/admin/policy/<slug:action>/<int:pk>/",

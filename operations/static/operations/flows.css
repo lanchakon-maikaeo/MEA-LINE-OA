@@ -158,3 +158,13 @@
 .fe__publish > summary { list-style: none; }
 .fe__publish > summary::-webkit-details-marker { display: none; }
 .fe__publish-form { position: absolute; right: 0; top: calc(100% + 8px); width: 330px; background: var(--canvas); border: 1px solid var(--hairline-soft); border-radius: 14px; padding: var(--s-12); z-index: 20; box-shadow: 0 10px 30px rgba(0,0,0,.12); }
+
+/* แท็บตามปุ่มบน rich menu จริง */
+.flow-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--hairline-soft); }
+.flow-tab { display: flex; flex-direction: column; gap: 2px; min-width: 150px; padding: 8px 12px; border: 1px solid var(--hairline-soft); border-radius: 12px; text-decoration: none; color: var(--ink); background: var(--canvas); }
+.flow-tab:hover { border-color: var(--ink); }
+.flow-tab.is-current { background: var(--ink); color: var(--on-primary, #fff); border-color: var(--ink); }
+.flow-tab.is-feature { opacity: .7; }
+.flow-tab__label { font-weight: 600; font-size: 14px; }
+.flow-tab__meta { font-size: 12px; opacity: .8; }
+.flow-tile__choices { margin: 6px 0 12px; padding-left: 1.2em; }

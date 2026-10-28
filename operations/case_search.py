@@ -56,10 +56,18 @@ def find(requester, by, text):
         for number in numbers:
             lines |= Q(details__contains=[{"numbers": [number]}])
         found = CaseLine.objects.filter(lines | Q(serials__has_any_keys=numbers))
-        paired = Q()
+        # รอบใหม่ Q4: a meter number may be the เลขติดตาม, a set's meter, or in รายละเอียด.
+        other = Q()
         for number in numbers:
-            paired |= Q(intake_data__paired_meter__contains=[number])
-        cases = cases.filter(Q(pk__in=found.values("case_id")) | paired)
+            other |= (
+                Q(intake_data__paired_meter__contains=[number])
+                | Q(intake_data__meters__contains=[{"numbers": [number]}])
+                | Q(sap_kind="meter", sap_number__iexact=number)
+                | Q(purpose__icontains=number)
+                | Q(return_reason__icontains=number)
+                | Q(description__icontains=number)
+            )
+        cases = cases.filter(Q(pk__in=found.values("case_id")) | other)
     rows = cases.select_related("requester__employee").order_by("-submitted_at")[:MAX_SHOWN]
     return list(rows), numbers, ""
 

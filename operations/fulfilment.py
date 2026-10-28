@@ -197,6 +197,10 @@ def _end_allocations(lines, reason):
 
 def approve(ctx, case, payload, reason, target):
     """Decide lines: 0 ≤ approved ≤ requested, final once given; less than asked needs a reason."""
+    from operations import approvals  # local: approvals builds on services
+
+    if approvals.whole(case):
+        return approvals.approve_case(ctx, case, payload, reason, target)  # ADR 0025
     _not_filer(ctx, case)
     lines = _lines(case)
     now = timezone.now()
@@ -235,6 +239,10 @@ def approve(ctx, case, payload, reason, target):
 
 def deny_approval(ctx, case, payload, reason, target):
     """Not approved at all: every undecided line becomes 0 with the reason (Q3)."""
+    from operations import approvals  # local: approvals builds on services
+
+    if approvals.whole(case):
+        return approvals.deny_case(ctx, case, payload, reason, target)  # ADR 0025
     _not_filer(ctx, case)
     lines = _lines(case)
     if any((line.approved_quantity or ZERO) > 0 for line in lines):

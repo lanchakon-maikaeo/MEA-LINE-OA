@@ -1,6 +1,6 @@
 {
  "version": "division-requirements-v1",
- "note": "requirement ของกองจากเว็บออกแบบเมนู (26 ต.ค. 2569) กคว. ตกลงแล้วจาก grill 27 ต.ค. 2569 ผูกกับกล่องใน flow Meter, CT, VT ส่วน กอจ. ยังรอคุย",
+ "note": "requirement ของกองจากเว็บออกแบบเมนู (26 ต.ค. 2569) กคว. ตกลงแล้วจาก grill 27 ต.ค. 2569 ผูกกับกล่องใน flow Meter, CT, VT กอจ. ยืนยัน grill Q1–Q20 แล้ว ผูกกับ flow koj-tracking",
  "requirements": [
   {
    "division": "กคว.",
@@ -88,9 +88,9 @@
    "text": "ฟข เขียนระบุวันที่รับของ",
    "status": "agreed",
    "priority": "medium",
-   "remark": "คงคำถาม ต้องการใช้ภายในวันที่ (ข้ามได้) วันจ่ายจริง กคว. เป็นคนตั้ง",
+   "remark": "รอบใหม่: ไม่ถามวันที่ต้องการใช้แยก ผู้แจ้งพิมพ์ไว้ในรายละเอียดได้ วันจ่ายจริง กคว. เป็นคนตั้ง",
    "flow": "meter-ct-vt",
-   "node": "need"
+   "node": "dw"
   },
   {
    "division": "กคว.",
@@ -98,7 +98,7 @@
    "text": "1 ใบเบิกมีได้ 1 UI แต่สมารถมีทั้งชุดได้เช่น คว. CT, VT",
    "status": "agreed",
    "priority": "medium",
-   "remark": "ปุ่ม ชุดมิเตอร์ CT VT มีสี่แบบ ชุดหนึ่งมีมิเตอร์ 1 เครื่อง หมายเลขเครื่องวัดฯ ที่อยู่ในเรื่องอื่นที่ยังไม่จบ รับไว้แต่เตือน",
+   "remark": "ปุ่ม ชุดมิเตอร์ CT VT มีสี่แบบ ชุดหนึ่งมีมิเตอร์ 1 เครื่อง ถามขนาด CT และ VT สั้น ๆ เพื่อเทียบตัวคูณ",
    "flow": "meter-ct-vt",
    "node": "kind"
   },
@@ -126,41 +126,41 @@
    "division": "กอจ.",
    "topic": "problem",
    "text": "TR, ใช้เลขที่ใบเบิกพัสดุ",
-   "status": "open",
+   "status": "agreed",
    "priority": "medium",
-   "remark": "",
-   "flow": "",
-   "node": ""
+   "remark": "ติดตามเลขใบเบิก/ใบสั่งงานจากระบบเดิม ค้นเลขเต็มก่อน ต้นเลขแสดงรายการให้เลือก ไม่สร้างเรื่องเบิกใหม่",
+   "flow": "koj-tracking",
+   "node": "tracking"
   },
   {
    "division": "กอจ.",
    "topic": "problem",
    "text": "App sheet export from SAP",
-   "status": "open",
+   "status": "agreed",
    "priority": "medium",
-   "remark": "",
-   "flow": "",
-   "node": ""
+   "remark": "แอดมินตั้งแหล่งข้อมูลและคอลัมน์ภายในหน่วยงาน ดึงทุก 1 ชั่วโมง เจ้าหน้าที่กด refresh ได้ ระบบเดิมเป็นเจ้าของข้อมูล",
+   "flow": "koj-tracking",
+   "node": "tracking"
   },
   {
    "division": "กอจ.",
    "topic": "problem",
    "text": "ใบเบิกมาพร้อมวันรับหม้อแปลง",
-   "status": "open",
+   "status": "agreed",
    "priority": "medium",
-   "remark": "",
-   "flow": "",
-   "node": ""
+   "remark": "แสดงวันนัดรับที่มีในต้นทาง มค. รับติดตามเบิก/คืนเฉพาะหม้อแปลงและคาปาซิเตอร์",
+   "flow": "koj-tracking",
+   "node": "tracking"
   },
   {
    "division": "กอจ.",
    "topic": "problem",
    "text": "จองวันนัดหมายไปรับ มารับพร้อมใบเบิก",
-   "status": "open",
+   "status": "declined",
    "priority": "medium",
-   "remark": "",
-   "flow": "",
-   "node": ""
+   "remark": "เฟสนี้ติดตามงานเดิมและแสดงวันนัดจากต้นทาง ไม่เปิดจองนัดรับใหม่",
+   "flow": "koj-tracking",
+   "node": "tracking"
   },
   {
    "division": "กอจ.",
@@ -168,29 +168,29 @@
    "text": "ดูจำนวน สถานะคงค้าง จำนวนในคลัง เช่น ขอเบิกหม้อแปลง 500kVA เหลือในคลังเท่าไร",
    "status": "open",
    "priority": "medium",
-   "remark": "",
-   "flow": "",
-   "node": ""
+   "remark": "เฟส 2 ยังไม่มีข้อมูลยอดคลัง",
+   "flow": "koj-tracking",
+   "node": "tracking"
   },
   {
    "division": "กอจ.",
    "topic": "problem",
    "text": "LV Cap, LBS FRTU, VT",
-   "status": "open",
+   "status": "agreed",
    "priority": "medium",
-   "remark": "",
-   "flow": "",
-   "node": ""
+   "remark": "ปุ่มแยก LBS FRTU และตู้ metering; อุปกรณ์อื่นเปิด bushing box, VT ประกอบ LBS, LV Cap. และพิมพ์ชื่อเอง เบิก/คืน LBS/RMU และอุปกรณ์อื่นส่งชุดผู้รับแจ้ง กอจ. ที่แอดมินเลือก",
+   "flow": "koj-tracking",
+   "node": "tracking"
   },
   {
    "division": "กอจ.",
    "topic": "other",
    "text": "1.เบิก TR ตัดจ่ายใน SAP ย้อนหลัง, คืน TR มีเลขที่ใบโอนขอคืน ฟข จะสอบถามมีพื้นที่ให้คืนมั้ย\n2. LBS, RMU ขั้นตอนเหมือนกันกับ TR\n3. ซจ รับแจ้งผ่าน M/N / เลขใบแจ้งซ่อมแล้วบันทึกใน AppSheet ถ้าเสร็จเป็น Msign เช่นงาน ทดสอบ RMU ใหม่, สอบถามสถานะงาน\n4. ซม รับจากภายใน คือคลังหม้อแปลง กระบวนการคล้าย ซจ\n5. ซอ คล้าย ซจ รับ M/N จาก ฟข สอบถามสถานะ",
-   "status": "open",
+   "status": "agreed",
    "priority": "medium",
-   "remark": "",
-   "flow": "",
-   "node": ""
+   "remark": "ซจ. ซ่อม LBS/RMU: ค้น WO/WBS/เลขรับ/ใบแจ้งซ่อม อ่านสถานะงาน แสดงทุกแถวในเขต ผู้ใช้กดติดตามก่อนรับ LINE; แอดมินเลือกชุด มค./ซจ./อุปกรณ์อื่น สถานะจบตั้งเองและเก็บประวัติ ซ่อมชนิดอื่นยังไม่อยู่เฟสแรก",
+   "flow": "koj-tracking",
+   "node": "tracking"
   }
  ]
 }

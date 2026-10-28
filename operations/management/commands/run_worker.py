@@ -47,6 +47,9 @@ class Command(BaseCommand):
                 target=line_menu_release.run_loop, name="line-menu", daemon=True
             ).start()
             threading.Thread(target=ai_eval.job_loop, name="ai-eval", daemon=True).start()
+            from operations import koj_tracking
+
+            threading.Thread(target=koj_tracking.sync_loop, name="koj-sources", daemon=True).start()
         next_approval_check = 0
         while True:
             if time.monotonic() >= next_approval_check:

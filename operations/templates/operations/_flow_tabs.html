@@ -1,0 +1,9 @@
+<nav class="flow-tabs" aria-label="ปุ่มบน rich menu ของผู้ใช้ LINE">
+  {% for t in tabs %}
+    {% if t.flow %}<a class="flow-tab{% if t.flow == flow or current.item == t.item %} is-current{% endif %}" href="{% url 'admin-flow' t.flow.key %}"{% if t.flow == flow %} aria-current="page"{% endif %}>
+    {% else %}<a class="flow-tab{% if current.item == t.item %} is-current{% endif %}{% if not t.can_flow %} is-feature{% endif %}" href="{% url 'admin-flows' %}?tile={{ t.item.pk }}"{% if current.item == t.item %} aria-current="page"{% endif %}>{% endif %}
+      <span class="flow-tab__label">{{ t.item.label }}</span>
+      <span class="flow-tab__meta">{% if t.item.place == "bar" %}แถบล่าง{% elif t.item.division %}{{ t.item.division.code }}{% else %}ทุกกอง{% endif %} · {% if t.flow %}มี flow{% elif t.can_flow %}ยังใช้ขั้นในโปรแกรม{% else %}ฟังก์ชันในโปรแกรม{% endif %}</span>
+    </a>
+  {% endfor %}
+</nav>

@@ -22,6 +22,7 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from operations import (
+    approvals,
     coordination,
     fulfilment,
     identity,
@@ -374,7 +375,8 @@ def _check_sap(submission, fields, requester, routes, intake):
 
     number = fields.get("sap_number", "")
     if number:
-        problem = typed_lines.sap_in_use(number, requester)
+        # เลขติดตาม with its kind may repeat: it tracks, it counts nothing (Q3, Q17).
+        problem = "" if fields.get("sap_kind") else typed_lines.sap_in_use(number, requester)
         if problem:
             fail(ErrorCode.VALIDATION_ERROR, problem)
         return
@@ -557,7 +559,8 @@ def submit_case(actor, *, idempotency_key, payload):
                 # ADR 0008: straight to the division the rules name; unclear → coordinator.
                 case.owner_division = owner or _proposed_owner(case, coordinator, now)
                 case.section = policy.section_for(case)
-                case.save(update_fields=["owner_division", "section"])
+                case.status = approvals.first_status(case)  # ADR 0025
+                case.save(update_fields=["owner_division", "section", "status"])
             cases.append(case)
         numbers = [c.number for c in cases]
         results = []
@@ -574,6 +577,7 @@ def submit_case(actor, *, idempotency_key, payload):
                 _record(ctx, case, "submit", "", "", data, EVENT_CASE_SUBMITTED, None, None)
             )
             policy.after_submit(case)
+            approvals.start_emergency(case)  # ADR 0025 Q24
         first = dataclasses.replace(
             results[0],
             split=[{"case_id": r.case_id, "case_number": r.case_number} for r in results[1:]],
@@ -721,6 +725,9 @@ HANDLERS = {
     **returns.HANDLERS,
     **coordination.HANDLERS,
     **problems.HANDLERS,
+    # ADR 0025: recorded by the system only
+    "start_work": approvals.system_only,
+    "skip_screening": approvals.system_only,
 }
 
 # Shared lifecycle actions: each kind has its own rules (M07 Q6, M08 Q11/Q13, M09 Q1-Q4).
@@ -745,7 +752,8 @@ def _handler(action, case):
 def perform_form_action(actor, case_id, action, *, expected_revision, idempotency_key, payload):
     """Commit the form's priority confirmation and triage decision together on every channel."""
     payload = dict(payload)
-    priority = payload.pop("priority", None) if action == "complete_triage" else None
+    with_level = action in ("complete_triage", "approve")  # ADR 0025 Q25: approve sets it too
+    priority = payload.pop("priority", None) if with_level else None
     if priority:
         perform_action(
             actor,

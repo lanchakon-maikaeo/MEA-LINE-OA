@@ -65,11 +65,13 @@ BUTTON_LABELS = {
     "decline_handoff": "ไม่รับงานนี้",
     "request_routing_decision": "ขอให้ผู้ประสานตัดสิน",
     "decide_routing": "ตัดสินว่ากองใดรับ",
-    "set_priority": "ยืนยันระดับความเร่งด่วน",
+    "set_priority": "ตั้งระดับความเร่งด่วน",
     "set_section": "ระบุแผนก",
     "set_sap_number": "แก้เลข SAP ของคำขอ",
     "record_facts": "แก้ข้อเท็จจริง",
     "approve": "อนุมัติ",
+    "start_work": "เริ่มงานทันที (เรื่องฉุกเฉิน)",
+    "skip_screening": "ข้ามขั้นคัดกรอง เข้ารออนุมัติ",
     "deny_approval": "ไม่อนุมัติ",
     "allocate": "จัดสรรของที่มีไม่พอ",
     "issue": "บันทึกการจ่ายของ",
@@ -324,13 +326,19 @@ RULES = {
     "decide_routing": lambda st: st.routes and (st.review_open or st.handoff is not None),
     "set_priority": lambda st: st.member(st.owner),
     "record_facts": lambda st: st.member(st.owner),
+    # ADR 0025: every kind; a case without item rows (or not a withdrawal) is approved whole.
     "approve": lambda st: (
-        st.case.kind == K.WITHDRAWAL
-        and st.other(st.case.submitted_by_id)
+        st.other(st.case.submitted_by_id)
         and st.grant(A.WITHDRAWAL_APPROVAL)
-        and any(line.approved_quantity is None for line in st.lines)
+        and (
+            st.case.kind != K.WITHDRAWAL
+            or not st.lines
+            or any(line.approved_quantity is None for line in st.lines)
+        )
     ),
     "deny_approval": lambda st: RULES["approve"](st),
+    "start_work": lambda st: False,  # the system starts an emergency itself (ADR 0025)
+    "skip_screening": lambda st: False,
     "allocate": lambda st: (
         st.grant(A.ALLOCATION) and any(line.outstanding > 0 for line in st.lines)
     ),
@@ -755,6 +763,15 @@ def build_form(action, st, params, demo=False):
         for name, title in FACT_FIELDS:
             add(Field(f"fact-{name}", title, "select", False, FACT_CHOICES))
         add(_reason(True, help_text="บอกว่ารู้ข้อเท็จจริงนี้จากไหน เช่น หน่วยงาน (เขต/ฝ่าย)แจ้งทางโทรศัพท์"))
+    elif action == "approve" and (case.kind != K.WITHDRAWAL or not st.lines):
+        # ADR 0025 Q25: one button for the whole case, the level in the same form.
+        if not st.priority_confirmed:
+            level = _priority_field(case)
+            form.intro = "อนุมัติทั้งเรื่องและตั้งระดับความเร่งด่วนไปพร้อมกัน " + (
+                "ระบบเลือกระดับที่เสนอไว้ให้แล้ว" if level.initial else "เลือกระดับแล้วบอกเหตุผล"
+            )
+            add(level)
+        add(_reason(label="หมายเหตุ", help_text="จำเป็นเมื่อระดับต่างจากที่ระบบเสนอ"))
     elif action == "approve":
         rows = [
             {

@@ -86,7 +86,11 @@ RULE_TITLES = {
     "R10": "ไม่พบรายการหรือขอบเขตไม่ชัด",
 }
 
-EXTRA_ACTIONS = {"submit": "ยื่นเรื่อง", "route_by_ai": "AI ส่งกองตามหน้าที่"}
+EXTRA_ACTIONS = {
+    "close_on_delivery": "ปิดเรื่องเมื่อเขตได้รับของ",
+    "submit": "ยื่นเรื่อง",
+    "route_by_ai": "AI ส่งกองตามหน้าที่",
+}
 
 SYSTEM_EVENTS = {
     "case.ack_overdue": "เกินเวลาตอบรับ",

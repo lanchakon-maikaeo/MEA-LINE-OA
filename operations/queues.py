@@ -52,7 +52,7 @@ LEVEL_TITLES = {
     "P2": "ตามกำหนดงาน",
     "P3": "งานปกติ",
 }
-UNTRIAGED = "รอคัดกรอง"
+UNTRIAGED = "ยังไม่ตั้งระดับ"  # ADR 0025: no screening step names it any more
 
 
 def level_name(level):
@@ -505,11 +505,25 @@ def build_rows(cases, now):
     return [by_number[item.number] for item in items]
 
 
-def ordered(cases, tab, orders=()):
-    """B.4 order (level → date needed → arrival); closed cases newest first."""
+SORTS = {"newest": "ล่าสุดก่อน", "urgent": "เรียงตามความเร่งด่วน"}
+
+
+def ordered(cases, tab, orders=(), sort="newest"):
+    """Newest first with emergencies on top (grill กคว. 27 ต.ค. 2569 Q12), or the B.4 order
+    (level → date needed → arrival) on request; closed cases newest first."""
     cases = [*cases.select_related("triage"), *orders]
     if tab == "closed":
         return sorted(cases, key=lambda c: c.ended_at or c.updated_at, reverse=True)
+    if sort != "urgent":
+
+        def newest(case):
+            if isinstance(case, WorkOrder):
+                return (1, -case.created_at.timestamp())
+            triage = getattr(case, "triage", None)
+            level = triage and (triage.effective_priority or triage.suggested_priority)
+            return (0 if level == Priority.P0 else 1, -case.submitted_at.timestamp())
+
+        return sorted(cases, key=newest)
 
     def key(case):
         if isinstance(case, WorkOrder):
@@ -526,8 +540,8 @@ def ordered(cases, tab, orders=()):
     return sorted(cases, key=key)
 
 
-def page(cases, tab, number, orders=()):
-    items = ordered(cases, tab, orders)
+def page(cases, tab, number, orders=(), sort="newest"):
+    items = ordered(cases, tab, orders, sort)
     total = len(items)
     pages = max(1, -(-total // PAGE_SIZE))
     number = min(max(1, number), pages)

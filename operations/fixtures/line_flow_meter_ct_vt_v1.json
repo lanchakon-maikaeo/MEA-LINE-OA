@@ -1,6 +1,6 @@
 {
- "version": "line-flow-meter-ct-vt-v1",
- "note": "ข้อสรุปที่ กคว. ตอบ grill วันที่ 27 ต.ค. 2569 (Meter, CT, VT) เป็นร่างแรกของตัวแก้ flow ตัวอย่างเลขเป็นข้อมูลสมมุติ",
+ "version": "line-flow-meter-ct-vt-v2",
+ "note": "ข้อสรุป grill กคว. 27 ต.ค. 2569 รอบใหม่ (เลขติดตามสี่ชนิด รายละเอียดแทนแถว ปุ่มแก้ไข) ตัวอย่างเลขเป็นข้อมูลสมมุติ",
  "flow": {
   "key": "meter-ct-vt",
   "name": "Meter, CT, VT",
@@ -160,78 +160,47 @@
     "w": 260
    },
    {
-    "id": "docw",
+    "id": "tw",
     "kind": "ask",
-    "title": "เลขที่ใบเบิกหรือใบสั่งงาน SAP",
-    "text": "กดเลือกชนิดเลข แล้วพิมพ์เลข เช่น 4500012345/10",
+    "title": "เลขติดตามใบเบิก",
+    "text": "พิมพ์เลขหรือชื่อตามที่เลือก เลขที่ใบเบิกพิมพ์ / ได้ เช่น 4500012345/10",
     "buttons": [],
     "config": {
-     "field": "sap_document",
-     "rule": "sap_document",
-     "choices": "เลขที่ใบเบิก|ใบสั่งงาน SAP",
-     "case_kind": "withdrawal"
+     "field": "tracking",
+     "rule": "tracking",
+     "choices": "เลขที่ใบเบิก|ใบสั่งงานจาก SAP|หมายเลขเครื่องวัดฯ|โครงการ"
     },
     "x": 1000,
     "y": 40,
     "w": 260
    },
    {
-    "id": "docr",
+    "id": "tr",
     "kind": "ask",
-    "title": "เลขที่ใบส่งคืนหรือใบสั่งงาน SAP",
-    "text": "กดเลือกชนิดเลข แล้วพิมพ์เลข",
+    "title": "เลขติดตามใบส่งคืน",
+    "text": "พิมพ์เลขหรือชื่อตามที่เลือก เช่น 4500020001",
     "buttons": [],
     "config": {
-     "field": "sap_document",
-     "rule": "sap_document",
-     "choices": "เลขที่ใบส่งคืน|ใบสั่งงาน SAP",
-     "case_kind": "return"
+     "field": "tracking",
+     "rule": "tracking",
+     "choices": "เลขที่ใบส่งคืน|ใบสั่งงานจาก SAP|หมายเลขเครื่องวัดฯ|โครงการ"
     },
     "x": 1000,
     "y": 270,
     "w": 260
    },
    {
-    "id": "docs",
-    "kind": "ask",
-    "title": "ชุด · เลขที่ใบเบิก ใบส่งคืน หรือใบสั่งงาน SAP",
-    "text": "กดเลือกชนิดเลข แล้วพิมพ์เลข",
-    "buttons": [],
-    "config": {
-     "field": "sap_document",
-     "rule": "sap_document",
-     "choices": "เลขที่ใบเบิก|เลขที่ใบส่งคืน|ใบสั่งงาน SAP"
-    },
-    "x": 1000,
-    "y": 500,
-    "w": 260
-   },
-   {
-    "id": "grp",
+    "id": "isset",
     "kind": "branch",
-    "title": "อุปกรณ์ที่เลือก",
+    "title": "เป็นชุดไหม",
     "text": "ระบบดูจากปุ่มแรกที่ผู้ใช้กด",
     "buttons": [
      {
-      "id": "grp.b0",
-      "label": "มิเตอร์",
+      "id": "isset.b0",
+      "label": "ชุด",
       "full": "",
       "note": "",
-      "set": "group=meter"
-     },
-     {
-      "id": "grp.b1",
-      "label": "CT",
-      "full": "",
-      "note": "",
-      "set": "group=ct"
-     },
-     {
-      "id": "grp.b2",
-      "label": "VT",
-      "full": "",
-      "note": "",
-      "set": "group=vt"
+      "set": "group=set"
      }
     ],
     "config": {},
@@ -240,139 +209,10 @@
     "w": 260
    },
    {
-    "id": "rowm",
-    "kind": "ask",
-    "title": "มิเตอร์",
-    "text": "พิมพ์ หมายเลขเครื่องวัดฯ, ขนาด\nเช่น 12345678, 5(100)A\nหลายเครื่องพิมพ์บรรทัดละเครื่อง",
-    "buttons": [],
-    "config": {
-     "field": "rows.meter",
-     "rule": "meter_row"
-    },
-    "x": 1640,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "rowct",
-    "kind": "ask",
-    "title": "CT",
-    "text": "พิมพ์ ขนาด, จำนวน\nเช่น 100/5A, 3",
-    "buttons": [],
-    "config": {
-     "field": "rows.ct",
-     "rule": "size_quantity"
-    },
-    "x": 1640,
-    "y": 270,
-    "w": 260
-   },
-   {
-    "id": "rowvt",
-    "kind": "ask",
-    "title": "VT",
-    "text": "พิมพ์ ขนาด, จำนวน\nเช่น 11000/110V, 3",
-    "buttons": [],
-    "config": {
-     "field": "rows.vt",
-     "rule": "size_quantity"
-    },
-    "x": 1640,
-    "y": 500,
-    "w": 260
-   },
-   {
-    "id": "rowo",
-    "kind": "ask",
-    "title": "อุปกรณ์อื่น",
-    "text": "พิมพ์ ชื่ออุปกรณ์, ขนาด, จำนวน\nเช่น คีมตัดสาย, 2 นิ้ว, 2",
-    "buttons": [],
-    "config": {
-     "field": "rows.other",
-     "rule": "name_size_quantity"
-    },
-    "x": 2600,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "more",
-    "kind": "message",
-    "title": "ต้องการเพิ่มรายการอุปกรณ์หรือไม่",
-    "text": "",
-    "buttons": [
-     {
-      "id": "more.b0",
-      "label": "เพิ่มรายการ",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "more.b1",
-      "label": "ไปต่อ",
-      "full": "",
-      "note": "",
-      "set": ""
-     }
-    ],
-    "config": {},
-    "x": 1960,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "add",
-    "kind": "message",
-    "title": "เพิ่มรายการ",
-    "text": "เลือกอุปกรณ์",
-    "buttons": [
-     {
-      "id": "add.b0",
-      "label": "มิเตอร์",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "add.b1",
-      "label": "CT",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "add.b2",
-      "label": "VT",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "add.b3",
-      "label": "อุปกรณ์อื่น",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "add.b4",
-      "label": "ไปต่อ",
-      "full": "",
-      "note": "",
-      "set": ""
-     }
-    ],
-    "config": {},
-    "x": 2280,
-    "y": 40,
-    "w": 260
-   },
-   {
     "id": "kind",
     "kind": "message",
     "title": "เลือกชุด",
-    "text": "1 ใบเบิก 1 ชุด",
+    "text": "ใบเบิกหนึ่งใบเป็นหนึ่งชุด",
     "buttons": [
      {
       "id": "kind.b0",
@@ -404,59 +244,55 @@
      }
     ],
     "config": {},
-    "x": 1320,
-    "y": 270,
+    "x": 1640,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "hasm",
+    "kind": "branch",
+    "title": "ชุดนี้มีมิเตอร์ไหม",
+    "text": "ระบบดูจากชุดที่เลือก",
+    "buttons": [
+     {
+      "id": "hasm.b0",
+      "label": "มีมิเตอร์",
+      "full": "",
+      "note": "",
+      "set": "set_kind=meter_ct|meter_ct_vt"
+     }
+    ],
+    "config": {},
+    "x": 1960,
+    "y": 40,
     "w": 260
    },
    {
     "id": "setm",
     "kind": "ask",
     "title": "ชุด · มิเตอร์",
-    "text": "พิมพ์ หมายเลขเครื่องวัดฯ, ขนาด\nชุดหนึ่งมีมิเตอร์ 1 เครื่อง",
+    "text": "พิมพ์ หมายเลขเครื่องวัดฯ, ขนาด\nเช่น 12345678, 5(100)A\nชุดหนึ่งมีมิเตอร์ 1 เครื่อง",
     "buttons": [],
     "config": {
      "field": "rows.meter",
      "rule": "meter_row",
      "max_rows": "1"
     },
-    "x": 1640,
-    "y": 730,
-    "w": 260
-   },
-   {
-    "id": "setui",
-    "kind": "ask",
-    "title": "ชุด · หมายเลขเครื่องวัดฯ ที่ใช้คู่กัน",
-    "text": "สำหรับชุด CT อย่างเดียว และ CT + VT ข้ามได้",
-    "buttons": [
-     {
-      "id": "setui.b0",
-      "label": "ข้าม",
-      "full": "",
-      "note": "",
-      "set": ""
-     }
-    ],
-    "config": {
-     "field": "paired_meter",
-     "rule": "numbers",
-     "optional": "1"
-    },
-    "x": 1640,
-    "y": 960,
+    "x": 2280,
+    "y": 40,
     "w": 260
    },
    {
     "id": "setct",
     "kind": "ask",
-    "title": "ชุด · CT",
-    "text": "พิมพ์ ขนาด, จำนวน\nเช่น 100/5A, 3",
+    "title": "ชุด · ขนาด CT",
+    "text": "พิมพ์ขนาด CT เช่น 100/5A",
     "buttons": [],
     "config": {
-     "field": "rows.ct",
-     "rule": "size_quantity"
+     "field": "ct_size",
+     "rule": "size"
     },
-    "x": 1960,
+    "x": 2280,
     "y": 270,
     "w": 260
    },
@@ -472,63 +308,42 @@
       "full": "",
       "note": "",
       "set": "set_kind=meter_ct_vt|ct_vt"
-     },
-     {
-      "id": "hasvt.b1",
-      "label": "ไม่มี VT",
-      "full": "",
-      "note": "",
-      "set": "set_kind=meter_ct|ct"
      }
     ],
     "config": {},
-    "x": 2280,
-    "y": 270,
+    "x": 2600,
+    "y": 40,
     "w": 260
    },
    {
     "id": "setvt",
     "kind": "ask",
-    "title": "ชุด · VT",
-    "text": "พิมพ์ ขนาด, จำนวน\nเช่น 11000/110V, 3",
+    "title": "ชุด · ขนาด VT",
+    "text": "พิมพ์ขนาด VT เช่น 11000/110V",
     "buttons": [],
     "config": {
-     "field": "rows.vt",
-     "rule": "size_quantity"
+     "field": "vt_size",
+     "rule": "size"
     },
-    "x": 2600,
-    "y": 270,
+    "x": 2920,
+    "y": 40,
     "w": 260
    },
    {
-    "id": "mult",
-    "kind": "ask",
-    "title": "ตัวคูณในใบเบิก",
-    "text": "พิมพ์ตัวคูณที่เขียนในใบเบิก เช่น 2000\nระบบคำนวณจาก CT และ VT ไม่ตรงบอกผู้ใช้ก่อนสรุป และเตือนเจ้าหน้าที่",
-    "buttons": [],
-    "config": {
-     "field": "multiplier",
-     "rule": "multiplier"
-    },
-    "x": 2600,
-    "y": 500,
-    "w": 260
-   },
-   {
-    "id": "wr",
+    "id": "wrd",
     "kind": "branch",
     "title": "เบิกหรือส่งคืน",
     "text": "ระบบดูจากปุ่มที่ผู้ใช้กด",
     "buttons": [
      {
-      "id": "wr.b0",
+      "id": "wrd.b0",
       "label": "เบิก",
       "full": "",
       "note": "",
       "set": "case_kind=withdrawal"
      },
      {
-      "id": "wr.b1",
+      "id": "wrd.b1",
       "label": "ส่งคืน",
       "full": "",
       "note": "",
@@ -536,52 +351,102 @@
      }
     ],
     "config": {},
+    "x": 1640,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "dw",
+    "kind": "ask",
+    "title": "รายละเอียดของที่เบิก",
+    "text": "พิมพ์อุปกรณ์ ขนาด จำนวน และใช้ทำอะไร\nเช่น มิเตอร์ 5(100)A 2 เครื่อง ใช้ติดตั้งผู้ใช้ไฟรายใหม่",
+    "buttons": [],
+    "config": {
+     "field": "details",
+     "rule": "text"
+    },
+    "x": 1960,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "dr",
+    "kind": "ask",
+    "title": "รายละเอียดของที่ส่งคืน",
+    "text": "พิมพ์อุปกรณ์ ขนาด จำนวน สภาพ และเหตุผลที่คืน\nเช่น มิเตอร์ 5(15)A 1 เครื่อง ชำรุด หน้าจอไม่ติด",
+    "buttons": [],
+    "config": {
+     "field": "details",
+     "rule": "text"
+    },
+    "x": 1960,
+    "y": 500,
+    "w": 260
+   },
+   {
+    "id": "setq",
+    "kind": "branch",
+    "title": "ต้องถามตัวคูณไหม",
+    "text": "ถามเฉพาะชุด",
+    "buttons": [
+     {
+      "id": "setq.b0",
+      "label": "ชุด",
+      "full": "",
+      "note": "",
+      "set": "group=set"
+     }
+    ],
+    "config": {},
     "x": 2280,
     "y": 500,
     "w": 260
    },
    {
-    "id": "purpose",
+    "id": "mult",
     "kind": "ask",
-    "title": "ขอเบิกเพื่อใช้ทำอะไร (วัตถุประสงค์)",
-    "text": "",
+    "title": "ตัวคูณในใบเบิก",
+    "text": "พิมพ์ตัวคูณที่เขียนในใบเบิก เช่น 2000\nระบบเทียบกับ CT × VT ถ้าไม่ตรงบอกผู้ใช้และเตือนเจ้าหน้าที่",
     "buttons": [],
     "config": {
-     "field": "purpose",
-     "rule": "text"
+     "field": "multiplier",
+     "rule": "multiplier"
     },
     "x": 2600,
-    "y": 730,
+    "y": 270,
     "w": 260
    },
    {
-    "id": "need",
-    "kind": "ask",
-    "title": "ต้องการใช้ภายในวันที่เท่าไร",
-    "text": "เช่น 31/12/2569 หรือกดข้าม วันจ่ายจริง กคว. เป็นคนตั้ง",
+    "id": "wrs",
+    "kind": "branch",
+    "title": "สรุปเบิกหรือส่งคืน",
+    "text": "ระบบดูจากปุ่มที่ผู้ใช้กด",
     "buttons": [
      {
-      "id": "need.b0",
-      "label": "ข้าม",
+      "id": "wrs.b0",
+      "label": "เบิก",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=withdrawal"
+     },
+     {
+      "id": "wrs.b1",
+      "label": "ส่งคืน",
+      "full": "",
+      "note": "",
+      "set": "case_kind=return"
      }
     ],
-    "config": {
-     "field": "needed_by",
-     "rule": "date",
-     "optional": "1"
-    },
-    "x": 2920,
-    "y": 40,
+    "config": {},
+    "x": 2600,
+    "y": 500,
     "w": 260
    },
    {
     "id": "sumw",
     "kind": "summary",
     "title": "สรุปเรื่อง: เบิก",
-    "text": "ส่งถึง: กคว.\nเลขที่ใบเบิก: 4500012345/10\n1. มิเตอร์ · 5(100)A · 1 เครื่อง (หมายเลข 12345678)\n2. CT · 100/5A · 3 ตัว\nตัวคูณ: 20 (ตรงกับที่คำนวณ)\nกดยืนยันภายใน 30 นาที",
+    "text": "ส่งถึง: กคว.\nเลขที่ใบเบิก: 4500012345/10\nรายละเอียด: มิเตอร์ 5(100)A 2 เครื่อง ใช้ติดตั้งผู้ใช้ไฟรายใหม่",
     "buttons": [
      {
       "id": "sumw.b0",
@@ -592,35 +457,28 @@
      },
      {
       "id": "sumw.b1",
-      "label": "กรอกใหม่",
+      "label": "แก้ไข",
       "full": "",
-      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก",
-      "set": ""
-     },
-     {
-      "id": "sumw.b2",
-      "label": "แนบหลักฐาน",
-      "full": "",
-      "note": "ส่งรูปหรือไฟล์ แล้วกลับมาที่สรุป",
-      "set": ""
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
      }
     ],
     "config": {},
-    "x": 3240,
-    "y": 40,
+    "x": 2920,
+    "y": 270,
     "w": 260
    },
    {
     "id": "casew",
     "kind": "create_case",
     "title": "สร้างเรื่องเบิก",
-    "text": "ส่งถึง กคว. ขั้นแรกคือรอรับใบเบิก",
+    "text": "ส่งถึง กคว. เข้ารออนุมัติ",
     "buttons": [],
     "config": {
      "case_kind": "withdrawal",
      "division": "กคว."
     },
-    "x": 3560,
+    "x": 3240,
     "y": 40,
     "w": 260
    },
@@ -628,32 +486,18 @@
     "id": "donew",
     "kind": "result",
     "title": "ยื่นเรื่องแล้ว",
-    "text": "เลขเรื่อง: W69-000113\nขั้น: รอรับใบเบิก\nติดตามได้ที่ เรื่องของฉัน",
+    "text": "ติดตามได้ที่ เรื่องของฉัน",
     "buttons": [],
     "config": {},
-    "x": 3880,
+    "x": 3560,
     "y": 40,
-    "w": 260
-   },
-   {
-    "id": "cond",
-    "kind": "ask",
-    "title": "สภาพของที่ส่งคืน และเหตุผลที่ส่งคืน",
-    "text": "ส่งคืนใช้ขั้นเดิม: รับของถึงคลัง แล้วตรวจสภาพ",
-    "buttons": [],
-    "config": {
-     "field": "condition_reason",
-     "rule": "text"
-    },
-    "x": 2600,
-    "y": 960,
     "w": 260
    },
    {
     "id": "sumr",
     "kind": "summary",
     "title": "สรุปเรื่อง: ส่งคืน",
-    "text": "ส่งถึง: กคว.\nเลขที่ใบส่งคืน: 4500020001\n1. มิเตอร์ · 5(15)A · 2 เครื่อง (หมายเลข 55001001, 55001002)\nกดยืนยันภายใน 30 นาที",
+    "text": "ส่งถึง: กคว.\nเลขที่ใบส่งคืน: 4500020001\nรายละเอียด: มิเตอร์ 5(15)A 1 เครื่อง ชำรุด",
     "buttons": [
      {
       "id": "sumr.b0",
@@ -664,15 +508,15 @@
      },
      {
       "id": "sumr.b1",
-      "label": "กรอกใหม่",
+      "label": "แก้ไข",
       "full": "",
-      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก",
-      "set": ""
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
      }
     ],
     "config": {},
     "x": 2920,
-    "y": 270,
+    "y": 500,
     "w": 260
    },
    {
@@ -693,7 +537,7 @@
     "id": "doner",
     "kind": "result",
     "title": "ยื่นเรื่องแล้ว",
-    "text": "เลขเรื่อง: R69-000021\nติดตามได้ที่ เรื่องของฉัน",
+    "text": "ติดตามได้ที่ เรื่องของฉัน",
     "buttons": [],
     "config": {},
     "x": 3560,
@@ -711,7 +555,7 @@
      "rule": "sap_document"
     },
     "x": 1000,
-    "y": 730,
+    "y": 500,
     "w": 260
    },
    {
@@ -729,15 +573,15 @@
      },
      {
       "id": "sumrep.b1",
-      "label": "กรอกใหม่",
+      "label": "แก้ไข",
       "full": "",
-      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก",
-      "set": ""
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
      }
     ],
     "config": {},
     "x": 1320,
-    "y": 500,
+    "y": 270,
     "w": 260
    },
    {
@@ -752,25 +596,25 @@
      "division": "กคว."
     },
     "x": 1640,
-    "y": 1190,
+    "y": 500,
     "w": 260
    },
    {
     "id": "donerep",
     "kind": "result",
     "title": "ยื่นเรื่องแล้ว",
-    "text": "เลขเรื่อง: P69-000063",
+    "text": "ติดตามได้ที่ เรื่องของฉัน",
     "buttons": [],
     "config": {},
     "x": 1960,
-    "y": 500,
+    "y": 730,
     "w": 260
    },
    {
     "id": "nb",
     "kind": "ask",
     "title": "โน้ตบุ๊กและหัวอ่าน",
-    "text": "พิมพ์รายละเอียด เช่น ยี่ห้อโน้ตบุ๊ก โปรแกรมมิเตอร์ supporting S/W หรือเรื่องอื่น",
+    "text": "พิมพ์สิ่งที่ต้องการ เช่น ลงโปรแกรมอ่านมิเตอร์ ตรวจหัวอ่าน",
     "buttons": [],
     "config": {
      "field": "description",
@@ -783,14 +627,40 @@
    {
     "id": "nbbook",
     "kind": "book",
-    "title": "ขอนัดจากปฏิทิน",
-    "text": "ปฏิทินงานโน้ตบุ๊กและหัวอ่าน ช่วงที่มีคนขอแล้วแต่ยังไม่ยืนยันถือว่าไม่ว่าง",
+    "title": "เลือกวันเวลาที่จะนำเครื่องมา",
+    "text": "ช่วงที่มีคนขอแล้วแต่ยังไม่ยืนยันถือว่าไม่ว่าง เลือกแล้วกันไว้ 30 นาทีระหว่างตรวจสรุป",
     "buttons": [],
     "config": {
      "calendar": "notebook"
     },
     "x": 1000,
-    "y": 960,
+    "y": 730,
+    "w": 260
+   },
+   {
+    "id": "sumnb",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: โน้ตบุ๊กและหัวอ่าน",
+    "text": "ส่งถึง: กคว.\nรายละเอียด: ลงโปรแกรมอ่านมิเตอร์\nขอนัด: วันพฤหัสบดีที่ 29 ต.ค. 2569 09:00–10:00",
+    "buttons": [
+     {
+      "id": "sumnb.b0",
+      "label": "ยืนยันส่งเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sumnb.b1",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
+    "config": {},
+    "x": 1320,
+    "y": 500,
     "w": 260
    },
    {
@@ -804,7 +674,7 @@
      "topic": "service",
      "division": "กคว."
     },
-    "x": 1320,
+    "x": 1640,
     "y": 730,
     "w": 260
    },
@@ -812,11 +682,11 @@
     "id": "nbdone",
     "kind": "result",
     "title": "ขอนัดแล้ว รอเจ้าหน้าที่ยืนยัน",
-    "text": "เจ้าหน้าที่ยืนยันเวลา เปลี่ยนวัน หรือเสนอช่วงใหม่ในเว็บ ไม่ยืนยันใน 1 วันทำการ ระบบเตือนเจ้าหน้าที่",
+    "text": "เจ้าหน้าที่ยืนยันหรือเสนอเวลาใหม่ แล้วระบบส่งข้อความบอก",
     "buttons": [],
     "config": {},
-    "x": 1640,
-    "y": 1420,
+    "x": 1960,
+    "y": 960,
     "w": 260
    },
    {
@@ -853,7 +723,7 @@
      "optional": "1"
     },
     "x": 1000,
-    "y": 1190,
+    "y": 960,
     "w": 260
    },
    {
@@ -871,22 +741,22 @@
      },
      {
       "id": "sumb.b1",
-      "label": "กรอกใหม่",
+      "label": "แก้ไข",
       "full": "",
-      "note": "เริ่มกรอกใหม่ตั้งแต่ขั้นแรก",
-      "set": ""
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
      }
     ],
     "config": {},
     "x": 1320,
-    "y": 960,
+    "y": 730,
     "w": 260
    },
    {
     "id": "caseb",
     "kind": "create_case",
     "title": "สร้างเรื่องขอเครื่องวัดฯ กลับคืน",
-    "text": "ขั้น: รับคำขอ แล้วพร้อมคืน (นัดแบบงานเบิก) แล้วเขตได้รับ",
+    "text": "ขั้น: รับคำขอ แล้วพร้อมคืน แล้วเขตได้รับ",
     "buttons": [],
     "config": {
      "case_kind": "problem",
@@ -894,73 +764,73 @@
      "division": "กคว."
     },
     "x": 1640,
-    "y": 1650,
+    "y": 960,
     "w": 260
    },
    {
     "id": "doneb",
     "kind": "result",
     "title": "ยื่นเรื่องแล้ว",
-    "text": "เลขเรื่อง: P69-000064",
+    "text": "ติดตามได้ที่ เรื่องของฉัน",
     "buttons": [],
     "config": {},
     "x": 1960,
-    "y": 730,
+    "y": 1190,
     "w": 260
    },
    {
     "id": "n_search",
     "kind": "note",
     "title": "ติดตามสถานะที่ เรื่องของฉัน",
-    "text": "ปุ่ม ค้นด้วยเลขที่ใบเบิก (รวมใบสั่งงาน SAP พิมพ์เลขต้นเจอทุก /10 /20)\nปุ่ม ค้นเลขเครื่องวัดฯ (UI และเลขตู้ค้นได้) หลายเลขคั่นด้วย ,\nคนในเขตเดียวกันเห็นสถานะ กำหนดจ่าย วิธีรับ และรหัสพนักงานผู้ส่ง ไม่เห็นชื่อ\nค้นจาก Google Sheet ทำเฟสถัดไป",
+    "text": "ปุ่ม ค้นด้วยเลขที่ใบเบิก (พิมพ์แค่ต้นเลขก็เจอทุก /10 /20)\nปุ่ม ค้นเลขเครื่องวัดฯ หลายเลขคั่นด้วย ,\nคนในเขตเดียวกันเห็นสถานะ กำหนดจ่าย วิธีรับ และรหัสพนักงานผู้ส่ง ไม่เห็นชื่อ\nอ่านจาก Google Sheet ทำเฟส 2",
     "buttons": [],
     "config": {},
     "x": 40,
-    "y": 1950,
+    "y": 1490,
     "w": 260
    },
    {
     "id": "n_stages",
     "kind": "note",
     "title": "กคว. ทำต่อในเว็บ (ทีละมากได้)",
-    "text": "1. รับใบเบิกแล้ว: วันรับงาน เริ่มนับกำหนดจ่าย\n2. คีย์จ่ายแล้ว: วันคีย์จ่าย และตั้งวันจ่าย\n3. จ่ายแล้ว: วันจ่ายให้เขต วิธีรับ\n4. เขตได้รับแล้ว\nสแกนหรือวางรายการเลขใบเบิกแล้วเปลี่ยนขั้นพร้อมกัน\nตารางกำหนดจ่ายตามขนาด วันจ่ายประจำ และวันส่งรถของแต่ละ ฟข. แก้ได้ในเว็บ\nข้อความสถานะบอกขั้นด้วยคำธรรมดา",
+    "text": "เรื่องใหม่เข้ารออนุมัติของกองทันที (ADR 0025)\n1. รับใบเบิกแล้ว: วันรับงาน\n2. คีย์จ่ายแล้ว: ตั้งวันจ่าย\n3. จ่ายแล้ว\n4. เขตได้รับแล้ว: ระบบปิดเรื่องเอง",
     "buttons": [],
     "config": {},
     "x": 360,
-    "y": 1950,
+    "y": 1490,
     "w": 260
    },
    {
     "id": "n_appt",
     "kind": "note",
     "title": "แจ้งวันจ่ายและนัดรับของ",
-    "text": "กคว. ตั้งวันจ่าย แล้วเสนอวันส่งรถของเขตนั้นกับช่วงมารับเองในข้อความเดียว\nฟข. เลือกวิธีรับตอนยืนยันนัด และเปลี่ยนทีหลังได้จากเรื่องของฉัน\nตอนนี้ปิดการส่งข้อความเอง เปิดได้ในตัวเลือกระบบ",
+    "text": "กคว. ตั้งวันจ่าย แล้วเสนอวันส่งรถของเขตนั้นกับช่วงมารับเองในข้อความเดียว\nฟข. เลือกวิธีรับ และเปลี่ยนทีหลังได้จากเรื่องของฉัน\nข้อความรอส่งตอนผู้แจ้งทักมา ไม่ใช้โควตา",
     "buttons": [],
     "config": {},
     "x": 680,
-    "y": 1950,
+    "y": 1490,
     "w": 260
    },
    {
     "id": "n_ai",
     "kind": "note",
-    "title": "พิมพ์เองได้ทุกขั้น",
-    "text": "AI อ่านข้อความแล้วกรอกร่าง ระบบตรวจค่าและส่งเรื่องหลังยืนยัน (ADR 0022)\nflow นี้มีของใหม่ จึงถามทีละขั้นไปก่อนจนชุดทดสอบใหม่ของ กคว. ผ่าน\nข้อความใช้คำว่า หมายเลขเครื่องวัดฯ",
+    "title": "ถามทีละขั้น",
+    "text": "flow นี้มีของใหม่ จึงถามทีละขั้นไปก่อนจนชุดทดสอบใหม่ของ กคว. ผ่าน\nข้อความใช้คำว่า หมายเลขเครื่องวัดฯ",
     "buttons": [],
     "config": {},
     "x": 1000,
-    "y": 1950,
+    "y": 1490,
     "w": 260
    },
    {
     "id": "n_rows",
     "kind": "note",
-    "title": "รูปแบบที่พิมพ์",
-    "text": "หนึ่งบรรทัดคือหนึ่งแถว แบ่งช่องด้วย ,\nระบบจัดช่องว่าง จุลภาคแบบอื่น เลขไทย ขีด หน่วยตัวใหญ่ และคำนำหน้าเลขให้เอง แล้วบอกว่าอ่านเป็นอะไร\nหมายเลขเครื่องวัดฯ ที่อยู่ในเรื่องอื่นที่ยังไม่จบ รับไว้แต่เตือน",
+    "title": "รับแจ้งเพื่อติดตาม",
+    "text": "ระบบไม่เก็บรายการอุปกรณ์ เพราะของจริงอยู่ใน SAP\nเลขติดตามซ้ำรับได้ ถ้าซ้ำกับเรื่องที่ยังไม่จบของคนเดิมระบบบอกผู้แจ้ง และติดป้ายเลขซ้ำให้เจ้าหน้าที่\nสรุปมีปุ่มแก้ไข ยื่นแล้วมีปุ่มส่งใบถัดไป",
     "buttons": [],
     "config": {},
     "x": 1320,
-    "y": 1950,
+    "y": 1490,
     "w": 260
    }
   ],
@@ -1018,434 +888,364 @@
     "id": "e8",
     "from": "c2m",
     "port": "c2m.b0",
-    "to": "docw",
+    "to": "tw",
     "label": ""
    },
    {
     "id": "e9",
     "from": "c2m",
     "port": "c2m.b1",
-    "to": "docr",
+    "to": "tr",
     "label": ""
    },
    {
     "id": "e10",
     "from": "c2ct",
     "port": "c2ct.b0",
-    "to": "docw",
+    "to": "tw",
     "label": ""
    },
    {
     "id": "e11",
     "from": "c2ct",
     "port": "c2ct.b1",
-    "to": "docr",
+    "to": "tr",
     "label": ""
    },
    {
     "id": "e12",
+    "from": "c2set",
+    "port": "c2set.b0",
+    "to": "tw",
+    "label": ""
+   },
+   {
+    "id": "e13",
+    "from": "c2set",
+    "port": "c2set.b1",
+    "to": "tr",
+    "label": ""
+   },
+   {
+    "id": "e14",
     "from": "c2ct",
     "port": "c2ct.b2",
     "to": "repair",
     "label": ""
    },
    {
-    "id": "e13",
-    "from": "c2set",
-    "port": "c2set.b0",
-    "to": "docs",
-    "label": ""
-   },
-   {
-    "id": "e14",
-    "from": "c2set",
-    "port": "c2set.b1",
-    "to": "docs",
-    "label": ""
-   },
-   {
     "id": "e15",
-    "from": "docw",
+    "from": "tw",
     "port": null,
-    "to": "grp",
+    "to": "isset",
     "label": ""
    },
    {
     "id": "e16",
-    "from": "docr",
+    "from": "tr",
     "port": null,
-    "to": "grp",
+    "to": "isset",
     "label": ""
    },
    {
     "id": "e17",
-    "from": "grp",
-    "port": "grp.b0",
-    "to": "rowm",
-    "label": ""
-   },
-   {
-    "id": "e18",
-    "from": "grp",
-    "port": "grp.b1",
-    "to": "rowct",
-    "label": ""
-   },
-   {
-    "id": "e19",
-    "from": "grp",
-    "port": "grp.b2",
-    "to": "rowvt",
-    "label": ""
-   },
-   {
-    "id": "e20",
-    "from": "rowm",
-    "port": null,
-    "to": "more",
-    "label": ""
-   },
-   {
-    "id": "e21",
-    "from": "rowct",
-    "port": null,
-    "to": "more",
-    "label": ""
-   },
-   {
-    "id": "e22",
-    "from": "rowvt",
-    "port": null,
-    "to": "more",
-    "label": ""
-   },
-   {
-    "id": "e23",
-    "from": "rowo",
-    "port": null,
-    "to": "more",
-    "label": ""
-   },
-   {
-    "id": "e24",
-    "from": "more",
-    "port": "more.b0",
-    "to": "add",
-    "label": ""
-   },
-   {
-    "id": "e25",
-    "from": "more",
-    "port": "more.b1",
-    "to": "wr",
-    "label": ""
-   },
-   {
-    "id": "e26",
-    "from": "add",
-    "port": "add.b0",
-    "to": "rowm",
-    "label": ""
-   },
-   {
-    "id": "e27",
-    "from": "add",
-    "port": "add.b1",
-    "to": "rowct",
-    "label": ""
-   },
-   {
-    "id": "e28",
-    "from": "add",
-    "port": "add.b2",
-    "to": "rowvt",
-    "label": ""
-   },
-   {
-    "id": "e29",
-    "from": "add",
-    "port": "add.b3",
-    "to": "rowo",
-    "label": ""
-   },
-   {
-    "id": "e30",
-    "from": "add",
-    "port": "add.b4",
-    "to": "wr",
-    "label": ""
-   },
-   {
-    "id": "e31",
-    "from": "docs",
-    "port": null,
+    "from": "isset",
+    "port": "isset.b0",
     "to": "kind",
     "label": ""
    },
    {
-    "id": "e32",
+    "id": "e18",
+    "from": "isset",
+    "port": null,
+    "to": "wrd",
+    "label": ""
+   },
+   {
+    "id": "e19",
     "from": "kind",
     "port": "kind.b0",
-    "to": "setm",
+    "to": "hasm",
     "label": ""
    },
    {
-    "id": "e33",
+    "id": "e20",
     "from": "kind",
     "port": "kind.b1",
+    "to": "hasm",
+    "label": ""
+   },
+   {
+    "id": "e21",
+    "from": "kind",
+    "port": "kind.b2",
+    "to": "hasm",
+    "label": ""
+   },
+   {
+    "id": "e22",
+    "from": "kind",
+    "port": "kind.b3",
+    "to": "hasm",
+    "label": ""
+   },
+   {
+    "id": "e23",
+    "from": "hasm",
+    "port": "hasm.b0",
     "to": "setm",
     "label": ""
    },
    {
-    "id": "e34",
-    "from": "kind",
-    "port": "kind.b2",
-    "to": "setui",
+    "id": "e24",
+    "from": "hasm",
+    "port": null,
+    "to": "setct",
     "label": ""
    },
    {
-    "id": "e35",
-    "from": "kind",
-    "port": "kind.b3",
-    "to": "setui",
-    "label": ""
-   },
-   {
-    "id": "e36",
+    "id": "e25",
     "from": "setm",
     "port": null,
     "to": "setct",
     "label": ""
    },
    {
-    "id": "e37",
-    "from": "setui",
-    "port": "setui.b0",
-    "to": "setct",
-    "label": ""
-   },
-   {
-    "id": "e38",
-    "from": "setui",
-    "port": null,
-    "to": "setct",
-    "label": ""
-   },
-   {
-    "id": "e39",
+    "id": "e26",
     "from": "setct",
     "port": null,
     "to": "hasvt",
     "label": ""
    },
    {
-    "id": "e40",
+    "id": "e27",
     "from": "hasvt",
     "port": "hasvt.b0",
     "to": "setvt",
     "label": ""
    },
    {
-    "id": "e41",
+    "id": "e28",
     "from": "hasvt",
-    "port": "hasvt.b1",
-    "to": "mult",
+    "port": null,
+    "to": "wrd",
     "label": ""
    },
    {
-    "id": "e42",
+    "id": "e29",
     "from": "setvt",
     "port": null,
+    "to": "wrd",
+    "label": ""
+   },
+   {
+    "id": "e30",
+    "from": "wrd",
+    "port": "wrd.b0",
+    "to": "dw",
+    "label": ""
+   },
+   {
+    "id": "e31",
+    "from": "wrd",
+    "port": "wrd.b1",
+    "to": "dr",
+    "label": ""
+   },
+   {
+    "id": "e32",
+    "from": "dw",
+    "port": null,
+    "to": "setq",
+    "label": ""
+   },
+   {
+    "id": "e33",
+    "from": "dr",
+    "port": null,
+    "to": "setq",
+    "label": ""
+   },
+   {
+    "id": "e34",
+    "from": "setq",
+    "port": "setq.b0",
     "to": "mult",
     "label": ""
    },
    {
-    "id": "e43",
+    "id": "e35",
+    "from": "setq",
+    "port": null,
+    "to": "wrs",
+    "label": ""
+   },
+   {
+    "id": "e36",
     "from": "mult",
     "port": null,
-    "to": "wr",
+    "to": "wrs",
     "label": ""
    },
    {
-    "id": "e44",
-    "from": "wr",
-    "port": "wr.b0",
-    "to": "purpose",
-    "label": ""
-   },
-   {
-    "id": "e45",
-    "from": "wr",
-    "port": "wr.b1",
-    "to": "cond",
-    "label": ""
-   },
-   {
-    "id": "e46",
-    "from": "purpose",
-    "port": null,
-    "to": "need",
-    "label": ""
-   },
-   {
-    "id": "e47",
-    "from": "need",
-    "port": "need.b0",
+    "id": "e37",
+    "from": "wrs",
+    "port": "wrs.b0",
     "to": "sumw",
     "label": ""
    },
    {
-    "id": "e48",
-    "from": "need",
-    "port": null,
-    "to": "sumw",
+    "id": "e38",
+    "from": "wrs",
+    "port": "wrs.b1",
+    "to": "sumr",
     "label": ""
    },
    {
-    "id": "e49",
+    "id": "e39",
     "from": "sumw",
     "port": "sumw.b0",
     "to": "casew",
     "label": ""
    },
    {
-    "id": "e50",
+    "id": "e40",
     "from": "casew",
     "port": null,
     "to": "donew",
     "label": ""
    },
    {
-    "id": "e51",
-    "from": "cond",
-    "port": null,
-    "to": "sumr",
-    "label": ""
-   },
-   {
-    "id": "e52",
+    "id": "e41",
     "from": "sumr",
     "port": "sumr.b0",
     "to": "caser",
     "label": ""
    },
    {
-    "id": "e53",
+    "id": "e42",
     "from": "caser",
     "port": null,
     "to": "doner",
     "label": ""
    },
    {
-    "id": "e54",
+    "id": "e43",
     "from": "repair",
     "port": null,
     "to": "sumrep",
     "label": ""
    },
    {
-    "id": "e55",
+    "id": "e44",
     "from": "sumrep",
     "port": "sumrep.b0",
     "to": "caserep",
     "label": ""
    },
    {
-    "id": "e56",
+    "id": "e45",
     "from": "caserep",
     "port": null,
     "to": "donerep",
     "label": ""
    },
    {
-    "id": "e57",
+    "id": "e46",
     "from": "nb",
     "port": null,
     "to": "nbbook",
     "label": ""
    },
    {
-    "id": "e58",
+    "id": "e47",
     "from": "nbbook",
     "port": null,
+    "to": "sumnb",
+    "label": ""
+   },
+   {
+    "id": "e48",
+    "from": "sumnb",
+    "port": "sumnb.b0",
     "to": "nbcase",
     "label": ""
    },
    {
-    "id": "e59",
+    "id": "e49",
     "from": "nbcase",
     "port": null,
     "to": "nbdone",
     "label": ""
    },
    {
-    "id": "e60",
+    "id": "e50",
     "from": "back",
     "port": null,
     "to": "backmore",
     "label": ""
    },
    {
-    "id": "e61",
+    "id": "e51",
     "from": "backmore",
     "port": "backmore.b0",
     "to": "sumb",
     "label": ""
    },
    {
-    "id": "e62",
+    "id": "e52",
     "from": "backmore",
     "port": null,
     "to": "sumb",
     "label": ""
    },
    {
-    "id": "e63",
+    "id": "e53",
     "from": "sumb",
     "port": "sumb.b0",
     "to": "caseb",
     "label": ""
    },
    {
-    "id": "e64",
+    "id": "e54",
     "from": "caseb",
     "port": null,
     "to": "doneb",
     "label": ""
    },
    {
-    "id": "e65",
+    "id": "e55",
     "from": "n_search",
     "port": null,
     "to": "c1",
     "label": ""
    },
    {
-    "id": "e66",
+    "id": "e56",
     "from": "n_stages",
     "port": null,
     "to": "donew",
     "label": ""
    },
    {
-    "id": "e67",
+    "id": "e57",
     "from": "n_appt",
     "port": null,
     "to": "donew",
     "label": ""
    },
    {
-    "id": "e68",
+    "id": "e58",
     "from": "n_ai",
     "port": null,
     "to": "c1",
     "label": ""
    },
    {
-    "id": "e69",
+    "id": "e59",
     "from": "n_rows",
     "port": null,
-    "to": "rowm",
+    "to": "tw",
     "label": ""
    }
   ]

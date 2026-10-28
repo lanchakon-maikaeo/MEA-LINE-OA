@@ -32,3 +32,54 @@
 .chat__meta { font-size: 11.5px; color: #1f2937; margin-top: 2px; }
 .chat__form { display: grid; gap: var(--s-8); margin-top: var(--s-12); }
 @media (max-width: 720px) { .cal-week { grid-template-columns: repeat(7, 160px); } }
+.wh-next { border: 1px solid var(--hairline-soft); border-radius: 14px; padding: var(--s-12); margin: var(--s-12) 0; }
+.wh-next__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 var(--s-12); }
+.wh-appt { border-top: 1px solid var(--hairline-soft); padding-top: var(--s-8); margin-top: var(--s-8); }
+/* หน้าต่างแชตลอย (Q15) */
+.chatwin { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.chatwin__toggle { border-radius: 999px; padding: 0 20px; min-height: 48px; box-shadow: 0 6px 20px rgba(0,0,0,.18); display: inline-flex; align-items: center; gap: 8px; }
+.chatwin__dot { background: var(--danger, #d92d20); color: #fff; border-radius: 999px; font-size: 12px; padding: 1px 8px; }
+.chatwin__panel { width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--canvas, #fff); border: 1px solid var(--hairline-soft); border-radius: 18px; box-shadow: 0 12px 40px rgba(0,0,0,.2); display: flex; flex-direction: column; overflow: hidden; }
+.chatwin__panel[hidden] { display: none; }
+.chatwin__head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--hairline-soft); }
+.chatwin .chatwin__close { background: transparent; color: var(--ink); min-height: 32px; width: 32px; padding: 0; font-size: 20px; border-radius: 50%; }
+.chatwin__hint { font-size: 12.5px; color: var(--mute); padding: 6px 14px; margin: 0; }
+.chatwin__body { flex: 1; overflow-y: auto; background: #8cabd9; padding: 12px; }
+.chat__list { display: flex; flex-direction: column; gap: 8px; }
+.chat__empty { color: #1f2937; font-size: 13px; }
+.chat__msg.is-faint { opacity: .6; }
+.chatwin__form { border-top: 1px solid var(--hairline-soft); padding: 8px; display: grid; gap: 6px; }
+.chatwin__contact { font-size: 12.5px; display: grid; gap: 4px; }
+.chatwin__send { display: flex; gap: 6px; align-items: flex-end; }
+.chatwin__send textarea { min-height: 44px; flex: 1; }
+@media (max-width: 600px) { .chatwin { right: 12px; bottom: 12px; } }
+/* ปฏิทินรายเดือน (รอบใหม่ Q10) */
+.cal-nav__month { font-size: 18px; }
+.mcal { border: 1px solid var(--hairline-soft); border-radius: 14px; overflow: hidden; margin-bottom: var(--s-8); }
+.mcal__row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.mcal__row + .mcal__row { border-top: 1px solid var(--hairline-soft); }
+.mcal__head { text-align: center; font-weight: 600; padding: 8px 4px; background: var(--cloud); }
+.mcal__day { min-height: 118px; padding: 6px; border-left: 1px solid var(--hairline-soft); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mcal__day:first-child { border-left: 0; }
+.mcal__day.is-out { background: #fafafa; color: var(--mute); }
+.mcal__day.is-today { background: #eef5ff; }
+.mcal__day.is-picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+.mcal__top { display: flex; justify-content: space-between; align-items: center; }
+.mcal__num { font-size: 13px; text-decoration: none; color: inherit; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; }
+.mcal__day.is-today .mcal__num { background: #1d6fe0; color: #fff; }
+.mcal__add { width: 22px; height: 22px; border: 1px solid var(--hairline); border-radius: 50%; display: grid; place-items: center; font-size: 15px; text-decoration: none; color: var(--ink); }
+.mcal__chip { display: block; font-size: 12px; border-radius: 6px; padding: 2px 6px; text-decoration: none; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid transparent; }
+.mcal__chip.is-free { background: #e8f5e9; border-left-color: #2e7d32; }
+.mcal__chip.is-full { background: #fde3d2; border-left-color: #e8590c; }
+.mcal__chip.is-closed { background: var(--cloud); color: var(--mute); }
+.mcal__chip--holiday { background: #fde8e0; border-left-color: #f08c5a; text-align: center; }
+.mcal__legend { font-size: 13px; color: var(--mute); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: var(--s-18); }
+.mcal__legend .mcal__chip { display: inline-block; }
+.cal-dayview { margin-bottom: var(--s-18); }
+@media (max-width: 720px) { .mcal__day { min-height: 80px; padding: 3px; } .mcal__chip { font-size: 10.5px; padding: 1px 3px; } }
+.mcal--pick .mcal__pick { font: inherit; text-align: left; background: var(--canvas, #fff); color: inherit; border-radius: 0; min-height: 84px; height: auto; width: 100%; cursor: pointer; align-items: stretch; }
+.mcal--pick .mcal__pick:hover { background: #f3f6fb; color: inherit; }
+.mcal--pick .mcal__pick.is-holiday { background: #fff4ef; }
+.mcal--pick .mcal__pick.is-out { background: #fafafa; }
+.mcal__day.is-picked, .mcal--pick .mcal__pick.is-picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+.hol-form { margin: var(--s-18) 0; }

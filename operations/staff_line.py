@@ -23,7 +23,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from operations import identity, options, orchestration, queues
@@ -288,15 +288,16 @@ def _text(kind, case):
     return f"{SUBJECTS[kind]}\nเรื่อง {case.number} · กอง {case.owner_division.code}"
 
 
-def plan(kind, key, case, users):
-    """LINE deliveries for staff with a linked LINE; nothing when the budget option is 0."""
+def plan(kind, key, case, users, chosen=False):
+    """LINE deliveries for staff with a linked LINE; nothing when the budget option is 0.
+    `chosen`: the people were picked by an admin (Q33), so each of them is told."""
     if kind not in IMPORTANT or case is None or options.get(options.STAFF_LINE_BUDGET) == "0":
         return []
     from operations.conversation import text_message
 
     now = timezone.now()
     planned = []
-    for user in _important_people(case, users):
+    for user in [u for u in users if u.is_active] if chosen else _important_people(case, users):
         line = ChannelIdentity.objects.filter(staff_user=user, is_following=True).first()
         if line is None:
             continue
@@ -349,7 +350,10 @@ def _token(identity_row, action, value, now):
 
 
 def is_staff_delivery(delivery):
-    return delivery.kind.startswith("staff_") and delivery.channel == N.Channel.LINE_PUSH
+    return delivery.channel == N.Channel.LINE_PUSH and (
+        delivery.kind.startswith("staff_")
+        or (delivery.kind.startswith("koj_") and delivery.recipient_user_id is not None)
+    )
 
 
 def recipient_problem(delivery):
@@ -368,6 +372,10 @@ def recipient_problem(delivery):
         if not identity.staff_scope(user).is_admin or not user.staff_profile.notify_registrations:
             return "registration notifications no longer allowed"
         return ""
+    if delivery.kind.startswith("koj_"):
+        from operations import koj_tracking
+
+        return koj_tracking.recipient_problem(delivery)
     if delivery.work_order_id is not None:
         from operations import work_orders  # local: work_orders plans through this path
 
@@ -384,10 +392,13 @@ def budget_allows(level, now):
     used = (
         N.objects.filter(
             channel=N.Channel.LINE_PUSH,
-            kind__startswith="staff_",
             status__in=[N.Status.SENT, N.Status.UNKNOWN],
             sent_at__gte=month,
-        ).aggregate(total=Sum("counted"))["total"]
+        )
+        .filter(
+            Q(kind__startswith="staff_") | Q(kind__startswith="koj_", recipient_user__isnull=False)
+        )
+        .aggregate(total=Sum("counted"))["total"]
         or 0
     )
     if level == N.Level.CRITICAL:

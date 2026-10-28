@@ -49,6 +49,7 @@ from operations.models import (
     Requester,
     Role,
     Section,
+    SystemOption,
 )
 from operations.tests.test_m02_cases import ITEMS, make_staff
 from operations.tests.test_m03_line import ALICE, LineTestCase, buttons, texts
@@ -58,7 +59,9 @@ A = AuthorityGrant.Activity
 
 
 def real_world(target):
-    """Districts, the real units, synthetic items and the FAJO-2 policy; no intake desk."""
+    """Districts, the real units, synthetic items and the FAJO-2 policy; no intake desk. New
+    cases are screened, as before ADR 0025 (tests of the new way switch it off)."""
+    SystemOption.objects.update_or_create(key=options.SCREENING, defaults={"value": "on"})
     call_command("load_districts", stdout=StringIO())
     call_command("load_org", stdout=StringIO())
     for code, category, unit, serialized, divisible in ITEMS:

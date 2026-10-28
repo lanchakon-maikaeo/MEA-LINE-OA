@@ -35,7 +35,8 @@ KINDS = {
     "branch": ("แยกทาง", "buttons"),
     "summary": ("สรุปเรื่อง", "buttons"),
     "create_case": ("สร้างเรื่อง", "next"),
-    "find_case": ("ค้นเรื่อง", "next"),
+    "find_case": ("ค้นเรื่อง", "end"),  # the chat shows เรื่องของฉัน and the flow ends
+    "koj_tracking": ("ติดตามงานต้นทาง กอจ.", "end"),
     "book": ("นัดในปฏิทิน", "next"),
     "ai_read": ("ให้ AI อ่าน", "next"),
     "handoff": ("ส่งต่อเจ้าหน้าที่", "end"),
@@ -50,7 +51,9 @@ RULES = {
     "text": "ข้อความ",
     "number": "ตัวเลข",
     "date": "วันที่ (ไม่ใช่วันที่ผ่านมาแล้ว)",
-    "sap_document": "เลขที่ใบเบิก ใบส่งคืน หรือใบสั่งงาน SAP (ไม่เกิน 30 ตัว ใช้ / ได้)",
+    "tracking": "เลขติดตามตามชนิดที่เลือก (ใบเบิก ใบส่งคืน ใบสั่งงาน หมายเลขเครื่องวัดฯ โครงการ)",
+    "sap_document": "เลข SAP (ไม่เกิน 30 ตัว ใช้ / ได้)",
+    "size": "ขนาดหนึ่งค่า เช่น 100/5A",
     "meter_row": "หมายเลขเครื่องวัดฯ, ขนาด (บรรทัดละเครื่อง)",
     "size_quantity": "ขนาด, จำนวน",
     "name_size_quantity": "ชื่ออุปกรณ์, ขนาด, จำนวน",
@@ -59,7 +62,7 @@ RULES = {
     "multiplier": "ตัวคูณ (เทียบกับ CT และ VT)",
     "district": "ชื่อเขต (18 เขต)",
 }
-ACTIONS = {"create_case", "find_case", "book", "ai_read", "handoff"}
+ACTIONS = {"create_case", "find_case", "book", "ai_read", "handoff", "koj_tracking"}
 SETTING = re.compile(r"[a-z_]{1,30}\s*=\s*[^=;|]{1,40}(?:\|[^=;|]{1,40})*")
 
 
@@ -150,6 +153,20 @@ def check(graph):
         out.setdefault(e["from"], []).append(e)
     for n in graph["nodes"]:
         name, role = KINDS[n["kind"]]
+        if n["kind"] == "koj_tracking":
+            from operations import koj_tracking
+
+            equipment, service = n["config"].get("equipment", ""), n["config"].get("service", "")
+            if equipment and equipment not in koj_tracking.EQUIPMENT:
+                add("error", n["id"], "ไม่พบอุปกรณ์ กอจ. ที่เลือก")
+            if (
+                service
+                and service != "watches"
+                and (service not in koj_tracking.SERVICES or not equipment)
+            ):
+                add("error", n["id"], "เลือกอุปกรณ์และบริการ กอจ. ให้ครบ")
+            if service == "repair" and equipment not in {"lbs", "rmu"}:
+                add("error", n["id"], "เฟสแรกติดตามซ่อมเฉพาะ LBS และ RMU")
         edges = out.get(n["id"], [])
         if n["kind"] != "note" and not n["title"].strip():
             add("warn", n["id"], f"{name} ยังไม่มีชื่อ")
@@ -262,6 +279,11 @@ def publish(actor, version, reason):
     version = LineFlowVersion.objects.select_for_update().get(pk=version.pk)
     if version.status != V.DRAFT:
         raise ValidationError("เผยแพร่ได้เฉพาะร่าง")
+    is_koj = version.flow.tile == "หม้อแปลง LBS RMU" or (
+        version.flow.division_id and version.flow.division.code in {"กอจ.", "กองอุปกรณ์ฯ"}
+    )
+    if is_koj and any(n["kind"] == "create_case" for n in version.graph["nodes"]):
+        raise ValidationError("กอจ. ติดตามงานต้นทาง ใช้กล่องติดตามงาน กอจ. แทนการสร้างเรื่องใหม่")
     issues = check(clean_graph(version.graph))
     if blocked(issues):
         raise ValidationError("ยังมีจุดที่ต้องแก้ก่อนเผยแพร่")
@@ -274,6 +296,97 @@ def publish(actor, version, reason):
     )
     identity.audit(actor, "line_flow.published", version, reason, number=version.number)
     return version
+
+
+# --- The real rich menu --------------------------------------------------------------------
+# A requester's flow starts from a big button of the report menu (Q49: registration and staff
+# work stay in code). Buttons that open เรื่องของฉัน or a case number search are features.
+FLOW_ACTIONS = {"topic", "general"}
+
+
+def menu_tabs():
+    """[{item, flow, can_flow}] for the requester rich menu as people see it: its big buttons,
+    then the bar below them."""
+    from operations.models import LineMenuItem
+
+    items = LineMenuItem.objects.filter(
+        tab=LineMenuItem.Tab.REPORT, is_active=True, place__in=["tile", "bar"]
+    ).select_related("division")
+    flows = {f.tile: f for f in LineFlow.objects.exclude(tile="")}
+    ordered = sorted(items, key=lambda i: (i.place != "tile", i.position, i.pk))
+    return [
+        {"item": i, "flow": flows.get(i.label), "can_flow": i.action in FLOW_ACTIONS}
+        for i in ordered
+    ]
+
+
+def _starter(item):
+    """A first draft for a button without a flow: its current choices, each still to be
+    joined to the next box."""
+    choices = list(item.choices.filter(is_active=True).order_by("position", "pk")[:MAX_BUTTONS])
+    buttons = [
+        {
+            "id": f"c1.b{n}",
+            "label": c.label[:MAX_LABEL],
+            "full": c.label if len(c.label) > MAX_LABEL else "",
+            "note": "ยังทำงานตามโปรแกรมเดิม ต่อเส้นไปกล่องถัดไปเมื่อออกแบบเสร็จ",
+            "set": "",
+        }
+        for n, c in enumerate(choices)
+    ]
+    box = {"title": "", "text": "", "config": {}, "w": 260}
+    nodes = [
+        {
+            **box,
+            "id": "start",
+            "kind": "entry",
+            "title": item.label,
+            "x": 40,
+            "y": 40,
+            "text": "ปุ่มบน rich menu",
+        },
+        {
+            **box,
+            "id": "c1",
+            "kind": "message",
+            "title": item.label,
+            "x": 360,
+            "y": 40,
+            "text": item.note or "เลือกเรื่องที่ต้องการ",
+            "buttons": buttons,
+        },
+    ]
+    nodes[0]["buttons"] = []
+    return {
+        "nodes": nodes,
+        "edges": [{"id": "e1", "from": "start", "port": None, "to": "c1", "label": ""}],
+    }
+
+
+@transaction.atomic
+def flow_for_tile(actor, item):
+    """The flow of a rich menu button, created with a starter draft when it has none."""
+    identity.require_admin(actor)
+    if item.action not in FLOW_ACTIONS:
+        raise ValidationError("ปุ่มนี้เปิดเรื่องของฉันหรือค้นเลขเรื่อง ไม่ใช้ flow")
+    flow = LineFlow.objects.filter(tile=item.label).first()
+    if flow is not None:
+        return flow
+    flow = LineFlow.objects.create(
+        key=f"tile-{item.pk}", name=item.label, tile=item.label, division=item.division
+    )
+    graph = clean_graph(_starter(item))
+    LineFlowVersion.objects.create(
+        flow=flow,
+        number=1,
+        graph=graph,
+        checks=check(graph),
+        note="ร่างแรกจากตัวเลือกที่ปุ่มนี้มีอยู่ตอนนี้",
+        created_by=actor,
+        updated_by=actor,
+    )
+    identity.audit(actor, "line_flow.created", flow, tile=item.label)
+    return flow
 
 
 # --- Requirements ---------------------------------------------------------------------------

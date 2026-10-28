@@ -21,6 +21,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from operations import conversation, identity, line_api
+from operations import options as system_options
 from operations.management.commands.run_worker import run_once
 from operations.models import (
     Attachment,
@@ -35,6 +36,7 @@ from operations.models import (
     RegistrationRequest,
     Requester,
     Role,
+    SystemOption,
     WebhookInbox,
 )
 from operations.tests.test_m02_cases import ITEMS, make_staff
@@ -94,6 +96,10 @@ def texts(messages):
 class LineTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
+        # New cases are screened, as before ADR 0025 (tests of the new way switch it off).
+        SystemOption.objects.update_or_create(
+            key=system_options.SCREENING, defaults={"value": "on"}
+        )
         call_command("load_districts", stdout=StringIO())
         call_command("seed_demo_units", stdout=StringIO())
         for code, category, unit, serialized, divisible in ITEMS:

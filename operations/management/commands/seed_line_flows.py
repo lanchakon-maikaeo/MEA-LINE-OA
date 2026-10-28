@@ -23,7 +23,15 @@ from operations.models import (
 )
 
 FIXTURES = Path(settings.BASE_DIR) / "operations" / "fixtures"
-FLOWS = ("line_flow_meter_ct_vt_v1.json",)
+FLOWS = (
+    "line_flow_meter_ct_vt_v1.json",
+    "line_flow_koj_v1.json",
+    # 28 ต.ค. 2569: the other buttons of the rich menu, drawn as the chat asks today.
+    "line_flow_kco_v1.json",
+    "line_flow_smg_v1.json",
+    "line_flow_usage_v1.json",
+    "line_flow_general_v1.json",
+)
 REQUIREMENTS = "division_requirements_v1.json"
 
 
@@ -31,6 +39,7 @@ class Command(BaseCommand):
     help = "Load the first LINE flow drafts and the divisions' requirements."
 
     def add_arguments(self, parser):
+        parser.add_argument("--division", help="seed เฉพาะกองที่ระบุ เช่น กอจ. โดยไม่แตะร่างกองอื่น")
         parser.add_argument(
             "--replace-draft", action="store_true", help="put the fixture into existing drafts"
         )
@@ -41,6 +50,13 @@ class Command(BaseCommand):
         for name in FLOWS:
             data = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
             spec = data["flow"]
+            if options.get("division") and spec["division"] != options["division"]:
+                continue
+            taken = LineFlow.objects.filter(tile=spec.get("tile", "")).exclude(key=spec["key"])
+            if spec.get("tile") and taken.exists():
+                # An admin already made this button's flow in the web; keep theirs.
+                self.stdout.write(f"{spec['key']}: ปุ่ม {spec['tile']} มี flow อยู่แล้ว ข้าม")
+                continue
             flow, _ = LineFlow.objects.get_or_create(
                 key=spec["key"],
                 defaults={
@@ -89,6 +105,8 @@ class Command(BaseCommand):
         data = json.loads((FIXTURES / REQUIREMENTS).read_text(encoding="utf-8"))
         added = 0
         for row in data["requirements"]:
+            if options.get("division") and row["division"] != options["division"]:
+                continue
             division = Division.objects.filter(code=row["division"]).first()
             if division is None:
                 self.stdout.write(f"ไม่พบกอง {row['division']} ข้าม")
@@ -107,3 +125,16 @@ class Command(BaseCommand):
             )
             added += 1
         self.stdout.write(f"requirement เพิ่ม {added} ข้อ")
+        if options["replace_draft"]:
+            # A new draft may rename boxes: requirements follow the fixture's links.
+            for row in data["requirements"]:
+                if options.get("division") and row["division"] != options["division"]:
+                    continue
+                updates = {"node_id": row["node"], "remark": row["remark"]}
+                if row["division"] == "กอจ.":
+                    updates.update(
+                        status=row["status"], flow=LineFlow.objects.filter(key=row["flow"]).first()
+                    )
+                DivisionRequirement.objects.filter(
+                    division__code=row["division"], text=row["text"]
+                ).update(**updates)

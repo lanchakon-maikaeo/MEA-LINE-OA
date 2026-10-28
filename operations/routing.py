@@ -74,9 +74,12 @@ def previous_owners(case):
 
 
 def _move_owner(case, division):
+    from operations import approvals  # local: approvals reads routing_words, not this module
+
     previous = case.owner_division.code
     case.owner_division = division
     case.assignee = None  # M02: a new owner division starts without a responsible person
+    approvals.after_move(case)  # ADR 0025: out of the coordinator's hands, into approval
     return previous
 
 

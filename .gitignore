@@ -45,6 +45,9 @@ archive/
 !Docs/adr/0022-the-ai-talks-and-fills-the-draft-the-program-files.md
 !Docs/adr/0023-requester-flows-are-data-published-from-the-admin-web.md
 !Docs/adr/0024-staff-messages-from-the-web-wait-for-a-free-reply.md
+!Docs/adr/0025-new-cases-wait-for-the-owner-divisions-approval-without-screening.md
+!Docs/adr/0026-koj-tracks-external-documents-and-status-changes.md
+!Docs/koj-tracking-setup.md
 
 !operations/line_assets/*.jpg
 

@@ -41,21 +41,25 @@ def schedule_of(division):
 
 
 def working_days_after(start, days):
+    """Monday to Friday, skipping วันหยุด (รอบใหม่ Q11)."""
+    off = calendars.holidays(start, start + timedelta(days=days * 3 + 30))
     day = start
     while days > 0:
         day += timedelta(days=1)
-        if day.weekday() < 5:
+        if day.weekday() < 5 and day not in off:
             days -= 1
     return day
 
 
 def next_weekday(start, weekdays):
-    """The first day on or after start whose weekday is in weekdays (start when none are set)."""
+    """The first day on or after start whose weekday is in weekdays and is no holiday (start
+    when none are set)."""
     if not weekdays:
         return start
-    for offset in range(7):
+    off = calendars.holidays(start, start + timedelta(days=60))
+    for offset in range(60):
         day = start + timedelta(days=offset)
-        if day.weekday() in weekdays:
+        if day.weekday() in weekdays and day not in off:
             return day
     return start
 
@@ -64,6 +68,13 @@ def sla_days(schedule, case):
     """The working days of the slowest row: a size's own line, else its group's default."""
     if schedule is None or not schedule.sla:
         return None
+    group = (case.intake_data or {}).get("group", "")
+    if group and not case.lines.exists():
+        # A tracking case lists no sizes (รอบใหม่ Q4): the row of its kind of equipment.
+        rule = next(
+            (r for r in schedule.sla if r.get("group") == group and not r.get("size")), None
+        )
+        return int(rule["days"]) if rule else None
     found = []
     for line in case.lines.all():
         for row in line.details or []:
@@ -109,8 +120,8 @@ def save_schedule(actor, division, sla, issue_weekdays, truck_days, reason):
         group, size = str(row.get("group", "")).strip(), str(row.get("size", "")).strip()[:40]
         if not group and not size and not str(row.get("days", "")).strip():
             continue
-        if group not in ("meter", "ct", "vt", "other"):
-            raise ValidationError("กลุ่มต้องเป็น มิเตอร์ CT VT หรืออุปกรณ์อื่น")
+        if group not in ("meter", "ct", "vt", "set", "other"):
+            raise ValidationError("กลุ่มต้องเป็น มิเตอร์ CT VT ชุด หรืออุปกรณ์อื่น")
         try:
             days = int(row.get("days"))
         except (TypeError, ValueError):
@@ -215,7 +226,40 @@ def record(actor, cases, stage, on, planned_on=None, note=""):
             _offer(actor, case, plan)
         elif stage == S.ISSUED:
             _tell(actor, case, f"จ่ายแล้ว {thai_date(on)}" + _method_text(case))
+        elif stage == S.DELIVERED and _close(actor, case):
+            _tell(actor, case, f"{case.number} เขตได้รับของแล้ว ปิดเรื่องแล้ว")
     return done, skipped
+
+
+def _close(actor, case):
+    """Q37: a tracking withdrawal or return (no item rows) ends when the district has it."""
+    from operations import services, workflow  # local: services builds on its peers
+
+    case = Case.objects.select_for_update().get(pk=case.pk)
+    if case.status in workflow.TERMINAL or case.lines.exists() or not case.sap_kind:
+        return False
+    from_status = case.status
+    case.status = Case.Status.CLOSED
+    case.revision += 1
+    case.updated_at = case.ended_at = timezone.now()
+    case.save(update_fields=["status", "revision", "updated_at", "ended_at"])
+    scope = identity.staff_scope(actor)
+    context = services._Context(label="ปิดเมื่อเขตได้รับของ", user=actor, scope=scope)
+    services._record(
+        context,
+        case,
+        "close_on_delivery",
+        from_status,
+        "เขตได้รับแล้ว (grill กคว. รอบใหม่ Q37)",
+        {},
+        services.EVENT_DECISION_RECORDED,
+        None,
+        None,
+    )
+    from operations import policy  # local: policy reads the database
+
+    policy.after_decision(case, "close_on_delivery", actor_is_staff=True)
+    return True
 
 
 def thai_date(day):

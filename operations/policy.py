@@ -1070,15 +1070,25 @@ def _wanted_work_clocks(case):
     owner = case.owner_division_id
     wanted = {}
     if case.kind == K.PROBLEM:
-        if _status_in(case, {S.SUBMITTED, S.TRIAGE}):
+        if _status_in(case, {S.SUBMITTED, S.TRIAGE, S.AWAITING_APPROVAL}):
             wanted[(K_.FIRST_RESPONSE, None)] = (owner, case.submitted_at)
         if _status_in(case, {S.IN_PROGRESS}):
-            start = _entered(case, action__in=["complete_triage", "dispute_resolution", "reopen"])
+            start = _entered(
+                case,
+                action__in=[
+                    "complete_triage",
+                    "approve",
+                    "start_work",
+                    "dispute_resolution",
+                    "reopen",
+                ],
+            )
             if start:
                 wanted[(K_.RESOLVE, None)] = (owner, start)
     elif case.kind == K.WITHDRAWAL:
         if _status_in(case, {S.AWAITING_APPROVAL}):
-            start = _entered(case, action="complete_triage")
+            # ADR 0025: without screening the approval clock starts when the case arrives.
+            start = _entered(case, action="complete_triage") or case.submitted_at
             if start:
                 wanted[(K_.APPROVAL, None)] = (owner, start)
         if _status_in(case, {S.AWAITING_EXECUTION, S.IN_PROGRESS}):
@@ -1616,7 +1626,13 @@ def card(case):
         "problem": _problem(case),
         "decision_made": Decision.objects.filter(
             case=case,
-            action__in=["set_priority", "accept_handoff", "decide_routing", "complete_triage"],
+            action__in=[
+                "set_priority",
+                "accept_handoff",
+                "decide_routing",
+                "complete_triage",
+                "approve",
+            ],
         ).exists(),
         "fulfilment": _fulfilment(case),
     }

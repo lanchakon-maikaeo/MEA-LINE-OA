@@ -541,6 +541,21 @@ def _staff_turn(turn):
     user = staff_line.staff_of(turn.identity)
     if user is None:
         return False
+    if (
+        data.startswith("m=koj")
+        or (token is not None and token.action.startswith("koj_"))
+        or (prompt.startswith("koj_") and text is not None and not data)
+    ):
+        from operations import koj_chat
+
+        turn.requester = turn.identity.requester
+        if data.startswith("m=koj"):
+            koj_chat.static(turn, data)
+        elif token is not None:
+            koj_chat.on_token(turn, token)
+        elif text is not None:
+            koj_chat.on_text(turn, text)
+        return True
     if data == "m=roles" or command in {"เมนูตามสิทธิ์", "เมนูเพิ่มเติม"}:
         turn.set_prompt()
         staff_work.navigation(turn, user)
@@ -1292,6 +1307,9 @@ def _requester_turn(turn):
 
     chat = case_chat.chatting(turn)  # read before held messages open a new chat
     case_chat.deliver(turn)
+    from operations import koj_chat  # local: koj_chat builds on this module
+
+    koj_chat.deliver_updates(turn)  # กอจ. jobs followed (owner, 28 Oct 2569: no push)
     draft = turn.conversation.active_draft
     if draft is not None and draft.status != D.OPEN:
         draft = None
@@ -1332,6 +1350,10 @@ def _requester_turn(turn):
     command = " ".join(text.split()) if text is not None else None
     if command in MENU_WORDS and command not in turn.conversation.reply_choices.get("actions", {}):
         return _static_postback(turn, MENU_WORDS[command], draft)
+    if text is not None and turn.conversation.prompt.startswith("koj_"):
+        from operations import koj_chat
+
+        return koj_chat.on_text(turn, text)
     in_chat = chat is not None and turn.conversation.prompt == "case_chat"
     if text is not None and in_chat and not CASE_NUMBER.fullmatch((command or "").upper()):
         return case_chat.on_text(turn, chat, text, message)
@@ -1598,6 +1620,10 @@ def off_step(draft, text):
 
 
 def _static_postback(turn, data, draft):
+    if data.startswith("m=koj"):
+        from operations import koj_chat
+
+        return koj_chat.static(turn, data)
     if data in ("m=find_slip", "m=find_meter") and turn.requester:
         from operations import case_search  # local: case_search builds on this module
 
@@ -1740,9 +1766,17 @@ def _menu_item(turn, pk, go=False):
         turn.conversation.active_draft = None
         turn.conversation.save(update_fields=["active_draft", "updated_at"])
     if item.place == LineMenuItem.Place.TILE:
-        from operations import flow_runner  # local: flow_runner builds on this module
+        from operations import (
+            flow_runner,  # local: flow_runner builds on this module
+            koj_chat,
+        )
 
         published = flow_runner.published_for(item.label)
+        koj = koj_chat.is_item(item)
+        if koj and koj_chat.live(item) and not koj_chat.allowed(turn):
+            return koj_chat.home(turn)  # says who may follow กอจ. work
+        if koj and not koj_chat.live(item):
+            published = None  # owner, 28 Oct 2569: the earlier card until a valid publish
         if published is not None:  # ADR 0023: the flow an admin published for this tile
             turn.set_prompt()
             return flow_runner.start(turn, published)
@@ -1783,6 +1817,10 @@ def _menu_item(turn, pk, go=False):
         )
         return
     if action == A.EQUIPMENT:
+        from operations import koj_chat
+
+        if koj_chat.is_item(item) and koj_chat.live(item):
+            return koj_chat.services(turn, item.topic)
         if item.topic not in TYPED_GROUPS:
             return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
         if _problems_only(turn):
@@ -1919,6 +1957,16 @@ def _menu_act(turn, data):
         return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
     if kind not in ACTION_LABELS:
         return _action_card(turn, item)
+    from operations import koj_chat
+
+    if koj_chat.is_item(item) and koj_chat.live(item):
+        if item.topic not in {"transformer", "lbs", "rmu", "other"}:
+            return koj_chat.home(turn)
+        if kind not in {K.WITHDRAWAL, K.RETURN, REPAIR} or (
+            kind == REPAIR and item.topic not in {"lbs", "rmu"}
+        ):
+            return koj_chat.services(turn, item.topic)
+        return koj_chat.ask(turn, item.topic, kind)
     if kind in (K.WITHDRAWAL, K.RETURN) and _problems_only(turn):
         return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
     prompt = turn.conversation.prompt_data if turn.conversation.prompt == "equipment_name" else {}
@@ -2274,6 +2322,10 @@ def _owned_draft(turn, draft_id):
 
 def _token_action(turn, token, draft):
     action = token.action
+    if action.startswith("koj_"):
+        from operations import koj_chat
+
+        return koj_chat.on_token(turn, token)
     if action == "info_target":
         case = (
             services.visible_cases(_actor(turn))
@@ -2294,6 +2346,10 @@ def _token_action(turn, token, draft):
         from operations import warehouse  # local: warehouse builds on this module
 
         return warehouse.on_choice(turn, token)
+    if action == "flow_again":
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        return flow_runner.again(turn, token.value)  # ส่งใบถัดไป (grill กคว. รอบใหม่ Q7)
     if action == "case_list":
         item = _menu_entry(token.value["item"]) if token.value.get("item") else None
         if token.value.get("item") and item is None:

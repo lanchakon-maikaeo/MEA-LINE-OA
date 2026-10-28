@@ -30,8 +30,15 @@ KIND_STATUSES = {
         S.IN_PROGRESS,
         S.AWAITING_CONFIRMATION,
     ),
-    K.RETURN: (S.SUBMITTED, S.TRIAGE, S.AWAITING_EXECUTION, S.IN_PROGRESS),
-    K.PROBLEM: (S.SUBMITTED, S.TRIAGE, S.IN_PROGRESS, S.AWAITING_CONFIRMATION),
+    # ADR 0025: returns and problem reports wait for the owner division's approval too.
+    K.RETURN: (S.SUBMITTED, S.TRIAGE, S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.IN_PROGRESS),
+    K.PROBLEM: (
+        S.SUBMITTED,
+        S.TRIAGE,
+        S.AWAITING_APPROVAL,
+        S.IN_PROGRESS,
+        S.AWAITING_CONFIRMATION,
+    ),
 }
 PAUSED = frozenset({S.AWAITING_INFO, S.ON_HOLD})
 TERMINAL = frozenset({S.CLOSED, S.REJECTED, S.CANCELLED})
@@ -226,18 +233,37 @@ ACTIONS = {
             "approve",
             "อนุมัติ",
             "M07",
-            _per_kind(
-                _only(
-                    K.WITHDRAWAL,
-                    {S.AWAITING_APPROVAL: {S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.REJECTED}},
-                )
-            ),
+            {
+                K.WITHDRAWAL: {
+                    S.AWAITING_APPROVAL: frozenset(
+                        {S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.REJECTED}
+                    )
+                },
+                K.RETURN: {S.AWAITING_APPROVAL: frozenset({S.AWAITING_EXECUTION})},
+                K.PROBLEM: {S.AWAITING_APPROVAL: frozenset({S.IN_PROGRESS})},
+            },
         ),
         ActionSpec(
             "deny_approval",
             "ไม่อนุมัติ",
             "M07",
-            _per_kind(_only(K.WITHDRAWAL, {S.AWAITING_APPROVAL: {S.REJECTED}})),
+            _per_kind(lambda k, st: {S.AWAITING_APPROVAL: {S.REJECTED}}),
+        ),
+        # ADR 0025: the system moves new cases past screening into approval, and starts an
+        # emergency problem report without waiting (Q24). No person performs these.
+        ActionSpec(
+            "skip_screening",
+            "ข้ามขั้นคัดกรอง เข้ารออนุมัติ",
+            "M06",
+            _per_kind(
+                lambda k, _: {S.SUBMITTED: {S.AWAITING_APPROVAL}, S.TRIAGE: {S.AWAITING_APPROVAL}}
+            ),
+        ),
+        ActionSpec(
+            "start_work",
+            "เริ่มงานทันที (เรื่องฉุกเฉิน)",
+            "M06",
+            _per_kind(_only(K.PROBLEM, {S.AWAITING_APPROVAL: {S.IN_PROGRESS}})),
         ),
         ActionSpec(
             "allocate",

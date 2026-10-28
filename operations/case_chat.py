@@ -219,5 +219,63 @@ def end(turn):
 
 
 def thread(case):
-    """The case card's chat: staff and requester messages in order."""
-    return list(M.objects.filter(case=case).select_related("author__staff_profile"))
+    """The case card's chat (grill กคว. รอบใหม่ Q16), oldest first: staff and requester
+    messages, the answers to staff who asked for more, and, faint, what the requester typed in
+    LINE while filing the case. [{"who", "text", "at", "meta", "faint", "contact"}]"""
+    from operations.models import ConversationMessage
+
+    items, seen_inboxes = [], set()
+    for m in M.objects.filter(case=case).select_related("author__staff_profile"):
+        if m.inbox_id:
+            seen_inboxes.add(m.inbox_id)
+        if m.direction == M.Direction.STAFF:
+            name = (
+                m.author.staff_profile.display_name
+                if m.author_id and hasattr(m.author, "staff_profile")
+                else "ระบบ"
+            )
+            meta = f"{name} · {m.get_status_display()}"
+        else:
+            meta = "ผู้แจ้ง"
+        items.append(
+            {
+                "who": m.direction,
+                "text": m.text,
+                "at": m.created_at,
+                "meta": meta,
+                "faint": False,
+                "contact": m.contact,
+                "id": f"m{m.pk}",
+            }
+        )
+    for c in ConversationMessage.objects.filter(case=case).exclude(inbox_id__in=seen_inboxes):
+        items.append(
+            {
+                "who": "requester",
+                "text": c.text,
+                "at": c.created_at,
+                "meta": "ผู้แจ้ง · ข้อมูลเพิ่ม",
+                "faint": False,
+                "contact": "",
+                "id": f"c{c.pk}",
+            }
+        )
+    for c in ConversationMessage.objects.filter(draft__case=case, case__isnull=True):
+        items.append(
+            {
+                "who": "requester",
+                "text": c.text,
+                "at": c.created_at,
+                "meta": "ผู้แจ้ง · ตอนสร้างเรื่อง",
+                "faint": True,
+                "contact": "",
+                "id": f"d{c.pk}",
+            }
+        )
+    return sorted(items, key=lambda i: i["at"])
+
+
+def last_from_requester(items):
+    return next(
+        (i["id"] for i in reversed(items) if i["who"] == "requester" and not i["faint"]), ""
+    )

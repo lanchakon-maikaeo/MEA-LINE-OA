@@ -1,7 +1,7 @@
 {% extends "operations/base.html" %}
 {% load static ui %}
 {% block title %}{{ case.number }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
-{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}">{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}"><script src="{% static 'operations/case_chat.js' %}" defer></script>{% endblock %}
 {% block page_id %}case{% endblock %}
 {% block page_kind %}{{ case.kind }}{% endblock %}
 {% block content %}

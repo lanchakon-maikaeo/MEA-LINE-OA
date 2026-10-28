@@ -1,4 +1,5 @@
 {% extends "operations/admin_base.html" %}
+{% load koj_ui %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · บัญชีเจ้าหน้าที่</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>
 
@@ -24,6 +25,7 @@
 </table></div>
 
 <div class="form-grid">
+    {% koj_recipients target %}
     <form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">
   <fieldset><legend>แจ้งการสมัครผ่าน LINE แอดมิน</legend>{% csrf_token %}
     <p>บัญชีผู้รับต้องเป็นแอดมินและเชื่อม LINE แล้ว ระบบตรวจสิทธิ์อีกครั้งก่อนส่ง</p>

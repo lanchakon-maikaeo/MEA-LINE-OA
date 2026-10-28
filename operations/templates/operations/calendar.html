@@ -41,40 +41,61 @@
 {% endif %}
 
 <div class="cal-nav">
-  <a class="btn btn--sm btn--secondary" href="?cal={{ calendar.key }}&amp;week={{ previous|date:'Y-m-d' }}">← สัปดาห์ก่อน</a>
-  <strong>{{ start|thai_date }} ถึง {{ days.6.date|thai_date }}</strong>
-  <a class="btn btn--sm btn--secondary" href="?cal={{ calendar.key }}&amp;week={{ next|date:'Y-m-d' }}">สัปดาห์ถัดไป →</a>
+  <a class="btn btn--sm btn--secondary" href="?cal={{ calendar.key }}&amp;month={{ previous|date:'Y-m-d' }}">← เดือนก่อน</a>
+  <strong class="cal-nav__month">{{ month_label }}</strong>
+  <a class="btn btn--sm btn--secondary" href="?cal={{ calendar.key }}&amp;month={{ next|date:'Y-m-d' }}">เดือนถัดไป →</a>
 </div>
-<div class="cal-week">
-  {% for d in days %}
-  <section class="cal-day{% if d.date == today %} is-today{% endif %}" aria-label="{{ d.date|date:'l j F' }}">
-    <h3>{{ d.date|date:"D j M" }}</h3>
-    {% for s in d.slots %}
-      <div class="cal-slot{% if not s.is_open %} is-closed{% elif s.taken >= s.capacity %} is-full{% endif %}">
-        <div class="cal-slot__time">{{ s.starts_at|time:"H:i" }}–{{ s.ends_at|time:"H:i" }} <span class="muted">{{ s.taken }}/{{ s.capacity }}</span></div>
-        {% if s.note %}<div class="muted">{{ s.note }}</div>{% endif %}
-        {% for a in s.appointments.all %}{% if a.status == "requested" or a.status == "confirmed" %}
-          <div class="cal-slot__who">{% if a.case %}<a href="{% url 'case-detail' a.case.number %}">{{ a.case.number }}</a>{% else %}ร่างที่ยังไม่ส่ง{% endif %} · {{ a.get_status_display }}
-            {% if a.status == "confirmed" %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}"><button class="btn btn--ghost btn--sm" name="action" value="done" type="submit">ทำเสร็จ</button></form>{% endif %}
-          </div>
-        {% endif %}{% endfor %}
-        {% if s.is_open %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="slot" value="{{ s.pk }}"><button class="btn btn--ghost btn--sm" name="action" value="close" type="submit">ปิดช่วงนี้</button></form>{% else %}<span class="tag tag--muted">ปิดแล้ว</span>{% endif %}
+<div class="mcal" role="grid" aria-label="ปฏิทิน {{ calendar.name }} {{ month_label }}">
+  <div class="mcal__row mcal__row--head" role="row">{% for w in weekdays %}<div class="mcal__head" role="columnheader">{{ w }}</div>{% endfor %}</div>
+  {% for week in weeks %}
+  <div class="mcal__row" role="row">
+    {% for d in week %}
+    <div class="mcal__day{% if not d.in_month %} is-out{% endif %}{% if d.date == today %} is-today{% endif %}{% if d.holiday %} is-holiday{% endif %}{% if picked and picked.date == d.date %} is-picked{% endif %}" role="gridcell" aria-label="{{ d.label }}">
+      <div class="mcal__top">
+        <a class="mcal__num" href="?cal={{ calendar.key }}&amp;month={{ start|date:'Y-m-d' }}&amp;day={{ d.date|date:'Y-m-d' }}#day" title="ดูทั้งวัน {{ d.label }}">{{ d.date.day }}</a>
+        {% if d.date >= today %}<a class="mcal__add" href="?cal={{ calendar.key }}&amp;month={{ start|date:'Y-m-d' }}&amp;day={{ d.date|date:'Y-m-d' }}#add" aria-label="เปิดช่วงเวลา {{ d.label }}">+</a>{% endif %}
       </div>
-    {% empty %}<p class="muted">ไม่มีช่วงเวลา</p>{% endfor %}
-  </section>
+      {% if d.holiday %}<div class="mcal__chip mcal__chip--holiday">{{ d.holiday }}</div>{% endif %}
+      {% for s in d.slots %}
+        {% with taken=s.taken %}
+        <a class="mcal__chip{% if not s.is_open %} is-closed{% elif taken >= s.capacity %} is-full{% else %} is-free{% endif %}" href="?cal={{ calendar.key }}&amp;month={{ start|date:'Y-m-d' }}&amp;day={{ d.date|date:'Y-m-d' }}#day">{{ s.starts_at|time:"H:i" }} {% if not s.is_open %}ปิด{% elif taken >= s.capacity %}{% for a in s.appointments.all %}{% if a.status == "requested" or a.status == "confirmed" %}{% if a.case %}{{ a.case.number }}{% else %}มีคนขอ{% endif %}{% if a.status == "requested" %} รอยืนยัน{% endif %}{% endif %}{% endfor %}{% else %}ว่าง{% endif %}</a>
+        {% endwith %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
   {% endfor %}
 </div>
+<p class="mcal__legend"><span class="mcal__chip is-free">ว่าง</span> <span class="mcal__chip is-full">มีคนขอหรือยืนยันแล้ว</span> <span class="mcal__chip mcal__chip--holiday">วันหยุด</span> กดเลขวันเพื่อดูทั้งวัน กด + เพื่อเปิดช่วงเวลา</p>
 
-<form method="post" class="panel cal-add">
+{% if picked %}
+<section class="panel cal-dayview" id="day">
+  <div class="panel__head"><h2>{{ picked.label }}{% if picked.holiday %} · วันหยุด {{ picked.holiday }}{% endif %}</h2></div>
+  {% for s in picked.slots %}
+    <div class="cal-slot{% if not s.is_open %} is-closed{% elif s.taken >= s.capacity %} is-full{% endif %}">
+      <div class="cal-slot__time">{{ s.starts_at|time:"H:i" }}–{{ s.ends_at|time:"H:i" }} <span class="muted">{{ s.taken }}/{{ s.capacity }}</span>{% if s.note %} <span class="muted">{{ s.note }}</span>{% endif %}</div>
+      {% for a in s.appointments.all %}{% if a.status == "requested" or a.status == "confirmed" %}
+        <div class="cal-slot__who">{% if a.case %}<a href="{% url 'case-detail' a.case.number %}">{{ a.case.number }}</a>{% else %}ร่างที่ยังไม่ส่ง{% endif %} · {{ a.get_status_display }}{% if a.method %} · {{ a.get_method_display }}{% endif %}
+          {% if a.status == "confirmed" %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}"><input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}"><button class="btn btn--ghost btn--sm" name="action" value="done" type="submit">ทำเสร็จ</button></form>{% endif %}
+        </div>
+      {% endif %}{% endfor %}
+      {% if s.is_open %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="slot" value="{{ s.pk }}"><input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}"><button class="btn btn--ghost btn--sm" name="action" value="close" type="submit">ปิดช่วงนี้</button></form>{% else %}<span class="tag tag--muted">ปิดแล้ว</span>{% endif %}
+    </div>
+  {% empty %}<p class="muted">วันนี้ยังไม่มีช่วงเวลา</p>{% endfor %}
+</section>
+{% endif %}
+
+<form method="post" class="panel cal-add" id="add">
   {% csrf_token %}
   <div class="panel__head"><h2>เปิดช่วงเวลา</h2><span class="panel__note">หลายเวลาในวันเดียวคั่นด้วย , เช่น 09:00, 10:30, 13:00</span></div>
   <div class="wh-bulk__grid">
-    <div class="field"><label for="ca-day">วัน</label><input type="date" id="ca-day" name="day" min="{{ today|date:'Y-m-d' }}" required></div>
+    <div class="field"><label for="ca-day">วัน</label><input type="date" id="ca-day" name="day" min="{{ today|date:'Y-m-d' }}" value="{% if picked %}{{ picked.date|date:'Y-m-d' }}{% endif %}" required>{% if picked %}<span class="helptext">{{ picked.label }}</span>{% endif %}</div>
     <div class="field"><label for="ca-times">เวลาเริ่ม</label><input type="text" id="ca-times" name="times" placeholder="09:00, 10:30" required></div>
     <div class="field"><label for="ca-min">ช่วงละ (นาที)</label><input type="number" id="ca-min" name="minutes" value="60" min="5" max="480"></div>
     <div class="field"><label for="ca-cap">รับได้ (คน)</label><input type="number" id="ca-cap" name="capacity" value="1" min="1" max="50"></div>
     <div class="field"><label for="ca-note">หมายเหตุ</label><input type="text" id="ca-note" name="note" maxlength="200"></div>
   </div>
+  {% if picked.holiday %}<label class="check-pill"><input type="checkbox" name="on_holiday" value="1"> เปิดในวันหยุด ({{ picked.holiday }})</label>{% endif %}
   <button class="btn" name="action" value="add" type="submit">เปิดช่วง</button>
 </form>
 {% endblock %}

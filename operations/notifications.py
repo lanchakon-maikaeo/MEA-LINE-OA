@@ -381,6 +381,10 @@ def _recipient_problem(delivery):
         return "not in allowlist"
     if not identity.is_following:
         return "unfollowed or blocked"
+    if delivery.kind.startswith("koj_"):
+        from operations import koj_tracking
+
+        return koj_tracking.recipient_problem(delivery)
     from operations import staff_line  # local: staff_line plans through this module
 
     if staff_line.is_staff_delivery(delivery):
@@ -444,7 +448,21 @@ def send(delivery_id, now=None):
                 .exclude(pk=delivery.pk)
                 .order_by("created_at")[:4]
             )
-            members = [delivery, *others]
+            members = [delivery]
+            for other in others:
+                problem = _recipient_problem(other)
+                if problem:
+                    other.status, other.detail = N.Status.SKIPPED, problem
+                    other.save(update_fields=["status", "detail"])
+                elif not allows(other.level, state) or (
+                    staff_line.is_staff_delivery(other)
+                    and not staff_line.budget_allows(other.level, now)
+                ):
+                    other.status, other.tier = N.Status.DEFERRED, state.tier
+                    other.detail = "budget limit for batch member"
+                    other.save(update_fields=["status", "tier", "detail"])
+                else:
+                    members.append(other)
             delivery.messages = [
                 m.message or {"type": "text", "text": m.text[:5000]} for m in members
             ]
@@ -458,6 +476,12 @@ def send(delivery_id, now=None):
                 member.sent_at = now
                 member.save()
         elif delivery.status == N.Status.UNKNOWN and delivery.batch_leader_id == delivery.pk:
+            # A retry must not disclose a tracking snapshot after access was revoked.
+            for member in N.objects.filter(batch_leader=delivery, kind__startswith="koj_"):
+                problem = _recipient_problem(member)
+                if problem:
+                    N.objects.filter(batch_leader=delivery).update(detail=problem)
+                    return SendResult("skipped")
             delivery.attempts += 1  # Same request, same retry key: LINE counts it once.
             delivery.save(update_fields=["attempts"])
         else:

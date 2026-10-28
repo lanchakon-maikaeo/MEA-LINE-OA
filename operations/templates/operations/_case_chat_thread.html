@@ -1,0 +1,8 @@
+{% load ui %}<div class="chat__list" data-last="{{ last }}" data-fresh="{{ fresh|yesno:'1,' }}">
+  {% for m in items %}
+    <div class="chat__msg chat__msg--{{ m.who }}{% if m.faint %} is-faint{% endif %}">
+      <div class="chat__bubble">{{ m.text|linebreaksbr }}{% if m.contact %}<div class="chat__contact">ติดต่อ: {{ m.contact }}</div>{% endif %}</div>
+      <div class="chat__meta">{{ m.meta }} · {{ m.at|thai_short }}</div>
+    </div>
+  {% empty %}<p class="chat__empty">ยังไม่มีข้อความ</p>{% endfor %}
+</div>

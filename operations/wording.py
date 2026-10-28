@@ -44,7 +44,9 @@ EXACT = {
         "เลือกหมวดผลให้ตรงกับเรื่อง (ข้อเสนอแนะมีหมวดผลของตัวเอง)"
     ),
     "topic must be meter, transformer, other, usage or suggestion.": "เลือกหัวข้อจากรายการในฟอร์ม",
-    "sap_kind must be slip, return_slip or work_order.": "เลือกชนิดเลข: ใบเบิก ใบส่งคืน หรือใบสั่งงาน SAP",
+    "sap_kind must be slip, return_slip, work_order, meter or project.": (
+        "เลือกชนิดเลขติดตาม: ใบเบิก ใบส่งคืน ใบสั่งงานจาก SAP หมายเลขเครื่องวัดฯ หรือโครงการ"
+    ),
     "intake_data must be a small object.": "ข้อมูลที่ flow เก็บเพิ่มยาวเกินไป",
     "Only division staff can file a case for a requester.": (
         "เจ้าหน้าที่ที่สังกัดกองเท่านั้นบันทึกเรื่องแทนผู้แจ้งได้"

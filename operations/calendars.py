@@ -14,11 +14,25 @@ from django.db.models import Count, F, Q
 from django.utils import timezone
 
 from operations import identity
-from operations.models import Appointment, Calendar, CalendarSlot
+from operations.models import Appointment, Calendar, CalendarSlot, Holiday
 
 A = Appointment.Status
 DAYS = ("จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส.", "อา.")
 DAY_NAMES = ("จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์")
+MONTH_NAMES = (
+    "มกราคม",
+    "กุมภาพันธ์",
+    "มีนาคม",
+    "เมษายน",
+    "พฤษภาคม",
+    "มิถุนายน",
+    "กรกฎาคม",
+    "สิงหาคม",
+    "กันยายน",
+    "ตุลาคม",
+    "พฤศจิกายน",
+    "ธันวาคม",
+)
 MONTHS = (
     "ม.ค.",
     "ก.พ.",
@@ -51,8 +65,80 @@ def free_slots(key, now=None):
     if calendar is None:
         return []
     now = now or timezone.now()
+    release_expired(now)
     slots = _open(calendar).filter(starts_at__gt=now, taken__lt=F("capacity"))
     return list(slots.order_by("starts_at")[:MAX_SHOWN])
+
+
+def holidays(first, last):
+    """{date: name} of the วันหยุด from first to last."""
+    return dict(Holiday.objects.filter(day__gte=first, day__lte=last).values_list("day", "name"))
+
+
+def day_label(day):
+    """How a day is named where people pick days (รอบใหม่ Q11): อังคาร, 20 ต.ค. 69."""
+    year = (day.year + 543) % 100
+    return f"{DAY_NAMES[day.weekday()]}, {day.day} {MONTHS[day.month - 1]} {year:02d}"
+
+
+@transaction.atomic
+def set_holiday(actor, day, name):
+    identity.require_admin(actor)
+    name = " ".join(str(name or "").split())[:120]
+    if not name:
+        raise ValidationError("ใส่ชื่อวันหยุด")
+    holiday, _ = Holiday.objects.update_or_create(
+        day=day, defaults={"name": name, "created_by": actor}
+    )
+    identity.audit(actor, "holiday.set", holiday, day=day.isoformat(), name=name)
+    return holiday
+
+
+@transaction.atomic
+def remove_holiday(actor, day):
+    identity.require_admin(actor)
+    holiday = Holiday.objects.filter(day=day).first()
+    if holiday is not None:
+        identity.audit(actor, "holiday.removed", holiday, day=day.isoformat(), name=holiday.name)
+        holiday.delete()
+
+
+def month(actor, calendar, first):
+    """Weeks (Sunday first, as on the requested picture) of the month that holds first, each
+    day with its slots and holiday, for the calendar page (รอบใหม่ Q10)."""
+    require_member(actor, calendar)
+    first = first.replace(day=1)
+    start = first - timedelta(days=(first.weekday() + 1) % 7)
+    end = start + timedelta(days=42)
+    begin = timezone.make_aware(datetime(start.year, start.month, start.day))
+    slots = (
+        _open_or_closed(calendar)
+        .filter(starts_at__gte=begin, starts_at__lt=begin + timedelta(days=42))
+        .prefetch_related("appointments__case")
+        .order_by("starts_at")
+    )
+    off = holidays(start, end)
+    days = {}
+    for slot in slots:
+        days.setdefault(timezone.localtime(slot.starts_at).date(), []).append(slot)
+    weeks = []
+    for w in range(6):
+        week_days = []
+        for d in range(7):
+            day = start + timedelta(days=w * 7 + d)
+            week_days.append(
+                {
+                    "date": day,
+                    "in_month": day.month == first.month,
+                    "slots": days.get(day, []),
+                    "holiday": off.get(day, ""),
+                    "label": day_label(day),
+                }
+            )
+        if w >= 4 and not any(x["in_month"] for x in week_days):
+            break
+        weeks.append(week_days)
+    return weeks
 
 
 def short(slot):
@@ -94,15 +180,19 @@ def attach(draft, case):
     )
 
 
+HOLD = timedelta(minutes=30)  # grill กคว. รอบใหม่ Q8
+
+
 def release_expired(now=None):
-    """Requests of drafts that were never sent free their slots."""
+    """Requests of drafts that were never sent, or not sent within 30 minutes of choosing,
+    free their slots (the draft holds it again at its summary if it is still free)."""
     from operations.models import ConversationDraft
 
-    Appointment.objects.filter(
-        case__isnull=True,
-        status=A.REQUESTED,
-        draft__status__in=[ConversationDraft.Status.DISCARDED, ConversationDraft.Status.EXPIRED],
-    ).update(status=A.CANCELLED, decided_at=now or timezone.now())
+    now = now or timezone.now()
+    gone = [ConversationDraft.Status.DISCARDED, ConversationDraft.Status.EXPIRED]
+    Appointment.objects.filter(case__isnull=True, status=A.REQUESTED).filter(
+        Q(draft__status__in=gone) | Q(draft__isnull=True) | Q(requested_at__lt=now - HOLD)
+    ).update(status=A.CANCELLED, decided_at=now)
 
 
 # --- Staff --------------------------------------------------------------------------------------
@@ -120,9 +210,15 @@ def visible(actor):
 
 
 @transaction.atomic
-def add_slots(actor, calendar, day, times, minutes, capacity=1, note=""):
-    """Open slots on day at each "HH:MM" of times, each `minutes` long."""
+def add_slots(actor, calendar, day, times, minutes, capacity=1, note="", on_holiday=False):
+    """Open slots on day at each "HH:MM" of times, each `minutes` long; a holiday needs
+    on_holiday (รอบใหม่ Q11: allowed, but asked first)."""
     require_member(actor, calendar)
+    holiday = Holiday.objects.filter(day=day).first()
+    if holiday is not None and not on_holiday:
+        raise ValidationError(
+            f"{day_label(day)} เป็นวันหยุด ({holiday.name}) ติ๊กยืนยันเปิดในวันหยุดแล้วกดอีกครั้ง"
+        )
     if not 5 <= int(minutes) <= 8 * 60:
         raise ValidationError("ช่วงละ 5 นาทีถึง 8 ชั่วโมง")
     if not 1 <= int(capacity) <= 50:
@@ -211,22 +307,6 @@ def decide(actor, appointment, action, *, slot=None, method="", note=""):
     if text:
         _tell(actor, appointment, text)
     return appointment
-
-
-def week(actor, calendar, start):
-    """Slots of the seven days from start, with their appointments, for the calendar page."""
-    require_member(actor, calendar)
-    first = timezone.make_aware(datetime(start.year, start.month, start.day))
-    slots = (
-        _open_or_closed(calendar)
-        .filter(starts_at__gte=first, starts_at__lt=first + timedelta(days=7))
-        .prefetch_related("appointments__case")
-        .order_by("starts_at")
-    )
-    days = [{"date": start + timedelta(days=i), "slots": []} for i in range(7)]
-    for slot in slots:
-        days[(timezone.localtime(slot.starts_at).date() - start).days]["slots"].append(slot)
-    return days
 
 
 def _open_or_closed(calendar):

@@ -129,18 +129,22 @@ class MixedQueueTests(WebTestCase):
         WorkOrder.objects.bulk_update(orders, ["created_at"])
         client = self.client_for(self.admin)
         url = reverse("queue-all")
-        first = client.get(url)
-        second = client.get(url, {"page": 2})
+        # The B.4 order is one tap away (grill กคว. 27 ต.ค. 2569 Q12: newest first by default).
+        first = client.get(url, {"sort": "urgent"})
+        second = client.get(url, {"page": 2, "sort": "urgent"})
         expected = [case.number, orders[51].number, orders[50].number] + [
             order.number for order in orders[:50]
         ]
         self.assertEqual(self.numbers(first) + self.numbers(second), expected)
         self.assertEqual(first.context["pager"], {"number": 1, "pages": 2, "total": 53})
-        poll = client.get(url, HTTP_HX_REQUEST="true")
+        poll = client.get(url, {"sort": "urgent"}, HTTP_HX_REQUEST="true")
         self.assertEqual(self.numbers(poll), self.numbers(first))
         self.assertEqual(poll.context["pager"], first.context["pager"])
-        exported = client.get(reverse("queue-all-export")).content.decode("utf-8-sig")
-        self.assertEqual([row[0] for row in list(csv.reader(io.StringIO(exported)))[1:]], expected)
+        exported = client.get(reverse("queue-all-export"), {"sort": "urgent"})
+        rows = list(csv.reader(io.StringIO(exported.content.decode("utf-8-sig"))))[1:]
+        self.assertEqual([row[0] for row in rows], expected)
+        newest = self.numbers(client.get(url))
+        self.assertEqual(newest[:2], [case.number, orders[51].number])  # emergency on top
 
     def test_overview_and_csv_include_orders_while_case_reports_keep_their_scope(self):
         case = self.at_meter()

@@ -117,7 +117,7 @@ def _text(kind, case, detail=""):
     return "\n".join(rows)
 
 
-def plan(kind, key, case, users, detail="", text=None):
+def plan(kind, key, case, users, detail="", text=None, chosen=False):
     """One email per recipient for one situation; the same key never plans twice. Nothing is
     planned while staff email is off, so the queue holds no mail that will never be sent.
     `case` is None only for situations about no single case (M11 registry summary). Staff
@@ -126,7 +126,7 @@ def plan(kind, key, case, users, detail="", text=None):
 
     if case is not None and case.is_example:
         return []  # ตัวอย่าง (15 ต.ค. 2569 Q33): no email or LINE about it
-    staff_line.plan(kind, key, case, users)
+    staff_line.plan(kind, key, case, users, chosen)
     if not enabled():
         return []
     now = timezone.now()
@@ -177,6 +177,15 @@ def plan_for_event(event):
         # The desk that holds new cases: intake, or (ADR 0008) the owner division itself.
         desk = Division.objects.filter(is_intake=True, is_active=True).first()
         desk_id = desk.pk if desk else case.owner_division_id
+        from operations.models import EmergencyContact
+
+        # Q33: the people an admin chose for this division, else its members (LINE: heads).
+        chosen = _with_email(
+            c.user
+            for c in EmergencyContact.objects.filter(division_id=desk_id).select_related("user")
+        )
+        if chosen:
+            return plan("staff_hazard", f"hazard:{case.pk}", case, chosen, chosen=True)
         return plan("staff_hazard", f"hazard:{case.pk}", case, members(desk_id))
     if event.event_type != orchestration.EVENT_DECISION:
         return []

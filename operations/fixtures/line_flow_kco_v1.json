@@ -1,0 +1,497 @@
+{
+ "version": "line-flow-kco-tools-v1",
+ "note": "ร่างตามขั้นที่แชตถามอยู่ตอนนี้ (28 ต.ค. 2569) ยังไม่เผยแพร่ ใช้ปรับหลัง grill ของกองนี้",
+ "flow": {
+  "key": "kco-tools",
+  "name": "เครื่องมือและอุปกรณ์",
+  "division": "กคอ.",
+  "tile": "เครื่องมือและอุปกรณ์"
+ },
+ "graph": {
+  "nodes": [
+   {
+    "id": "start",
+    "kind": "entry",
+    "title": "เครื่องมือและอุปกรณ์",
+    "text": "ปุ่มบน rich menu ของ กคอ.",
+    "buttons": [],
+    "config": {},
+    "x": 40,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "name",
+    "kind": "ask",
+    "title": "เครื่องมือและอุปกรณ์",
+    "text": "พิมพ์ชื่ออุปกรณ์ เช่น เครื่องบีบสายไฟแบบแบตเตอรี่",
+    "buttons": [
+     {
+      "id": "name.b0",
+      "label": "ติดตามเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     }
+    ],
+    "config": {
+     "field": "equipment_name",
+     "rule": "text"
+    },
+    "x": 360,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "act",
+    "kind": "message",
+    "title": "เลือกสิ่งที่ต้องการ",
+    "text": "",
+    "buttons": [
+     {
+      "id": "act.b0",
+      "label": "ติดตามใบเบิก",
+      "full": "",
+      "note": "",
+      "set": "case_kind=withdrawal"
+     },
+     {
+      "id": "act.b1",
+      "label": "ติดตามใบส่งคืน",
+      "full": "",
+      "note": "",
+      "set": "case_kind=return"
+     },
+     {
+      "id": "act.b2",
+      "label": "ติดตามสถานะการซ่อม",
+      "full": "",
+      "note": "",
+      "set": "case_kind=problem"
+     }
+    ],
+    "config": {},
+    "x": 680,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "sap",
+    "kind": "ask",
+    "title": "เลขใบเบิกหรือใบส่งคืน SAP",
+    "text": "พิมพ์เลขใบเบิกหรือใบส่งคืนจาก SAP",
+    "buttons": [],
+    "config": {
+     "field": "sap_document",
+     "rule": "sap_document"
+    },
+    "x": 1000,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "rows",
+    "kind": "ask",
+    "title": "ขนาดและจำนวน",
+    "text": "พิมพ์ ขนาด, จำนวน เช่น 2 นิ้ว, 2\nหลายขนาดพิมพ์บรรทัดละขนาด",
+    "buttons": [],
+    "config": {
+     "field": "rows.other",
+     "rule": "size_quantity"
+    },
+    "x": 1320,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "wr",
+    "kind": "branch",
+    "title": "เบิกหรือส่งคืน",
+    "text": "ระบบดูจากปุ่มที่ผู้ใช้กด",
+    "buttons": [
+     {
+      "id": "wr.b0",
+      "label": "เบิก",
+      "full": "",
+      "note": "",
+      "set": "case_kind=withdrawal"
+     },
+     {
+      "id": "wr.b1",
+      "label": "ส่งคืน",
+      "full": "",
+      "note": "",
+      "set": "case_kind=return"
+     }
+    ],
+    "config": {},
+    "x": 1640,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "purpose",
+    "kind": "ask",
+    "title": "ขอเบิกเพื่อใช้ทำอะไร (วัตถุประสงค์)",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "field": "purpose",
+     "rule": "text"
+    },
+    "x": 1960,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "cond",
+    "kind": "ask",
+    "title": "สภาพของที่ส่งคืน และเหตุผลที่ส่งคืน",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "field": "condition_reason",
+     "rule": "text"
+    },
+    "x": 1960,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "sumw",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: เบิก",
+    "text": "",
+    "buttons": [
+     {
+      "id": "sumw.b0",
+      "label": "ยืนยันส่งเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sumw.b1",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
+    "config": {},
+    "x": 2280,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "casew",
+    "kind": "create_case",
+    "title": "สร้างเรื่องเบิก",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "case_kind": "withdrawal",
+     "division": "กคอ."
+    },
+    "x": 2600,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "donew",
+    "kind": "result",
+    "title": "ยื่นเรื่องแล้ว",
+    "text": "ติดตามได้ที่ เรื่องของฉัน",
+    "buttons": [],
+    "config": {},
+    "x": 2920,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "sumr",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: ส่งคืน",
+    "text": "",
+    "buttons": [
+     {
+      "id": "sumr.b0",
+      "label": "ยืนยันส่งเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sumr.b1",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
+    "config": {},
+    "x": 2280,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "caser",
+    "kind": "create_case",
+    "title": "สร้างเรื่องส่งคืน",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "case_kind": "return",
+     "division": "กคอ."
+    },
+    "x": 2600,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "doner",
+    "kind": "result",
+    "title": "ยื่นเรื่องแล้ว",
+    "text": "ติดตามได้ที่ เรื่องของฉัน",
+    "buttons": [],
+    "config": {},
+    "x": 2920,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "repsap",
+    "kind": "ask",
+    "title": "เลข SAP งานซ่อม",
+    "text": "พิมพ์เลข SAP งานซ่อม",
+    "buttons": [],
+    "config": {
+     "field": "sap_document",
+     "rule": "sap_document"
+    },
+    "x": 1000,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "repwhat",
+    "kind": "ask",
+    "title": "สิ่งที่ต้องการติดตาม",
+    "text": "เช่น ส่งซ่อมเมื่อไร หรืออาการที่ส่งซ่อม",
+    "buttons": [],
+    "config": {
+     "field": "description",
+     "rule": "text"
+    },
+    "x": 1320,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "sumrep",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: ติดตามสถานะการซ่อม",
+    "text": "",
+    "buttons": [
+     {
+      "id": "sumrep.b0",
+      "label": "ยืนยันส่งเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sumrep.b1",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
+    "config": {},
+    "x": 1640,
+    "y": 270,
+    "w": 260
+   },
+   {
+    "id": "caserep",
+    "kind": "create_case",
+    "title": "สร้างเรื่องติดตามซ่อม",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "case_kind": "problem",
+     "topic": "repair",
+     "division": "กคอ."
+    },
+    "x": 1960,
+    "y": 500,
+    "w": 260
+   },
+   {
+    "id": "donerep",
+    "kind": "result",
+    "title": "ยื่นเรื่องแล้ว",
+    "text": "ติดตามได้ที่ เรื่องของฉัน",
+    "buttons": [],
+    "config": {},
+    "x": 2280,
+    "y": 500,
+    "w": 260
+   },
+   {
+    "id": "track",
+    "kind": "find_case",
+    "title": "เรื่องของฉัน",
+    "text": "แสดงเรื่องของผู้แจ้งในกองนี้",
+    "buttons": [],
+    "config": {},
+    "x": 680,
+    "y": 270,
+    "w": 260
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "from": "start",
+    "port": null,
+    "to": "name",
+    "label": ""
+   },
+   {
+    "id": "e2",
+    "from": "name",
+    "port": null,
+    "to": "act",
+    "label": ""
+   },
+   {
+    "id": "e3",
+    "from": "name",
+    "port": "name.b0",
+    "to": "track",
+    "label": ""
+   },
+   {
+    "id": "e4",
+    "from": "act",
+    "port": "act.b0",
+    "to": "sap",
+    "label": ""
+   },
+   {
+    "id": "e5",
+    "from": "act",
+    "port": "act.b1",
+    "to": "sap",
+    "label": ""
+   },
+   {
+    "id": "e6",
+    "from": "act",
+    "port": "act.b2",
+    "to": "repsap",
+    "label": ""
+   },
+   {
+    "id": "e7",
+    "from": "sap",
+    "port": null,
+    "to": "rows",
+    "label": ""
+   },
+   {
+    "id": "e8",
+    "from": "rows",
+    "port": null,
+    "to": "wr",
+    "label": ""
+   },
+   {
+    "id": "e9",
+    "from": "wr",
+    "port": "wr.b0",
+    "to": "purpose",
+    "label": ""
+   },
+   {
+    "id": "e10",
+    "from": "wr",
+    "port": "wr.b1",
+    "to": "cond",
+    "label": ""
+   },
+   {
+    "id": "e11",
+    "from": "purpose",
+    "port": null,
+    "to": "sumw",
+    "label": ""
+   },
+   {
+    "id": "e12",
+    "from": "sumw",
+    "port": "sumw.b0",
+    "to": "casew",
+    "label": ""
+   },
+   {
+    "id": "e13",
+    "from": "casew",
+    "port": null,
+    "to": "donew",
+    "label": ""
+   },
+   {
+    "id": "e14",
+    "from": "cond",
+    "port": null,
+    "to": "sumr",
+    "label": ""
+   },
+   {
+    "id": "e15",
+    "from": "sumr",
+    "port": "sumr.b0",
+    "to": "caser",
+    "label": ""
+   },
+   {
+    "id": "e16",
+    "from": "caser",
+    "port": null,
+    "to": "doner",
+    "label": ""
+   },
+   {
+    "id": "e17",
+    "from": "repsap",
+    "port": null,
+    "to": "repwhat",
+    "label": ""
+   },
+   {
+    "id": "e18",
+    "from": "repwhat",
+    "port": null,
+    "to": "sumrep",
+    "label": ""
+   },
+   {
+    "id": "e19",
+    "from": "sumrep",
+    "port": "sumrep.b0",
+    "to": "caserep",
+    "label": ""
+   },
+   {
+    "id": "e20",
+    "from": "caserep",
+    "port": null,
+    "to": "donerep",
+    "label": ""
+   }
+  ]
+ }
+}

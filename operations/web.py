@@ -22,9 +22,11 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from operations import (
     admin_nav,
+    approvals,
     casepage,
     charts,
     identity,
+    policy,
     queues,
     registry,
     reports,
@@ -38,7 +40,16 @@ from operations import (
     workflow,
 )
 from operations.contracts import Actor, CommandFailed, ErrorCode
-from operations.models import Case, District, Division, Priority, Role, RoleGrant, WorkOrder
+from operations.models import (
+    AuthorityGrant,
+    Case,
+    District,
+    Division,
+    Priority,
+    Role,
+    RoleGrant,
+    WorkOrder,
+)
 
 ADMIN_URLS = ("admin-",)
 REFERENCE_URLS = {"pii", "routing-words", "duties"}
@@ -236,7 +247,9 @@ def _queue(request, division, admin_all=False):
     except ValueError:
         number = 1
     orders = queues.order_queryset(request.user, tab, division, now, filters)
-    items, pager = queues.page(cases, tab, number, orders)
+    sort = request.GET.get("sort", "newest")
+    sort = sort if sort in queues.SORTS else "newest"
+    items, pager = queues.page(cases, tab, number, orders, sort)
     if division or admin_all:
         request.session["division"] = division.code if division else ALL_QUEUE
     context = {
@@ -250,7 +263,14 @@ def _queue(request, division, admin_all=False):
         "pager": pager,
         "now": now,
         "kinds": Case.Kind.choices,
-        "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "รอคัดกรอง")],
+        "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "ยังไม่ตั้งระดับ")],
+        "sort": sort,
+        "sorts": queues.SORTS.items(),
+        "may_approve": bool(division)
+        and approvals.no_screening()
+        and policy.has_authority(
+            request.user, AuthorityGrant.Activity.WITHDRAWAL_APPROVAL, division.pk
+        ),
         "statuses": [
             *Case.Status.choices,
             *(
@@ -332,6 +352,23 @@ def all_queue(request):
     if not (scope.is_admin or scope.is_support):
         raise PermissionDenied
     return _queue(request, None, admin_all=True)
+
+
+@login_required
+@require_POST
+def division_approve(request, code):
+    """ADR 0025 Q26: approve the ticked cases at the level the system proposed."""
+    division = _division_or_404(_scope(request), code)
+    numbers = request.POST.getlist("case")[:100]
+    cases = list(queues.visible(request.user).filter(owner_division=division, number__in=numbers))
+    done, skipped = approvals.bulk_approve(request.user, cases)
+    if done:
+        messages.success(request, f"อนุมัติแล้ว {len(done)} เรื่อง")
+    for case, why in skipped[:20]:
+        messages.error(request, f"{case.number}: {why}")
+    if not numbers:
+        messages.error(request, "ติ๊กเรื่องที่จะอนุมัติก่อน")
+    return redirect("division-detail", code=division.code)
 
 
 # Queue tabs the tour may take a case from, in order of preference.
@@ -669,7 +706,9 @@ def _export(request, division, admin_all=False):
         queues.tab_condition(tab, division, request.user, now, admin_all)
     )
     orders = queues.order_queryset(request.user, tab, division, now, filters)
-    cases = queues.ordered(queues.apply_filters(queues.prefetch(cases), filters), tab, orders)
+    sort = request.GET.get("sort", "newest")  # the CSV keeps the order on screen
+    sort = sort if sort in queues.SORTS else "newest"
+    cases = queues.ordered(queues.apply_filters(queues.prefetch(cases), filters), tab, orders, sort)
     text, count, truncated = reports.export_csv(cases, now)
     identity.audit(
         request.user,

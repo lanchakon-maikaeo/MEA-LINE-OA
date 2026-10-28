@@ -158,7 +158,7 @@ class SeedTests(FlowTestCase):
                 self.assertTrue(r.remark)
                 self.assertTrue(line_flows.node_title(r.flow, r.node_id))
         self.assertEqual(
-            DivisionRequirement.objects.filter(division__code="กอจ.", status="open").count(), 7
+            DivisionRequirement.objects.filter(division__code="กอจ.", status="open").count(), 1
         )
 
 
@@ -225,3 +225,56 @@ class WebTests(FlowTestCase):
         self.assertEqual(bad.status_code, 302)
         req.refresh_from_db()
         self.assertEqual(req.node_id, "kind")  # an unknown box is refused
+
+
+class MenuTabTests(FlowTestCase):
+    def test_the_flow_pages_have_one_tab_per_rich_menu_button(self):
+        from operations import line_menu_catalog
+        from operations.models import LineMenuItem
+
+        line_menu_catalog.sync()
+        client = Client()
+        client.force_login(self.admin)
+        tiles = list(
+            LineMenuItem.objects.filter(tab="report", place="tile", is_active=True).order_by(
+                "position"
+            )
+        )
+        page = client.get("/console/admin/flows/").content.decode()
+        for tile in tiles:
+            self.assertIn(tile.label, page)
+        self.assertIn('aria-current="page"', page)
+        other = next(t for t in tiles if t.label == "ระบบ SMG, AMR")
+        seeded = LineFlow.objects.get(tile=other.label)  # remove the seeded draft to start over
+        seeded.versions.all().delete()
+        seeded.delete()
+        r = client.post("/console/admin/flows/", {"tile": other.pk})
+        flow = LineFlow.objects.get(tile=other.label)
+        self.assertRedirects(r, f"/console/admin/flows/{flow.key}/", fetch_redirect_response=False)
+        draft = line_flows.draft_of(flow)
+        self.assertEqual(
+            [b["label"] for b in draft.graph["nodes"][1]["buttons"]],
+            [c.label[:20] for c in other.choices.filter(is_active=True).order_by("position", "pk")],
+        )
+        self.assertEqual(flow.versions.filter(status="published").count(), 0)  # chat unchanged
+        client.post("/console/admin/flows/", {"tile": other.pk})
+        self.assertEqual(LineFlow.objects.filter(tile=other.label).count(), 1)
+        editor = client.get(f"/console/admin/flows/{flow.key}/").content.decode()
+        self.assertIn("flow-tabs", editor)
+
+
+class EveryButtonTests(FlowTestCase):
+    def test_every_requester_button_has_a_draft_that_passes_the_checks(self):
+        from operations import line_menu_catalog
+
+        line_menu_catalog.sync()
+        for tab in line_flows.menu_tabs():
+            if not tab["can_flow"]:
+                continue
+            with self.subTest(button=tab["item"].label):
+                self.assertIsNotNone(tab["flow"])
+                version = line_flows.draft_of(tab["flow"])
+                errors = [
+                    i["message"] for i in line_flows.check(version.graph) if i["level"] == "error"
+                ]
+                self.assertEqual(errors, [])
