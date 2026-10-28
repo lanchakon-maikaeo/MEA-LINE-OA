@@ -6,6 +6,13 @@ day suggested is วันรับงาน plus the working days of the slowes
 the next day the division issues. Setting it sends ฟข. one message: the day, the truck day of
 its district and a choice to come and collect (Q27, Q46); the choice is the confirmation. จ่ายแล้ว
 tells them too. Every message is a held reply (ADR 0024), never a push.
+
+grill กคอ. (28 ต.ค. 2569): a division may send by truck by default (DivisionSchedule.delivery):
+with no กำหนดจ่ายตามขนาด the issue day is the district's next truck day after คีย์จ่ายแล้ว
+(plus lead_days), the truck is chosen for ฟข. at once and มารับเอง is the one button. A truck
+table may name a ฟข. by its abbreviation (ชื่อย่อ ฟข.) until an admin maps it to a district;
+a ฟข. with no truck day hears the division's contact instead. Returns are received, not
+issued, so their stages offer no delivery; each division may rename its stages.
 """
 
 import re
@@ -90,20 +97,48 @@ def sla_days(schedule, case):
     return max(found) if found else None
 
 
-def suggested_issue(case, received_on):
+def suggested_issue(case, received_on, keyed_on=None):
     schedule = schedule_of(case.owner_division)
     days = sla_days(schedule, case)
     if days is None:
-        return None
+        # กคอ. Q40: no กำหนดจ่ายตามขนาด, the goods go on the district's next truck day.
+        if schedule is None or schedule.delivery != schedule.Delivery.TRUCK:
+            return None
+        start = working_days_after(keyed_on or received_on, schedule.lead_days)
+        return truck_day(case, start)
     return next_weekday(
         working_days_after(received_on, days), schedule.issue_weekdays if schedule else []
     )
 
 
+def truck_weekdays(schedule, district):
+    """The truck days of a district: by its code, else by its ชื่อย่อ ฟข. (กคอ. Q26)."""
+    if schedule is None or district is None:
+        return []
+    days = schedule.truck_days or {}
+    return days.get(district.code) or (days.get(district.short_name) if district.short_name else [])
+
+
+def unmapped_abbreviations(schedule):
+    """Abbreviations of the truck table no district carries yet."""
+    from operations.models import District
+
+    known = set(District.objects.exclude(short_name="").values_list("short_name", flat=True))
+    codes = set(District.objects.values_list("code", flat=True))
+    keys = (schedule.truck_days or {}) if schedule else {}
+    return sorted(k for k in keys if k not in codes and k not in known)
+
+
 def truck_day(case, on_or_after):
-    schedule = schedule_of(case.owner_division)
-    weekdays = (schedule.truck_days or {}).get(case.district.code, []) if schedule else []
+    weekdays = truck_weekdays(schedule_of(case.owner_division), case.district)
     return next_weekday(on_or_after, weekdays) if weekdays else None
+
+
+def stage_label(case, stage):
+    """The division's own name of a stage for this kind of case (Q7, Q32), else the default."""
+    schedule = schedule_of(case.owner_division)
+    names = (schedule.stage_labels or {}).get(case.kind, {}) if schedule else {}
+    return names.get(stage) or S(stage).label
 
 
 def preview(schedule, group, district_code, received_on):
@@ -122,13 +157,16 @@ def preview(schedule, group, district_code, received_on):
     issue = next_weekday(
         working_days_after(received_on, int(rule["days"])), schedule.issue_weekdays
     )
-    weekdays = (schedule.truck_days or {}).get(district_code, [])
+    from operations.models import District
+
+    weekdays = truck_weekdays(schedule, District.objects.filter(code=district_code).first())
     return issue, next_weekday(issue, weekdays) if weekdays else None
 
 
 @transaction.atomic
-def save_schedule(actor, division, sla, issue_weekdays, truck_days, reason):
-    """กำหนดจ่ายตามขนาด, issue days and truck days; staff of the division, with a reason."""
+def save_schedule(actor, division, sla, issue_weekdays, truck_days, reason, **more):
+    """กำหนดจ่ายตามขนาด, issue days and truck days; staff of the division, with a reason.
+    `more` may set delivery, lead_days, contact and stage_labels (grill กคอ.)."""
     scope = identity.staff_scope(actor)
     if not identity.can_access_division(scope, division.pk):
         raise PermissionDenied
@@ -157,11 +195,71 @@ def save_schedule(actor, division, sla, issue_weekdays, truck_days, reason):
         if days
     }
     schedule, _ = DivisionSchedule.objects.get_or_create(division=division)
+    # Rows of abbreviations no district carries yet are not on the form: keep them (Q26).
+    for key in unmapped_abbreviations(schedule):
+        trucks.setdefault(key, schedule.truck_days[key])
     schedule.sla, schedule.issue_weekdays, schedule.truck_days = clean, weekdays, trucks
+    if "delivery" in more:
+        if more["delivery"] not in DivisionSchedule.Delivery.values:
+            raise ValidationError("เลือกวิธีส่งของจากรายการ")
+        schedule.delivery = more["delivery"]
+    if "lead_days" in more:
+        try:
+            schedule.lead_days = int(more["lead_days"] or 0)
+        except (TypeError, ValueError):
+            raise ValidationError("วันเผื่อก่อนวันรถต้องเป็นตัวเลข") from None
+        if not 0 <= schedule.lead_days <= 20:
+            raise ValidationError("วันเผื่อก่อนวันรถต้องอยู่ระหว่าง 0 ถึง 20")
+    if "contact" in more:
+        schedule.contact = " ".join(str(more["contact"] or "").split())[:100]
+    if "stage_labels" in more:
+        labels = {}
+        for kind, names in (more["stage_labels"] or {}).items():
+            if kind not in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN):
+                continue
+            kept = {k: " ".join(str(v).split())[:40] for k, v in names.items() if k in S.values}
+            labels[kind] = {k: v for k, v in kept.items() if v}
+        schedule.stage_labels = {k: v for k, v in labels.items() if v}
     schedule.updated_by = actor
     schedule.save()
     identity.audit(actor, "division_schedule.updated", division, reason, rows=len(clean))
     return schedule
+
+
+@transaction.atomic
+def save_short_names(actor, names, reason):
+    """ชื่อย่อ ฟข. of the districts by code; an admin, with a reason. Returns how many changed."""
+    from operations.models import District
+
+    identity.require_admin(actor)
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError("ใส่เหตุผลที่แก้ชื่อย่อ")
+    clean = {}
+    for code, name in names.items():
+        name = "".join(str(name or "").split())[:16]
+        if name and not name.endswith("."):
+            name += "."
+        clean[code] = name
+    given = [n for n in clean.values() if n]
+    if len(given) != len(set(given)):
+        raise ValidationError("ชื่อย่อซ้ำกัน หนึ่งเขตมีชื่อย่อเดียว")
+    changed = 0
+    for district in District.objects.filter(code__in=clean):
+        if district.short_name != clean[district.code]:
+            before = district.short_name
+            district.short_name = clean[district.code]
+            district.save(update_fields=["short_name"])
+            identity.audit(
+                actor,
+                "district.short_name",
+                district,
+                reason,
+                before=before,
+                after=district.short_name,
+            )
+            changed += 1
+    return changed
 
 
 # --- Stages -------------------------------------------------------------------------------------
@@ -231,9 +329,10 @@ def record(actor, cases, stage, on, planned_on=None, note=""):
             skipped.append((case, f"ยังไม่ได้บันทึก{S(missing[0]).label}"))
             continue
         plan = planned_on
-        if stage == S.KEYED and plan is None:
-            plan = suggested_issue(case, have[S.RECEIVED].on)
-        if stage == S.KEYED and plan is None:
+        returning = case.kind == Case.Kind.RETURN  # received, not issued (grill กคอ. Q32)
+        if stage == S.KEYED and plan is None and not returning:
+            plan = suggested_issue(case, have[S.RECEIVED].on, on)
+        if stage == S.KEYED and plan is None and not returning:
             skipped.append((case, "ใส่วันจ่าย (ตารางกำหนดจ่ายยังไม่มีขนาดนี้)"))
             continue
         CaseMilestone.objects.create(
@@ -246,7 +345,10 @@ def record(actor, cases, stage, on, planned_on=None, note=""):
         )
         identity.audit(actor, f"case.stage_{stage}", case, number=case.number, on=on.isoformat())
         done.append(case)
-        if stage == S.KEYED:
+        if returning:
+            if stage == S.DELIVERED and _close(actor, case):
+                _tell(actor, case, f"{case.number} {stage_label(case, stage)} ปิดเรื่องแล้ว")
+        elif stage == S.KEYED:
             _offer(actor, case, plan)
         elif stage == S.ISSUED:
             _tell(actor, case, f"จ่ายแล้ว {thai_date(on)}" + _method_text(case))
@@ -296,7 +398,14 @@ def _method_text(case):
         .exclude(method="")
         .first()
     )
-    return f"\nวิธีรับ: {chosen.get_method_display()}" if chosen else ""
+    return f"\nวิธีรับ: {method_label(case, chosen.method)}" if chosen else ""
+
+
+def method_label(case, method):
+    """How the goods come, naming the division's truck ("รถ กคว. ไปส่ง")."""
+    if method == Appointment.Method.TRUCK:
+        return f"รถ {case.owner_division.code} ไปส่ง"
+    return Appointment.Method(method).label if method else ""
 
 
 def _identity(case):
@@ -317,17 +426,28 @@ def _token(found, action, value):
     return f"t={token.token}"
 
 
+def _current_method(case):
+    chosen = Appointment.objects.filter(case=case, status__in=Appointment.HOLDING).first()
+    return chosen.method if chosen else ""
+
+
 def offer_buttons(case, found, issue_on):
-    """Quick replies for ฟข.: the truck day of its district, or coming to collect."""
+    """Quick replies for ฟข.: the truck day of its district, or coming to collect. Where the
+    truck is the default, only the way not yet chosen is offered (กคอ. Q16)."""
     buttons = []
+    code = case.owner_division.code
+    schedule = schedule_of(case.owner_division)
+    by_truck = schedule is not None and schedule.delivery == schedule.Delivery.TRUCK
+    chosen = _current_method(case) if by_truck else ""
     truck = truck_day(case, issue_on)
-    if truck is not None:
+    if truck is not None and chosen != Appointment.Method.TRUCK:
         value = {"case": str(case.pk), "method": "truck", "on": truck.isoformat()}
         month = calendars.MONTHS[truck.month - 1]
         label = f"รถส่ง {calendars.DAYS[truck.weekday()]} {truck.day} {month}"
         buttons.append([label, _token(found, "delivery", value), f"รับของทางรถ {thai_date(truck)}"])
-    value = {"case": str(case.pk), "method": "pickup"}
-    buttons.append(["มารับเอง", _token(found, "delivery", value), "มารับของเองที่ กคว."])
+    if chosen != Appointment.Method.PICKUP:
+        value = {"case": str(case.pk), "method": "pickup"}
+        buttons.append(["มารับเอง", _token(found, "delivery", value), f"มารับของเองที่ {code}"])
     return buttons
 
 
@@ -338,12 +458,27 @@ def _offer(actor, case, issue_on):
     found = _identity(case)
     if found is None:
         return
+    code = case.owner_division.code
+    schedule = schedule_of(case.owner_division)
     truck = truck_day(case, issue_on)
+    if schedule is not None and schedule.delivery == schedule.Delivery.TRUCK:
+        # กคอ. Q16: the truck is chosen already; มารับเอง is there for whoever cannot wait.
+        if truck is not None:
+            calendar = pickup_calendar(case.owner_division)
+            if calendar is not None:
+                _choose(case, calendar, Appointment.Method.TRUCK, note=f"วันส่งรถ {truck}")
+            text = f"รถ {code} จะนำของไปส่งถึงเขต{thai_date(truck)}\nถ้าจะมารับเองที่ {code} กดมารับเอง"
+        else:
+            text = f"กำหนดจ่าย {thai_date(issue_on)}\nยังไม่มีวันรถของเขตนี้"
+            if schedule.contact:
+                text += f" สอบถามวันส่งได้ที่ {schedule.contact}"
+        case_chat.send_system(actor, case, text, offer_buttons(case, found, issue_on))
+        return
     text = f"กำหนดจ่าย {thai_date(issue_on)}\nเลือกวิธีรับของ"
     if truck is not None:
-        text += f" รถ กคว. ไปส่งเขต{thai_date(truck)} หรือมารับเอง"
+        text += f" รถ {code} ไปส่งเขต{thai_date(truck)} หรือมารับเอง"
     else:
-        text += " มารับเองที่ กคว. (ยังไม่มีวันส่งรถของเขตนี้)"
+        text += f" มารับเองที่ {code} (ยังไม่มีวันส่งรถของเขตนี้)"
     case_chat.send_system(actor, case, text, offer_buttons(case, found, issue_on))
 
 
@@ -371,16 +506,15 @@ def on_choice(turn, token):
         return conversation._menu(turn, "เรื่องนี้ไม่ใช่ของคุณ")
     if stages(case).get(S.ISSUED):
         return conversation._menu(turn, f"{case.number} จ่ายแล้ว เปลี่ยนวิธีรับไม่ได้")
-    calendar = Calendar.objects.filter(
-        key=PICKUP, division=case.owner_division, is_active=True
-    ).first()
+    calendar = pickup_calendar(case.owner_division)
     if calendar is None:
         return conversation._menu(turn, "กองนี้ยังไม่เปิดปฏิทินนัดรับของ")
     method = value.get("method")
     if method == "truck":
         _choose(case, calendar, Appointment.Method.TRUCK, note=f"วันส่งรถ {value.get('on', '')}")
         day = date.fromisoformat(value["on"])
-        return conversation._menu(turn, f"{case.number}: รับของทางรถ กคว. {thai_date(day)}")
+        code = case.owner_division.code
+        return conversation._menu(turn, f"{case.number}: รับของทางรถ {code} {thai_date(day)}")
     if method == "pickup" and value.get("slot"):
         slot = calendar.slots.filter(pk=value["slot"]).first()
         holding = slot.appointments.filter(status__in=Appointment.HOLDING) if slot else None
@@ -388,22 +522,33 @@ def on_choice(turn, token):
             turn.say("ช่วงนี้เต็มหรือปิดแล้ว เลือกช่วงอื่น")
         else:
             _choose(case, calendar, Appointment.Method.PICKUP, slot=slot)
+            code = case.owner_division.code
             return conversation._menu(
-                turn, f"{case.number}: ขอนัดมารับ {calendars.label(slot)} รอ กคว. ยืนยัน"
+                turn, f"{case.number}: ขอนัดมารับ {calendars.label(slot)} รอ {code} ยืนยัน"
             )
     keyed = stages(case).get(S.KEYED)
     first_day = keyed.planned_on if keyed and keyed.planned_on else timezone.localdate()
     after = timezone.make_aware(datetime.combine(first_day, time.min))
-    slots = [s for s in calendars.free_slots(PICKUP) if s.starts_at >= after]
+    slots = [s for s in calendars.free_slots(calendar.key) if s.starts_at >= after]
+    code = case.owner_division.code
     if not slots:
         _choose(case, calendar, Appointment.Method.PICKUP)
-        return conversation._menu(turn, f"{case.number}: มารับเอง ยังไม่มีช่วงว่าง กคว. จะนัดกลับ")
+        return conversation._menu(turn, f"{case.number}: มารับเอง ยังไม่มีช่วงว่าง {code} จะนัดกลับ")
     quick = []
     for slot in slots[:12]:
         value = {"case": str(case.pk), "method": "pickup", "slot": slot.pk}
         label, data = turn.button(calendars.short(slot), "delivery", value)
         quick.append((label, data, calendars.label(slot)))
     turn.say(f"{case.number}: เลือกช่วงที่จะมารับ", quick)
+
+
+def pickup_calendar(division):
+    """The division's นัดรับของ calendar: key "pickup" (กคว.) or "pickup-…" (กคอ.)."""
+    return (
+        Calendar.objects.filter(division=division, is_active=True, key__startswith=PICKUP)
+        .order_by("pk")
+        .first()
+    )
 
 
 def _choose(case, calendar, method, slot=None, note=""):
@@ -424,9 +569,10 @@ def status_lines(case):
     lines = []
     now = current(case)
     if now is not None:
-        lines.append(f"ขั้นงานคลัง: {now.get_stage_display()} ({now.on:%d/%m}/{now.on.year + 543})")
+        label = stage_label(case, now.stage)
+        lines.append(f"ขั้นงานคลัง: {label} ({now.on:%d/%m}/{now.on.year + 543})")
     keyed = stages(case).get(S.KEYED)
-    if keyed and keyed.planned_on:
+    if keyed and keyed.planned_on and case.kind != Case.Kind.RETURN:
         lines.append(f"กำหนดจ่าย: {thai_date(keyed.planned_on)}")
     method = _method_text(case).strip()
     if method:

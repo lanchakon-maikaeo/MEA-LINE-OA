@@ -1,5 +1,5 @@
-"""flow LINE ในหน้าแอดมิน (ADR 0023): drafts are checked graphs, only admins edit them, publishing
-needs the flow runner, and every division requirement opens the box it belongs to."""
+"""flow LINE ในหน้าแอดมิน (ADR 0023): drafts are checked graphs, only admins edit them and
+publishing needs the flow runner. The requirement page is gone (grill กคอ. Q41)."""
 
 import copy
 import json
@@ -11,7 +11,7 @@ from django.core.management import call_command
 from django.test import Client, TestCase
 
 from operations import line_flows, line_menu_catalog
-from operations.models import AuditEvent, DivisionRequirement, LineFlow, LineFlowVersion, Role
+from operations.models import AuditEvent, LineFlow, LineFlowVersion, Role
 from operations.tests.test_m02_cases import make_staff
 
 
@@ -143,22 +143,12 @@ class DraftTests(FlowTestCase):
 
 class SeedTests(FlowTestCase):
     def test_seeding_again_changes_nothing(self):
-        before = (LineFlowVersion.objects.count(), DivisionRequirement.objects.count())
+        from operations.models import DivisionSchedule
+
+        before = (LineFlowVersion.objects.count(), DivisionSchedule.objects.count())
         call_command("seed_line_flows", stdout=StringIO())
         self.assertEqual(
-            (LineFlowVersion.objects.count(), DivisionRequirement.objects.count()), before
-        )
-
-    def test_every_kcw_requirement_is_agreed_and_opens_its_box(self):
-        reqs = DivisionRequirement.objects.filter(division__code="กคว.")
-        self.assertEqual(reqs.count(), 12)
-        for r in reqs:
-            with self.subTest(text=r.text[:20]):
-                self.assertEqual(r.status, DivisionRequirement.Status.AGREED)
-                self.assertTrue(r.remark)
-                self.assertTrue(line_flows.node_title(r.flow, r.node_id))
-        self.assertEqual(
-            DivisionRequirement.objects.filter(division__code="กอจ.", status="open").count(), 1
+            (LineFlowVersion.objects.count(), DivisionSchedule.objects.count()), before
         )
 
 
@@ -173,11 +163,12 @@ class WebTests(FlowTestCase):
         for url in (
             "/console/admin/flows/",
             "/console/admin/flows/meter-ct-vt/",
-            "/console/admin/requirements/",
+            "/console/admin/districts/",
         ):
             with self.subTest(url=url):
                 self.assertEqual(staff.get(url).status_code, 403)
                 self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(self.client.get("/console/admin/requirements/").status_code, 404)
 
     def test_the_editor_saves_through_json_and_answers_with_the_checks(self):
         page = self.client.get("/console/admin/flows/meter-ct-vt/?node=mult").content.decode()
@@ -199,32 +190,6 @@ class WebTests(FlowTestCase):
             content_type="application/json",
         )
         self.assertEqual(stale.status_code, 409)
-
-    def test_a_requirement_links_to_a_box_with_an_audit(self):
-        req = DivisionRequirement.objects.filter(division__code="กอจ.").first()
-        r = self.client.post(
-            "/console/admin/requirements/",
-            {
-                "id": req.pk,
-                "status": "agreed",
-                "remark": "ทำตามข้อสรุป",
-                "flow": "meter-ct-vt",
-                "node": "kind",
-            },
-        )
-        self.assertEqual(r.status_code, 302)
-        req.refresh_from_db()
-        self.assertEqual((req.status, req.node_id, req.flow.key), ("agreed", "kind", "meter-ct-vt"))
-        self.assertTrue(AuditEvent.objects.filter(action="division_requirement.updated").exists())
-        page = self.client.get("/console/admin/requirements/?division=กอจ.").content.decode()
-        self.assertIn("/console/admin/flows/meter-ct-vt/?node=kind", page)
-        bad = self.client.post(
-            "/console/admin/requirements/",
-            {"id": req.pk, "status": "agreed", "flow": "meter-ct-vt", "node": "ไม่มี"},
-        )
-        self.assertEqual(bad.status_code, 302)
-        req.refresh_from_db()
-        self.assertEqual(req.node_id, "kind")  # an unknown box is refused
 
 
 class MenuTabTests(FlowTestCase):

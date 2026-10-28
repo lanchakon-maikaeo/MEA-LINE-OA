@@ -361,20 +361,7 @@ class OtherButtonTests(FlowTestCase):
         self.assertEqual((case.topic, case.owner_division.code), ("usage", "กตฟ."))
         self.assertEqual([m["number"] for m in case.meters], ["12345678", "12345679"])
 
-    def test_tools_ask_the_name_first(self):
-        self.publish("เครื่องมือและอุปกรณ์")
-        reply = self.open("เครื่องมือและอุปกรณ์")
-        self.assertIn("พิมพ์ชื่ออุปกรณ์", texts(reply))
-        self.type(ALICE, "เครื่องบีบสายไฟแบบแบตเตอรี่")
-        self.press(ALICE, "ติดตามใบเบิก")
-        self.type(ALICE, "4500030001")
-        self.type(ALICE, "16 sq.mm, 2")
-        reply = self.type(ALICE, "ซ่อมสายป้อน")
-        self.assertIn("อุปกรณ์: เครื่องบีบสายไฟแบบแบตเตอรี่", texts(reply))
-        self.press(ALICE, "ยืนยันส่งเรื่อง")
-        case = Case.objects.get()
-        self.assertEqual((case.kind, case.owner_division.code), ("withdrawal", "กคอ."))
-        self.assertEqual(case.lines.get().details[0]["name"], "เครื่องบีบสายไฟแบบแบตเตอรี่")
+    # The กคอ. tile asks the job first since the กคอ. grill (Q3): test_m18_kko_flow.
 
     def test_smg_and_general_reports(self):
         # ADR 0027: ศอค. takes problem reports in its own Google Form; nothing is filed here.

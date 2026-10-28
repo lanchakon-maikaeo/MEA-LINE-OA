@@ -1,15 +1,4 @@
-/* flow LINE editor and division requirements (ADR 0023). Uses the tokens of app.css. */
-
-/* --- Requirements page ---------------------------------------------------------------------- */
-.req-list { display: grid; gap: var(--s-12); }
-.req { border: 1px solid var(--hairline-soft); border-radius: var(--r-field); padding: var(--s-12) var(--s-18); background: var(--canvas); }
-.req:target { border-color: var(--info); box-shadow: 0 0 0 3px var(--info-tint); }
-.req__head { display: flex; flex-wrap: wrap; gap: var(--s-8); align-items: center; }
-.req__text { margin: var(--s-8) 0; }
-.req__box { margin: 0 0 var(--s-8); }
-.req__remark { margin: 0 0 var(--s-8); padding: var(--s-8) var(--s-12); background: var(--cloud); border-radius: 10px; }
-.req__edit summary { cursor: pointer; color: var(--ash); font-size: 14px; }
-.req__form { display: grid; gap: var(--s-8); margin-top: var(--s-8); max-width: 640px; }
+/* flow LINE editor (ADR 0023). Uses the tokens of app.css. */
 
 /* The editor needs the whole width: the admin side list hides on this page only. */
 .admin-shell:has(.page--flow) { display: block; max-width: none; padding-left: 0; }
@@ -74,7 +63,6 @@
 .fn__text { padding: 0 12px 8px; font-size: 12.5px; color: var(--ash); white-space: pre-wrap; max-height: 5.6em; overflow: hidden; word-break: break-word; }
 .fn__chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 8px; }
 .fn__chip { font-size: 11px; border-radius: 8px; padding: 1px 7px; background: var(--cloud); color: var(--ash); }
-.fn__chip--req { background: var(--info-tint); color: var(--info-deep); cursor: pointer; }
 .fn__chip--err { background: var(--danger-tint); color: var(--danger); }
 .fn__buttons { display: grid; gap: 4px; padding: 0 12px 10px; }
 .fn__button { position: relative; font-size: 12.5px; border: 1px solid var(--hairline-soft); border-radius: 9px; padding: 4px 26px 4px 9px; background: #fcfcfc; }
@@ -126,8 +114,6 @@
 .fe__issue .fe__lvl { font-size: 11px; border-radius: 8px; padding: 1px 7px; flex: none; }
 .fe__lvl--error { background: var(--danger); color: #fff; }
 .fe__lvl--warn { background: var(--cloud-deep); color: var(--ash); }
-.fe__reqs { display: grid; gap: 6px; }
-.fe__req { border: 1px solid var(--info-tint); background: #f7f9ff; border-radius: 10px; padding: 6px 9px; font-size: 13px; }
 
 /* --- LINE preview --------------------------------------------------------------------------- */
 .fe__phone { margin: 0 auto; width: 280px; border-radius: 30px; background: #1f1f1f; padding: 10px; }

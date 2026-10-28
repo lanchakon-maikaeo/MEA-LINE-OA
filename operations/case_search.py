@@ -80,9 +80,7 @@ def describe(case, requester):
     if case.sap_number:
         lines.append(f"เลข: {case.sap_number}")
     stage = CaseMilestone.objects.filter(case=case).order_by("-on", "-pk").first()
-    lines.append(
-        f"สถานะ: {stage.get_stage_display() if stage else conversation._status_label(case)}"
-    )
+    lines.append(f"สถานะ: {stage.label if stage else conversation._status_label(case)}")
     keyed = CaseMilestone.objects.filter(case=case, stage=CaseMilestone.Stage.KEYED).first()
     if keyed and keyed.planned_on:
         lines.append(f"กำหนดจ่าย: {keyed.planned_on:%d/%m}/{keyed.planned_on.year + 543}")
@@ -92,7 +90,9 @@ def describe(case, requester):
         .first()
     )
     if method:
-        lines.append(f"วิธีรับ: {method.get_method_display()}")
+        from operations import warehouse  # local: warehouse builds on the models
+
+        lines.append(f"วิธีรับ: {warehouse.method_label(case, method.method)}")
     if case.requester_id != requester.pk:
         employee = case.requester.employee
         lines.append(f"ผู้ส่ง: รหัสพนักงาน {employee.employee_id if employee else '-'}")

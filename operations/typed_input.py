@@ -83,6 +83,7 @@ def sap_rule(text):
 
 
 PROJECT = re.compile(r"^[\w\u0E00-\u0E7F ./()-]{2,60}$")  # Thai marks are not \w
+MEMO = PROJECT  # เลขที่ M/N may carry the writer's abbreviation, e.g. ฝอจ.คม. 123/2569
 
 
 def tracking_rule(text, kind):
@@ -97,6 +98,11 @@ def tracking_rule(text, kind):
         value = " ".join(tidy(text).split())
         if not PROJECT.match(value):
             return _fail("พิมพ์ชื่อหรือรหัสโครงการ 2 ถึง 60 ตัว")
+        return value, value, ""
+    if kind == "memo":  # grill กคอ. Q20: M/N, the memo for an item with no SAP code
+        value = " ".join(tidy(text).split()).upper()
+        if not MEMO.match(value):
+            return _fail("พิมพ์เลขที่ M/N 2 ถึง 60 ตัว เช่น คม. 123/2569")
         return value, value, ""
     return sap_rule(text)
 

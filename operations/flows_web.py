@@ -1,8 +1,9 @@
-"""หน้าแอดมิน flow LINE และ requirement ของกอง (ADR 0023, grill กคว. 27 ต.ค. 2569).
+"""หน้าแอดมิน flow LINE (ADR 0023, grill กคว. 27 ต.ค. 2569).
 
 The list of flows, the canvas editor of one flow's draft (saved as JSON, checked on every save),
-ลองคุย (the editor plays the draft and asks the runner's own rules what typed text reads as),
-publishing, and the divisions' requirements, each of which opens the box it belongs to.
+ลองคุย (the editor plays the draft and asks the runner's own rules what typed text reads as)
+and publishing. The divisions' requirement page went away in the กคอ. grill (Q41): the menu
+designer on Vercel keeps them.
 """
 
 import json
@@ -15,13 +16,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST, require_safe
 
 from operations import flow_runner, line_flows, typed_input
-from operations.models import (
-    Division,
-    DivisionRequirement,
-    LineFlow,
-    LineFlowVersion,
-    SheetSource,
-)
+from operations.models import LineFlow, LineFlowVersion, SheetSource
 from operations.views import admin_required
 
 V = LineFlowVersion.Status
@@ -42,7 +37,6 @@ def _row(flow):
         "draft": draft,
         "errors": sum(1 for c in checks if c["level"] == "error"),
         "warnings": sum(1 for c in checks if c["level"] == "warn"),
-        "requirements": flow.requirements.count(),
     }
 
 
@@ -101,16 +95,6 @@ def admin_flow(request, key):
     if version is None:
         messages.info(request, "flow นี้ยังไม่มีรุ่น กดเริ่มร่างก่อน")
         return redirect("admin-flows")
-    requirements = [
-        {
-            "id": r.pk,
-            "node": r.node_id,
-            "text": r.text,
-            "status": r.get_status_display(),
-            "division": r.division.code,
-        }
-        for r in flow.requirements.select_related("division")
-    ]
     config = {
         "flow": {"key": flow.key, "name": flow.name},
         "version": {
@@ -131,10 +115,8 @@ def admin_flow(request, key):
             f"{s.key}:{s.name.replace('|', ' ').replace(':', ' ')}"
             for s in SheetSource.objects.all()
         ),
-        "requirements": requirements,
         "saveUrl": reverse("admin-flow-save", args=[flow.key]),
         "tryUrl": reverse("admin-flow-try", args=[flow.key]),
-        "requirementsUrl": reverse("admin-requirements"),
         "focus": request.GET.get("node", ""),
         "runnerReady": line_flows.RUNNER_READY,
     }
@@ -217,56 +199,6 @@ def admin_flow_publish(request, key):
 
 
 @admin_required
-def admin_requirements(request):
-    divisions = list(Division.objects.filter(requirements__isnull=False).distinct())
-    code = request.GET.get("division") or (divisions[0].code if divisions else "")
-    division = next((d for d in divisions if d.code == code), None)
-    if request.method == "POST":
-        req = get_object_or_404(DivisionRequirement, pk=request.POST.get("id"))
-        flow = LineFlow.objects.filter(key=request.POST.get("flow", "")).first()
-        try:
-            line_flows.update_requirement(
-                request.user,
-                req,
-                status=request.POST.get("status"),
-                remark=request.POST.get("remark"),
-                flow=flow,
-                node_id=request.POST.get("node", "") if flow else "",
-            )
-        except ValidationError as exc:
-            messages.error(request, " ".join(exc.messages))
-        else:
-            messages.success(request, "บันทึก requirement แล้ว")
-        return redirect(f"{reverse('admin-requirements')}?division={req.division.code}#r{req.pk}")
-    rows = []
-    flows = list(LineFlow.objects.all())
-    if division is not None:
-        for req in DivisionRequirement.objects.filter(division=division).select_related("flow"):
-            rows.append({"req": req, "box": line_flows.node_title(req.flow, req.node_id)})
-    boxes = {}
-    for flow in flows:
-        published, draft = _versions(flow)
-        version = draft or published
-        boxes[flow.key] = [
-            {"id": n["id"], "title": n["title"]}
-            for n in (version.graph.get("nodes", []) if version else [])
-        ]
-    return render(
-        request,
-        "operations/admin_requirements.html",
-        {
-            "divisions": divisions,
-            "division": division,
-            "rows": rows,
-            "topics": DivisionRequirement.Topic.choices,
-            "statuses": DivisionRequirement.Status.choices,
-            "flows": flows,
-            "boxes": boxes,
-        },
-    )
-
-
-@admin_required
 def admin_sheets(request):
     """แหล่งข้อมูลค้นในชีท (ADR 0027): the sheets a ค้นในชีท box reads, two columns each."""
     from operations import sheet_lookup
@@ -297,5 +229,6 @@ def admin_sheets(request):
             "editing": editing,
             "adding": request.GET.get("new") == "1" or not sources,
             "every": int(sheet_lookup.EVERY.total_seconds() // 60),
+            "matches": SheetSource.Match.choices,
         },
     )

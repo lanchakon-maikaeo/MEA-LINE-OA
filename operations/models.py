@@ -32,6 +32,9 @@ class District(models.Model):
     code = models.CharField(max_length=16, unique=True)
     name = models.CharField(max_length=200, unique=True)
     official_code = models.CharField(max_length=32, null=True, blank=True, unique=True)
+    # ชื่อย่อ ฟข. (grill กคอ. 28 ต.ค. 2569 Q26) such as ฟขป., used by the divisions' truck
+    # tables; an admin sets it, unique when set.
+    short_name = models.CharField(max_length=16, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -517,7 +520,7 @@ class Case(models.Model):
     # รอบใหม่ Q1–Q2: เลขติดตาม may also be a meter number or a project name (up to 60).
     sap_number = models.CharField(max_length=60, blank=True, db_index=True)
     sap_kind = models.CharField(max_length=16, blank=True)  # slip, return_slip, work_order,
-    # meter or project
+    # meter, project or memo (M/N, grill กคอ. Q20)
     description = models.TextField(blank=True)
     impact = models.TextField(blank=True)
     related_case = models.ForeignKey(
@@ -3090,8 +3093,9 @@ class LineFlowVersion(models.Model):
 
 
 class DivisionRequirement(models.Model):
-    """requirement ของกอง: สิ่งที่กองต้องการซึ่งวาดเป็น flow ไม่ได้ทั้งหมด ผูกกับกล่องหนึ่งใน flow ได้
-    (grill กคว. 27 ต.ค. 2569 Q28, Q36)"""
+    """requirement ของกอง (grill กคว. 27 ต.ค. 2569 Q28, Q36). Not used since the กคอ. grill
+    (28 ต.ค. 2569 Q41) took its page away: the menu designer on Vercel keeps the requirements.
+    The table stays until a release that may drop it (dropping is a one-way migration)."""
 
     class Topic(models.TextChoices):
         PROBLEM = "problem", "ปัญหาที่เจอตอนนี้"
@@ -3186,7 +3190,7 @@ class Appointment(models.Model):
 
     class Method(models.TextChoices):
         NONE = "", "-"
-        TRUCK = "truck", "รถ กคว. ไปส่ง"
+        TRUCK = "truck", "รถของกองไปส่ง"
         PICKUP = "pickup", "ฟข. มารับเอง"
 
     HOLDING = (Status.REQUESTED, Status.CONFIRMED)
@@ -3242,6 +3246,13 @@ class CaseMilestone(models.Model):
             models.UniqueConstraint(fields=["case", "stage"], name="case_milestone_once")
         ]
 
+    @property
+    def label(self):
+        """The stage as the owner division names it for this kind of case (grill กคอ. Q32)."""
+        from operations import warehouse  # local: warehouse builds on the models
+
+        return warehouse.stage_label(self.case, self.stage)
+
 
 class DivisionSchedule(models.Model):
     """ตารางของกอง (Q17, Q30, Q45): กำหนดจ่ายตามขนาด (working days after วันรับงาน), the
@@ -3251,7 +3262,20 @@ class DivisionSchedule(models.Model):
     # [{"group": "meter", "size": "5(100)A", "days": 3}]; an empty size is the group's default.
     sla = models.JSONField(default=list, blank=True)
     issue_weekdays = models.JSONField(default=list, blank=True)  # 0 = Monday
-    truck_days = models.JSONField(default=dict, blank=True)  # {District.code: [weekday]}
+    # {District.code or ชื่อย่อ ฟข.: [weekday]}: a table copied from a division's poster names
+    # each ฟข. by its abbreviation until an admin says which district that is (กคอ. Q26).
+    truck_days = models.JSONField(default=dict, blank=True)
+
+    class Delivery(models.TextChoices):
+        CHOOSE = "choose", "ฟข. เลือกรถส่งหรือมารับเอง"  # กคว. Q46
+        TRUCK = "truck", "รถส่งเป็นค่าเริ่มต้น มีปุ่มมารับเอง"  # กคอ. Q16
+
+    delivery = models.CharField(max_length=8, choices=Delivery.choices, default=Delivery.CHOOSE)
+    # Working days between คีย์จ่ายแล้ว and the earliest truck day (กคอ. Q40, default 0).
+    lead_days = models.PositiveSmallIntegerField(default=0)
+    contact = models.CharField(max_length=100, blank=True)  # said when a ฟข. has no truck day
+    # {"withdrawal"|"return": {stage: name}}: the division's own names of the stages (Q7, Q32).
+    stage_labels = models.JSONField(default=dict, blank=True)
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )

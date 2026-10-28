@@ -41,7 +41,6 @@
   var uid = function (p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); };
   var nodeById = function (id) { return graph.nodes.find(function (n) { return n.id === id; }); };
   var issuesOf = function (id) { return checks.filter(function (c) { return c.node === id; }); };
-  var reqsOf = function (id) { return CFG.requirements.filter(function (r) { return r.node === id; }); };
 
   /* ---------- history & saving ---------- */
   function snapshot() { return JSON.stringify(graph); }
@@ -117,7 +116,6 @@
       if (n.kind === "sheet_lookup") chips.append(el("span", "fn__chip", (c.source ? "ชีท " + c.source : "ยังไม่เลือกชีท") + (c.by === "employee" ? " · รหัสพนักงาน" : " · เลข UI")));
       if (n.kind === "book" && c.calendar) chips.append(el("span", "fn__chip", "ปฏิทิน " + c.calendar));
       if (n.kind === "branch" && c.condition) chips.append(el("span", "fn__chip", "ดูจาก " + c.condition));
-      var reqs = reqsOf(n.id); if (reqs.length) { var rc = el("span", "fn__chip fn__chip--req", "สิ่งที่กองต้องการ " + reqs.length + " ข้อ"); rc.dataset.req = "1"; rc.title = reqs.map(function (r) { return r.text; }).join("\n"); chips.append(rc); }
       var errs = issuesOf(n.id).filter(function (i) { return i.level === "error"; }); if (errs.length) { var ec = el("span", "fn__chip fn__chip--err", "ต้องแก้ " + errs.length); ec.title = errs.map(function (i) { return i.message; }).join("\n"); chips.append(ec); }
       if (chips.childNodes.length) box.append(chips);
       if (n.buttons && n.buttons.length) {
@@ -228,8 +226,6 @@
       if (EDITABLE) { var add = el("button", "fe__mini", "+ เพิ่มปุ่ม"); add.type = "button"; add.onclick = function () { change(function () { n.buttons = n.buttons || []; n.buttons.push({ id: uid("b"), label: n.kind === "branch" ? "ทางใหม่" : "ปุ่มใหม่", full: "", note: "", set: "" }); }); }; wrap.append(add); }
       pane.append(wrap);
     }
-    var reqs = reqsOf(n.id);
-    if (reqs.length) { var rw = el("div", "fe__field"); rw.append(el("span", "fe__label", "สิ่งที่กองต้องการที่ผูกกับกล่องนี้")); var rl = el("div", "fe__reqs"); reqs.forEach(function (r) { var a = el("a", "fe__req", r.division + " · " + r.status + " · " + r.text); a.href = CFG.requirementsUrl + "?division=" + encodeURIComponent(r.division) + "#r" + r.id; rl.append(a); }); rw.append(rl); pane.append(rw); }
     var issues = issuesOf(n.id); if (issues.length) { var iw = el("div", "fe__field"); iw.append(el("span", "fe__label", "สิ่งที่ต้องดูในกล่องนี้")); issues.forEach(function (i) { var d = el("div", "fe__issue"); d.append(el("span", "fe__lvl fe__lvl--" + i.level, i.level === "error" ? "ต้องแก้" : "ควรดู"), el("span", null, i.message)); iw.append(d); }); pane.append(iw); }
     if (EDITABLE) {
       var dup = el("button", "fe__mini", "ทำซ้ำกล่อง"); dup.type = "button"; dup.onclick = function () { change(function () { var c = JSON.parse(JSON.stringify(n)); c.id = uid("n"); c.x += 30; c.y += 30; c.buttons.forEach(function (b) { b.id = uid("b"); }); graph.nodes.push(c); sel.node = c.id; }); };
@@ -449,7 +445,6 @@
     var t = ev.target;
     var port = t.closest(".fn__port--out"), box = t.closest(".fn"), edge = t.closest("[data-edge]");
     if (port && box && EDITABLE) { ev.preventDefault(); drag = { kind: "connect", from: box.dataset.id, port: port.dataset.port || null, temp: null }; port.classList.add("is-active"); canvas.setPointerCapture(ev.pointerId); return; }
-    if (t.closest("[data-req]") && box) { sel.node = box.dataset.id; sel.edge = null; tab = "node"; render(); return; }
     if (box) {
       var id = box.dataset.id; sel.node = id; sel.edge = null; if (tab !== "preview") tab = "node"; markSel(); renderSide();
       if (EDITABLE && (t.closest("[data-drag]") || !t.closest(".fn__button"))) { var n = nodeById(id); var p = toWorld(ev.clientX, ev.clientY); drag = { kind: "move", node: n, dx: p.x - n.x, dy: p.y - n.y, moved: false }; canvas.setPointerCapture(ev.pointerId); }

@@ -29,7 +29,7 @@
     update();
   }
 
-  // Schedule: กำหนดจ่าย and วันส่งรถ as two tabs (#truck opens the second).
+  // Schedule: กำหนดจ่าย, วันส่งรถ and ชื่อขั้น as tabs (#truck or #stages opens the others).
   var tabs = document.querySelectorAll("[data-sc-tab]");
   function show(part) {
     tabs.forEach(function (tab) {
@@ -44,10 +44,11 @@
     tabs.forEach(function (tab) {
       tab.addEventListener("click", function () {
         show(tab.dataset.scTab);
-        history.replaceState(null, "", tab.dataset.scTab === "sla" ? location.pathname + location.search : "#truck");
+        history.replaceState(null, "", tab.dataset.scTab === "sla" ? location.pathname + location.search : "#" + tab.dataset.scTab);
       });
     });
-    show(location.hash === "#truck" ? "truck" : "sla");
+    var opened = location.hash.slice(1);
+    show(document.querySelector('[data-sc-tab="' + opened + '"]') ? opened : "sla");
   }
 
   // A size row is added from the group's blank row and removed by its own button.

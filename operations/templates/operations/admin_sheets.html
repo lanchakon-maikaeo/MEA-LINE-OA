@@ -9,7 +9,8 @@
   <dl class="facts">
     <div><dt>รหัสในกล่อง</dt><dd>{{ source.key }}</dd></div>
     <div><dt>แท็บ</dt><dd>{{ source.sheet_name }}</dd></div>
-    <div><dt>คอลัมน์ที่อ่าน</dt><dd>เลข {{ source.key_column }} · สถานะ {{ source.status_column }}{% if source.owner_columns %} · รหัสพนักงาน {{ source.owner_columns }}{% endif %} · เริ่มแถว {{ source.first_row }}</dd></div>
+    <div><dt>คอลัมน์ที่อ่าน</dt><dd>{{ source.number_label }} {{ source.key_column }} · สถานะ {{ source.status_column }}{% if source.owner_columns %} · รหัสพนักงาน {{ source.owner_columns }}{% endif %}{% if source.district_column %} · ฟข. {{ source.district_column }}{% endif %}{% if source.name_column %} · ชื่อเครื่องมือ {{ source.name_column }}{% endif %}{% if source.order_column %} · วันที่ {{ source.order_column }}{% endif %}{% for c in source.extra_columns %} · {{ c.label }} {{ c.column }}{% endfor %} · เริ่มแถว {{ source.first_row }}</dd></div>
+    {% if source.status_words %}<div><dt>คำที่ผู้ใช้เห็นแทนสถานะ</dt><dd>{% for k, v in source.status_words.items %}{{ k }} = {{ v }}{% if not forloop.last %} · {% endif %}{% endfor %}{% if source.blank_word %} · ช่องว่าง = {{ source.blank_word }}{% endif %}</dd></div>{% endif %}
     <div><dt>ข้อมูลล่าสุด</dt><dd>{% if source.last_synced_at %}{{ source.last_synced_at|thai_datetime }} · {{ source.rows_read }} แถว{% else %}ยังไม่เคยอ่านได้{% endif %}</dd></div>
     <div><dt>ผลการอ่านล่าสุด</dt><dd>{{ source.last_error|default:"อ่านได้ปกติ" }}{% if source.refresh_requested %} · รออ่านใหม่{% endif %}</dd></div>
   </dl>
@@ -33,6 +34,20 @@
     <label>คอลัมน์สถานะ<input name="status_column" required maxlength="3" value="{{ s.status_column|default:'R' }}"></label>
     <label>คอลัมน์รหัสพนักงานของผู้แจ้ง (ว่างได้ หลายคอลัมน์คั่นด้วย , เช่น B,M)<input name="owner_columns" maxlength="20" value="{{ s.owner_columns|default:'' }}"></label>
     <label>แถวแรกของข้อมูล (ถัดจากหัวตาราง)<input name="first_row" type="number" min="1" max="1000" value="{{ s.first_row|default:2 }}"></label>
+    <label>เทียบเลขแบบ<select name="match">{% for v, l in matches %}<option value="{{ v }}"{% if s.match == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+    <label>ชื่อเลขที่ผู้ใช้เห็น<input name="number_label" maxlength="40" value="{{ s.number_label|default:'เลข UI' }}"></label>
+    <label>คอลัมน์ ฟข. (ว่างได้ ถ้าใส่ ผู้ใช้เห็นเฉพาะแถวของเขตตัวเอง ชีตที่เทียบหมายเลขอุปกรณ์ต้องใส่)<input name="district_column" maxlength="3" value="{{ s.district_column|default:'' }}"></label>
+    <label>คอลัมน์ชื่อเครื่องมือ (ว่างได้ ใส่เมื่อหมายเลขเดียวกันใช้กับหลายเครื่องมือ)<input name="name_column" maxlength="3" value="{{ s.name_column|default:'' }}"></label>
+    <label>คอลัมน์วันที่ใช้หาแถวล่าสุด (ว่างได้ เช่น วันเข้า)<input name="order_column" maxlength="3" value="{{ s.order_column|default:'' }}"></label>
+    <label>คำที่ผู้ใช้เห็นแทนค่าในคอลัมน์สถานะ (บรรทัดละคู่ เช่น 11=ซ่อมเสร็จ รอส่งคืน)<textarea name="status_words" rows="4">{% for k, v in s.status_words.items %}{{ k }}={{ v }}
+{% endfor %}</textarea></label>
+    <label>คำเมื่อช่องสถานะว่าง (ว่างได้)<input name="blank_word" maxlength="60" value="{{ s.blank_word|default:'' }}"></label>
+    <label>คอลัมน์ที่บอกว่าส่งคืนแล้ว (ว่างได้ เช่น วันรับกลับ)<input name="done_column" maxlength="3" value="{{ s.done_column|default:'' }}"></label>
+    <label>คำเมื่อส่งคืนแล้ว (บรรทัดละคู่ เช่น 11=ซ่อมเสร็จ ส่งคืน ฟข. แล้ว ใช้ ว่าง แทนช่องสถานะว่าง)<textarea name="done_words" rows="3">{% for k, v in s.done_words.items %}{% if k %}{{ k }}{% else %}ว่าง{% endif %}={{ v }}
+{% endfor %}</textarea></label>
+    <label>คอลัมน์ที่แสดงเพิ่ม ไม่เกิน 4 (บรรทัดละคู่ เช่น F=วันที่รับ)<textarea name="extra_columns" rows="3">{% for c in s.extra_columns %}{{ c.column }}={{ c.label }}
+{% endfor %}</textarea></label>
+    <input type="hidden" name="ai_words_shown" value="1"><label><input type="checkbox" name="ai_words" value="1"{% if not s or s.ai_words %} checked{% endif %}> ให้ AI เรียบเรียงคำตอบ (ใช้เมื่อรุ่น AI ผ่านการประเมินแล้ว)</label>
     <label><input type="checkbox" name="enabled" value="1"{% if s.enabled %} checked{% endif %}> เปิดให้แชตใช้</label>
     <label>เหตุผล<input name="reason" required maxlength="300"></label>
     <div class="cluster"><button class="btn" type="submit">บันทึก</button><a href="{% url 'admin-sheets' %}">ยกเลิก</a></div>

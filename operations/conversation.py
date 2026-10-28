@@ -1395,6 +1395,13 @@ def _free_text(turn, draft, text, message=None):
     if text is not None and flow_runner.is_flow(draft) and turn.conversation.prompt != "track":
         # ADR 0023 Q44: a published flow asks step by step with its own rules, without AI.
         return flow_runner.on_text(turn, draft, text)
+    if (
+        text is not None
+        and draft is None
+        and not turn.conversation.prompt
+        and flow_runner.sheet_hit(turn, text)
+    ):
+        return None  # ADR 0029: a piece in a repair sheet, answered from the sheet
     if text is not None and turn.conversation.prompt != "track":
         from operations import agent_chat, ai_chat, answers  # local: build on this module
 

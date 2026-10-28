@@ -16,6 +16,8 @@ withdrawals and returns that cite one list no items (they live in SAP), so the r
 
 ADR 0027: a ค้นในชีท box waits for typed numbers, answers from a sheet's status column and
 waits again, with ถามเลข UI อื่น and จบ, until the requester ends it or stays quiet 30 minutes.
+ADR 0029: a button of the box (ส่งให้ คม. ตรวจ) is offered when a number was not found, and
+taken at once while the box's sheet is not set up; what was typed goes on to the case.
 """
 
 from datetime import timedelta
@@ -43,6 +45,7 @@ TRACKING_CHOICES = {
     "ใบสั่งงาน SAP": ("work_order", ""),  # drafts of the first version
     "หมายเลขเครื่องวัดฯ": ("meter", ""),
     "โครงการ": ("project", ""),
+    "เลขที่ M/N": ("memo", Case.Kind.WITHDRAWAL),  # grill กคอ. Q20
 }
 TRACKING_LABELS = {
     "slip": "เลขที่ใบเบิก",
@@ -50,6 +53,7 @@ TRACKING_LABELS = {
     "work_order": "ใบสั่งงานจาก SAP",
     "meter": "หมายเลขเครื่องวัดฯ",
     "project": "โครงการ",
+    "memo": "เลขที่ M/N",
 }
 GROUP_LABELS = {"meter": "มิเตอร์", "ct": "CT", "vt": "VT", "other": "อุปกรณ์อื่น"}
 VALUE_LABELS = {
@@ -64,6 +68,7 @@ VALUE_LABELS = {
     "impact": "ข้อมูลเพิ่มเติม",
     "purpose": "วัตถุประสงค์",
     "condition_reason": "สภาพและเหตุผลที่ส่งคืน",
+    "tools": "เครื่องมือ",
 }
 # What แก้ไข calls each typed answer (a quick reply label fits 20 characters).
 EDIT_LABELS = {
@@ -100,6 +105,7 @@ EXTRA = (
     "warnings",
     "staff_notes",
     "appointment",
+    "no_number",
 )
 HOLD = timedelta(minutes=30)  # Q8: a chosen slot is kept this long for the summary
 MAX_HOPS = 40
@@ -187,12 +193,19 @@ def start(turn, version, node_id=None, values=None):
         from operations import koj_chat
 
         return koj_chat.from_flow(turn, first.get("config", {}))
+    draft, node_id = _open(turn, version, entry, node_id, values)
+    return _go(turn, draft, node_id)
+
+
+def _open(turn, version, entry, node_id=None, values=None):
+    """A new active draft of this version, at node_id (else the box after the entry)."""
     draft = conversation._new_draft(turn)
     state = _fresh(version, entry)
     if node_id and node(version.graph, node_id):
         state["values"] = dict(values or {})
     else:
         node_id = follow(version.graph, entry["id"])
+    state["node"] = node_id
     data = {
         "lines": [],
         "fields": {},
@@ -200,7 +213,7 @@ def start(turn, version, node_id=None, values=None):
         "flow": state,
     }
     conversation._touch(draft, turn.now, kind="", step=STEP, data=data)
-    return _go(turn, draft, node_id)
+    return draft, node_id
 
 
 def again(turn, value):
@@ -291,6 +304,10 @@ def render(turn, draft):
             quick = [
                 (*b(c, "flow", {"node": box["id"], "choice": c}, draft), c) for c in _choices(box)
             ]
+            # A button of the box (ไม่มีเลข, grill กคอ. Q17) is offered beside the choices.
+            for button in box["buttons"]:
+                value = {"node": box["id"], "button": button["id"]}
+                quick.append((*b(button["label"], "flow", value, draft), button["label"]))
             return turn.say(f"{box['title']}\nเลือกก่อนว่าจะติดตามด้วยอะไร", quick)
         title = f"{box['title']} ({picked})" if picked else box["title"]
         text = "\n".join(x for x in (title, box["text"]) if x)
@@ -339,6 +356,8 @@ def summary(draft, graph, box):
     if values.get("tracking"):
         label = TRACKING_LABELS.get(values.get("sap_kind"), "เลขติดตาม")
         lines.append(f"{label}: {values['tracking']}")
+    elif values.get("no_number"):
+        lines.append("เลขติดตาม: ไม่มีเลข เจ้าหน้าที่หาเอกสารจากรายละเอียด")
     if values.get("sap_document"):
         lines.append(f"เลข SAP งานซ่อม: {values['sap_document']}")
     for row in state.get("rows", []):
@@ -359,7 +378,15 @@ def summary(draft, graph, box):
             lines.append(
                 f"{VALUE_LABELS[key]}: {', '.join(value) if isinstance(value, list) else value}"
             )
-    for key in ("details", "description", "purpose", "condition_reason", "impact", "mea_numbers"):
+    for key in (
+        "tools",
+        "details",
+        "description",
+        "purpose",
+        "condition_reason",
+        "impact",
+        "mea_numbers",
+    ):
         value = values.get(key)
         if value:
             lines.append(
@@ -545,6 +572,7 @@ def on_text(turn, draft, text):
         if rule == "district":
             values[f"{field}_name"] = shown  # the code is kept, the name is shown
     if rule == "tracking":
+        values.pop("no_number", None)  # a number typed after all
         notes += _tracking_notes(turn, values, value)
     if rule in ("multiplier", "size") and values.get("multiplier"):
         mismatch = _check_multiplier(values)
@@ -581,24 +609,88 @@ def _lookup(turn, draft, state, box, text):
         _finish(turn, draft)
         return conversation._free_text(turn, None, text)
     source = sheet_lookup.source_for(box["config"].get("source", ""))
+    handoff = next(
+        (b for b in box["buttons"] if follow(_version(draft).graph, box["id"], b["id"])), None
+    )
+    if source is None and handoff is not None:
+        # ADR 0029: no sheet yet, so what was typed goes to the division as a case.
+        if not sheet_lookup.codes_in(text):
+            turn.say("ยังไม่เห็นหมายเลขอุปกรณ์ในข้อความ พิมพ์ ชื่อเครื่องมือ, หมายเลข เช่น SAFETY BELT, NC801")
+            _save(turn, draft, state)
+            return None
+        state["values"] = {**state["values"], "tools": " ".join(text.split())[:1000]}
+        _save(turn, draft, state)
+        target = follow(_version(draft).graph, box["id"], handoff["id"])
+        return _go(turn, draft, target, "ตอนนี้ยังค้นจากชีตไม่ได้ ส่งให้เจ้าหน้าที่ตรวจแทน")
     if source is None:
         return _finish(turn, draft, "ตอนนี้ยังตรวจสอบสถานะจากชีทไม่ได้ กรุณาติดต่อ ศอค.")
-    numbers = sheet_lookup.numbers_in(text)
+    code = source.match == source.Match.CODE
+    numbers = sheet_lookup.keys_in(source, text)
     if not numbers:
-        turn.say("ยังไม่เห็นเลข UI ในข้อความ พิมพ์เป็นตัวเลข เช่น 12345678")
+        turn.say(
+            "ยังไม่เห็นหมายเลขอุปกรณ์ในข้อความ พิมพ์ ชื่อเครื่องมือ, หมายเลข เช่น SAFETY BELT, NC801"
+            if code
+            else "ยังไม่เห็นเลข UI ในข้อความ พิมพ์เป็นตัวเลข เช่น 12345678"
+        )
         _save(turn, draft, state)
         return None
     extra = len(numbers) > sheet_lookup.MAX_NUMBERS
-    items = sheet_lookup.lookup(source, numbers[: sheet_lookup.MAX_NUMBERS])
+    district = turn.requester.district if source.district_column and turn.requester else None
+    names = {n: name for name, n in sheet_lookup.codes_in(text)} if code else {}
+    items = sheet_lookup.lookup(source, numbers[: sheet_lookup.MAX_NUMBERS], district, names)
     note = sheet_lookup.stale_note(source, turn.now)
+    state["values"] = {**state["values"], "tools": " ".join(text.split())[:1000]}
     _save(turn, draft, state)
+    again = "ถามชิ้นอื่น" if code else "ถามเลข UI อื่น"
     quick = [
         (*turn.button(label, "flow", {"node": box["id"], "lookup": key}, draft), label)
-        for key, label in (("again", "ถามเลข UI อื่น"), ("end", "จบ"))
+        for key, label in (("again", again), ("end", "จบ"))
     ]
-    turn.say(sheet_lookup.answer(items, extra, note), quick)
-    ai_sheet_status.queue(turn, items, extra, note)
+    hint = ""
+    if handoff is not None and any(not i["found"] for i in items):
+        value = {"node": box["id"], "button": handoff["id"]}
+        quick.insert(0, (*turn.button(handoff["label"], "flow", value, draft), handoff["label"]))
+        hint = f"ตรวจหมายเลขอีกครั้ง หรือกด {handoff['label']}"
+    turn.say(sheet_lookup.answer(items, extra, note, hint=hint), quick)
+    if source.ai_words:
+        ai_sheet_status.queue(turn, items, extra, note, hint)
     return None
+
+
+def sheet_hit(turn, text):
+    """ADR 0029 (grill กคอ. Q30): typed text outside any step that names a piece the asker's
+    ฟข. has in a repair sheet a published flow looks up is answered by that flow's lookup box.
+    The program finds the piece in the sheet; nothing is guessed. True when it answered."""
+    from operations import sheet_lookup
+
+    requester = turn.requester
+    if requester is None or conversation._problems_only(turn) or not text:
+        return False
+    sources = {
+        s.key: s
+        for s in sheet_lookup.SheetSource.objects.filter(
+            enabled=True, match=sheet_lookup.SheetSource.Match.CODE
+        )
+    }
+    if not sources or not sheet_lookup.codes_in(text):
+        return False
+    for version in LineFlowVersion.objects.filter(
+        status=LineFlowVersion.Status.PUBLISHED
+    ).select_related("flow"):
+        for box in version.graph.get("nodes", []):
+            source = sources.get(box.get("config", {}).get("source", ""))
+            if box.get("kind") != "sheet_lookup" or source is None:
+                continue
+            keys = sheet_lookup.keys_in(source, text)[: sheet_lookup.MAX_NUMBERS]
+            names = {n: name for name, n in sheet_lookup.codes_in(text)}
+            items = sheet_lookup.lookup(source, keys, requester.district, names)
+            if not any(i["found"] for i in items):
+                continue
+            entry = next(n for n in version.graph["nodes"] if n["kind"] == "entry")
+            draft, _ = _open(turn, version, entry, box["id"])
+            _lookup(turn, draft, _state(draft), box, text)
+            return True
+    return False
 
 
 def _tracking_notes(turn, values, number):
@@ -706,7 +798,8 @@ def payload(draft, config, flow):
     state = _state(draft)
     values = state["values"]
     kind = values.get("case_kind") or config.get("case_kind") or Case.Kind.PROBLEM
-    tracking = bool(values.get("tracking")) and kind != Case.Kind.PROBLEM
+    # ไม่มีเลข (grill กคอ. Q17): still a tracking case, its document found by staff.
+    tracking = bool(values.get("tracking") or values.get("no_number")) and kind != Case.Kind.PROBLEM
     lines = []
     if not tracking:
         for row in state.get("rows", []):
@@ -714,6 +807,13 @@ def payload(draft, config, flow):
             if row["group"] == "other" and values.get("equipment_name"):
                 entry.setdefault("name", values["equipment_name"])  # กคอ.: the name came first
             lines = typed_lines.add(lines, row["group"], entry, kind)
+    if topic_of(values, config) == Case.Topic.REPAIR and values.get("tools"):
+        # ADR 0029: each typed piece is a row with its หมายเลขอุปกรณ์ (25 Oct 2569 Q7).
+        from operations import sheet_lookup  # local: sheet_lookup reads the database
+
+        for name, number in sheet_lookup.codes_in(values["tools"]):
+            entry = {"name": name or "เครื่องมือ", "equipment_number": number}
+            lines = typed_lines.add(lines, "other", entry, kind)
     path = " · ".join([flow.tile or flow.name, *state.get("path", [])[:2]])
     data = {"kind": kind, "lines": lines, "menu_label": path[:120]}
     if config.get("division"):
@@ -723,7 +823,7 @@ def payload(draft, config, flow):
     if topic:
         data["topic"] = topic
     if tracking:
-        data["sap_number"] = values["tracking"]
+        data["sap_number"] = values.get("tracking", "")
         data["sap_kind"] = values.get("sap_kind") or (
             "return_slip" if kind == Case.Kind.RETURN else "slip"
         )
@@ -735,7 +835,7 @@ def payload(draft, config, flow):
     elif kind == Case.Kind.RETURN:
         data["condition"] = data["reason"] = details or values.get("condition_reason") or "-"
     else:
-        bits = [details or values.get("description", "")]
+        bits = [values.get("tools", ""), details or values.get("description", "")]
         if values.get("mea_numbers"):
             bits.append("MEA No.: " + ", ".join(values["mea_numbers"]))
         if values.get("appointment"):
@@ -757,6 +857,10 @@ def payload(draft, config, flow):
     if extra:
         data["intake_data"] = extra
     return data
+
+
+def topic_of(values, config):
+    return values.get("topic") or config.get("topic", "")
 
 
 def _keep_slot(turn, draft, graph, state):

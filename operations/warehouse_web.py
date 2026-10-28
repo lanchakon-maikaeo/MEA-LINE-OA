@@ -26,6 +26,7 @@ from operations.models import (
     CaseMilestone,
     District,
     Division,
+    DivisionSchedule,
     Holiday,
 )
 from operations.views import admin_required
@@ -181,6 +182,10 @@ def schedule_page(request, code):
             )
         ]
         trucks = {d.code: request.POST.getlist(f"truck_{d.code}") for d in districts}
+        labels = {
+            kind: {st: request.POST.get(f"stage_{kind}_{st}", "") for st in S.values}
+            for kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
+        }
         try:
             warehouse.save_schedule(
                 request.user,
@@ -189,6 +194,10 @@ def schedule_page(request, code):
                 request.POST.getlist("issue"),
                 trucks,
                 request.POST.get("reason", ""),
+                delivery=request.POST.get("delivery", DivisionSchedule.Delivery.CHOOSE),
+                lead_days=request.POST.get("lead_days", 0),
+                contact=request.POST.get("contact", ""),
+                stage_labels=labels,
             )
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์แก้ตารางนี้"])))
@@ -197,6 +206,7 @@ def schedule_page(request, code):
         return redirect("warehouse-schedule", code=code)
     rows = list(schedule.sla if schedule else [])
     trucks = schedule.truck_days if schedule else {}
+    stage_names = schedule.stage_labels if schedule else {}
     # 28 ต.ค. 2569 Q5: one box per group, its every-size row first, then each size.
     groups = [
         {
@@ -221,7 +231,23 @@ def schedule_page(request, code):
             "weekdays": WEEKDAYS,
             "short_days": list(enumerate(["จ.", "อ.", "พ.", "พฤ.", "ศ."])),
             "issue": schedule.issue_weekdays if schedule else [],
-            "districts": [(d, trucks.get(d.code, [])) for d in districts],
+            "districts": [(d, warehouse.truck_weekdays(schedule, d)) for d in districts],
+            "unmapped": [
+                (k, " ".join(WEEKDAYS[n][1] for n in trucks[k] if n < len(WEEKDAYS)))
+                for k in warehouse.unmapped_abbreviations(schedule)
+            ],
+            "delivery_choices": DivisionSchedule.Delivery.choices,
+            "stage_rows": [
+                (
+                    kind,
+                    label,
+                    [
+                        (st, S(st).label, (stage_names.get(kind) or {}).get(st, ""))
+                        for st in S.values
+                    ],
+                )
+                for kind, label in ((Case.Kind.WITHDRAWAL, "ใบเบิก"), (Case.Kind.RETURN, "ใบส่งคืน"))
+            ],
             "schedule": schedule,
             "example": {
                 "group": pick_group,
@@ -352,6 +378,33 @@ def _calendar_post(request, code, choices, picked_cal, start):
 
 
 @admin_required
+def admin_districts(request):
+    """ชื่อย่อ ฟข. (grill กคอ. 28 ต.ค. 2569 Q26): which district each abbreviation of the
+    divisions' truck tables is; saved with a reason."""
+    districts = list(District.objects.filter(is_active=True).order_by("code"))
+    if request.method == "POST":
+        names = {d.code: request.POST.get(f"short_{d.code}", "") for d in districts}
+        try:
+            changed = warehouse.save_short_names(request.user, names, request.POST.get("reason"))
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+        else:
+            messages.success(request, f"บันทึกชื่อย่อแล้ว {changed} เขต")
+        return redirect("admin-districts")
+    from operations.models import DivisionSchedule as Schedule
+
+    waiting = [
+        (s.division.code, warehouse.unmapped_abbreviations(s))
+        for s in Schedule.objects.select_related("division").order_by("division__code")
+    ]
+    return render(
+        request,
+        "operations/admin_districts.html",
+        {"districts": districts, "waiting": [(code, keys) for code, keys in waiting if keys]},
+    )
+
+
+@admin_required
 def admin_holidays(request):
     """วันหยุด (รอบใหม่ Q11): admins pick days on a month grid; each day is named like
     "อังคาร, 20 ต.ค. 69" where it is picked."""
@@ -478,7 +531,8 @@ def case_stage(request, number):
             for _, why in skipped:
                 messages.error(request, why)
             if done:
-                messages.success(request, f"บันทึก{S(request.POST['stage']).label}แล้ว")
+                label = warehouse.stage_label(case, request.POST["stage"])
+                messages.success(request, f"บันทึก{label}แล้ว")
     back = request.POST.get("back", "")
     if back.startswith(reverse("warehouse", args=[case.owner_division.code])):
         return redirect(back)
@@ -528,10 +582,11 @@ def case_panel(user, case):
     return {
         "can_act": identity.holds(scope, case.owner_division_id) or scope.is_admin,
         "next_stage": next_stage,
-        "next_label": S(next_stage).label if next_stage else "",
+        "returning": case.kind == Case.Kind.RETURN,
+        "next_label": warehouse.stage_label(case, next_stage) if next_stage else "",
         "suggested": (
-            warehouse.suggested_issue(case, received.on)
-            if next_stage == S.KEYED and received
+            warehouse.suggested_issue(case, received.on, timezone.localdate())
+            if next_stage == S.KEYED and received and case.kind != Case.Kind.RETURN
             else None
         ),
         "today": timezone.localdate(),

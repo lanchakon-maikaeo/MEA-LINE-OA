@@ -67,6 +67,7 @@ GROUPS = (
                 ("admin-policy-action",),
             ),
             Page("admin-holidays", "วันหยุด", "วันที่ไม่นับเป็นวันทำการ และขึ้นในปฏิทินนัด"),
+            Page("admin-districts", "เขต", "ชื่อย่อ ฟข. ของแต่ละเขต ใช้จับคู่ตารางรถของกอง"),
             Page("admin-inventory", "คลังของ", "รายการของและยอดคลัง", ("admin-inventory-action",)),
             Page("admin-items", "รายการอุปกรณ์", "หมวดเมนู LINE และรหัสพัสดุ SAP ของแต่ละรายการ"),
             Page(
@@ -86,11 +87,6 @@ GROUPS = (
                 "flow LINE",
                 "ขั้นสนทนาของผู้แจ้ง แก้แบบลากวาง ตรวจ แล้วเผยแพร่",
                 ("admin-flow", "admin-flow-start", "admin-flow-save", "admin-flow-publish"),
-            ),
-            Page(
-                "admin-requirements",
-                "สิ่งที่แต่ละกองต้องการ",
-                "ความต้องการของแต่ละกองที่ผูกกับกล่องใน flow กดไปดูกล่องนั้นได้",
             ),
             Page("admin-answers", "คลังคำตอบ", "คำตอบที่บอทใช้ตอบคำถามทั่วไป"),
             Page(

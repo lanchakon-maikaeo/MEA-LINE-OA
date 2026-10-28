@@ -144,9 +144,9 @@ urlpatterns = [
         flows_web.admin_flow_publish,
         name="admin-flow-publish",
     ),
-    path("console/admin/requirements/", flows_web.admin_requirements, name="admin-requirements"),
     path("console/admin/sheets/", flows_web.admin_sheets, name="admin-sheets"),
     path("console/admin/holidays/", warehouse_web.admin_holidays, name="admin-holidays"),
+    path("console/admin/districts/", warehouse_web.admin_districts, name="admin-districts"),
     path("console/admin/policy/", views.admin_policy, name="admin-policy"),
     path(
         "console/admin/policy/<slug:action>/<int:pk>/",

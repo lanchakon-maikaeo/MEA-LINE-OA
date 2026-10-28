@@ -1,5 +1,5 @@
 {
- "note": "ADR 0027: synthetic UI numbers; status notes written in the style of the ศอค. sheet, no real rows. statuses are the reports of one UI, oldest first; must = words the reply keeps, must_not = claims the notes never made.",
+ "note": "ADR 0027: synthetic UI numbers; status notes written in the style of the ศอค. sheet, no real rows. statuses are the reports of one UI, oldest first; must = words the reply keeps, must_not = claims the notes never made. 28 ต.ค. 2569: เพิ่มหมายเหตุที่อ้างเลขมิเตอร์อื่น (เลขจากหมายเหตุใช้ได้)",
  "examples": [
   {
    "items": [
@@ -253,6 +253,24 @@
    ],
    "must_not": [
     "เสร็จ"
+   ]
+  },
+  {
+   "items": [
+    {
+     "number": "90000016",
+     "statuses": [
+      "ย้ายไปมิเตอร์ 87093373 แล้ว online"
+     ]
+    }
+   ],
+   "must": [
+    "90000016",
+    "87093373",
+    "online"
+   ],
+   "must_not": [
+    "ออฟไลน์"
    ]
   }
  ]

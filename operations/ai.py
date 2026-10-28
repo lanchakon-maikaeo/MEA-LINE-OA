@@ -386,7 +386,10 @@ def record_eval(version, report):
     elif version.task == AIConfigVersion.Task.SHEET_STATUS:
         from operations import ai_sheet_status
 
-        passed = ai_sheet_status.gate_passed(report, version)
+        # ADR 0029: a version that passes only the กคอ. set may word repair pieces alone.
+        passed = ai_sheet_status.gate_passed(report, version) or ai_sheet_status.code_gate_passed(
+            (report or {}).get("kko"), version
+        )
     elif version.task == AIConfigVersion.Task.TRIAGE:
         passed = ai_triage.gate_passed(report, version)
     elif version.task == AIConfigVersion.Task.ANSWER:

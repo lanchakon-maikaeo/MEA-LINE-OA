@@ -17,7 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from operations import identity
-from operations.models import DivisionRequirement, LineFlow, LineFlowVersion
+from operations.models import LineFlow, LineFlowVersion
 
 V = LineFlowVersion.Status
 RUNNER_READY = True  # flow_runner reads published flows (stage 2 of ADR 0023)
@@ -53,7 +53,7 @@ RULES = {
     "text": "ข้อความ",
     "number": "ตัวเลข",
     "date": "วันที่ (ไม่ใช่วันที่ผ่านมาแล้ว)",
-    "tracking": "เลขติดตามตามชนิดที่เลือก (ใบเบิก ใบส่งคืน ใบสั่งงาน หมายเลขเครื่องวัดฯ โครงการ)",
+    "tracking": "เลขติดตามตามชนิดที่เลือก (ใบเบิก ใบส่งคืน ใบสั่งงาน หมายเลขเครื่องวัดฯ โครงการ M/N)",
     "sap_document": "เลข SAP (ไม่เกิน 30 ตัว ใช้ / ได้)",
     "size": "ขนาดหนึ่งค่า เช่น 100/5A",
     "meter_row": "หมายเลขเครื่องวัดฯ, ขนาด (บรรทัดละเครื่อง)",
@@ -176,7 +176,9 @@ def check(graph):
             if source is None:
                 add("error", n["id"], f"ค้นในชีท '{n['title']}' ยังไม่ได้เลือกแหล่งข้อมูล")
             elif not source.enabled:
-                add("warn", n["id"], f"แหล่งข้อมูล '{source.name}' ยังปิดอยู่ บอทจะตอบว่ายังค้นไม่ได้")
+                handoff = any(e["port"] for e in out.get(n["id"], []))
+                then = "ส่งสิ่งที่พิมพ์ไปตามปุ่มของกล่องแทน" if handoff else "ตอบว่ายังค้นไม่ได้"
+                add("warn", n["id"], f"แหล่งข้อมูล '{source.name}' ยังปิดอยู่ บอทจะ{then}")
         edges = out.get(n["id"], [])
         if n["kind"] != "note" and not n["title"].strip():
             add("warn", n["id"], f"{name} ยังไม่มีชื่อ")
@@ -397,45 +399,3 @@ def flow_for_tile(actor, item):
     )
     identity.audit(actor, "line_flow.created", flow, tile=item.label)
     return flow
-
-
-# --- Requirements ---------------------------------------------------------------------------
-
-
-def node_title(flow, node_id):
-    if flow is None or not node_id:
-        return ""
-    version = draft_of(flow) or flow.versions.filter(status=V.PUBLISHED).first()
-    for n in (version.graph if version else {}).get("nodes", []):
-        if n["id"] == node_id:
-            return n["title"]
-    return ""
-
-
-@transaction.atomic
-def update_requirement(actor, requirement, *, status=None, remark=None, flow=None, node_id=None):
-    identity.require_admin(actor)
-    req = DivisionRequirement.objects.select_for_update().get(pk=requirement.pk)
-    before = (req.status, req.remark, req.flow_id, req.node_id)
-    if status is not None:
-        if status not in DivisionRequirement.Status.values:
-            raise ValidationError("สถานะไม่ถูกต้อง")
-        req.status = status
-    if remark is not None:
-        req.remark = _text(remark, 2000)
-    if flow is not None or node_id is not None:
-        if flow is not None and node_id and not node_title(flow, node_id):
-            raise ValidationError("ไม่พบกล่องนี้ใน flow")
-        req.flow, req.node_id = flow, node_id or ""
-    if (req.status, req.remark, req.flow_id, req.node_id) == before:
-        return req
-    req.save()
-    identity.audit(
-        actor,
-        "division_requirement.updated",
-        req,
-        status=req.status,
-        flow=req.flow.key if req.flow else "",
-        node=req.node_id,
-    )
-    return req

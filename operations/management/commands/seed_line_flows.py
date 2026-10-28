@@ -1,14 +1,15 @@
-"""นำ flow ร่างแรกและ requirement ของกองเข้าระบบ (ADR 0023, grill กคว. 27 ต.ค. 2569).
+"""นำ flow ร่างแรกและตารางรถของกองเข้าระบบ (ADR 0023, grill กคว. 27 ต.ค. 2569, grill กคอ.).
 
-Safe to run again: a flow that already has a version keeps it, and a requirement whose text the
-division already has is not added twice. --replace-draft puts the fixture into a flow's draft
-(nothing published changes); a flow without a tile gets the fixture's.
+Safe to run again: a flow that already has a version keeps it, and a truck table only fills in
+what is missing. --replace-draft puts the fixture into a flow's draft (nothing published
+changes); a flow without a tile gets the fixture's.
 """
 
 import json
 from pathlib import Path
 
 from django.conf import settings
+from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
@@ -16,7 +17,6 @@ from operations import identity, line_flows
 from operations.models import (
     Calendar,
     Division,
-    DivisionRequirement,
     DivisionSchedule,
     LineFlow,
     LineFlowVersion,
@@ -33,11 +33,12 @@ FLOWS = (
     "line_flow_usage_v1.json",
     "line_flow_general_v1.json",
 )
-REQUIREMENTS = "division_requirements_v1.json"
+# grill กคอ. 28 ต.ค. 2569: the TE-Delivery Plus table of คม. (weekdays by ชื่อย่อ ฟข.).
+TRUCK_TABLES = ("te_delivery_kko_v1.json",)
 
 
 class Command(BaseCommand):
-    help = "Load the first LINE flow drafts and the divisions' requirements."
+    help = "Load the first LINE flow drafts and the divisions' truck tables."
 
     def add_arguments(self, parser):
         parser.add_argument("--division", help="seed เฉพาะกองที่ระบุ เช่น กอจ. โดยไม่แตะร่างกองอื่น")
@@ -116,39 +117,7 @@ class Command(BaseCommand):
                 updated_by=actor,
             )
             self.stdout.write(f"{flow.key}: สร้างร่างรุ่น 1")
-        data = json.loads((FIXTURES / REQUIREMENTS).read_text(encoding="utf-8"))
-        added = 0
-        for row in data["requirements"]:
-            if options.get("division") and row["division"] != options["division"]:
-                continue
-            division = Division.objects.filter(code=row["division"]).first()
-            if division is None:
-                self.stdout.write(f"ไม่พบกอง {row['division']} ข้าม")
-                continue
-            if DivisionRequirement.objects.filter(division=division, text=row["text"]).exists():
-                continue
-            DivisionRequirement.objects.create(
-                division=division,
-                topic=row["topic"],
-                text=row["text"],
-                status=row["status"],
-                priority=row["priority"],
-                remark=row["remark"],
-                flow=LineFlow.objects.filter(key=row["flow"]).first() if row["flow"] else None,
-                node_id=row["node"],
-            )
-            added += 1
-        self.stdout.write(f"requirement เพิ่ม {added} ข้อ")
-        if options["replace_draft"]:
-            # A new draft may rename boxes: requirements follow the fixture's links.
-            for row in data["requirements"]:
-                if options.get("division") and row["division"] != options["division"]:
-                    continue
-                updates = {"node_id": row["node"], "remark": row["remark"]}
-                if row["division"] == "กอจ.":
-                    updates.update(
-                        status=row["status"], flow=LineFlow.objects.filter(key=row["flow"]).first()
-                    )
-                DivisionRequirement.objects.filter(
-                    division__code=row["division"], text=row["text"]
-                ).update(**updates)
+        for name in TRUCK_TABLES:
+            division = json.loads((FIXTURES / name).read_text(encoding="utf-8"))["division"]
+            if not options.get("division") or options["division"] == division:
+                call_command("load_truck_table", name, stdout=self.stdout)

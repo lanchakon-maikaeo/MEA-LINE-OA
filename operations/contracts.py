@@ -148,6 +148,7 @@ TRACKING_PATTERNS = {
     "work_order": SAP_PATTERN,
     "meter": (r"[A-Za-z0-9-]{4,20}", "หมายเลขเครื่องวัดฯ ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว"),
     "project": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "ชื่อโครงการยาว 2 ถึง 60 ตัว"),
+    "memo": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "เลขที่ M/N ยาว 2 ถึง 60 ตัว"),
 }
 NO_ITEM_TOPICS = {Case.Topic.USAGE, Case.Topic.SUGGESTION, Case.Topic.INQUIRY, Case.Topic.SYSTEM}
 # ADR 0028: any action may carry a status notice for the requester and an internal note.
@@ -330,7 +331,7 @@ def parse_submission(payload, on_behalf):
         if fields["sap_kind"] not in TRACKING_PATTERNS:
             fail(
                 ErrorCode.VALIDATION_ERROR,
-                "sap_kind must be slip, return_slip, work_order, meter or project.",
+                "sap_kind must be slip, return_slip, work_order, meter, project or memo.",
             )
         fields["sap_number"] = _text(payload, "sap_number", False, 60)
         pattern, problem = TRACKING_PATTERNS[fields["sap_kind"]]
