@@ -20,6 +20,7 @@ from operations.models import (
     DivisionSchedule,
     LineFlow,
     LineFlowVersion,
+    SheetSource,
 )
 
 FIXTURES = Path(settings.BASE_DIR) / "operations" / "fixtures"
@@ -28,7 +29,7 @@ FLOWS = (
     "line_flow_koj_v1.json",
     # 28 ต.ค. 2569: the other buttons of the rich menu, drawn as the chat asks today.
     "line_flow_kco_v1.json",
-    "line_flow_smg_v1.json",
+    "line_flow_smg_v2.json",  # grill เจษ 28 ต.ค. 2569 (ADR 0027)
     "line_flow_usage_v1.json",
     "line_flow_general_v1.json",
 )
@@ -78,14 +79,27 @@ class Command(BaseCommand):
                 DivisionSchedule.objects.get_or_create(
                     division=division, defaults={"issue_weekdays": [0, 1, 2, 3, 4]}
                 )
+            for sheet in data.get("sheets", []):
+                # ADR 0027: created switched off; an admin turns it on once it reads.
+                SheetSource.objects.get_or_create(
+                    key=sheet["key"], defaults={**sheet, "updated_by": actor}
+                )
             graph = line_flows.clean_graph(data["graph"])
             draft = line_flows.draft_of(flow)
             if options["replace_draft"] and draft is not None:
                 draft.graph, draft.checks = graph, line_flows.check(graph)
+                draft.note = data["note"]
                 draft.revision += 1
                 draft.updated_by = actor
                 draft.save(
-                    update_fields=["graph", "checks", "revision", "updated_by", "updated_at"]
+                    update_fields=[
+                        "graph",
+                        "checks",
+                        "note",
+                        "revision",
+                        "updated_by",
+                        "updated_at",
+                    ]
                 )
                 self.stdout.write(f"{flow.key}: แทนร่างรุ่น {draft.number} ด้วยข้อสรุป")
                 continue

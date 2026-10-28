@@ -13,6 +13,9 @@ grill กคว. รอบใหม่ (27 ต.ค. 2569): a เลขติด�
 withdrawals and returns that cite one list no items (they live in SAP), so the requester types
 รายละเอียด instead of rows; the summary offers แก้ไข (retype one answer) and, once filed,
 ส่งใบถัดไป starts the same path again at the number.
+
+ADR 0027: a ค้นในชีท box waits for typed numbers, answers from a sheet's status column and
+waits again, with ถามเลข UI อื่น and จบ, until the requester ends it or stays quiet 30 minutes.
 """
 
 from datetime import timedelta
@@ -234,6 +237,12 @@ def _go(turn, draft, nid, said=""):
         if kind in ("ai_read", "entry", "note"):
             nid = follow(graph, box["id"])
             continue
+        if kind == "sheet_lookup" and (
+            conversation._problems_only(turn) or draft.data.get("anonymous")
+        ):
+            return _finish(turn, draft, "ต้องยืนยันตัวตนพนักงานก่อนตรวจสอบสถานะ")
+        if kind == "sheet_lookup" and box["config"].get("by") == "employee":
+            return _finish(turn, draft, _own_reports(turn, box))
         state["node"] = box["id"]
         if kind == "summary":
             state["summary"] = box["id"]
@@ -251,10 +260,14 @@ def _go(turn, draft, nid, said=""):
 
             _finish(turn, draft)
             return koj_chat.from_flow(turn, {**state["values"], **box["config"]})
+        if kind == "web" and box["config"].get("url"):
+            # The box's name is for the editor; LINE gets the link and any line above it
+            # (เจษ's SMG flow answers with the link alone, 28 Oct 2569).
+            return _finish(
+                turn, draft, "\n".join(x for x in (box["text"], box["config"]["url"]) if x)
+            )
         if kind in ("result", "limit", "web", "handoff"):
             text = "\n".join(x for x in (box["title"], box["text"]) if x)
-            if kind == "web" and box["config"].get("url"):
-                text += f"\n{box['config']['url']}"
             return _finish(turn, draft, text)
         return conversation._ask(turn, draft)
     return _finish(turn, draft, "flow นี้วนไม่จบ กรุณาติดต่อ ฝอจ.")
@@ -285,6 +298,8 @@ def render(turn, draft):
             text = "แก้ " + text
     elif kind == "summary":
         text = summary(draft, graph, box)
+    elif kind == "sheet_lookup":
+        text = box["text"] or box["title"]  # the box's name is for the editor (เจษ's flow)
     elif kind == "book":
         from operations import calendars  # local: calendars builds on this module
 
@@ -400,6 +415,11 @@ def on_button(turn, draft, value):
         return _go(turn, draft, follow(graph, box["id"]))
     if "edit" in value or "back" in value:
         return _edit(turn, draft, graph, state, value)
+    if "lookup" in value:  # ถามเครื่องอื่น / จบ after an answer (ADR 0027)
+        if value["lookup"] == "end":
+            return _finish(turn, draft, "จบการตรวจสอบแล้ว เลือกเมนูด้านล่างได้เลย")
+        _save(turn, draft, state)
+        return conversation._ask(turn, draft)
     button = next((b for b in box["buttons"] if b["id"] == value.get("button")), None)
     if button is None:
         return conversation._ask(turn, draft)
@@ -487,6 +507,8 @@ def restart(turn, draft):
 def on_text(turn, draft, text):
     graph, state = _version(draft).graph, _state(draft)
     box = node(graph, state.get("node"))
+    if box is not None and box["kind"] == "sheet_lookup":
+        return _lookup(turn, draft, state, box, text)
     if box is None or box["kind"] != "ask":
         turn.say("เลือกจากปุ่มด้านล่าง")
         return conversation._ask(turn, draft)
@@ -533,6 +555,50 @@ def on_text(turn, draft, text):
     if state.get("editing"):
         return _back_to_summary(turn, draft, state, "\n".join(notes))
     return _go(turn, draft, follow(graph, box["id"]), "\n".join(notes))
+
+
+def _own_reports(turn, box):
+    """ค้นในชีทด้วยรหัสพนักงาน (เจษ): the rows this verified employee reported, no typing."""
+    from operations import employees, sheet_lookup
+
+    source = sheet_lookup.source_for(box["config"].get("source", ""))
+    if source is None:
+        return "ตอนนี้ยังตรวจสอบสถานะจากชีทไม่ได้ กรุณาติดต่อ ศอค."
+    requester = turn.requester
+    if requester is None or employees.identity_state(requester) != "verified":
+        return "ต้องยืนยันรหัสพนักงานก่อน จึงจะดูรายการที่แจ้งไว้ได้"
+    employee_id = requester.employee.employee_id
+    reports = sheet_lookup.own_reports(source, employee_id)
+    return sheet_lookup.own_answer(reports, employee_id, sheet_lookup.stale_note(source, turn.now))
+
+
+def _lookup(turn, draft, state, box, text):
+    """ค้นในชีท (ADR 0027): numbers in, statuses out, then wait for the next numbers."""
+    from operations import ai_sheet_status, sheet_lookup
+
+    if turn.now - draft.updated_at > sheet_lookup.IDLE:
+        # Quiet too long: this text is a new message, not a number for the old question.
+        _finish(turn, draft)
+        return conversation._free_text(turn, None, text)
+    source = sheet_lookup.source_for(box["config"].get("source", ""))
+    if source is None:
+        return _finish(turn, draft, "ตอนนี้ยังตรวจสอบสถานะจากชีทไม่ได้ กรุณาติดต่อ ศอค.")
+    numbers = sheet_lookup.numbers_in(text)
+    if not numbers:
+        turn.say("ยังไม่เห็นเลข UI ในข้อความ พิมพ์เป็นตัวเลข เช่น 12345678")
+        _save(turn, draft, state)
+        return None
+    extra = len(numbers) > sheet_lookup.MAX_NUMBERS
+    items = sheet_lookup.lookup(source, numbers[: sheet_lookup.MAX_NUMBERS])
+    note = sheet_lookup.stale_note(source, turn.now)
+    _save(turn, draft, state)
+    quick = [
+        (*turn.button(label, "flow", {"node": box["id"], "lookup": key}, draft), label)
+        for key, label in (("again", "ถามเลข UI อื่น"), ("end", "จบ"))
+    ]
+    turn.say(sheet_lookup.answer(items, extra, note), quick)
+    ai_sheet_status.queue(turn, items, extra, note)
+    return None
 
 
 def _tracking_notes(turn, values, number):
@@ -783,4 +849,4 @@ def expects_text(draft):
     if not is_flow(draft):
         return False
     box = node(_version(draft).graph, _state(draft).get("node"))
-    return bool(box and box["kind"] == "ask")
+    return bool(box and box["kind"] in ("ask", "sheet_lookup"))

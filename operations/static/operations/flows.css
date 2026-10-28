@@ -96,6 +96,7 @@
 .k-find_case { background: #0e7490; } .k-book { background: #be185d; } .k-ai_read { background: #4b4b4d; }
 .k-handoff { background: #9a3412; } .k-web { background: #707072; } .k-limit { background: #d30005; }
 .k-result { background: #a16207; } .k-note { background: #c9a227; }
+.k-sheet_lookup { background: #0f766e; }
 
 /* --- Side panel ----------------------------------------------------------------------------- */
 .fe__side { border-left: 1px solid var(--hairline-soft); display: flex; flex-direction: column; min-height: 0; background: var(--canvas); }

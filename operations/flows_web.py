@@ -15,7 +15,13 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST, require_safe
 
 from operations import flow_runner, line_flows, typed_input
-from operations.models import Division, DivisionRequirement, LineFlow, LineFlowVersion
+from operations.models import (
+    Division,
+    DivisionRequirement,
+    LineFlow,
+    LineFlowVersion,
+    SheetSource,
+)
 from operations.views import admin_required
 
 V = LineFlowVersion.Status
@@ -120,6 +126,11 @@ def admin_flow(request, key):
         "roles": {k: v[1] for k, v in line_flows.KINDS.items()},
         "rules": line_flows.RULES,
         "limits": {"buttons": line_flows.MAX_BUTTONS, "label": line_flows.MAX_LABEL},
+        "sheets": ":เลือกแหล่งข้อมูล|"
+        + "|".join(
+            f"{s.key}:{s.name.replace('|', ' ').replace(':', ' ')}"
+            for s in SheetSource.objects.all()
+        ),
         "requirements": requirements,
         "saveUrl": reverse("admin-flow-save", args=[flow.key]),
         "tryUrl": reverse("admin-flow-try", args=[flow.key]),
@@ -251,5 +262,40 @@ def admin_requirements(request):
             "statuses": DivisionRequirement.Status.choices,
             "flows": flows,
             "boxes": boxes,
+        },
+    )
+
+
+@admin_required
+def admin_sheets(request):
+    """แหล่งข้อมูลค้นในชีท (ADR 0027): the sheets a ค้นในชีท box reads, two columns each."""
+    from operations import sheet_lookup
+
+    sources = list(SheetSource.objects.all())
+    editing = next((s for s in sources if s.key == request.GET.get("key")), None)
+    if request.method == "POST":
+        source = next((s for s in sources if s.key == request.POST.get("source")), None)
+        try:
+            if request.POST.get("do") == "refresh" and source is not None:
+                sheet_lookup.request_refresh(request.user, source)
+                messages.success(request, f"สั่งดึงข้อมูล {source.name} ใหม่แล้ว")
+            else:
+                source = sheet_lookup.save_source(
+                    request.user, source, request.POST, request.POST.get("reason")
+                )
+                messages.success(request, f"บันทึก {source.name} แล้ว ระบบกำลังดึงข้อมูลใหม่")
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            suffix = f"?key={source.key}" if source else "?new=1"
+            return redirect(reverse("admin-sheets") + suffix)
+        return redirect("admin-sheets")
+    return render(
+        request,
+        "operations/admin_sheets.html",
+        {
+            "sources": sources,
+            "editing": editing,
+            "adding": request.GET.get("new") == "1" or not sources,
+            "every": int(sheet_lookup.EVERY.total_seconds() // 60),
         },
     )

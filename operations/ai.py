@@ -339,6 +339,10 @@ def test_version(actor, version):
         from operations import ai_keywords
 
         return ai_keywords.test_version(actor, version)
+    if version.task == AIConfigVersion.Task.SHEET_STATUS:
+        from operations import ai_sheet_status
+
+        return ai_sheet_status.test_version(actor, version)
     results = []
     for profile in version.chain():
         started = time.monotonic()
@@ -379,6 +383,10 @@ def record_eval(version, report):
 
     if version.task == AIConfigVersion.Task.KEYWORDS:
         passed = ai_keywords.gate_passed(report, version)
+    elif version.task == AIConfigVersion.Task.SHEET_STATUS:
+        from operations import ai_sheet_status
+
+        passed = ai_sheet_status.gate_passed(report, version)
     elif version.task == AIConfigVersion.Task.TRIAGE:
         passed = ai_triage.gate_passed(report, version)
     elif version.task == AIConfigVersion.Task.ANSWER:
@@ -433,6 +441,12 @@ def activation_blocker(version):
 
         if not ai_keywords.gate_passed(version.eval_result, version):
             return "Keyword evidence is missing, stale or failed; evaluate again."
+        return None
+    if version.task == AIConfigVersion.Task.SHEET_STATUS:
+        from operations import ai_sheet_status
+
+        if not ai_sheet_status.gate_passed(version.eval_result, version):
+            return "Sheet status evidence is missing, stale or failed; evaluate again."
         return None
     if version.eval_result.get("gate") != eval_gate_for(version):
         return "The evaluation predates the current application/security gate; evaluate again."

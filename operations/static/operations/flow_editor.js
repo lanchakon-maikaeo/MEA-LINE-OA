@@ -10,10 +10,10 @@
   var CFG = JSON.parse(cfgEl.textContent);
   var KINDS = CFG.kinds, ROLES = CFG.roles, RULES = CFG.rules, LIMITS = CFG.limits;
   var EDITABLE = CFG.version.editable;
-  var ICONS = { entry: "▶", message: "💬", ask: "✎", branch: "⑂", summary: "≡", create_case: "＋", find_case: "⌕", koj_tracking: "⌕", book: "▦", ai_read: "AI", handoff: "☎", web: "↗", limit: "⛔", result: "✓", note: "✱" };
+  var ICONS = { entry: "▶", message: "💬", ask: "✎", branch: "⑂", summary: "≡", create_case: "＋", find_case: "⌕", koj_tracking: "⌕", sheet_lookup: "▤", book: "▦", ai_read: "AI", handoff: "☎", web: "↗", limit: "⛔", result: "✓", note: "✱" };
   var PALETTE = [
     ["คุยกับผู้ใช้", ["message", "ask", "branch", "summary", "result"]],
-    ["ระบบทำงาน", ["create_case", "find_case", "koj_tracking", "book", "ai_read", "handoff"]],
+    ["ระบบทำงาน", ["create_case", "find_case", "koj_tracking", "sheet_lookup", "book", "ai_read", "handoff"]],
     ["อื่น ๆ", ["entry", "web", "limit", "note"]],
   ];
   var CONFIG_FIELDS = {
@@ -23,6 +23,7 @@
     find_case: [["by", "ค้นด้วย", "text", "เช่น sap_document, meter_number"]],
     book: [["calendar", "ปฏิทิน", "text", "เช่น notebook, pickup"]],
     web: [["url", "ลิงก์", "text", "https://…"]],
+    sheet_lookup: [["source", "แหล่งข้อมูล", "select", CFG.sheets || ":ยังไม่มีแหล่งข้อมูล"], ["by", "ค้นด้วย", "select", ":เลข UI ที่ผู้ใช้พิมพ์|employee:รหัสพนักงานของผู้ใช้ (แสดงรายการที่ตัวเองแจ้ง)"]],
   };
 
   var graph = CFG.graph && CFG.graph.nodes ? CFG.graph : { nodes: [], edges: [] };
@@ -113,6 +114,7 @@
       if (n.kind === "ask") { if (c.field) chips.append(el("span", "fn__chip", "ช่อง " + c.field)); if (c.rule) chips.append(el("span", "fn__chip", RULES[c.rule] || c.rule)); if (c.choices) chips.append(el("span", "fn__chip", "เลือก: " + c.choices.split("|").join(" / "))); }
       if (n.kind === "create_case") { chips.append(el("span", "fn__chip", [c.case_kind, c.division, c.topic].filter(Boolean).join(" · "))); }
       if (n.kind === "koj_tracking") { chips.append(el("span", "fn__chip", [c.equipment, c.service].filter(Boolean).join(" · ") || "เมนู กอจ.")); }
+      if (n.kind === "sheet_lookup") chips.append(el("span", "fn__chip", (c.source ? "ชีท " + c.source : "ยังไม่เลือกชีท") + (c.by === "employee" ? " · รหัสพนักงาน" : " · เลข UI")));
       if (n.kind === "book" && c.calendar) chips.append(el("span", "fn__chip", "ปฏิทิน " + c.calendar));
       if (n.kind === "branch" && c.condition) chips.append(el("span", "fn__chip", "ดูจาก " + c.condition));
       var reqs = reqsOf(n.id); if (reqs.length) { var rc = el("span", "fn__chip fn__chip--req", "สิ่งที่กองต้องการ " + reqs.length + " ข้อ"); rc.dataset.req = "1"; rc.title = reqs.map(function (r) { return r.text; }).join("\n"); chips.append(rc); }
@@ -253,10 +255,10 @@
     // The button the user tapped to get here (a branch is the system's choice, not a tap).
     var into = graph.edges.find(function (e) { var f = nodeById(e.from); return e.to === n.id && e.port && f && f.kind !== "branch"; });
     if (into) { var from = nodeById(into.from); var b = from && from.buttons.find(function (x) { return x.id === into.port; }); if (b) screen.append(el("div", "fe__user", b.full || b.label)); }
-    var bot = { message: 1, ask: 1, summary: 1, result: 1, limit: 1, web: 1, branch: 0 };
+    var bot = { message: 1, ask: 1, summary: 1, result: 1, limit: 1, web: 1, sheet_lookup: 1, branch: 0 };
     if (bot[n.kind]) {
       var oa = el("div", "fe__oa"); oa.append(el("span", "fe__avatar", "ฝอจ"));
-      var text = n.kind === "message" || n.kind === "summary" ? [n.title, n.text].filter(Boolean).join("\n") : (n.text || n.title);
+      var text = n.kind === "message" || n.kind === "summary" ? [n.title, n.text].filter(Boolean).join("\n") : (n.kind === "web" && n.config && n.config.url ? [n.text, n.config.url].filter(Boolean).join("\n") : (n.text || n.title));
       oa.append(el("div", "fe__bubble", text || "(ยังไม่มีข้อความ)")); screen.append(oa);
     } else {
       screen.append(el("div", "fe__typing", "ขั้นนี้ระบบทำงานเอง ผู้ใช้ไม่เห็นข้อความของกล่องนี้: " + (KINDS[n.kind] || n.kind)));
@@ -268,6 +270,8 @@
     if (n.kind === "branch") labels = [];
     labels.forEach(function (l) { quick.append(el("span", "fe__qr" + (l.length > LIMITS.label ? " is-long" : ""), l)); });
     if (labels.length) screen.append(quick);
+    if (n.kind === "sheet_lookup" && n.config && n.config.by === "employee") screen.append(el("div", "fe__typing", "ระบบแสดงรายการที่ผู้ใช้แจ้งไว้ในชีท โดยแมพรหัสพนักงานที่ผู้ใช้ยืนยันแล้ว"));
+    else if (n.kind === "sheet_lookup") screen.append(el("div", "fe__typing", "ผู้ใช้พิมพ์เลข UI ได้ครั้งละไม่เกิน 10 เลข ระบบตอบสถานะจากชีท แล้วถามต่อพร้อมปุ่ม ถามเลข UI อื่น และ จบ"));
     if (n.kind === "ask") screen.append(el("div", "fe__typing", "ผู้ใช้พิมพ์ตอบ" + (n.config && n.config.rule ? " · ระบบตรวจ: " + (RULES[n.config.rule] || n.config.rule) : "")));
     phone.append(screen); pane.append(phone);
     pane.append(el("p", "fe__help", "ปุ่มที่ชื่อยาวเกินจะเป็นสีแดง LINE ตัดชื่อปุ่มที่ยาวเกิน " + LIMITS.label + " ตัวอักษร"));
@@ -308,7 +312,10 @@
       if (n.kind === "book") { say("sys", "ผู้ใช้เลือกช่วงเวลาว่างจากปฏิทิน " + (n.config.calendar || "") + " (ลองคุยข้ามขั้นนี้)"); id = follow(n.id); continue; }
       if (n.kind === "find_case") { say("bot", "(แสดงรายการ เรื่องของฉัน)"); play.done = true; return; }
       if (n.kind === "koj_tracking") { say("bot", n.config.service === "watches" ? "เปิดรายการติดตาม กอจ. (ลองคุยใช้ข้อมูลจำลอง)" : "เปิดติดตามงานต้นทาง กอจ. · " + (n.config.equipment || "เลือกอุปกรณ์") + " · " + (n.config.service || "เลือกบริการ") + " (ลองคุยไม่อ่านชีทจริงและไม่สมัครรับแจ้ง)"); play.done = true; return; }
+      if (n.kind === "sheet_lookup" && n.config.by === "employee") { say("sys", "ระบบแสดงรายการที่ผู้ใช้แจ้งไว้ในชีท " + (n.config.source || "(ยังไม่เลือก)") + " แมพด้วยรหัสพนักงาน (ลองคุยไม่อ่านชีทจริง)"); play.done = true; return; }
+      if (n.kind === "sheet_lookup") { say("bot", n.text || n.title); say("sys", "ผู้ใช้พิมพ์เลข UI แล้วระบบตอบสถานะจากชีท " + (n.config.source || "(ยังไม่เลือก)") + " (ลองคุยไม่อ่านชีทจริง)"); play.done = true; return; }
       play.node = n.id;
+      if (n.kind === "web" && n.config.url) { say("bot", [n.text, n.config.url].filter(Boolean).join("\n")); play.done = true; return; }
       if (n.kind === "result" || n.kind === "limit" || n.kind === "web" || n.kind === "handoff") { say("bot", [n.title, n.text].filter(Boolean).join("\n")); play.done = true; return; }
       if (n.kind === "summary") { play.summary = n.id; say("bot", playSummary(n)); return; }
       if (n.kind === "ask" && n.config.choices && !play.choice[n.id]) { say("bot", n.title + "\nเลือกก่อนว่าจะติดตามด้วยอะไร"); return; }

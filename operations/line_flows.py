@@ -37,6 +37,8 @@ KINDS = {
     "create_case": ("สร้างเรื่อง", "next"),
     "find_case": ("ค้นเรื่อง", "end"),  # the chat shows เรื่องของฉัน and the flow ends
     "koj_tracking": ("ติดตามงานต้นทาง กอจ.", "end"),
+    # ADR 0027: the requester types numbers, the program answers from a sheet and asks again.
+    "sheet_lookup": ("ค้นในชีท", "end"),
     "book": ("นัดในปฏิทิน", "next"),
     "ai_read": ("ให้ AI อ่าน", "next"),
     "handoff": ("ส่งต่อเจ้าหน้าที่", "end"),
@@ -62,7 +64,7 @@ RULES = {
     "multiplier": "ตัวคูณ (เทียบกับ CT และ VT)",
     "district": "ชื่อเขต (18 เขต)",
 }
-ACTIONS = {"create_case", "find_case", "book", "ai_read", "handoff", "koj_tracking"}
+ACTIONS = {"create_case", "find_case", "book", "ai_read", "handoff", "koj_tracking", "sheet_lookup"}
 SETTING = re.compile(r"[a-z_]{1,30}\s*=\s*[^=;|]{1,40}(?:\|[^=;|]{1,40})*")
 
 
@@ -167,6 +169,14 @@ def check(graph):
                 add("error", n["id"], "เลือกอุปกรณ์และบริการ กอจ. ให้ครบ")
             if service == "repair" and equipment not in {"lbs", "rmu"}:
                 add("error", n["id"], "เฟสแรกติดตามซ่อมเฉพาะ LBS และ RMU")
+        if n["kind"] == "sheet_lookup":
+            from operations.sheet_models import SheetSource
+
+            source = SheetSource.objects.filter(key=n["config"].get("source", "")).first()
+            if source is None:
+                add("error", n["id"], f"ค้นในชีท '{n['title']}' ยังไม่ได้เลือกแหล่งข้อมูล")
+            elif not source.enabled:
+                add("warn", n["id"], f"แหล่งข้อมูล '{source.name}' ยังปิดอยู่ บอทจะตอบว่ายังค้นไม่ได้")
         edges = out.get(n["id"], [])
         if n["kind"] != "note" and not n["title"].strip():
             add("warn", n["id"], f"{name} ยังไม่มีชื่อ")

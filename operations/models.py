@@ -19,6 +19,11 @@ from operations.koj_models import (  # noqa: F401 - register and re-export ก�
     KojSource,
     KojWatch,
 )
+from operations.sheet_models import (  # noqa: F401 - register and re-export ค้นในชีท models
+    SheetEntry,
+    SheetSource,
+    SheetStatusRun,
+)
 
 
 class District(models.Model):
@@ -1125,6 +1130,7 @@ class AIConfigVersion(models.Model):
         ANSWER = "answer", "ตอบแชตผู้ใช้ LINE OA จากคลังคำตอบ"
         ROUTING = "routing", "เสนอกองจากหน้าที่ของกอง"
         KEYWORDS = "keywords", "ยกคำสำคัญให้ระบบจำ"
+        SHEET_STATUS = "sheet_status", "เรียบเรียงสถานะจากชีท"
 
     class Status(models.TextChoices):
         CANDIDATE = "candidate", "รอทดสอบ/ประเมิน"

@@ -63,6 +63,7 @@ TASKS = {
     "screen": "กรองคำสั่งแฝง",
     "triage": "คัดกรองเรื่อง",
     "routing": "ส่งกองตามหน้าที่",
+    "sheet_status": "เรียบเรียงสถานะจากชีท",
     "eval": "การประเมิน (ข้อความจำลอง)",
 }
 NUMBER_DIGITS = 6  # a run of at least this many digits is masked (Q35)
