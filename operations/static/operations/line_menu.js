@@ -1,47 +1,26 @@
-/* Build-time renderer for bundled LINE menu images (ADR 0019). */
+/* Build-time artwork and typography only; tap bounds come from line_menu.drawing(). */
 (function () {
   "use strict";
-
-  var ORANGE = "#df5d28";
-  var DEEP_ORANGE = "#a93622";
-  var GOLD = "#f3b62f";
-  var INK = "#3b302d";
-  var MUTED = "#7d6d65";
+  var BLUE = "#a5dcef", ORANGE = "#e9b38a", GOLD = "#e9ce83";
+  var INK = "#f5f7fb", MUTED = "#d8e2ef";
 
   function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+    ctx.roundRect(x, y, w, h, r);
   }
 
-  function fillRound(ctx, x, y, w, h, r, fill) {
-    roundRect(ctx, x, y, w, h, r);
-    ctx.fillStyle = fill;
-    ctx.fill();
-  }
-
-  function strokeRound(ctx, x, y, w, h, r, stroke, width) {
-    roundRect(ctx, x, y, w, h, r);
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = width;
-    ctx.stroke();
+  function strokePath(ctx, path) {
+    ctx.stroke(new Path2D(path));
   }
 
   function splitLongWord(ctx, word, width) {
-    var lines = [];
-    var line = "";
+    var lines = [], line = "";
     Array.from(word).forEach(function (character) {
       var next = line + character;
       if (line && ctx.measureText(next).width > width) {
         lines.push(line);
         line = character;
-      } else {
-        line = next;
-      }
+      } else line = next;
     });
     if (line) lines.push(line);
     return lines;
@@ -49,14 +28,10 @@
 
   function wrap(ctx, text, width) {
     var words = String(text || "").trim().split(/\s+/).filter(Boolean);
-    var lines = [];
-    var line = "";
+    var lines = [], line = "";
     words.forEach(function (word) {
       if (ctx.measureText(word).width > width) {
-        if (line) {
-          lines.push(line);
-          line = "";
-        }
+        if (line) { lines.push(line); line = ""; }
         lines = lines.concat(splitLongWord(ctx, word, width));
         return;
       }
@@ -64,12 +39,29 @@
       if (line && ctx.measureText(next).width > width) {
         lines.push(line);
         line = word;
-      } else {
-        line = next;
-      }
+      } else line = next;
     });
     if (line) lines.push(line);
     return lines.slice(0, 3);
+  }
+
+  function titleLines(ctx, label, width) {
+    if (label === "หม้อแปลง LBS RMU") {
+      return { size: 80, lines: ["หม้อแปลง LBS", "RMU"] };
+    }
+    if (!/\s/.test(label)) {
+      for (var singleSize = 80; singleSize >= 46; singleSize -= 4) {
+        ctx.font = "700 " + singleSize + "px MenuThai, sans-serif";
+        if (ctx.measureText(label).width <= width) return { size: singleSize, lines: [label] };
+      }
+    }
+    for (var size = 80; size >= 46; size -= 4) {
+      ctx.font = "700 " + size + "px MenuThai, sans-serif";
+      var lines = wrap(ctx, label, width);
+      var widest = Math.max.apply(null, lines.map(function (line) { return ctx.measureText(line).width; }));
+      if (lines.length <= 2 && widest <= width) return { size: size, lines: lines };
+    }
+    return { size: 46, lines: wrap(ctx, label, width) };
   }
 
   function iconType(label) {
@@ -84,368 +76,194 @@
     return "grid";
   }
 
-  function drawBolt(ctx, x, y, scale) {
-    ctx.beginPath();
-    ctx.moveTo(x + 8 * scale, y - 30 * scale);
-    ctx.lineTo(x - 18 * scale, y + 6 * scale);
-    ctx.lineTo(x - 2 * scale, y + 6 * scale);
-    ctx.lineTo(x - 9 * scale, y + 35 * scale);
-    ctx.lineTo(x + 23 * scale, y - 8 * scale);
-    ctx.lineTo(x + 6 * scale, y - 8 * scale);
-    ctx.closePath();
+  function drawBolt(ctx) {
     ctx.fillStyle = GOLD;
-    ctx.fill();
+    ctx.fill(new Path2D("M 9 -40 L -25 7 H -3 L -11 43 L 29 -13 H 7 Z"));
   }
 
-  function drawIcon(ctx, type, x, y, scale) {
-    var stroke = ORANGE;
+  function drawMeter(ctx) {
+    strokePath(ctx, "M -52 -90 H 52 V 40 H -52 Z M -39 -76 H 39 V -33 H -39 Z");
+    strokePath(ctx, "M -17 -57 H 17 M -39 0 H 39 V 25 H -39 Z M -39 40 V 89 H 39 V 40");
+    strokePath(ctx, "M -36 -18 H -27");
+    [8, 33].forEach(function (x) {
+      ctx.beginPath();
+      ctx.arc(x, -18, 8, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+  }
+
+  function drawIcon(ctx, type, x, y, scale, accent) {
     ctx.save();
     ctx.translate(x, y);
+    ctx.scale(scale, scale);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = 11 * scale;
-    ctx.strokeStyle = stroke;
-    ctx.fillStyle = "#fff9f3";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = accent;
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 6;
     if (type === "meter") {
-      fillRound(ctx, -70 * scale, -62 * scale, 140 * scale, 124 * scale, 24 * scale, "#fffaf4");
-      strokeRound(ctx, -70 * scale, -62 * scale, 140 * scale, 124 * scale, 24 * scale, stroke, 8 * scale);
-      ctx.beginPath();
-      ctx.arc(0, -15 * scale, 26 * scale, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-35 * scale, 34 * scale);
-      ctx.lineTo(35 * scale, 34 * scale);
-      ctx.stroke();
-      drawBolt(ctx, 0, -2 * scale, scale * 0.7);
-      [-94, 94].forEach(function (offset) {
-        ctx.beginPath();
-        ctx.arc(offset * scale, 26 * scale, 19 * scale, 0, Math.PI * 2);
-        ctx.stroke();
-      });
+      drawMeter(ctx);
     } else if (type === "transformer") {
-      ctx.beginPath();
-      ctx.moveTo(-82 * scale, 58 * scale);
-      ctx.lineTo(-54 * scale, -60 * scale);
-      ctx.lineTo(54 * scale, -60 * scale);
-      ctx.lineTo(82 * scale, 58 * scale);
-      ctx.stroke();
-      [-30, 30].forEach(function (offset) {
-        ctx.beginPath();
-        ctx.arc(offset * scale, -2 * scale, 28 * scale, -Math.PI / 2, Math.PI / 2);
-        ctx.arc(offset * scale, -2 * scale, 28 * scale, Math.PI / 2, (Math.PI * 3) / 2);
-        ctx.stroke();
+      strokePath(ctx, "M -85 -4 H 85 V 70 H -85 Z M -85 8 H -108 V 58 H -85");
+      strokePath(ctx, "M 85 8 H 108 V 58 H 85 M -46 70 V 90 M -64 90 H -28 M 46 70 V 90 M 28 90 H 64");
+      [-55, 0, 55].forEach(function (offset) {
+        ctx.save();
+        ctx.translate(offset, 0);
+        strokePath(ctx, "M 0 -100 V -4 M -12 -82 H 12 M -12 -59 H 12 M -12 -36 H 12 M 0 12 V 54");
+        ctx.restore();
       });
-      ctx.beginPath();
-      ctx.moveTo(-95 * scale, 60 * scale);
-      ctx.lineTo(95 * scale, 60 * scale);
-      ctx.stroke();
-      drawBolt(ctx, 0, 4 * scale, scale * 0.72);
     } else if (type === "tools") {
-      ctx.beginPath();
-      ctx.moveTo(-75 * scale, -68 * scale);
-      ctx.arc(-75 * scale, -68 * scale, 32 * scale, 0.35, Math.PI * 1.7);
-      ctx.lineTo(34 * scale, 42 * scale);
-      ctx.arc(50 * scale, 58 * scale, 21 * scale, -2.4, 0.75);
-      ctx.lineTo(-57 * scale, -51 * scale);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-45 * scale, 65 * scale);
-      ctx.lineTo(75 * scale, -55 * scale);
+      strokePath(ctx, "M -58 -55 C -102 -50 -93 -100 -62 -88 L -48 -73 L -61 -60 L -78 -75");
+      strokePath(ctx, "M -51 -68 L 77 61 C 95 80 73 103 56 83 L -70 -45");
       ctx.strokeStyle = GOLD;
-      ctx.stroke();
+      strokePath(ctx, "M -79 86 L 61 -55 M -84 72 L -67 89");
       ctx.beginPath();
-      ctx.arc(80 * scale, -60 * scale, 21 * scale, 0, Math.PI * 2);
+      ctx.arc(76, -70, 20, 0, Math.PI * 2);
       ctx.stroke();
     } else if (type === "system") {
-      [[0, -58], [-76, 35], [76, 35]].forEach(function (point) {
+      strokePath(ctx, "M -63 -22 C -101 -22 -101 -72 -65 -78 C -48 -119 -2 -117 14 -81 C 49 -86 74 -58 68 -34 C 100 -17 80 15 56 15 H -62 C -91 15 -91 -17 -63 -22 Z");
+      strokePath(ctx, "M -48 16 L -110 57 M 0 16 V 65 M 48 16 L 110 57");
+      ctx.save();
+      ctx.translate(-118, 93);
+      ctx.scale(0.34, 0.34);
+      drawMeter(ctx);
+      ctx.restore();
+      strokePath(ctx, "M -30 67 H 30 V 109 H -30 Z M -30 109 L -42 122 H 42 L 30 109");
+      strokePath(ctx, "M 102 66 H 142 L 153 106 H 91 Z M 99 86 H 147 M 115 66 L 111 106 M 130 66 L 134 106 M 122 106 V 126 M 108 126 H 136");
+      ctx.strokeStyle = BLUE;
+      [17, 29, 41].forEach(function (radius) {
         ctx.beginPath();
-        ctx.arc(point[0] * scale, point[1] * scale, 23 * scale, 0, Math.PI * 2);
-        ctx.fillStyle = "#fffaf4";
-        ctx.fill();
-        ctx.strokeStyle = stroke;
+        ctx.arc(0, -22, radius, Math.PI * 1.22, Math.PI * 1.78);
         ctx.stroke();
       });
-      ctx.strokeStyle = stroke;
       ctx.beginPath();
-      ctx.moveTo(0, -35 * scale);
-      ctx.lineTo(-59 * scale, 20 * scale);
-      ctx.moveTo(0, -35 * scale);
-      ctx.lineTo(59 * scale, 20 * scale);
-      ctx.moveTo(-53 * scale, 35 * scale);
-      ctx.lineTo(53 * scale, 35 * scale);
+      ctx.arc(0, -22, 3, 0, Math.PI * 2);
       ctx.stroke();
-      drawBolt(ctx, 0, 8 * scale, scale * 0.62);
     } else if (type === "usage") {
-      ctx.beginPath();
-      ctx.moveTo(-80 * scale, -8 * scale);
-      ctx.lineTo(0, -70 * scale);
-      ctx.lineTo(80 * scale, -8 * scale);
-      ctx.lineTo(65 * scale, -8 * scale);
-      ctx.lineTo(65 * scale, 65 * scale);
-      ctx.lineTo(-65 * scale, 65 * scale);
-      ctx.lineTo(-65 * scale, -8 * scale);
-      ctx.closePath();
-      ctx.fillStyle = "#fffaf4";
-      ctx.fill();
-      ctx.stroke();
-      drawBolt(ctx, 0, 18 * scale, scale * 0.82);
+      strokePath(ctx, "M -91 -8 L 0 -85 L 91 -8 H 69 V 80 H -69 V -8 Z");
+      ctx.translate(0, 16);
+      drawBolt(ctx);
     } else if (type === "chat") {
-      fillRound(ctx, -88 * scale, -60 * scale, 176 * scale, 118 * scale, 33 * scale, "#fffaf4");
-      strokeRound(ctx, -88 * scale, -60 * scale, 176 * scale, 118 * scale, 33 * scale, stroke, 9 * scale);
-      ctx.beginPath();
-      ctx.moveTo(-23 * scale, 55 * scale);
-      ctx.lineTo(-48 * scale, 86 * scale);
-      ctx.lineTo(5 * scale, 58 * scale);
+      roundRect(ctx, -91, -67, 182, 124, 30);
       ctx.stroke();
-      [-35, 0, 35].forEach(function (offset) {
+      strokePath(ctx, "M -20 57 L -51 91 L 9 57");
+      [-40, 0, 40].forEach(function (offset) {
         ctx.beginPath();
-        ctx.arc(offset * scale, -4 * scale, 8 * scale, 0, Math.PI * 2);
-        ctx.fillStyle = GOLD;
+        ctx.arc(offset, -4, 6, 0, Math.PI * 2);
+        ctx.fillStyle = accent;
         ctx.fill();
       });
     } else if (type === "task" || type === "track") {
-      fillRound(ctx, -66 * scale, -72 * scale, 132 * scale, 144 * scale, 18 * scale, "#fffaf4");
-      strokeRound(ctx, -66 * scale, -72 * scale, 132 * scale, 144 * scale, 18 * scale, stroke, 9 * scale);
-      [-28, 2, 32].forEach(function (offset) {
-        ctx.beginPath();
-        ctx.moveTo(-35 * scale, offset * scale);
-        ctx.lineTo(32 * scale, offset * scale);
-        ctx.stroke();
+      roundRect(ctx, -66, -82, 132, 164, 15);
+      ctx.stroke();
+      [-40, 0, 40].forEach(function (offset) {
+        strokePath(ctx, "M -34 " + offset + " H 34");
       });
       if (type === "track") {
         ctx.beginPath();
-        ctx.arc(70 * scale, 55 * scale, 31 * scale, 0, Math.PI * 2);
-        ctx.strokeStyle = GOLD;
+        ctx.arc(65, 57, 31, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(92 * scale, 77 * scale);
-        ctx.lineTo(118 * scale, 103 * scale);
-        ctx.stroke();
+        strokePath(ctx, "M 88 80 L 112 104");
       }
     } else {
-      [-38, 38].forEach(function (xOffset) {
-        [-38, 38].forEach(function (yOffset) {
-          fillRound(ctx, (xOffset - 25) * scale, (yOffset - 25) * scale, 50 * scale, 50 * scale, 12 * scale, "#fffaf4");
-          strokeRound(ctx, (xOffset - 25) * scale, (yOffset - 25) * scale, 50 * scale, 50 * scale, 12 * scale, stroke, 7 * scale);
+      [-42, 42].forEach(function (dx) {
+        [-42, 42].forEach(function (dy) {
+          roundRect(ctx, dx - 27, dy - 27, 54, 54, 10);
+          ctx.stroke();
         });
       });
     }
     ctx.restore();
   }
 
-  function drawBackground(ctx, canvas) {
-    var background = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    background.addColorStop(0, "#fffdf8");
-    background.addColorStop(0.52, "#fff5e9");
-    background.addColorStop(1, "#fee5c5");
-    ctx.fillStyle = background;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.save();
-    ctx.globalAlpha = 0.48;
-    ctx.lineCap = "round";
-    ctx.strokeStyle = "#f39b31";
-    ctx.lineWidth = 105;
-    ctx.beginPath();
-    ctx.arc(-125, -140, 720, 0.25, 1.2);
-    ctx.stroke();
-    ctx.strokeStyle = "#e75d28";
-    ctx.lineWidth = 52;
-    ctx.beginPath();
-    ctx.arc(-125, -140, 855, 0.28, 1.19);
-    ctx.stroke();
-    ctx.strokeStyle = "#f7ce53";
-    ctx.lineWidth = 32;
-    ctx.beginPath();
-    ctx.arc(-125, -140, 920, 0.28, 1.2);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.globalAlpha = 0.32;
-    ctx.strokeStyle = "#f2a136";
-    ctx.lineWidth = 100;
-    ctx.beginPath();
-    ctx.arc(canvas.width + 250, canvas.height + 180, 780, Math.PI + 0.15, Math.PI * 1.66);
-    ctx.stroke();
-    ctx.strokeStyle = "#e9612b";
-    ctx.lineWidth = 46;
-    ctx.beginPath();
-    ctx.arc(canvas.width + 250, canvas.height + 180, 900, Math.PI + 0.16, Math.PI * 1.65);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.globalAlpha = 0.14;
-    ctx.fillStyle = "#5da6dd";
-    for (var i = 0; i < 28; i += 1) {
-      var width = 34 + ((i * 37) % 86);
-      var height = 52 + ((i * 71) % 230);
-      ctx.fillRect(i * 96, canvas.height - height - 22, width, height);
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.globalAlpha = 0.55;
-    ctx.fillStyle = "#ffffff";
-    [[1540, 110, 8], [1770, 230, 6], [2140, 130, 11], [2400, 420, 7], [1230, 1520, 7]].forEach(function (spark) {
-      ctx.beginPath();
-      ctx.arc(spark[0], spark[1], spark[2], 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.restore();
+  function artworkSlice(ctx, artwork, source, target) {
+    ctx.drawImage(artwork,
+      source[0] * artwork.naturalWidth, source[1] * artwork.naturalHeight,
+      source[2] * artwork.naturalWidth, source[3] * artwork.naturalHeight,
+      target.x, target.y, target.w, target.h);
   }
 
-  function titleLines(ctx, label, width) {
-    if (!/\s/.test(label)) {
-      for (var singleSize = 80; singleSize >= 46; singleSize -= 4) {
-        ctx.font = "700 " + singleSize + "px MenuThai, sans-serif";
-        if (ctx.measureText(label).width <= width) {
-          return { size: singleSize, lines: [label] };
-        }
-      }
-    }
-    for (var size = 80; size >= 46; size -= 4) {
-      ctx.font = "700 " + size + "px MenuThai, sans-serif";
-      var lines = wrap(ctx, label, width);
-      var widest = Math.max.apply(null, lines.map(function (line) { return ctx.measureText(line).width; }));
-      if (lines.length <= 2 && widest <= width) return { size: size, lines: lines };
-    }
-    return { size: 46, lines: wrap(ctx, label, width) };
-  }
-
-  function drawTile(ctx, s) {
-    var inset = 20;
-    var x = s.x + inset;
-    var y = s.y + inset;
-    var w = s.w - inset * 2;
-    var h = s.h - inset * 2;
-    var card = ctx.createLinearGradient(x, y, x + w, y + h);
-    card.addColorStop(0, "#ffffff");
-    card.addColorStop(1, "#fff4e7");
-    ctx.save();
-    ctx.shadowColor = "rgba(124, 60, 28, 0.22)";
-    ctx.shadowBlur = 16;
-    ctx.shadowOffsetY = 8;
-    fillRound(ctx, x, y, w, h, 56, card);
-    ctx.restore();
-    strokeRound(ctx, x, y, w, h, 56, ORANGE, 5);
-    strokeRound(ctx, x + 10, y + 10, w - 20, h - 20, 46, "#f6c54d", 2);
-
-    ctx.save();
-    ctx.globalAlpha = 0.09;
-    ctx.fillStyle = "#7bc7f1";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.88, y + h * 0.13, w * 0.24, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    var scale = Math.min(w / 850, h / 690);
-    drawIcon(ctx, iconType(s.label), x + w / 2, y + h * 0.29, scale * 0.92);
-    var title = titleLines(ctx, s.label, w - 110);
+  function drawTile(ctx, s, artwork, index, columns) {
+    var row = Math.floor(index / columns), column = index % columns;
+    // Crop the approved text-free artwork into the unchanged tap bounds.
+    var sourceY = row === 0 ? 0 : 400 / 1030;
+    var sourceH = row === 0 ? 400 / 1030 : 424 / 1030;
+    artworkSlice(ctx, artwork, [column / 3, sourceY, 1 / 3, sourceH], s);
+    var accent = (row + column) % 2 ? ORANGE : BLUE;
+    var scale = Math.min(s.w / 650, s.h / 600);
+    drawIcon(ctx, iconType(s.label), s.x + s.w / 2, s.y + s.h * 0.30, scale, accent);
+    var title = titleLines(ctx, s.label, s.w - 100);
     var lineHeight = Math.round(title.size * 1.13);
-    var note = String(s.note || "");
-    var total = title.lines.length * lineHeight + (note ? 70 : 0);
-    var textY = y + h * 0.68 - total / 2 + lineHeight / 2;
+    var textY = s.y + s.h * 0.635 - (title.lines.length - 1) * lineHeight / 2;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = INK;
     ctx.font = "700 " + title.size + "px MenuThai, sans-serif";
     title.lines.forEach(function (line) {
-      ctx.fillText(line, x + w / 2, textY);
+      ctx.fillText(line, s.x + s.w / 2, textY);
       textY += lineHeight;
     });
-    if (note) {
-      textY += 24;
+    if (s.note) {
       ctx.fillStyle = MUTED;
-      ctx.font = "600 43px MenuThai, sans-serif";
-      ctx.fillText(note, x + w / 2, textY);
+      ctx.font = "600 " + Math.round(title.size * 0.66) + "px MenuThai, sans-serif";
+      ctx.fillText(s.note, s.x + s.w / 2, s.y + s.h * 0.825);
     }
   }
 
-  function drawBar(ctx, s) {
-    var inset = 20;
-    var x = s.x + inset;
-    var y = s.y + inset;
-    var w = s.w - inset * 2;
-    var h = s.h - inset * 2;
-    var fill = ctx.createLinearGradient(x, y, x + w, y + h);
-    fill.addColorStop(0, "#ef762b");
-    fill.addColorStop(0.55, "#d95726");
-    fill.addColorStop(1, DEEP_ORANGE);
-    ctx.save();
-    ctx.shadowColor = "rgba(117, 46, 25, 0.26)";
-    ctx.shadowBlur = 14;
-    ctx.shadowOffsetY = 6;
-    fillRound(ctx, x, y, w, h, 46, fill);
-    ctx.restore();
-    strokeRound(ctx, x, y, w, h, 46, "#f7ca55", 4);
-    ctx.save();
-    ctx.globalAlpha = 0.22;
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.86, y + h * 0.18, h * 0.72, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    ctx.fillStyle = "#ffffff";
+  function drawBar(ctx, s, artwork, index) {
+    artworkSlice(ctx, artwork, [index / 2, 824 / 1030, 1 / 2, 206 / 1030], s);
+    ctx.fillStyle = INK;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "700 66px MenuThai, sans-serif";
-    ctx.fillText(s.label, x + w / 2, y + h / 2 + 2);
+    ctx.font = "700 90px MenuThai, sans-serif";
+    ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h * 0.415);
   }
 
   function drawTab(ctx, s) {
-    var inset = 18;
-    var x = s.x + inset;
-    var y = s.y + 16;
-    var w = s.w - inset * 2;
-    var h = s.h - 30;
-    var fill = s.active ? DEEP_ORANGE : "#fff8f0";
-    fillRound(ctx, x, y, w, h, 36, fill);
-    strokeRound(ctx, x, y, w, h, 36, s.active ? "#f6c54d" : ORANGE, s.active ? 4 : 3);
+    var fill = ctx.createLinearGradient(s.x, s.y, s.x, s.y + s.h);
+    fill.addColorStop(0, s.active ? "#89502f" : "#112b42");
+    fill.addColorStop(1, s.active ? "#492b20" : "#071729");
+    roundRect(ctx, s.x + 18, s.y + 16, s.w - 36, s.h - 30, 30);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = s.active ? 5 : 3;
+    ctx.strokeStyle = s.active ? ORANGE : "#5d9abb";
+    ctx.stroke();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = s.active ? "#ffffff" : INK;
+    ctx.fillStyle = INK;
     ctx.font = "700 64px MenuThai, sans-serif";
-    ctx.fillText(s.label, x + w / 2, y + h / 2 + 2);
+    ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h / 2);
   }
 
-  function draw(canvas, shapes) {
+  function draw(canvas, shapes, artwork) {
     var ctx = canvas.getContext("2d");
-    drawBackground(ctx, canvas);
+    ctx.fillStyle = "#06172a";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    var hasBar = shapes.some(function (s) { return s.place === "bar"; });
+    var tileIndex = 0, barIndex = 0;
     shapes.forEach(function (s) {
       if (!s.label) return;
-      if (s.place === "tab") {
-        drawTab(ctx, s);
-      } else if (s.place === "bar") {
-        drawBar(ctx, s);
-      } else {
-        drawTile(ctx, s);
-      }
+      if (s.place === "tab") drawTab(ctx, s);
+      else if (s.place === "bar") drawBar(ctx, s, artwork, barIndex++);
+      else drawTile(ctx, s, artwork, tileIndex++, hasBar ? 3 : 2);
     });
+    canvas.dataset.menuRendered = "true";
   }
 
   function start() {
     var data = document.getElementById("menu-drawing");
+    var artwork = document.getElementById("menu-artwork");
     var canvases = document.querySelectorAll("[data-menu-canvas]");
-    if (!data || !canvases.length) return;
+    if (!data || !artwork || !canvases.length) return;
     var pages = JSON.parse(data.textContent).pages || {};
-    var byPage = {};
-    canvases.forEach(function (canvas) {
-      byPage[canvas.getAttribute("data-menu-canvas")] = canvas;
-    });
-    var render = function () {
-      Object.keys(byPage).forEach(function (page) {
-        draw(byPage[page], pages[page] || []);
+    Promise.all([document.fonts.ready, artwork.decode()]).then(function () {
+      canvases.forEach(function (canvas) {
+        draw(canvas, pages[canvas.getAttribute("data-menu-canvas")] || [], artwork);
       });
-    };
-    var ready = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
-    ready.then(render);
+    });
   }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start);
-  } else {
-    start();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
 })();
