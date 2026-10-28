@@ -89,6 +89,8 @@ BUTTON_LABELS = {
     "resolve_return_discrepancy": "ปิดส่วนต่างการรับคืน",
     "terminate_return": "ยุติส่วนที่ค้างส่งคืน",
     "resolve": "บันทึกผลการแก้ปัญหา",
+    "admin_send": "ส่งให้กอง",
+    "admin_answer": "ตอบเรื่อง",
     "request_child_work": "สร้างงานย่อย",
     "accept_child_work": "รับงานย่อย",
     "decline_child_work": "ไม่รับงานย่อย",
@@ -119,6 +121,7 @@ PRIMARY_ORDER = [
     "accept_handoff",
     "accept_child_work",
     "decide_routing",
+    "admin_answer",
     "decide_child_work",
     "decide_inspection",
     "approve",
@@ -172,6 +175,7 @@ class Situation:
     resolver_id: int | None = None  # who recorded the latest ผลการแก้ปัญหา
     sections: list = field(default_factory=list)  # the owner division's active แผนก
     overseen: frozenset = frozenset()  # divisions this viewer supervises (16 Oct 2569 Q5)
+    admin: bool = False  # ADR 0030: admins send cases to divisions and answer what they hold
 
     def member(self, division_id, roles=None):
         if self.support:
@@ -246,6 +250,7 @@ def situation(user, case):
         support=scope.is_support,
         separation=identity.separated(scope),
         overseen=scope.overseen,
+        admin=scope.is_admin or scope.is_support,
         **_readiness(case, lines),
     )
 
@@ -254,7 +259,7 @@ def _readiness(case, lines):
     """Read-only (never policy.state_for, which locks): the level, R09 and the close date."""
     triage = CaseTriage.objects.filter(case=case).select_related("current_recommendation").first()
     resolved = (
-        case.decisions.filter(action="resolve").order_by("-id").first()
+        case.decisions.filter(action__in=problems.RESULT_ACTIONS).order_by("-id").first()
         if case.kind == K.PROBLEM
         else None
     )
@@ -409,8 +414,12 @@ RULES = {
         st.member(st.owner, [Role.SUPERVISOR])
         and any(line.return_outstanding > 0 for line in st.lines)
     ),
+    # The case page offers it for the admins' own cases; any case moves from the tab (Q11).
+    "admin_send": lambda st: st.admin and st.case.held_by_admin,
+    "admin_answer": lambda st: st.admin and st.case.held_by_admin and st.case.kind == K.PROBLEM,
     "resolve": lambda st: (
         st.case.kind == K.PROBLEM
+        and not st.case.held_by_admin
         and st.member(st.owner, [Role.RESOLVER])
         and not coordination.blocks_closing(st.case)
     ),
@@ -619,11 +628,11 @@ def _members(division_id):
     return choices
 
 
-def _divisions(exclude=None):
-    return [
-        (d.code, f"{d.code} {d.name}")
-        for d in Division.objects.filter(is_active=True).exclude(pk=exclude).order_by("code")
-    ]
+def _divisions(exclude=None, real=False):
+    divisions = Division.objects.filter(is_active=True).exclude(pk=exclude)
+    if real:  # ADR 0030: the real divisions only, not the demo ones
+        divisions = divisions.filter(is_synthetic=False)
+    return [(d.code, f"{d.code} {d.name}") for d in divisions.order_by("code")]
 
 
 def _number(value):
@@ -1088,18 +1097,41 @@ def build_form(action, st, params, demo=False):
         add(Field("category", "สาเหตุ", "radio", True, list(returns.STOP_CATEGORIES.items())))
         add(Field("reference", "เลขเอกสาร SAP", help="จำเป็นเมื่อสูญหาย"))
         add(_reason(True))
-    elif action == "resolve":
+    elif action == "admin_send":
+        here = None if case.held_by_admin else case.owner_division_id
+        add(Field("division", "ส่งให้กอง", "select", True, _divisions(here, real=True)))
+        add(Field("reason", "เหตุผล", "textarea", True))
+    elif action in ("resolve", "admin_answer"):
         suggestion = case.topic == Case.Topic.SUGGESTION
-        if suggestion:
-            form.intro = "ตอบข้อเสนอแนะ ผู้แจ้งจะได้ผลทาง LINE และกดรับทราบได้"
         results = dict(ProblemResolution.Category.choices)
+        if case.topic == Case.Topic.GENERAL:
+            # ADR 0030 Q13: staff say which it is; each kind keeps its own results.
+            form.intro = "เลือกว่าเรื่องนี้เป็นปัญหาหรือข้อเสนอแนะ แล้วเลือกผลในกลุ่มนั้น"
+            add(
+                Field(
+                    "as",
+                    "เรื่องนี้เป็น",
+                    "radio",
+                    True,
+                    [("problem", "ปัญหา"), ("suggestion", "ข้อเสนอแนะ")],
+                )
+            )
+            choices = [
+                (c, f"{group}: {results[c]}")
+                for kind, group in (("problem", "ปัญหา"), ("suggestion", "ข้อเสนอแนะ"))
+                for c in problems.categories_for(case, kind)
+            ]
+        else:
+            if suggestion:
+                form.intro = "ตอบข้อเสนอแนะ ผู้แจ้งจะได้ผลทาง LINE และกดรับทราบได้"
+            choices = [(c, results[c]) for c in problems.categories_for(case)]
         add(
             Field(
                 "category",
                 "ผลการพิจารณา" if suggestion else "ผลที่ได้",
                 "radio",
                 True,
-                [(c, results[c]) for c in problems.categories_for(case)],
+                choices,
             )
         )
         add(Field("message", "ข้อความถึงผู้แจ้ง", "textarea", True, help="ผู้แจ้งเห็นข้อความนี้ใน LINE"))

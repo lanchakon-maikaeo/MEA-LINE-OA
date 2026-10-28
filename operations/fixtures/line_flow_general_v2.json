@@ -1,0 +1,279 @@
+{
+ "version": "line-flow-general-v2",
+ "note": "ADR 0030 (grill 28 ต.ค. 2569): เลือกกองจาก carousel แล้วพิมพ์รายละเอียดช่องเดียว อื่นๆ รอแอดมิน บน production ระบบทดสอบแล้วเผยแพร่เอง",
+ "flow": {
+  "key": "general",
+  "name": "ปัญหา/ข้อเสนอแนะ",
+  "division": "",
+  "tile": "ปัญหา/ข้อเสนอแนะ"
+ },
+ "graph": {
+  "nodes": [
+   {
+    "id": "start",
+    "kind": "entry",
+    "title": "ปัญหา/ข้อเสนอแนะ",
+    "text": "ปุ่มบน rich menu ทุกกอง/ศูนย์",
+    "buttons": [],
+    "config": {},
+    "x": 40,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "c1",
+    "kind": "message",
+    "title": "เลือกกอง",
+    "text": "เลือกกองที่ต้องการแจ้ง",
+    "buttons": [
+     {
+      "id": "c1.b0",
+      "label": "กคว.",
+      "full": "กองเครื่องวัดหน่วยไฟฟ้า",
+      "note": "",
+      "set": "division=กคว."
+     },
+     {
+      "id": "c1.b1",
+      "label": "กอจ.",
+      "full": "กองอุปกรณ์การจำหน่าย",
+      "note": "",
+      "set": "division=กอจ."
+     },
+     {
+      "id": "c1.b2",
+      "label": "กคอ.",
+      "full": "กองเครื่องมือเครื่องใช้และอุปกรณ์",
+      "note": "",
+      "set": "division=กคอ."
+     },
+     {
+      "id": "c1.b3",
+      "label": "ศอค.",
+      "full": "ศูนย์ปฏิบัติการระบบอ่านเครื่องวัดอัตโนมัติ",
+      "note": "",
+      "set": "division=ศอค."
+     },
+     {
+      "id": "c1.b4",
+      "label": "กตฟ.",
+      "full": "กองตรวจสอบการใช้ไฟฟ้า",
+      "note": "",
+      "set": "division=กตฟ."
+     },
+     {
+      "id": "c1.b5",
+      "label": "บท.",
+      "full": "แผนกบริหารทั่วไป",
+      "note": "",
+      "set": "division=บท."
+     },
+     {
+      "id": "c1.b6",
+      "label": "อื่นๆ",
+      "full": "ปัญหาการใช้งานหรืออื่นๆ",
+      "note": "",
+      "set": "division=admin"
+     }
+    ],
+    "config": {
+     "style": "carousel"
+    },
+    "x": 360,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "b1",
+    "kind": "branch",
+    "title": "พิมพ์รายละเอียดแล้วหรือยัง",
+    "text": "เปลี่ยนกองจากหน้าสรุป กลับไปที่สรุป",
+    "buttons": [
+     {
+      "id": "b1.b0",
+      "label": "พิมพ์แล้ว",
+      "full": "",
+      "note": "",
+      "set": "description=*"
+     }
+    ],
+    "config": {},
+    "x": 680,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "desc",
+    "kind": "ask",
+    "title": "พิมพ์รายละเอียดที่ต้องการแจ้ง ส่งรูปประกอบได้",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "field": "description",
+     "rule": "text"
+    },
+    "x": 1000,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "sum",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: ปัญหา/ข้อเสนอแนะ",
+    "text": "",
+    "buttons": [
+     {
+      "id": "sum.b0",
+      "label": "ยืนยันส่งเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sum.b1",
+      "label": "เปลี่ยนกอง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sum.b2",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้รายละเอียด แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
+    "config": {},
+    "x": 1320,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "case",
+    "kind": "create_case",
+    "title": "สร้างเรื่อง (กองที่ผู้แจ้งเลือก)",
+    "text": "อื่นๆ รอแอดมิน (ADR 0030)",
+    "buttons": [],
+    "config": {
+     "case_kind": "problem",
+     "topic": "general"
+    },
+    "x": 1640,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "done",
+    "kind": "result",
+    "title": "ส่งเรื่องแล้ว",
+    "text": "ดูความคืบหน้าได้ที่ เรื่องของฉัน",
+    "buttons": [],
+    "config": {},
+    "x": 1960,
+    "y": 40,
+    "w": 260
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "from": "start",
+    "port": null,
+    "to": "c1",
+    "label": ""
+   },
+   {
+    "id": "e_c0",
+    "from": "c1",
+    "port": "c1.b0",
+    "to": "b1",
+    "label": ""
+   },
+   {
+    "id": "e_c1",
+    "from": "c1",
+    "port": "c1.b1",
+    "to": "b1",
+    "label": ""
+   },
+   {
+    "id": "e_c2",
+    "from": "c1",
+    "port": "c1.b2",
+    "to": "b1",
+    "label": ""
+   },
+   {
+    "id": "e_c3",
+    "from": "c1",
+    "port": "c1.b3",
+    "to": "b1",
+    "label": ""
+   },
+   {
+    "id": "e_c4",
+    "from": "c1",
+    "port": "c1.b4",
+    "to": "b1",
+    "label": ""
+   },
+   {
+    "id": "e_c5",
+    "from": "c1",
+    "port": "c1.b5",
+    "to": "b1",
+    "label": ""
+   },
+   {
+    "id": "e_c6",
+    "from": "c1",
+    "port": "c1.b6",
+    "to": "b1",
+    "label": ""
+   },
+   {
+    "id": "e_b1",
+    "from": "b1",
+    "port": "b1.b0",
+    "to": "sum",
+    "label": ""
+   },
+   {
+    "id": "e_b2",
+    "from": "b1",
+    "port": null,
+    "to": "desc",
+    "label": ""
+   },
+   {
+    "id": "e_d",
+    "from": "desc",
+    "port": null,
+    "to": "sum",
+    "label": ""
+   },
+   {
+    "id": "e_s0",
+    "from": "sum",
+    "port": "sum.b0",
+    "to": "case",
+    "label": ""
+   },
+   {
+    "id": "e_s1",
+    "from": "sum",
+    "port": "sum.b1",
+    "to": "c1",
+    "label": ""
+   },
+   {
+    "id": "e_k",
+    "from": "case",
+    "port": null,
+    "to": "done",
+    "label": ""
+   }
+  ]
+ }
+}

@@ -18,7 +18,7 @@ LABEL = {**{key: STEPS[i] for key, i in INDEX.items()}, "done_confirm": "เส�
 NEEDS_NOTICE = {"need_you", "done_confirm", "done"}
 # Q14: actions whose own text already reaches the requester; it counts as their notice.
 REASON_IS_NOTICE = {"request_info", "decline", "deny_approval", "cancel", "reopen"}
-MESSAGE_IS_NOTICE = {"resolve"}
+MESSAGE_IS_NOTICE = {"resolve", "admin_answer"}
 # No notice is required where the requester already knows the outcome: goods flows tell them
 # themselves (the issue day, the receipt to confirm, what came back), an answer recorded for the
 # district is their own word, and child work ends inside the case.

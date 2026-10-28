@@ -243,6 +243,9 @@
   function bulkState(form) {
     var boxes = document.querySelectorAll('input[name=case][form="' + form.id + '"]');
     var ticked = Array.prototype.filter.call(boxes, function (b) { return b.checked; }).length;
+    // ADR 0030: "every case the filters match" counts those instead of the ticks.
+    var filtered = form.querySelector("[data-bulk-filtered]");
+    var count = filtered && filtered.checked ? parseInt(filtered.getAttribute("data-count"), 10) || 0 : ticked;
     var all = form.querySelector("[data-bulk-all]");
     if (all) {
       all.checked = boxes.length > 0 && ticked === boxes.length;
@@ -251,8 +254,8 @@
     }
     var submit = form.querySelector("[data-bulk-submit]");
     if (submit) {
-      submit.disabled = ticked === 0;
-      submit.textContent = ticked ? submit.getAttribute("data-label").replace("{n}", ticked) : submit.getAttribute("data-empty");
+      submit.disabled = count === 0;
+      submit.textContent = count ? submit.getAttribute("data-label").replace("{n}", count) : submit.getAttribute("data-empty");
     }
   }
   function bulkForms() {
@@ -266,7 +269,7 @@
         b.checked = target.checked;
       });
     }
-    if (target.matches && target.matches("[data-bulk-all], input[name=case][form]")) bulkForms();
+    if (target.matches && target.matches("[data-bulk-all], [data-bulk-filtered], input[name=case][form]")) bulkForms();
   });
   document.addEventListener("htmx:afterSwap", bulkForms);
 

@@ -133,15 +133,14 @@ class SimpleServiceTests(menu_tests.MenuTestCase):
         refused = self.say(self.postback(BOB, "m=equipment&kind=withdrawal"))
         self.assertIn("ยืนยันตัวตนพนักงาน", texts(refused))
         self.assertFalse(conversation.ConversationDraft.objects.filter(identity=line).exists())
-        self.type(BOB, "แจ้งปัญหา")
-        self.press(BOB, "ระบบ SMG-AMR/บิล")
+        # Typing แจ้งปัญหา opens the division carousel (ADR 0030); the system card still works.
+        self.say(self.postback(BOB, "m=problem&topic=system"))
         self.press(BOB, "ปัญหาการจัดทำบิล")
         draft = conversation.ConversationDraft.objects.get(identity=line, status="open")
         self.assertEqual((draft.kind, draft.data["topic"]), ("problem", "system"))
 
     def test_equipment_problem_uses_four_groups_and_actual_item_topic(self):
-        self.type(ALICE, "แจ้งปัญหา")
-        reply = self.press(ALICE, "ปัญหาอุปกรณ์")
+        reply = self.say(self.postback(ALICE, "m=problem&topic=equipment"))
         self.assertEqual(list(buttons(reply))[:4], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น"])
         self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, EquipmentType.objects.get(code="TRF_SYN_A").name)
@@ -155,8 +154,7 @@ class SimpleServiceTests(menu_tests.MenuTestCase):
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
         line = ChannelIdentity.objects.create(channel="line", external_id=BOB)
         identity.anonymous_requester(line)
-        self.say(self.postback(BOB, "m=problems"))
-        self.press(BOB, "ระบบ SMG-AMR/บิล")
+        self.say(self.postback(BOB, "m=problem&topic=system"))
         self.press(BOB, "ปัญหาการจัดทำบิล")
         self.type(BOB, "แจ้งปัญหาระบบจัดทำบิล ทดสอบ")
         self.press(BOB, "ข้าม")

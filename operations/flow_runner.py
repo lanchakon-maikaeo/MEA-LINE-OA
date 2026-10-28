@@ -24,7 +24,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from operations import conversation, services, typed_input, typed_lines, workflow
+from operations import conversation, problem_pick, services, typed_input, typed_lines, workflow
 from operations.contracts import CommandFailed
 from operations.models import (
     Appointment,
@@ -159,11 +159,15 @@ def assign(values, text):
 
 
 def holds(values, text):
-    """Whether every "key=a|b" of text holds for values ("" never holds)."""
+    """Whether every "key=a|b" of text holds for values ("" never holds); "key=*" holds when
+    the key has any value (ADR 0030: back to the summary once the details are in)."""
     parts = [p for p in str(text or "").split(";") if "=" in p]
     for part in parts:
         key, allowed = (x.strip() for x in part.split("=", 1))
-        if str(values.get(key, "")) not in {a.strip() for a in allowed.split("|")}:
+        if allowed == "*":
+            if not values.get(key):
+                return False
+        elif str(values.get(key, "")) not in {a.strip() for a in allowed.split("|")}:
             return False
     return bool(parts)
 
@@ -334,6 +338,26 @@ def render(turn, draft):
                 for s in slots[: conversation.MAX_QUICK - 1]
             ]
         return turn.say(text, quick)
+    elif kind == "message" and box["config"].get("style") == "carousel":
+        # ADR 0030: one bubble per button with its full name (the division carousel).
+        turn.say(box["text"] or box["title"])
+        turn.replies.append(
+            problem_pick.carousel(
+                [
+                    (
+                        button.get("full") or button["label"],
+                        b(
+                            button["label"],
+                            "flow",
+                            {"node": box["id"], "button": button["id"]},
+                            draft,
+                        )[1],
+                    )
+                    for button in box["buttons"]
+                ]
+            )
+        )
+        return None
     else:
         text = "\n".join(x for x in (box["title"], box["text"]) if x)
     for button in box["buttons"]:
@@ -349,7 +373,9 @@ def summary(draft, graph, box):
     lines = [box["title"]]
     confirm = next((b for b in box["buttons"] if follow(graph, box["id"], b["id"])), None)
     target = node(graph, follow(graph, box["id"], confirm["id"])) if confirm else None
-    if target and target["config"].get("division"):
+    if values.get("division"):  # ADR 0030: the division the requester picked
+        lines.append(f"ส่งถึง: {problem_pick.target(values['division'])}")
+    elif target and target["config"].get("division"):
         lines.append(f"ส่งถึง: {target['config']['division']}")
     if values.get("set_kind"):
         lines.append(f"ชุด: {SET_LABELS.get(values['set_kind'], values['set_kind'])}")
@@ -816,8 +842,11 @@ def payload(draft, config, flow):
             lines = typed_lines.add(lines, "other", entry, kind)
     path = " · ".join([flow.tile or flow.name, *state.get("path", [])[:2]])
     data = {"kind": kind, "lines": lines, "menu_label": path[:120]}
-    if config.get("division"):
-        data["division_code"] = config["division"]
+    picked = values.get("division") or config.get("division")
+    if picked == problem_pick.ADMIN:
+        data["hold_for_admin"] = True  # ADR 0030: ปัญหาการใช้งานหรืออื่นๆ
+    elif picked:
+        data["division_code"] = picked
     # A button may name the topic ("topic=suggestion"); otherwise the box says it.
     topic = (values.get("topic") or config.get("topic", "")) if kind == Case.Kind.PROBLEM else ""
     if topic:
@@ -925,7 +954,11 @@ def _create(turn, draft, graph, box):
     ]
     title = result_box["title"] if result_box else "ยื่นเรื่องแล้ว"
     status = f"สถานะ: {case.get_status_display()}"
-    conversation._menu(turn, "\n".join([title, f"เลขเรื่อง: {', '.join(numbers)}", status, *rest]))
+    if state["values"].get("division"):
+        conversation._menu(turn, problem_pick.done_text(case))  # ADR 0030 Q26
+    else:
+        lines = [title, f"เลขเรื่อง: {', '.join(numbers)}", status, *rest]
+        conversation._menu(turn, "\n".join(lines))
     base = state.get("base")
     if base:
         value = {"version": _version(draft).pk, "node": base["node"], "values": base["values"]}

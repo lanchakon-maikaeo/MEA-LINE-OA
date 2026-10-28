@@ -8,28 +8,38 @@ and when, with a CSV download. Their answers:
 - Q5: the code appears on this page only.
 - Q4, Q6 and Q7: the CSV carries no personal data (no name, code, text, location or staff name),
   only the kind of reporter, and every download is audited.
+
+ADR 0030 (28 Oct 2569): the page is a tab after คิวงาน for admins. Its first sub-tab holds the
+cases nobody picked a division for (ปัญหาการใช้งานหรืออื่นๆ); admins tick cases, or every case
+the filters match, and send them to one division with one reason after confirming the count.
 """
 
 import csv
 import io
+import uuid
 from datetime import date
 
 from django.conf import settings
+from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import urlencode
-from django.views.decorators.http import require_safe
+from django.views.decorators.http import require_POST, require_safe
 
-from operations import identity, reports
+from operations import identity, reports, services, workflow
+from operations.contracts import Actor, CommandFailed
 from operations.models import Case, Division, RoleGrant
 from operations.views import admin_required
 
 PER_PAGE = 50
 NO_TOPIC = "none"
+ADMIN_OWNER = "admin"  # the กองเจ้าภาพ filter's value for cases the admins hold
+TABS = (("waiting", "รอแอดมิน"), ("all", "ทั้งหมด"))
+SEND_MAX = 500  # cases one ส่งให้กอง may move
 RECORDED_LATER = 60  # seconds between the real report time and the record worth showing
 HEADER = (
     "เลขเรื่อง",
@@ -59,7 +69,7 @@ def _chosen(query):
         if query.get(key) in allowed:
             chosen[key] = query[key]
     division = (query.get("division") or "").strip()
-    if division and Division.objects.filter(code=division).exists():
+    if division == ADMIN_OWNER or (division and Division.objects.filter(code=division).exists()):
         chosen["division"] = division
     for key in ("from", "to"):
         try:
@@ -69,11 +79,15 @@ def _chosen(query):
     return chosen
 
 
-def _cases(chosen):
+def _waiting():
+    """Open cases the admins hold (ADR 0030), for the sub-tab and the count on the tab."""
+    return Case.objects.filter(held_by_admin=True).exclude(status__in=workflow.TERMINAL)
+
+
+def _cases(chosen, tab="all"):
     """Problem and suggestion cases matching the filters, newest real report time first."""
-    cases = Case.objects.filter(kind=Case.Kind.PROBLEM).annotate(
-        reported=Coalesce("reported_at", "submitted_at")
-    )
+    cases = (_waiting() if tab == "waiting" else Case.objects).filter(kind=Case.Kind.PROBLEM)
+    cases = cases.annotate(reported=Coalesce("reported_at", "submitted_at"))
     if chosen.get("topic") == NO_TOPIC:
         cases = cases.filter(topic="")
     elif "topic" in chosen:
@@ -82,8 +96,10 @@ def _cases(chosen):
         cases = cases.filter(status=chosen["status"])
     if "channel" in chosen:
         cases = cases.filter(channel=chosen["channel"])
-    if "division" in chosen:
-        cases = cases.filter(owner_division__code=chosen["division"])
+    if chosen.get("division") == ADMIN_OWNER:
+        cases = cases.filter(held_by_admin=True)
+    elif "division" in chosen:
+        cases = cases.filter(owner_division__code=chosen["division"], held_by_admin=False)
     if "from" in chosen:
         cases = cases.filter(reported__date__gte=chosen["from"])
     if "to" in chosen:
@@ -130,6 +146,7 @@ def _row(case):
         "on_behalf": _staff_name(case.submitted_by) if case.submitted_by_id else "",
         "reported": case.reported_at or case.submitted_at,
         "recorded": case.submitted_at if _recorded_later(case) else None,
+        "ended": case.status in workflow.TERMINAL,
     }
 
 
@@ -142,16 +159,30 @@ def _filters():
         ("topic", "หัวข้อ", topics),
         ("status", "สถานะ", Case.Status.choices),
         ("channel", "ช่องทาง", Case.Channel.choices),
-        ("division", "กองเจ้าภาพ", [(d.code, d.code) for d in divisions]),
+        ("division", "กองเจ้าภาพ", [(ADMIN_OWNER, "แอดมิน"), *[(d.code, d.code) for d in divisions]]),
     ]
 
 
-@admin_required
-@require_safe
-def problems(request):
-    chosen = _chosen(request.GET)
-    page = Paginator(_cases(chosen), PER_PAGE).get_page(request.GET.get("page"))
-    query = urlencode(chosen)
+def _targets():
+    """Where ส่งให้กอง may send: the real active divisions."""
+    divisions = Division.objects.filter(is_active=True, is_synthetic=False).order_by("code")
+    return [(d.code, f"{d.code} {d.name}") for d in divisions]
+
+
+def _tab(query):
+    """The sub-tab asked for; otherwise รอแอดมิน while anything waits there, else ทั้งหมด."""
+    tab = query.get("tab", "")
+    if tab in dict(TABS):
+        return tab
+    return "waiting" if _waiting().exists() else "all"
+
+
+def _page(request, query, pending=None):
+    chosen, tab = _chosen(query), _tab(query)
+    cases = _cases(chosen, tab)
+    page = Paginator(cases, PER_PAGE).get_page(query.get("page"))
+    filters = urlencode(chosen)
+    here = urlencode({"tab": tab, **chosen})
     return render(
         request,
         "operations/admin_problems.html",
@@ -160,10 +191,88 @@ def problems(request):
             "rows": [_row(case) for case in page],
             "chosen": chosen,
             "filters": _filters(),
-            "query": query,
-            "page_query": f"{query}&" if query else "",
+            "query": filters,
+            "page_query": f"{here}&",
+            "tab": tab,
+            "tabs": [
+                (key, label, urlencode({"tab": key, **chosen}), _cases(chosen, key).count())
+                for key, label in TABS
+            ],
+            "matching": page.paginator.count,
+            "open_matching": cases.exclude(status__in=workflow.TERMINAL).count(),
+            "targets": _targets(),
+            "pending": pending,
         },
     )
+
+
+@admin_required
+@require_safe
+def problems(request):
+    return _page(request, request.GET)
+
+
+def _to_send(post):
+    """The cases one ส่งให้กอง names: the ticked numbers, or every open case the filters
+    match (ADR 0030 Q18), at most SEND_MAX."""
+    if post.get("all_filtered") == "1":
+        cases = _cases(_chosen(post), _tab(post)).exclude(status__in=workflow.TERMINAL)
+    else:
+        numbers = post.getlist("case")[:SEND_MAX]
+        cases = Case.objects.filter(kind=Case.Kind.PROBLEM, number__in=numbers)
+    return list(cases.select_related("owner_division")[: SEND_MAX + 1])
+
+
+@admin_required
+@require_POST
+def problems_send(request):
+    """ส่งให้กอง for many cases: the first post shows the count to confirm, the second sends
+    each case with the same reason; cases that cannot move are listed with why."""
+    post = request.POST
+    back = f"{reverse('admin-problems')}?{urlencode({'tab': _tab(post), **_chosen(post)})}"
+    division = Division.objects.filter(
+        code=post.get("to_division", ""), is_active=True, is_synthetic=False
+    ).first()
+    reason = " ".join((post.get("reason") or "").split())
+    cases = _to_send(post)
+    if division is None or not reason or not cases:
+        messages.error(request, "เลือกเรื่อง เลือกกอง และใส่เหตุผลก่อนส่ง")
+        return redirect(back)
+    capped = len(cases) > SEND_MAX
+    cases = cases[:SEND_MAX]
+    if post.get("confirm") != "1":
+        pending = {
+            "count": len(cases),
+            "capped": capped,
+            "division": division,
+            "reason": reason,
+            "numbers": [c.number for c in cases],
+            "all_filtered": post.get("all_filtered") == "1",
+        }
+        return _page(request, post, pending)
+    batch = uuid.uuid4().hex[:12]
+    done, failed = 0, []
+    for case in cases:
+        try:
+            services.perform_action(
+                Actor.staff(request.user),
+                case.pk,
+                "admin_send",
+                expected_revision=case.revision,
+                idempotency_key=f"admin-send-{batch}-{case.pk}",
+                payload={"division": division.code, "reason": reason},
+            )
+        except CommandFailed as exc:
+            failed.append(f"{case.number}: {exc.message or exc.code}")
+        else:
+            done += 1
+    if done:
+        messages.success(request, f"ส่ง {done} เรื่องให้ {division.code} แล้ว")
+    for line in failed[:20]:
+        messages.error(request, line)
+    if capped:
+        messages.info(request, f"ส่งได้ครั้งละไม่เกิน {SEND_MAX} เรื่อง เรื่องที่เหลือยังอยู่ในรายการ")
+    return redirect(back)
 
 
 def _reporter_kind(requester):
@@ -215,7 +324,7 @@ def problems_csv(request):
                     divisions.get(case.submitted_by_id, "") if on_behalf else "",
                     reports._when(case.reported_at or case.submitted_at),
                     reports._when(case.submitted_at),
-                    case.owner_division.code,
+                    case.owner_label,
                     case.get_status_display(),
                     reports._when(case.ended_at),
                 )

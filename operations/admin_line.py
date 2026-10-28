@@ -30,13 +30,24 @@ USER_COMMAND = re.compile(r"^ดูผู้ใช้\s+(\d+)$")
 
 
 @transaction.atomic
-def set_notifications(actor, user, enabled):
+def set_notifications(actor, user, enabled, admin_waiting=None):
+    """Registration alerts, and (ADR 0030 Q25) alerts of cases waiting for the admins."""
     identity.require_admin(actor)
     identity.require_admin(user)
     profile = StaffProfile.objects.select_for_update().get(user=user)
     profile.notify_registrations = enabled
-    profile.save(update_fields=["notify_registrations"])
-    identity.audit(actor, "staff.registration_notifications", user, enabled=enabled)
+    fields = ["notify_registrations"]
+    if admin_waiting is not None:
+        profile.notify_admin_waiting = admin_waiting
+        fields.append("notify_admin_waiting")
+    profile.save(update_fields=fields)
+    identity.audit(
+        actor,
+        "staff.registration_notifications",
+        user,
+        enabled=enabled,
+        admin_waiting=profile.notify_admin_waiting,
+    )
 
 
 def notify(registration):

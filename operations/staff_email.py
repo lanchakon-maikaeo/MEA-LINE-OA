@@ -46,6 +46,7 @@ SUBJECTS = {
     "staff_hazard": "เรื่องใหม่แจ้งเหตุอันตราย (ฉุกเฉิน)",
     "staff_registry": "พบส่วนต่างทะเบียนใหม่จากไฟล์ SAP",  # M11 Q19: one per import
     "staff_support": "ผู้ช่วยเหลือระบบทำแทนกองในเรื่องของกอง",  # ADR 0007
+    "staff_admin_waiting": "มีเรื่องรอแอดมิน",  # ADR 0030: LINE only
 }
 CRITICAL = {"staff_hazard", "staff_escalated", "staff_routing"}
 
@@ -169,6 +170,13 @@ def plan_for_event(event):
     """Decisions and new cases from the outbox (deadline events come from the sweep)."""
     if event.event_type == orchestration.EVENT_CASE_SUBMITTED:
         case = Case.objects.filter(pk=event.subject_id).select_related("district").first()
+        if case is not None and case.held_by_admin and not case.is_example:
+            from operations import staff_line  # local: staff_line reads subjects from here
+
+            # ADR 0030 Q21, Q25: LINE to the admins who keep this on (no email, no division).
+            staff_line.plan(
+                "staff_admin_waiting", f"admin:{case.pk}", case, staff_line.admin_receivers(), True
+            )
         floor = (
             CaseTriage.objects.filter(case=case).values_list("priority_floor", flat=True).first()
         )
@@ -238,6 +246,12 @@ def _plan_decision(decision):
         )
         if waiting:
             return plan("staff_routing", key, case, routing_holders(case))
+    if case.held_by_admin and decision.action in ("dispute_resolution", "reopen"):
+        from operations import staff_line  # local: staff_line reads subjects from here
+
+        kind = "staff_dispute" if decision.action == "dispute_resolution" else "staff_reopen"
+        staff_line.plan(kind, key, case, staff_line.admin_receivers(), True)  # ADR 0030
+        return []
     if decision.action == "dispute_resolution":
         return plan("staff_dispute", key, case, _assignee_or_owner(case))
     if decision.action == "reopen":

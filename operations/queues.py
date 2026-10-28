@@ -106,7 +106,8 @@ def _decide_condition(user, scope_admin_all, now):
 
 def tab_condition(tab, division, user, now, admin_all=False):
     """The cases of one tab; `division` None is the admin's every-division view."""
-    owner = Q(owner_division=division) if division else Q()
+    # ADR 0030: a case the admins hold waits on their own tab, in no division's queue.
+    owner = (Q(owner_division=division) if division else Q()) & Q(held_by_admin=False)
     if tab == "host":
         return owner & Q(status__in=workflow.OPEN - WAITING_DISTRICT)
     if tab == "incoming":

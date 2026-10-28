@@ -14,6 +14,8 @@
 #                                  (Object Storage, compartment, hosts, AI/LINE flags like the Mac)
 #   deploy/e5-move.sh secrets      the owner puts the secrets in (copied from the Mac .env and
 #                                  ngrok config on a yes, or typed hidden); shown nowhere
+#   deploy/e5-move.sh line-keys    only the LINE channel secret + token from the Mac .env (another
+#                                  OA), then web and worker restart; the old file is kept on E5
 #   deploy/e5-move.sh check        are the owner's secrets in? (hashes compared, never shown)
 #   deploy/e5-move.sh s3-test      does the backup key work? (OCI's error code only)
 #   deploy/e5-move.sh diagnose     why a deploy's smoke failed (status, smoke, n8n import, logs)
@@ -31,6 +33,9 @@
 #   deploy/e5-move.sh purge-demo [--keep N1,N2 --apply --username U --reason R]
 #                                  remove the demo data (15 Oct 2026): a dry run that lists what
 #                                  would go unless --apply, which takes a fresh backup first
+#   deploy/e5-move.sh restart-data [--apply --username U --reason R --reset-numbers]
+#                                  remove every case, requester and LINE account (29 Oct 2026,
+#                                  the OA switch): a dry run unless --apply, which backs up first
 #   deploy/e5-move.sh ssh [cmd]    a shell (or one command) on E5 through the tunnel
 #
 # Nothing here types a credential: LINE, AI, backup keys and the ngrok authtoken are put on the
@@ -335,7 +340,38 @@ print(json.dumps({f: kv for f, kv in out.items() if kv}))
 PY
 )
   [ "$json" != "{}" ] || { say "nothing to write"; return; }
-  printf '%s\n' "$json" | on_e5 'sudo python3 -c "
+  printf '%s\n' "$json" | put_secrets
+  check || true
+}
+
+# 28 Oct 2026: the bot moved to another LINE OA (@705ttrga). Only the two LINE keys go from the
+# Mac .env to E5; the old file is kept as app.secret.env.before-line-oa for the way back.
+line_keys() {
+  local json
+  tunnel
+  json=$(REPO="$REPO" python3 - <<'PY'
+import json, os
+from pathlib import Path
+
+env = dict(
+    line.split("=", 1) for line in Path(os.environ["REPO"], ".env").read_text().splitlines()
+    if "=" in line and not line.startswith("#")
+)
+keys = ["LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"]
+missing = [k for k in keys if not env.get(k, "").strip()]
+if missing:
+    raise SystemExit("empty in the Mac .env: " + ", ".join(missing))
+print(json.dumps({"app.secret.env": {k: env[k].strip() for k in keys}}))
+PY
+) || die "put the new OA's channel secret and access token in the Mac .env first"
+  on_e5 'sudo cp -p /srv/faoj/env/app.secret.env /srv/faoj/env/app.secret.env.before-line-oa'
+  printf '%s\n' "$json" | put_secrets
+  say "restarting web and worker so they read the new keys; the worker publishes the Rich Menu on the new OA within 5 minutes"
+  { echo "$REMOTE_LIB"; echo 'dc up -d --no-deps web worker'; } | as_root
+}
+
+put_secrets() {  # {"file": {"KEY": "value"}} on stdin, written by root on E5; never in argv
+  on_e5 'sudo python3 -c "
 import json, os, re, sys
 for name, kv in json.load(sys.stdin).items():
     path = \"/srv/faoj/env/\" + name
@@ -350,7 +386,6 @@ for name, kv in json.load(sys.stdin).items():
     open(path, \"w\").write(text)
     os.chmod(path, mode)
 "'
-  check || true
 }
 
 # Ask Object Storage with the backup key from E5's database container and print only OCI's error
@@ -558,6 +593,19 @@ dc run --rm -T migrate /app/.venv/bin/python manage.py purge_demo_data "$@"
 EOF
 }
 
+restart_data() {  # 29 Oct 2026: every case, requester and LINE account goes at the OA switch
+  local arg apply=0
+  for arg in "$@"; do [ "$arg" = --apply ] && apply=1; done
+  tunnel
+  if [ "$apply" = 1 ]; then
+    say "fresh database backup before anything is removed (faoj backup diff)"
+    on_e5 'sudo /usr/local/sbin/faoj backup diff' || die "the backup failed: nothing was removed"
+  fi
+  { printf '%s\n' "$REMOTE_LIB"; cat <<'EOF'; } | as_root "$(quote "$@")"
+dc run --rm -T migrate /app/.venv/bin/python manage.py restart_line_data "$@"
+EOF
+}
+
 back_to_mac() {
   say "E5: stop ngrok and close (data written on E5 since the cutover stays on E5 only)"
   { echo "$REMOTE_LIB"; echo 'dc --profile ngrok stop ngrok >/dev/null; faoj maintenance on'; } | as_root
@@ -574,6 +622,7 @@ case "${1:-}" in
   all) tunnel; mount_data; source_tree; bootstrap; build; dry_run;;
   configure) configure;;
   secrets) secrets;;
+  line-keys) line_keys;;
   check) check;;
   s3-test) s3_test;;
   diagnose) diagnose;;
@@ -582,8 +631,9 @@ case "${1:-}" in
   cutover) cutover;;
   back-to-mac) back_to_mac;;
   purge-demo) shift; purge_demo "$@";;
+  restart-data) shift; restart_data "$@";;
   pii-key) pii_key;;
-  manage) shift; manage_e5 "$@";;
+  manage) shift; tunnel; manage_e5 "$@";;
   mail) mail_setup;;
   ssh) shift; on_e5 "$@";;
   *) sed -n '2,35p' "$0"; exit 2;;

@@ -55,6 +55,8 @@ ADMIN_URLS = ("admin-",)
 REFERENCE_URLS = {"pii", "routing-words", "duties"}
 ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
 ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
+# ADR 0030 Q12: ปัญหาและข้อเสนอแนะ is a tab of its own after คิวงาน, for admins only.
+PROBLEM_URLS = {"admin-problems", "admin-problems-csv", "admin-problems-send"}
 
 
 def environment(request):
@@ -75,7 +77,9 @@ def navigation(request):
     admin_menu = (
         admin_nav.menu(scope, name) if scope.is_admin and name in admin_nav.URL_NAMES else None
     )
-    if admin_menu or (name and name.startswith(ADMIN_URLS)):
+    if name in PROBLEM_URLS:
+        section = "problems"
+    elif admin_menu or (name and name.startswith(ADMIN_URLS)):
         section = "admin"
     elif name in REFERENCE_URLS:
         section = "reference"
@@ -113,8 +117,16 @@ def navigation(request):
             "registrations": not scope.is_admin and identity.may_decide_registrations(user),
             "registry": registry.may_open(user),
             "admin": admin_menu,
+            "admin_waiting": _admin_waiting() if scope.is_admin else 0,
         }
     }
+
+
+def _admin_waiting():
+    """The number on the ปัญหาและข้อเสนอแนะ tab: open cases the admins hold (ADR 0030)."""
+    from operations import problems_web  # local: problems_web imports views
+
+    return problems_web._waiting().count()
 
 
 def _scope(request):

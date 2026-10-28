@@ -21,6 +21,13 @@
         <form class="inline" method="post" action="{% url 'admin-registration-action' reg.pk 'approve' %}">
           {% csrf_token %}<button type="submit">รับรอง</button>
         </form>
+        {% if is_admin and reg.earlier %}
+        <details{% if reg.suggested %} open{% endif %}><summary>ผูกกับผู้แจ้งเดิม</summary><form method="post" action="{% url 'admin-registration-action' reg.pk 'approve' %}">
+          {% csrf_token %}<p class="muted">ใช้กับคนที่เคยลงทะเบียนใน LINE OA เดิม เรื่องเดิมและการแจ้งสถานะจะย้ายมาที่ LINE นี้ ส่วน LINE เดิมจะถูกถอน</p>
+          <label>ผู้แจ้งเดิม <select name="requester" required><option value="">เลือกผู้แจ้ง</option>{% for r in reg.earlier %}<option value="{{ r.pk }}"{% if r.pk == reg.suggested %} selected{% endif %}>{{ r.display_name }} · {{ r.district.name }}</option>{% endfor %}</select></label>
+          <label>เหตุผล <input name="reason" value="ย้าย LINE OA"></label><button type="submit">รับรองและผูก</button>
+        </form></details>
+        {% endif %}
         <details><summary>ปฏิเสธคำขอ</summary><form method="post" action="{% url 'admin-registration-action' reg.pk 'reject' %}">
           {% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">ปฏิเสธ</button>
         </form></details>

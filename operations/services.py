@@ -121,7 +121,7 @@ def _resolve(actor):
 def _waiting_for_coordinator(case_ref):
     """Open routing review, an unanswered (escalated) intake/handoff/child request, or child work
     a coordinator must place: what routing-authority holders see (M06, M09 Q6)."""
-    return (
+    return Q(held_by_admin=False) & (
         Q(Exists(RoutingReview.objects.filter(case=case_ref, status=RoutingReview.Status.OPEN)))
         | Q(
             Exists(
@@ -177,6 +177,8 @@ def _staff_condition(ctx):
 def _can_view(ctx, case):
     if ctx.requester is not None:
         return case.requester_id == ctx.requester.pk
+    if case.held_by_admin:
+        return ctx.scope.is_admin or ctx.scope.is_support  # ADR 0030: the admins hold it
     if identity.can_access_division(ctx.scope, case.owner_division_id):
         return True
     return Case.objects.filter(_staff_condition(ctx), pk=case.pk).exists()
@@ -196,7 +198,7 @@ def visible_cases(actor):
         return identity.filter_by_requester(cases, ctx.requester)
     if ctx.scope.is_admin or ctx.scope.is_support:
         return cases
-    return cases.filter(_staff_condition(ctx))
+    return cases.filter(_staff_condition(ctx)).exclude(held_by_admin=True)
 
 
 def _parse_case_id(case_id):
@@ -531,6 +533,9 @@ def submit_case(actor, *, idempotency_key, payload):
             else None
         )
         routes = [(chosen, lines)] if chosen and intake is None else None
+        held = submission.hold_for_admin and intake is None
+        if held:
+            routes = [(coordinator, lines)]  # ADR 0030: an admin holds it, the rules wait
         routes = list(routes or _route(submission.kind, lines, intake, now))
         _check_sap(submission, fields, requester, routes, intake)
         _check_meters(submission, fields, intake)
@@ -549,6 +554,7 @@ def submit_case(actor, *, idempotency_key, payload):
                 menu_label=submission.menu_label,
                 meters=list(submission.meters),
                 intake_data=dict(submission.intake_data or {}),
+                held_by_admin=held,
                 submitted_at=now,
                 updated_at=now,
                 **fields,

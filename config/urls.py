@@ -115,6 +115,7 @@ urlpatterns = [
     ),
     path("console/admin/problems/", problems_web.problems, name="admin-problems"),
     path("console/admin/problems.csv", problems_web.problems_csv, name="admin-problems-csv"),
+    path("console/admin/problems/send/", problems_web.problems_send, name="admin-problems-send"),
     path("console/admin/requesters/new/", views.admin_requester_new, name="admin-requester-new"),
     path(
         "console/admin/requesters/<int:pk>/",

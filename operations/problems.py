@@ -24,25 +24,32 @@ def _member(ctx, division_id, roles=None):
 
 
 SUGGESTION_RESULTS = (R.CONSIDERED, R.ADOPTED, R.NOT_FEASIBLE)
+RESULT_ACTIONS = ("resolve", "admin_answer")  # the result a requester answers (ADR 0030)
 
 
-def categories_for(case):
-    """A suggestion is answered (considered/adopted/not feasible); a problem is resolved."""
-    if case.topic == Case.Topic.SUGGESTION:
+def categories_for(case, kind=""):
+    """A suggestion is answered (considered/adopted/not feasible); a problem is resolved. A case
+    from the division carousel (ADR 0030) is either, as staff say when they record the result."""
+    kind = kind or ("suggestion" if case.topic == Case.Topic.SUGGESTION else "problem")
+    if kind == "suggestion":
         return list(SUGGESTION_RESULTS)
     return [c for c in R.values if c not in SUGGESTION_RESULTS]
 
 
-def latest(case):
-    return case.resolutions.order_by("-id").first()
+def _kind_of(case, payload):
+    """ADR 0030 Q13: ปัญหา or ข้อเสนอแนะ, chosen with the result while the topic is unset."""
+    if case.topic != Case.Topic.GENERAL:
+        return ""
+    kind = payload.get("as")
+    if kind not in ("problem", "suggestion"):
+        fail(ErrorCode.VALIDATION_ERROR, "เลือกว่าเรื่องนี้เป็นปัญหาหรือข้อเสนอแนะ")
+    return kind
 
 
-def resolve(ctx, case, payload, reason, target):
-    """ผลการแก้ปัญหา by a resolver of the owner division; child work must be finished (Q1)."""
-    if ctx.requester is not None or not _member(ctx, case.owner_division_id, [Role.RESOLVER]):
-        fail(ErrorCode.FORBIDDEN, "เฉพาะผู้แก้ปัญหาของกองเจ้าภาพบันทึกผล (Q1)")
+def _record_result(ctx, case, payload, target):
+    kind = _kind_of(case, payload)
     category = payload.get("category")
-    if category not in categories_for(case):
+    if category not in categories_for(case, kind):
         fail(ErrorCode.VALIDATION_ERROR, "Choose a result category that fits this case.")
     if coordination.blocks_closing(case):
         fail(ErrorCode.VALIDATION_ERROR, "ยังมีงานย่อยค้าง บันทึกผลไม่ได้ (Q1/Q6)")
@@ -53,8 +60,34 @@ def resolve(ctx, case, payload, reason, target):
         internal_note=clean_text(payload, "internal_note", False),
         resolved_by=ctx.user,
     )
+    data = {"resolution_id": resolution.pk, "category": category}
+    if kind:
+        case.topic = Case.Topic.SUGGESTION if kind == "suggestion" else Case.Topic.PROBLEM
+        data["topic"] = case.topic
     case.status = target
-    return {"resolution_id": resolution.pk, "category": category}
+    return data
+
+
+def latest(case):
+    return case.resolutions.order_by("-id").first()
+
+
+def resolve(ctx, case, payload, reason, target):
+    """ผลการแก้ปัญหา by a resolver of the owner division; child work must be finished (Q1)."""
+    if ctx.requester is not None or not _member(ctx, case.owner_division_id, [Role.RESOLVER]):
+        fail(ErrorCode.FORBIDDEN, "เฉพาะผู้แก้ปัญหาของกองเจ้าภาพบันทึกผล (Q1)")
+    if case.held_by_admin:
+        fail(ErrorCode.FORBIDDEN, "เรื่องนี้รอแอดมิน")
+    return _record_result(ctx, case, payload, target)
+
+
+def admin_answer(ctx, case, payload, reason, target):
+    """ADR 0030 Q10, Q19: an admin answers a case the admins hold; the owner stays แอดมิน."""
+    if ctx.requester is not None or not (ctx.scope.is_admin or ctx.scope.is_support):
+        fail(ErrorCode.FORBIDDEN, "เฉพาะแอดมินตอบเรื่องที่รอแอดมิน")
+    if not case.held_by_admin:
+        fail(ErrorCode.VALIDATION_ERROR, "เรื่องนี้อยู่ที่กองแล้ว ให้กองบันทึกผล")
+    return _record_result(ctx, case, payload, target)
 
 
 def _requester_or_intake(ctx, case, payload):
@@ -68,7 +101,7 @@ def _requester_or_intake(ctx, case, payload):
     if intake is None:
         if not _member(ctx, case.owner_division_id):
             fail(ErrorCode.FORBIDDEN, "เจ้าหน้าที่กองเจ้าภาพบันทึกคำตอบแทนผู้แจ้งได้")
-        resolved = case.decisions.filter(action="resolve").order_by("-id").first()
+        resolved = case.decisions.filter(action__in=RESULT_ACTIONS).order_by("-id").first()
         if identity.separated(ctx) and resolved and resolved.actor_id == ctx.user.pk:
             fail(
                 ErrorCode.FORBIDDEN,
@@ -115,7 +148,7 @@ def close(ctx, case, payload, reason, target):
     """Q3: no answer for 7 days after the resolution; the owner division closes with a reason."""
     if ctx.requester is not None or not _member(ctx, case.owner_division_id):
         fail(ErrorCode.FORBIDDEN, "สมาชิกกองเจ้าภาพเป็นผู้ปิดเรื่อง")
-    asked = case.decisions.filter(action="resolve").order_by("-id").first()
+    asked = case.decisions.filter(action__in=RESULT_ACTIONS).order_by("-id").first()
     cutoff = timezone.now() - timedelta(days=settings.RECEIPT_NO_RESPONSE_DAYS)
     if asked is None or asked.created_at > cutoff:
         fail(
@@ -144,6 +177,7 @@ def reopen(ctx, case, payload, reason, target):
 
 HANDLERS = {
     "resolve": resolve,
+    "admin_answer": admin_answer,
     "dispute_resolution": dispute,
 }
 

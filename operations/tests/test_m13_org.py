@@ -559,42 +559,47 @@ class LineTopicTests(LineTestCase):
         super().setUpTestData()
         real_world(cls)
 
-    def test_the_general_problem_menu_uses_the_four_equipment_groups(self):
+    def test_a_problem_or_suggestion_starts_at_the_division_carousel(self):
+        """ADR 0030: one bubble per division, then ปัญหาการใช้งานหรืออื่นๆ; a number works too."""
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        reply = self.sent[-1]
-        self.assertIn(
-            "เรื่องนี้เกี่ยวกับอะไร\n1. มิเตอร์\n2. CT\n3. VT\n4. อุปกรณ์อื่น\n5. ข้อเสนอแนะ",
-            texts(reply),
-        )
-        self.assertEqual(list(buttons(reply))[:5], ["มิเตอร์", "CT", "VT", "อุปกรณ์อื่น", "ข้อเสนอแนะ"])
-        self.assertNotIn("หม้อแปลง", texts(reply))
-        self.assertNotIn("การใช้ไฟฟ้า", texts(reply))
+        reply = self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        self.assertIn("เลือกกองที่ต้องการแจ้ง", texts(reply))
+        self.assertEqual(list(buttons(reply))[-1], "ปัญหาการใช้งานหรืออื่นๆ")
+        self.assertNotIn("มิเตอร์", buttons(reply))
         self.type(ALICE, "2")
         draft = ConversationDraft.objects.get(status="open")
-        self.assertEqual((draft.data["line"]["group"], draft.data["topic"]), ("ct", "meter"))
+        self.assertEqual((draft.data["topic"], draft.data["division"]), ("general", "กองอุปกรณ์ฯ"))
 
     def test_a_suggestion_reaches_the_coordinator_and_is_acknowledged(self):
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "ข้อเสนอแนะ")
-        self.assertIn("กรุณาแจ้งข้อเสนอแนะ", texts(self.sent[-1]))
-        self.type(ALICE, "อยากให้แจ้งเวลารับของล่วงหน้า (ทดสอบ)")
-        self.press(ALICE, "ข้าม")
-        summary = self.press(ALICE, "ข้าม")
-        self.assertIn("สรุปเรื่อง: ข้อเสนอแนะ", texts(summary))
+        self.press(ALICE, "ปัญหาการใช้งานหรืออื่นๆ")  # ADR 0030: the admins hold it
+        summary = self.type(ALICE, "อยากให้แจ้งเวลารับของล่วงหน้า (ทดสอบ)")
+        self.assertIn("สรุปเรื่อง: ปัญหา/ข้อเสนอแนะ", texts(summary))
+        self.assertIn("ส่งถึง: แอดมินระบบ", texts(summary))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
-        self.assertEqual((case.owner_division.code, case.topic), ("ฝอจ.", "suggestion"))
-        self.assertEqual(problems.categories_for(case), ["considered", "adopted", "not_feasible"])
+        self.assertEqual((case.owner_label, case.topic), ("แอดมิน", "general"))
+        self.assertEqual(
+            problems.categories_for(case, "suggestion"), ["considered", "adopted", "not_feasible"]
+        )
+        services.perform_action(  # the admin says it is a suggestion with the answer
+            Actor.staff(self.admin),
+            case.pk,
+            "admin_answer",
+            expected_revision=case.revision,
+            idempotency_key=f"answer-{case.pk}",
+            payload={"as": "suggestion", "category": "considered", "message": "รับไว้พิจารณา"},
+        )
+        case.refresh_from_db()
+        self.assertEqual(case.topic, "suggestion")
         self.assertEqual(problem_chat.labels(case), ("รับทราบ", "มีข้อมูลเพิ่ม"))
 
     def test_an_equipment_problem_uses_its_selected_item_for_the_case_topic(self):
         self.approve(ALICE)
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        self.say(self.postback(ALICE, "m=problem&topic=equipment"))  # the equipment card
         self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "TRF_SYN_A")
         draft = ConversationDraft.objects.get(status="open")

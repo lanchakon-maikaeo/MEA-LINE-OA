@@ -195,6 +195,14 @@ ACTIONS = {
             "M06",
             _per_kind(lambda k, st: _same(_working(st))),
         ),
+        # ADR 0030: an admin moves a case to a division at once (also many from the tab).
+        ActionSpec(
+            "admin_send",
+            "แอดมินส่งให้กอง",
+            "M06",
+            _per_kind(lambda k, st: _same([s for s in st if s not in TERMINAL])),
+            reason_required=True,
+        ),
         ActionSpec(
             "set_priority",
             "ยืนยันระดับความเร่งด่วน",
@@ -376,6 +384,21 @@ ACTIONS = {
             "บันทึกผลแก้ปัญหา",
             "M09",
             _per_kind(_only(K.PROBLEM, {S.IN_PROGRESS: {S.AWAITING_CONFIRMATION}})),
+        ),
+        # ADR 0030 Q10: a case the admins hold is answered by an admin, like a resolver would.
+        ActionSpec(
+            "admin_answer",
+            "แอดมินตอบเรื่อง",
+            "M09",
+            _per_kind(
+                _only(
+                    K.PROBLEM,
+                    {
+                        S.SUBMITTED: {S.AWAITING_CONFIRMATION},
+                        S.IN_PROGRESS: {S.AWAITING_CONFIRMATION},
+                    },
+                )
+            ),
         ),
         ActionSpec(
             "dispute_resolution",

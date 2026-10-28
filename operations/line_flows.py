@@ -211,7 +211,10 @@ def check(graph):
                 add("error", n["id"], f"ถามข้อมูล '{n['title']}' ยังไม่ได้บอกว่าเก็บลงช่องไหน")
             if n["config"].get("rule") not in RULES:
                 add("error", n["id"], f"ถามข้อมูล '{n['title']}' ยังไม่ได้เลือกกฎตรวจ")
-        if n["kind"] == "create_case" and not n["config"].get("division"):
+        picks = any(
+            "division" in b["set"] for m in graph["nodes"] for b in m["buttons"]
+        )  # ADR 0030: the requester picks the division with a button
+        if n["kind"] == "create_case" and not n["config"].get("division") and not picks:
             add("warn", n["id"], f"สร้างเรื่อง '{n['title']}' ยังไม่ได้บอกกอง ระบบจะเลือกกองตามกฎ")
     if len(entries) == 1:
         seen, todo = set(), [entries[0]["id"]]
@@ -283,6 +286,12 @@ def save_draft(actor, version, graph, revision, note=None):
 def publish(actor, version, reason):
     """Make a checked draft the flow's published version; the previous one stays for rollback."""
     identity.require_admin(actor)
+    return publish_as(actor, version, reason)
+
+
+def publish_as(actor, version, reason):
+    """publish without the admin check: the system's own publish after a passing test
+    (ADR 0030 Q22, Q24); everything else is the same."""
     reason = identity._require_reason(reason)
     if not reason:
         raise ValidationError("ใส่เหตุผลก่อนเผยแพร่")

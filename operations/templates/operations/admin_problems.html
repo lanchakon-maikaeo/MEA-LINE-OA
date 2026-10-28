@@ -1,16 +1,24 @@
-{% extends "operations/admin_base.html" %}
+{% extends "operations/base.html" %}
 {% load ui %}
-{% block title %}ปัญหาและข้อเสนอแนะ · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}ปัญหาและข้อเสนอแนะ · ระบบรับเรื่อง ฝอจ.{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
     <h1>ปัญหาและข้อเสนอแนะ</h1>
-    <p class="lede">เรื่องแจ้งปัญหาและข้อเสนอแนะทั้งหมดทุกช่องทาง เรียงตามเวลาแจ้งจริง ใหม่สุดก่อน ผู้แจ้งไม่ระบุตัวตนแสดงเป็นรหัสแทนตัว คนเดียวกันได้รหัสเดิม แต่ไม่มีใครรู้ว่าเป็นใคร</p>
+    <p class="lede">เรื่องแจ้งปัญหาและข้อเสนอแนะทุกช่องทาง ใหม่สุดก่อน แท็บรอแอดมินคือเรื่องที่ผู้แจ้งเลือก "ปัญหาการใช้งานหรืออื่นๆ" แอดมินตอบเองในหน้าเรื่อง หรือติ๊กแล้วส่งให้กอง ผู้แจ้งไม่ระบุตัวตนแสดงเป็นรหัสแทนตัว</p>
   </div>
   <div class="page-head__actions"><a class="btn btn--outline" href="{% url 'admin-problems-csv' %}{% if query %}?{{ query }}{% endif %}">ดาวน์โหลด CSV</a></div>
 </div>
+
+<nav class="chips mb-18" aria-label="แท็บย่อย">
+  {% for key, label, link, count in tabs %}
+    <a class="chip" href="?{{ link }}"{% if key == tab %} aria-current="page"{% endif %}>{{ label }} <span class="chip__count{% if key == 'waiting' and count %} chip__count--alert{% endif %}">{{ count }}</span></a>
+  {% endfor %}
+</nav>
+
 <form class="report-filters" method="get" aria-label="ตัวกรอง">
+  <input type="hidden" name="tab" value="{{ tab }}">
   {% for key, title, choices in filters %}
     <label class="visually-hidden" for="p-{{ key }}">{{ title }}</label>
     <select id="p-{{ key }}" name="{{ key }}" class="pill-select{% if key in chosen %} is-set{% endif %}">
@@ -23,25 +31,64 @@
     <label for="p-to">ถึง</label><input id="p-to" type="date" name="to" value="{{ chosen.to|default:'' }}">
   </span>
   <button class="btn btn--sm" type="submit">กรอง</button>
-  {% if chosen %}<a class="btn btn--sm btn--ghost" href="{% url 'admin-problems' %}">ล้างตัวกรอง</a>{% endif %}
+  {% if chosen %}<a class="btn btn--sm btn--ghost" href="?tab={{ tab }}">ล้างตัวกรอง</a>{% endif %}
 </form>
-<p class="muted">{{ page.paginator.count }} เรื่อง · ไฟล์ CSV ใช้ตัวกรองเดียวกัน ไม่มีชื่อ รหัสแทนตัว ข้อความที่แจ้ง พิกัด หรือชื่อเจ้าหน้าที่ และทุกการดาวน์โหลดถูกบันทึก</p>
+
+{% if pending %}
+<form method="post" action="{% url 'admin-problems-send' %}" class="notice mb-24" role="alertdialog" aria-labelledby="send-confirm">
+  {% csrf_token %}
+  <div class="notice__body">
+    <strong id="send-confirm">ส่ง {{ pending.count }} เรื่องให้ {{ pending.division.code }} {{ pending.division.name }}</strong>
+    <p>เหตุผล: {{ pending.reason }}</p>
+    {% if pending.capped %}<p>ส่งได้ครั้งละไม่เกิน {{ pending.count }} เรื่อง เรื่องที่เหลือยังอยู่ในรายการ</p>{% endif %}
+    <input type="hidden" name="confirm" value="1">
+    <input type="hidden" name="to_division" value="{{ pending.division.code }}">
+    <input type="hidden" name="reason" value="{{ pending.reason }}">
+    {% for number in pending.numbers %}<input type="hidden" name="case" value="{{ number }}">{% endfor %}
+    <input type="hidden" name="tab" value="{{ tab }}">
+    {% for k, v in chosen.items %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <div class="cluster mt-18">
+      <button class="btn btn--sm" type="submit">ยืนยันส่ง</button>
+      <a class="btn btn--sm btn--ghost" href="?{{ page_query }}">ยกเลิก</a>
+    </div>
+  </div>
+</form>
+{% endif %}
+
+<form method="post" action="{% url 'admin-problems-send' %}" id="bulk-send" class="bulk-bar mb-18" data-bulk>
+  {% csrf_token %}
+  <input type="hidden" name="tab" value="{{ tab }}">
+  {% for k, v in chosen.items %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <label class="check-pill js-only"><input type="checkbox" data-bulk-all> เลือกทั้งหมดในหน้านี้</label>
+  <label class="check-pill"><input type="checkbox" name="all_filtered" value="1" data-bulk-filtered data-count="{{ open_matching }}"> เลือกทั้งหมดตามตัวกรอง ({{ open_matching }} เรื่อง)</label>
+  <label class="visually-hidden" for="send-division">ส่งให้กอง</label>
+  <select id="send-division" name="to_division" class="pill-select" required>
+    <option value="">ส่งให้กอง</option>
+    {% for code, label in targets %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+  </select>
+  <label class="visually-hidden" for="send-reason">เหตุผล</label>
+  <input id="send-reason" name="reason" placeholder="เหตุผล" required maxlength="500">
+  <button class="btn btn--sm" type="submit" data-bulk-submit data-label="ส่งให้กอง ({n} เรื่อง)" data-empty="ติ๊กเรื่องที่จะส่งก่อน">ส่งให้กอง</button>
+</form>
+
+<p class="muted">{{ matching }} เรื่อง · ไฟล์ CSV ใช้ตัวกรองเดียวกัน ไม่มีชื่อ รหัสแทนตัว ข้อความที่แจ้ง พิกัด หรือชื่อเจ้าหน้าที่ และทุกการดาวน์โหลดถูกบันทึก</p>
 <div class="table-wrap"><table class="table--cards">
-  <thead><tr><th scope="col">เลขเรื่อง</th><th scope="col">หัวข้อ</th><th scope="col">ข้อความที่แจ้ง</th><th scope="col">ผู้แจ้ง</th><th scope="col">ช่องทาง</th><th scope="col">วันเวลาแจ้ง</th><th scope="col">กองเจ้าภาพ</th><th scope="col">สถานะ</th></tr></thead>
+  <thead><tr><th scope="col"><span class="visually-hidden">เลือก</span></th><th scope="col">เลขเรื่อง</th><th scope="col">หัวข้อ</th><th scope="col">ข้อความที่แจ้ง</th><th scope="col">ผู้แจ้ง</th><th scope="col">ช่องทาง</th><th scope="col">วันเวลาแจ้ง</th><th scope="col">กองเจ้าภาพ</th><th scope="col">สถานะ</th></tr></thead>
   <tbody data-more data-more-noun="เรื่อง">
   {% for row in rows %}{% with case=row.case %}
     <tr>
+      <td>{% if not row.ended %}<input type="checkbox" name="case" value="{{ case.number }}" form="bulk-send" aria-label="เลือก {{ case.number }}">{% endif %}</td>
       <td class="nowrap"><a href="{% url 'case-detail' case.number %}">{{ case.number }}</a></td>
       <td class="cell--wide" data-label="หัวข้อ">{{ row.topic }}</td>
       <td class="cell--wide" data-label="ข้อความที่แจ้ง">{{ case.description|truncatechars:120 }}</td>
       <td class="cell--wide" data-label="ผู้แจ้ง">{% if row.reporter_link %}<a href="{{ row.reporter_link }}">{{ row.reporter }}</a>{% else %}{{ row.reporter }}{% endif %}</td>
       <td data-label="ช่องทาง">{{ case.get_channel_display }}{% if row.on_behalf %}<br><span class="muted">บันทึกแทนโดย {{ row.on_behalf }}</span>{% endif %}</td>
       <td class="nowrap" data-label="วันเวลาแจ้ง">{{ row.reported|thai_datetime }}{% if row.recorded %}<br><span class="muted">บันทึก {{ row.recorded|thai_datetime }}</span>{% endif %}</td>
-      <td class="nowrap" data-label="กองเจ้าภาพ">{{ case.owner_division.code }}</td>
+      <td class="nowrap" data-label="กองเจ้าภาพ">{{ case.owner_label }}</td>
       <td class="nowrap cell--end">{{ case.get_status_display }}</td>
     </tr>
   {% endwith %}{% empty %}
-    <tr><td colspan="8">ไม่มีเรื่องที่ตรงกับตัวกรอง</td></tr>
+    <tr><td colspan="9">{% if tab == "waiting" %}ไม่มีเรื่องรอแอดมิน{% else %}ไม่มีเรื่องที่ตรงกับตัวกรอง{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table></div>

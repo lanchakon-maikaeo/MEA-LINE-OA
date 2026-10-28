@@ -28,9 +28,10 @@
 <div class="form-grid">
     {% koj_recipients target %}
     <form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">
-  <fieldset><legend>แจ้งการสมัครผ่าน LINE แอดมิน</legend>{% csrf_token %}
+  <fieldset><legend>แจ้งเตือนแอดมินทาง LINE</legend>{% csrf_token %}
     <p>บัญชีผู้รับต้องเป็นแอดมินและเชื่อม LINE แล้ว ระบบตรวจสิทธิ์อีกครั้งก่อนส่ง</p>
     <label><input type="checkbox" name="enabled" value="1"{% if target.staff_profile.notify_registrations %} checked{% endif %}> รับแจ้งคำขอลงทะเบียนและผลการอนุมัติ</label>
+    <label><input type="checkbox" name="admin_waiting" value="1"{% if target.staff_profile.notify_admin_waiting %} checked{% endif %}> รับแจ้งเรื่องใหม่ที่รอแอดมิน (ปัญหาการใช้งานหรืออื่นๆ)</label>
     <button type="submit">บันทึกผู้รับแจ้ง</button>
   </fieldset>
 </form>

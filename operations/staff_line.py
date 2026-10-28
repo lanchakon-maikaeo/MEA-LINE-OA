@@ -53,7 +53,12 @@ IMPORTANT = {
     "staff_child_work": N.Level.NORMAL,
     "staff_dispute": N.Level.NORMAL,
     "staff_reopen": N.Level.NORMAL,
+    "staff_admin_waiting": N.Level.NORMAL,  # ADR 0030
 }
+# Alerts that may show what the requester typed, masked like text sent to the AI (owner, 29 Oct
+# 2569: an exception to the lock screen rule for the admins' waiting cases only).
+SHOWS_TYPED = frozenset({"staff_admin_waiting"})
+TYPED_CHARS = 80
 # Steps a staff member may take from LINE when ตัวเลือกระบบ allows it; anything irreversible or
 # that needs a long form stays on the web.
 LINE_ACTIONS = {
@@ -281,11 +286,30 @@ def _important_people(case, users):
     return [u for u in people if u.pk in heads] or people
 
 
+def admin_receivers():
+    """ADR 0030 Q25: active admins who keep the waiting-case alert on (the default)."""
+    from django.contrib.auth import get_user_model
+
+    ids = RoleGrant.objects.filter(
+        role=Role.ADMIN, revoked_at__isnull=True, division__isnull=True
+    ).values_list("user_id", flat=True)
+    return list(
+        get_user_model()
+        .objects.filter(pk__in=ids, is_active=True, staff_profile__notify_admin_waiting=True)
+        .order_by("pk")
+    )
+
+
 def _text(kind, case):
     from operations.staff_email import SUBJECTS
 
+    if kind in SHOWS_TYPED:
+        from operations import pii  # local: pii reads the database for names
+
+        typed = " ".join(pii.Masker.for_ai().mask(case.description or "").split())
+        return f"{SUBJECTS[kind]} {case.number}\n{typed[:TYPED_CHARS]}".rstrip()
     # No requester name, no requester text: the push shows on the lock screen.
-    return f"{SUBJECTS[kind]}\nเรื่อง {case.number} · กอง {case.owner_division.code}"
+    return f"{SUBJECTS[kind]}\nเรื่อง {case.number} · กอง {case.owner_label}"
 
 
 def plan(kind, key, case, users, chosen=False):
@@ -368,6 +392,10 @@ def recipient_problem(delivery):
         or staff_of(delivery.identity) is None
     ):
         return "staff LINE no longer linked or account inactive"
+    if delivery.kind == "staff_admin_waiting" and not (
+        identity.staff_scope(user).is_admin and user.staff_profile.notify_admin_waiting
+    ):
+        return "admin waiting alerts no longer allowed"
     if delivery.kind == "staff_registration":
         if not identity.staff_scope(user).is_admin or not user.staff_profile.notify_registrations:
             return "registration notifications no longer allowed"

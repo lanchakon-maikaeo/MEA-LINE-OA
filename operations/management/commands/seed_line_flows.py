@@ -31,7 +31,7 @@ FLOWS = (
     "line_flow_kco_v1.json",
     "line_flow_smg_v2.json",  # grill เจษ 28 ต.ค. 2569 (ADR 0027)
     "line_flow_usage_v1.json",
-    "line_flow_general_v1.json",
+    "line_flow_general_v2.json",  # ADR 0030: the division carousel
 )
 # grill กคอ. 28 ต.ค. 2569: the TE-Delivery Plus table of คม. (weekdays by ชื่อย่อ ฟข.).
 TRUCK_TABLES = ("te_delivery_kko_v1.json",)

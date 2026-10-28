@@ -20,7 +20,15 @@ from django.db.models import Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from operations import identity as identity_services
-from operations import line_api, requester_steps, services, typed_lines, usage_meters, workflow
+from operations import (
+    line_api,
+    problem_pick,
+    requester_steps,
+    services,
+    typed_lines,
+    usage_meters,
+    workflow,
+)
 from operations.contracts import (
     Actor,
     CommandFailed,
@@ -77,6 +85,8 @@ SUGGESTION_FIELDS = [
     ("impact", "ถ้ามีรายละเอียดเพิ่ม เช่น สถานที่หรืองานที่เกี่ยวข้อง พิมพ์ต่อได้ หรือกดข้าม", False),
     ("related_case_number", "หากเกี่ยวข้องกับเรื่องเดิม กรุณาเลือกเรื่อง หรือเลือกข้าม", False),
 ]
+# ADR 0030 Q6: a division picked from the carousel, then the details in one message.
+GENERAL_FIELDS = [("description", problem_pick.DETAIL, True)]
 # 25 Oct 2569 Q11: after the meters and their districts; the details may be skipped.
 USAGE_FIELDS = [
     (
@@ -138,6 +148,7 @@ FIELD_LABELS = {
 # Story topics ask different questions, so their answers carry their own labels.
 TOPIC_FIELD_LABELS = {
     "suggestion": {"description": "ข้อเสนอแนะ", "impact": "รายละเอียดเพิ่ม"},
+    "general": {"description": "รายละเอียด"},
     "usage": {"description": "เรื่องที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
     "inquiry": {"description": "สิ่งที่สอบถาม"},
     "repair": {"description": "สิ่งที่ต้องการติดตาม"},
@@ -1676,19 +1687,7 @@ def _static_postback(turn, data, draft):
     if data == "m=register":
         return _ask_kind(turn, "ลงทะเบียนหรือยืนยันตัวตน")
     if data == "m=problems":
-        turn.set_prompt()
-        return turn.say(
-            "เลือกประเภทปัญหาหรือข้อเสนอแนะ",
-            [
-                (label, f"m=problem&topic={topic}")
-                for topic, label in (
-                    ("equipment", "ปัญหาอุปกรณ์"),
-                    ("system", "ระบบ SMG-AMR/บิล"),
-                    ("usage", "การใช้ไฟฟ้า"),
-                    ("suggestion", "ข้อเสนอแนะ"),
-                )
-            ],
-        )
+        return _general_draft(turn)  # ADR 0030 Q14: the division carousel, typed or tapped
     if data in {"m=equipment&kind=withdrawal", "m=equipment&kind=return"}:
         if turn.internal or any(
             getattr(turn.requester, flag, False)
@@ -1736,6 +1735,35 @@ def _static_postback(turn, data, draft):
     if data.startswith("c="):
         return _case_detail(turn, data[2:])
     return _reprompt(turn, draft)
+
+
+def _general_draft(turn):
+    """ADR 0030: a problem or suggestion that starts at the division carousel."""
+    turn.set_prompt()
+    draft = _new_draft(turn)
+    keep = {"anonymous": True} if draft.data.get("anonymous") else {}
+    _touch(draft, turn.now, kind=K.PROBLEM, step="topic", data={"lines": [], "fields": {}, **keep})
+    return _ask(turn, draft)
+
+
+def _pick_division(turn, draft, code):
+    """ADR 0030: the division tapped (or ปัญหาการใช้งานหรืออื่นๆ for the admins), then the
+    details; a change from the summary goes back to the summary."""
+    if code not in dict(problem_pick.choices()):
+        return _ask(turn, draft)
+    data = draft.data
+    keep = {k: data[k] for k in ("anonymous", "location", "menu_label") if data.get(k)}
+    fields = data["fields"] if data.get("topic") == Case.Topic.GENERAL else {}
+    held = code == problem_pick.ADMIN
+    draft.data = {
+        **keep,
+        "lines": [],
+        "fields": fields,
+        "topic": Case.Topic.GENERAL,
+        "division": "" if held else code,
+        **({"hold_for_admin": True} if held else {}),
+    }
+    return _set(turn, draft, _next_field(draft))
 
 
 def _equipment_draft(turn, kind):
@@ -2252,9 +2280,10 @@ def _case_detail(turn, number):
         if bar
         else f"สถานะ: {_status_label(case)}"
     )
+    owner = problem_pick.ADMIN_TARGET if case.held_by_admin else case.owner_division.name
     text = (
         f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}{sap}\n"
-        f"{step}\nกองเจ้าภาพ: {case.owner_division.name}\n"
+        f"{step}\nกองเจ้าภาพ: {owner}\n"
         f"อัปเดตล่าสุด: {_when(case.updated_at)}" + (f"\nไฟล์แนบ: {files} ไฟล์" if files else "")
     )
     buttons = []
@@ -2540,12 +2569,15 @@ def _ask_question(turn, draft):
             + [b("ยกเลิกร่าง", "discard", draft=draft)],
         )
     elif step == "topic":
-        topics = _topics()
-        lines = [f"{n}. {_topic_menu_label(t)}" for n, t in enumerate(topics, 1)]
-        turn.say(
-            "เรื่องนี้เกี่ยวกับอะไร\n" + "\n".join(lines),
-            [b(_topic_menu_label(t), "topic", {"topic": t}, draft) for t in topics]
-            + [b("ยกเลิกร่าง", "discard", draft=draft)],
+        # ADR 0030: one bubble per division, then ปัญหาการใช้งานหรืออื่นๆ (no topic menu).
+        turn.say(problem_pick.PROMPT)
+        turn.replies.append(
+            problem_pick.carousel(
+                [
+                    (label, b(label, "pick_division", {"division": code}, draft)[1])
+                    for code, label in problem_pick.choices()
+                ]
+            )
         )
     elif step in {"meter_group", "category"}:
         buttons = [
@@ -2656,6 +2688,16 @@ def _ask_question(turn, draft):
         return _typed_group_card(turn, draft)
     elif step == "detail":
         return _detail_row(turn, draft)
+    elif step == "summary" and data.get("topic") == Case.Topic.GENERAL:
+        turn.say(  # ADR 0030 Q11, Q26: the division may still change before confirming
+            _summary(draft),
+            [
+                b(CONFIRM_LABEL, "confirm", draft=draft, ttl=CONFIRM_TTL),
+                b("เปลี่ยนกอง", "change_division", draft=draft),
+                b("แก้ไข", "edit_details", draft=draft),
+                b("ยกเลิกร่าง", "discard", draft=draft),
+            ],
+        )
     elif step == "summary":
         turn.say(
             _summary(draft),
@@ -2679,9 +2721,13 @@ def _skip_model(turn, draft):
 def _summary(draft):
     data = draft.data
     lines = [f"{SUMMARY_HEAD} {_kind_label(draft.kind, data.get('topic'))}"]
-    if data.get("menu_label"):
+    general = data.get("topic") == Case.Topic.GENERAL
+    if data.get("menu_label") and not general:
         lines.append(f"หัวข้อ: {data['menu_label']}")
-    if data.get("division"):
+    if general:
+        pick = problem_pick.ADMIN if data.get("hold_for_admin") else data.get("division", "")
+        lines.append(f"ส่งถึง: {problem_pick.target(pick)}")
+    elif data.get("division"):
         lines.append(f"ส่งถึง: {data['division']}")
     if data.get("sap_number"):
         label = typed_lines.sap_label(draft.kind, data.get("topic"))
@@ -2754,6 +2800,8 @@ def _returns_to_topic_menu(draft):
 
 
 def _kind_label(kind, topic=""):
+    if topic == Case.Topic.GENERAL:
+        return KIND_SHORT[K.PROBLEM]
     if topic in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
         return TOPIC_LABELS[topic]
     if topic == Case.Topic.INQUIRY:
@@ -2767,6 +2815,8 @@ def _kind_label(kind, topic=""):
 
 def _fields(draft):
     topic = draft.data.get("topic")
+    if topic == Case.Topic.GENERAL:
+        return GENERAL_FIELDS
     if topic == Case.Topic.USAGE:
         return USAGE_FIELDS
     if topic == Case.Topic.SUGGESTION:
@@ -2857,6 +2907,14 @@ def _draft_button(turn, draft, action, value):
             draft.data = dict(data, equipment_menu="equipment")
         _touch(draft, turn.now, kind=value["kind"], step=step)
         return _ask(turn, draft)
+    if action == "pick_division" and draft.step == "topic":
+        return _pick_division(turn, draft, value.get("division", ""))
+    if action == "change_division" and draft.step == "summary":
+        return _set(turn, draft, "topic")
+    if action == "edit_details" and draft.step == "summary":
+        fields = {k: v for k, v in data["fields"].items() if k != "description"}
+        draft.data = dict(data, fields=fields)
+        return _set(turn, draft, "field:description")
     if action == "topic":
         topic = value.get("topic")
         if topic not in _topics():
@@ -3435,15 +3493,13 @@ def _draft_text(turn, draft, text):
         kind = KIND_ORDER[int(text.translate(THAI_DIGITS)) - 1]
         return _draft_button(turn, draft, "kind", {"kind": kind})
     if step == "topic":
-        raw = text.translate(THAI_DIGITS)
-        topics = _topics()
-        if raw.isdigit():
-            number = int(raw)
-            if 1 <= number <= len(topics):
-                return _draft_button(turn, draft, "topic", {"topic": topics[number - 1]})
-        for topic in topics:
-            if raw.casefold() == _topic_menu_label(topic).casefold():
-                return _draft_button(turn, draft, "topic", {"topic": topic})
+        raw = text.translate(THAI_DIGITS).strip()
+        picks = problem_pick.choices()
+        if raw.isdigit() and 1 <= int(raw) <= len(picks):
+            return _pick_division(turn, draft, picks[int(raw) - 1][0])
+        for code, label in picks:
+            if raw.casefold() in (code.casefold(), label.casefold()):
+                return _pick_division(turn, draft, code)
     if step in {"meter_group", "category"}:
         raw = text.translate(THAI_DIGITS)
         groups = list(METER_GROUPS)
@@ -3459,7 +3515,7 @@ def _draft_text(turn, draft, text):
 
 CHOICE_HINTS = {
     "kind": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
-    "topic": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อหรือชื่อหมวด",
+    "topic": "แตะชื่อกองด้านบน หรือพิมพ์ชื่อกอง",
     "category": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
     "location": "กด 'ส่งตำแหน่ง' ด้านล่าง",
 }
@@ -3474,6 +3530,8 @@ def _payload(draft):
         payload["latitude"], payload["longitude"] = data["location"]
     if data.get("division"):
         payload["division_code"] = data["division"]
+    elif data.get("hold_for_admin"):
+        payload["hold_for_admin"] = True  # ADR 0030: ปัญหาการใช้งานหรืออื่นๆ
     if data.get("menu_label"):
         payload["menu_label"] = data["menu_label"]
     if data.get("sap_number") and typed_lines.sap_label(draft.kind, data.get("topic")):
@@ -3517,7 +3575,9 @@ def _confirm(turn, draft):
     turn.conversation.save(update_fields=["active_draft", "updated_at"])
     remaining = _open_drafts(turn).count()
     numbers = [case.number, *(s["case_number"] for s in result.split)]
-    if len(numbers) > 1:
+    if case.topic == Case.Topic.GENERAL:
+        text = problem_pick.done_text(case)  # ADR 0030 Q26
+    elif len(numbers) > 1:
         # ADR 0008: one request with items of several divisions becomes one case per division.
         text = (
             f"ยื่นเรื่องแล้ว แยกเป็น {len(numbers)} เรื่องตามกองที่ดูแลของ\n"

@@ -287,8 +287,13 @@ def admin_user_action(request, pk, action):
 
         _run(
             request,
-            lambda: admin_line.set_notifications(actor, target, data.get("enabled") == "1"),
-            "บันทึกผู้รับแจ้งการสมัครแล้ว",
+            lambda: admin_line.set_notifications(
+                actor,
+                target,
+                data.get("enabled") == "1",
+                admin_waiting=data.get("admin_waiting") == "1",
+            ),
+            "บันทึกการแจ้งเตือนแล้ว",
         )
     elif action == "revoke":
         grant_id = data.get("grant_id", "")
@@ -396,6 +401,9 @@ def admin_registrations(request):
     requesters = _requester_rows(people.exclude(status=Requester.Status.REVOKED)[:100])
     revoked = _requester_rows(people.filter(status=Requester.Status.REVOKED)[:100])
     is_admin = identity.staff_scope(request.user).is_admin
+    pending = list(pending)
+    if is_admin and pending:
+        _earlier_requesters(pending)
     return render(
         request,
         "operations/admin_registrations.html",
@@ -435,6 +443,30 @@ def admin_registrations(request):
             "requester_form": forms.RequesterCreateForm(),
         },
     )
+
+
+def _earlier_requesters(pending):
+    """ย้าย LINE OA (28 Oct 2569): who each new LINE may have been on the old OA. The same
+    employee ID, else the same name without spaces, is suggested; the admin decides."""
+    earlier = list(
+        Requester.objects.filter(
+            status=Requester.Status.ACTIVE,
+            is_anonymous=False,
+            channelidentity__channel=ChannelIdentity.Channel.LINE,
+        )
+        .select_related("district")
+        .distinct()
+        .order_by("display_name")
+    )
+
+    def same(requester, reg):
+        if reg.employee_id:
+            return requester.employee_id == reg.employee_id
+        return "".join(requester.display_name.split()) == "".join(reg.submitted_name.split())
+
+    for reg in pending:
+        reg.earlier = [r for r in earlier if r.pk != reg.identity.requester_id]
+        reg.suggested = next((r.pk for r in reg.earlier if same(r, reg)), None)
 
 
 def _requester_rows(requesters):
@@ -713,10 +745,16 @@ def admin_registration_action(request, pk, action):
     registration = get_object_or_404(RegistrationRequest, pk=pk)
     reason = request.POST.get("reason", "")
     if action == "approve":
+        earlier = request.POST.get("requester", "")
+        if earlier and not earlier.isdigit():
+            raise Http404
+        target = get_object_or_404(Requester, pk=int(earlier)) if earlier else None
         _run(
             request,
-            lambda: identity.approve_registration(request.user, registration, reason),
-            "รับรองผู้ใช้แล้ว",
+            lambda: identity.approve_registration(
+                request.user, registration, reason, requester=target
+            ),
+            "รับรองแล้ว และย้ายเรื่องเดิมมาที่ LINE นี้แล้ว" if target else "รับรองผู้ใช้แล้ว",
         )
     elif action == "reject":
         _run(

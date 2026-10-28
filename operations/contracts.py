@@ -110,7 +110,7 @@ STAFF_CHANNELS = frozenset(
 )
 ON_BEHALF_FIELDS = {"requester_id", "channel", "intake_note", "reported_at"}
 # เมนู LINE (15 ต.ค. 2569 Q20): the division the person chose in the menu, and the choice's name.
-MENU_FIELDS = {"division_code", "menu_label", "sap_kind", "intake_data"}
+MENU_FIELDS = {"division_code", "menu_label", "sap_kind", "intake_data", "hold_for_admin"}
 # เวลาแจ้งจริง may go back this far (an outage plus a weekend), never into the future.
 REPORTED_AT_MAX_AGE = timedelta(days=30)
 REPORTED_AT_SKEW = timedelta(minutes=5)
@@ -150,7 +150,13 @@ TRACKING_PATTERNS = {
     "project": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "ชื่อโครงการยาว 2 ถึง 60 ตัว"),
     "memo": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "เลขที่ M/N ยาว 2 ถึง 60 ตัว"),
 }
-NO_ITEM_TOPICS = {Case.Topic.USAGE, Case.Topic.SUGGESTION, Case.Topic.INQUIRY, Case.Topic.SYSTEM}
+NO_ITEM_TOPICS = {
+    Case.Topic.USAGE,
+    Case.Topic.SUGGESTION,
+    Case.Topic.INQUIRY,
+    Case.Topic.SYSTEM,
+    Case.Topic.GENERAL,
+}
 # ADR 0028: any action may carry a status notice for the requester and an internal note.
 ACTION_FIELDS = {"reason", "notice", "internal_note"}
 ACTION_EXTRA_FIELDS = {
@@ -178,7 +184,10 @@ ACTION_EXTRA_FIELDS = {
     "resolve_return_discrepancy": {"unit", "resolution", "reference", "replaces"},
     "terminate_return": {"lines", "category", "reference"},
     # M09: children are numbered per case; an intake answer carries channel and intake_note.
-    "resolve": {"category", "message", "internal_note"},
+    "resolve": {"category", "message", "internal_note", "as"},
+    # ADR 0030: an admin sends a case to a division, or answers one the admins hold.
+    "admin_send": {"division"},
+    "admin_answer": {"category", "message", "internal_note", "as"},
     "dispute_resolution": {"channel", "intake_note"},
     "request_child_work": {"division", "task", "deliverable", "rule", "lines"},
     "accept_child_work": {"child"},
@@ -297,6 +306,7 @@ class Submission:
     menu_label: str = ""
     meters: tuple = ()  # เครื่องวัดในเรื่องการใช้ไฟฟ้า (usage_meters)
     intake_data: dict | None = None  # values a published LINE flow collected (ADR 0023)
+    hold_for_admin: bool = False  # ปัญหาการใช้งานหรืออื่นๆ: no division picked (ADR 0030)
 
 
 def parse_submission(payload, on_behalf):
@@ -422,6 +432,9 @@ def parse_submission(payload, on_behalf):
     intake_data = payload.get("intake_data") or {}
     if not isinstance(intake_data, dict) or len(json.dumps(intake_data, ensure_ascii=False)) > 5000:
         fail(ErrorCode.VALIDATION_ERROR, "intake_data must be a small object.")
+    hold = payload.get("hold_for_admin", False)
+    if hold not in (True, False) or (hold and (division_code or kind != Case.Kind.PROBLEM)):
+        fail(ErrorCode.VALIDATION_ERROR, "Only a problem with no division waits for the admins.")
     return Submission(
         kind,
         tuple(lines),
@@ -435,6 +448,7 @@ def parse_submission(payload, on_behalf):
         menu_label,
         meters,
         intake_data,
+        hold,
     )
 
 

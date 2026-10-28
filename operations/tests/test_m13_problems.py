@@ -117,7 +117,7 @@ class FilterTests(ProblemsTestCase):
             second = self.client.get(LIST + "?channel=line&page=2")
         self.assertEqual(len(first.context["rows"]), 2)
         self.assertContains(first, "หน้า 1 / 2")
-        self.assertContains(first, "?channel=line&amp;page=2")
+        self.assertContains(first, "?tab=all&amp;channel=line&amp;page=2")  # and the sub-tab
         self.assertEqual(len(second.context["rows"]), 1)
 
 

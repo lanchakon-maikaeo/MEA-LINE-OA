@@ -373,8 +373,8 @@ class OtherButtonTests(FlowTestCase):
         self.assertFalse(Case.objects.exists())
         self.publish("ปัญหา/ข้อเสนอแนะ")
         self.open("ปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "ข้อเสนอแนะ")
+        self.press(ALICE, "กองเครื่องวัดหน่วยไฟฟ้า")  # ADR 0030: the division carousel
         self.type(ALICE, "อยากให้แจ้งวันจ่ายล่วงหน้า")
-        self.press(ALICE, "ข้าม")
         self.press(ALICE, "ยืนยันส่งเรื่อง")
-        self.assertEqual(Case.objects.get().topic, "suggestion")
+        case = Case.objects.get()
+        self.assertEqual((case.topic, case.owner_division.code), ("general", "กคว."))

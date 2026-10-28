@@ -329,5 +329,5 @@ class ChoiceHintTests(AnswerTestCase):
         self.assertIn("ต้องการแจ้งเรื่องประเภทใด", reply)
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
         reply = texts(self.type(ALICE, "ไม่รู้เหมือนกัน"))
-        self.assertIn("พิมพ์เลขข้อหรือชื่อหมวด", reply)
-        self.assertIn("เรื่องนี้เกี่ยวกับอะไร", reply)
+        self.assertIn("แตะชื่อกองด้านบน หรือพิมพ์ชื่อกอง", reply)
+        self.assertIn("เลือกกองที่ต้องการแจ้ง", reply)  # ADR 0030: the division carousel

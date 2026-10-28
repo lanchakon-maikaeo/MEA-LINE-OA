@@ -1164,7 +1164,10 @@ def reconcile_clocks(case, state, policy, now):
         if clock.kind in ACK_KINDS:
             finished = (
                 case.status in workflow.TERMINAL
-                or (clock.kind == AckClock.Kind.INTAKE and case.status != S.SUBMITTED)
+                or (
+                    clock.kind == AckClock.Kind.INTAKE
+                    and (case.status != S.SUBMITTED or case.held_by_admin)
+                )
                 or (
                     clock.kind == AckClock.Kind.HANDOFF
                     and (pending is None or clock.handoff_id != pending.pk)
@@ -1182,6 +1185,7 @@ def reconcile_clocks(case, state, policy, now):
     priority = _clock_priority(state)
     if (
         case.status == S.SUBMITTED
+        and not case.held_by_admin  # ADR 0030: no coordinator clock for the admins' cases
         and not AckClock.objects.filter(case=case, kind=AckClock.Kind.INTAKE).exists()
     ):
         intake = Division.objects.filter(is_intake=True).first() or case.owner_division

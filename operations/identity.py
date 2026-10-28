@@ -1018,9 +1018,63 @@ def _require_registration_decider(actor):
 
 
 @transaction.atomic
-def approve_registration(actor, registration, reason=""):
+def approve_registration(actor, registration, reason="", requester=None):
     _require_registration_decider(actor)
+    if requester is not None:
+        return _approve_as(actor, registration, requester, reason)
     return _approve(actor, registration, reason)
+
+
+def _approve_as(actor, registration, requester, reason):
+    """ย้าย LINE OA (28 Oct 2569): the bot moved to an OA under another LINE provider, so people
+    come back with a new LINE user ID. An admin says which requester this was; the new LINE
+    takes over that requester (its cases and notices) and the old LINE is withdrawn."""
+    require_admin(actor)
+    registration = RegistrationRequest.objects.select_for_update().get(pk=registration.pk)
+    if registration.status != RegistrationRequest.Status.PENDING:
+        raise ValidationError("Registration is not pending.")
+    identity = ChannelIdentity.objects.select_for_update().get(pk=registration.identity_id)
+    if identity.status == ChannelIdentity.Status.REVOKED:
+        raise ValidationError("บัญชีถูกระงับหรือถอนการรับรอง ให้แอดมินตรวจ")
+    requester = Requester.objects.select_for_update().get(pk=requester.pk)
+    if requester.status != Requester.Status.ACTIVE or requester.is_anonymous:
+        raise ValidationError("ผูกได้เฉพาะผู้แจ้งที่ใช้งานอยู่")
+    if registration.employee_id and registration.employee_id != requester.employee_id:
+        raise ValidationError("คำขอนี้ตรงกับรหัสพนักงานของคนอื่น ผูกกับผู้แจ้งคนนี้ไม่ได้")
+    old = (
+        ChannelIdentity.objects.select_for_update()
+        .filter(requester=requester, channel=identity.channel)
+        .exclude(pk=identity.pk)
+    )
+    moved_from = list(old.values_list("pk", flat=True))
+    old.update(status=ChannelIdentity.Status.REVOKED, is_following=False)
+    identity.requester = requester
+    identity.status = ChannelIdentity.Status.ACTIVE
+    identity.save(update_fields=["requester", "status"])
+    _mark_approved(actor, registration, reason)
+    from operations import line_menu
+
+    transaction.on_commit(lambda: line_menu.relink(identity))
+    audit(
+        actor,
+        "registration.approved",
+        registration,
+        reason,
+        district=registration.requested_district.code,
+        requester_id=requester.pk,
+        employee=registration.employee.employee_id if registration.employee else None,
+        moved_from=moved_from,
+    )
+    return requester
+
+
+def _mark_approved(actor, registration, reason):
+    registration.status = RegistrationRequest.Status.APPROVED
+    registration.decided_by = actor
+    registration.decided_at = timezone.now()
+    registration.decision_reason = reason.strip()
+    registration.save(update_fields=["status", "decided_by", "decided_at", "decision_reason"])
+    _registration_event(registration)
 
 
 def _approve(actor, registration, reason="", automatic=False):
@@ -1064,12 +1118,7 @@ def _approve(actor, registration, reason="", automatic=False):
     identity.requester = requester
     identity.status = ChannelIdentity.Status.ACTIVE
     identity.save(update_fields=["requester", "status"])
-    registration.status = RegistrationRequest.Status.APPROVED
-    registration.decided_by = actor
-    registration.decided_at = timezone.now()
-    registration.decision_reason = reason.strip()
-    registration.save(update_fields=["status", "decided_by", "decided_at", "decision_reason"])
-    _registration_event(registration)
+    _mark_approved(actor, registration, reason)
     from operations import line_menu
 
     transaction.on_commit(lambda: line_menu.relink(identity))

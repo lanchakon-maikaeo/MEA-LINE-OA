@@ -143,6 +143,8 @@ class StaffProfile(models.Model):
     )
     must_change_password = models.BooleanField(default=False)
     notify_registrations = models.BooleanField(default=False)
+    # ADR 0030 Q25: an admin hears on LINE of each case waiting for the admins (on unless set off).
+    notify_admin_waiting = models.BooleanField(default=True)
     # Sessions authenticated before this instant are rejected (forced logout).
     sessions_valid_after = models.DateTimeField(null=True, blank=True)
 
@@ -468,6 +470,9 @@ class Case(models.Model):
         # grill กคว. 27 Oct 2569 (Q4, Q5): โน้ตบุ๊กและหัวอ่าน, and ขอเครื่องวัดฯ กลับคืน by MEA No.
         SERVICE = "service", "ขอรับบริการ"
         METER_BACK = "meter_back", "ขอเครื่องวัดฯ กลับคืน"
+        # ADR 0030: the requester picks a division and types; staff say which it is at the result.
+        GENERAL = "general", "ยังไม่ระบุ"
+        PROBLEM = "problem", "ปัญหา"
 
     class Channel(models.TextChoices):
         LINE = "line", "LINE"
@@ -540,6 +545,9 @@ class Case(models.Model):
     # Values a published LINE flow collected beyond the fixed fields (ADR 0023): the multiplier
     # check, the meter a CT set goes with, MEA numbers, warnings for staff.
     intake_data = models.JSONField(default=dict, blank=True)
+    # ปัญหาการใช้งานหรืออื่นๆ (ADR 0030): no division was picked, so an admin holds the case. The
+    # coordinator stands in as owner_division; queues, clocks and reports leave it to the admins.
+    held_by_admin = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ["-submitted_at"]
@@ -572,6 +580,11 @@ class Case(models.Model):
 
     def __str__(self):
         return self.number
+
+    @property
+    def owner_label(self):
+        """The owner as people read it: แอดมิน for a case an admin holds (ADR 0030 Q19)."""
+        return "แอดมิน" if self.held_by_admin else self.owner_division.code
 
 
 class CaseLine(models.Model):

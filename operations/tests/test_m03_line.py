@@ -84,8 +84,12 @@ def buttons(messages):
             found[action["label"]] = action.get("data") or action.get("uri") or action["type"]
         if message["type"] == "flex":
             for bubble in message["contents"]["contents"]:
-                for button in bubble["body"]["contents"]:
-                    found[button["action"]["label"]] = button["action"]["data"]
+                body = bubble["body"]
+                if body.get("action"):  # a bubble that is its own button (ADR 0030)
+                    found[body["action"]["displayText"]] = body["action"]["data"]
+                for button in body["contents"]:
+                    if "action" in button:
+                        found[button["action"]["label"]] = button["action"]["data"]
     return found
 
 
@@ -487,8 +491,8 @@ class DraftConversationTests(LineTestCase):
         self.press(BOB, "ยืนยันส่งเรื่อง")
         other = Case.objects.exclude(pk=own.pk).get()
 
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        # The equipment problem card (ADR 0030 took it off the general menu).
+        self.say(self.postback(ALICE, "m=problem&topic=equipment"))
         self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "ไม่ระบุรุ่น")
         self.type(ALICE, "หม้อแปลงมีเสียงดัง")

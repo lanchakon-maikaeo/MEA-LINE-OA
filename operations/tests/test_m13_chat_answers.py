@@ -107,10 +107,10 @@ class KeywordTests(AnswerTestCase):
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "ข้อเสนอแนะ")
+        self.press(ALICE, "ปัญหาการใช้งานหรืออื่นๆ")  # ADR 0030: the division carousel
         reply = texts(self.type(ALICE, "อยากให้มีเบอร์ติดต่อแต่ละกองในไลน์"))
         self.assertNotIn("02-000-0001", reply)
-        self.assertIn("รายละเอียดเพิ่ม", reply)  # the next question of the suggestion
+        self.assertIn("สรุปเรื่อง", reply)  # the details were the one question
 
     def test_drafts_and_retired_answers_are_not_used(self):
         self.mode("faq")
@@ -123,8 +123,7 @@ class KeywordTests(AnswerTestCase):
     def test_hazard_words_get_the_guidance_at_once(self):
         self.mode("faq")
         self.approve(ALICE)
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        self.say(self.postback(ALICE, "m=problem&topic=equipment"))  # the equipment card
         self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "ไม่ระบุรุ่น")
         reply = texts(self.type(ALICE, "หม้อแปลงมีควันออกมาตอนนี้"))

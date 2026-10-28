@@ -394,8 +394,7 @@ class FoundBySimulatorTests(LineTestCase):
                 code=f"MTR_L{n:02d}", name=f"มิเตอร์ L{n:02d}", category="meter", unit="เครื่อง"
             )
         self.approve(ALICE)
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        self.say(self.postback(ALICE, "m=problem&topic=equipment"))  # the equipment card
         reply = self.press(ALICE, "มิเตอร์")
         self.assertIn("ค้นหา", texts(reply))
         self.assertIn("ไม่ระบุรุ่น", buttons(reply))
@@ -407,9 +406,7 @@ class FoundBySimulatorTests(LineTestCase):
 
     def test_the_summary_follows_the_questions_with_the_topics_labels(self):
         self.approve(ALICE)
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "ข้อเสนอแนะ")
+        self.say(self.postback(ALICE, "m=problem&topic=suggestion"))  # the suggestion card
         self.type(ALICE, "อยากให้มีรอบรับของช่วงบ่าย (ทดสอบ)")
         self.type(ALICE, "ใช้กับคลังเขต (ทดสอบ)")
         summary = texts(self.press(ALICE, "ข้าม"))

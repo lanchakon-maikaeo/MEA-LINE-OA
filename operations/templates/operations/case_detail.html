@@ -19,7 +19,7 @@
     {% if case.is_example %}<span class="tag tag--outline" title="ไม่นับในรายงาน ไม่มีกรอบเวลา และไม่ส่งข้อความหาใคร">ตัวอย่าง</span>{% endif %}
   </div>
   <dl class="facts">
-    <div><dt>กองเจ้าภาพ</dt><dd>{{ case.owner_division.code }} {{ case.owner_division.name }}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>
+    <div><dt>กองเจ้าภาพ</dt><dd>{% if case.held_by_admin %}แอดมิน <span class="muted">(รอแอดมินตอบหรือส่งให้กอง)</span>{% else %}{{ case.owner_division.code }} {{ case.owner_division.name }}{% endif %}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>
     {% if case.topic == "usage" %}<div><dt>หัวข้อ</dt><dd>การใช้ไฟฟ้า{% if page.usage_private %} <span class="muted">(ไม่ส่งให้ AI)</span>{% endif %}</dd></div>{% endif %}
     <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
     <div><dt>หน่วยงาน (เขต/ฝ่าย)</dt><dd>{{ case.district.name }}</dd></div>
