@@ -1,0 +1,104 @@
+{% extends "operations/admin_base.html" %}
+{% load ui units_ui %}
+{% block title %}ผังหน่วยงาน · แอดมิน · DED Center{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน · กองและการส่งงาน</span>
+    <h1>ผังหน่วยงาน</h1>
+    <p class="lede">หน้านี้บอกว่าใครอยู่หน่วยไหน แต่ละหน่วยรับงานอะไร เรื่องใหม่ระบบมอบให้ใคร และเรื่องสำคัญจะส่ง LINE หาใคร แก้ได้ที่การ์ดของแต่ละหน่วย และระบบเก็บประวัติทุกครั้งที่แก้</p>
+  </div>
+</div>
+
+<section class="section org-try" aria-labelledby="org-try">
+  <div class="section-head"><h2 id="org-try">ลองดูว่าเด้งไปใคร</h2></div>
+  <form class="org-try__form" method="get" action="#org-try">
+    <div class="field"><label for="try-division">กอง</label>
+      <select id="try-division" name="division" required>{% for d in divisions %}<option value="{{ d.pk }}"{% if asked.division == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.short_name|default:d.code }} · {{ d.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="try-kind">ประเภทเรื่อง</label>
+      <select id="try-kind" name="kind" required>{% for value, label in kinds %}<option value="{{ value }}"{% if asked.kind == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="try-group">ของหรือหัวข้อ</label>
+      <select id="try-group" name="group" required>{% for value, label in groups %}<option value="{{ value }}"{% if asked.group == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <button class="btn btn--sm" type="submit">ลองดู</button>
+  </form>
+  {% if result %}
+  <ol class="org-steps" aria-label="ผลของ {{ result.label }}">
+    <li class="org-steps__item">
+      <span class="org-steps__n" aria-hidden="true">1</span>
+      <div><strong>หน่วยที่รับ</strong>
+        <p>{% if result.work %}{{ result.label }} เป็นงานของ <span class="org-pill">{{ result.unit.path }}</span>{% else %}ยังไม่มีหน่วยไหนใน {{ result.unit.label }} รับ{{ result.label }} เรื่องจะอยู่ระดับกอง และยังไม่มีแผนก{% endif %}</p></div>
+    </li>
+    <li class="org-steps__item">
+      <span class="org-steps__n" aria-hidden="true">2</span>
+      <div><strong>ผู้รับผิดชอบ</strong>
+        <p>{% if result.pick.person %}ระบบมอบให้ <strong>{{ result.pick.person.staff_profile.display_name|default:result.pick.person.username }}</strong> ทันทีที่เรื่องเข้า{% else %}ยังไม่มี เรื่องจะรอคนในกองกดรับงาน{% endif %}</p>
+        {% for note in result.pick.notes %}<p class="muted">{{ note }}</p>{% endfor %}</div>
+    </li>
+    <li class="org-steps__item">
+      <span class="org-steps__n" aria-hidden="true">3</span>
+      <div><strong>LINE ถ้าเป็นเรื่องสำคัญ</strong>
+        {% if result.line %}<ul class="org-steps__people">{% for user, why in result.line %}<li><strong>{{ user.staff_profile.display_name|default:user.username }}</strong> <span class="muted">{{ why }}</span></li>{% endfor %}</ul>
+        {% else %}<p>ไม่มีใครในกองนี้ผูก LINE ไว้ ระบบจึงส่งได้แค่อีเมล</p>{% endif %}
+        <p class="muted">เรื่องธรรมดาไม่ส่ง LINE ผู้รับผิดชอบดูได้จากงานของฉัน</p></div>
+    </li>
+  </ol>
+  {% endif %}
+</section>
+
+{% if unplaced %}
+<section class="section" aria-labelledby="org-unplaced">
+  <div class="section-head"><h2 id="org-unplaced">ยังไม่ได้จัดหน่วย <span class="chip__count chip__count--alert">{{ unplaced|length }}</span></h2></div>
+  <p class="muted">คนกลุ่มนี้มีบทบาทในกองแล้ว แต่ยังไม่มีกองในสังกัด ป้ายสังกัดจึงขึ้นเป็น N/A ทั้งหมด เลือกหน่วยได้เฉพาะในกองที่คนนั้นมีบทบาทอยู่</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">ชื่อ</th><th scope="col">ทะเบียนพนักงานระบุ</th><th scope="col">ย้ายไป</th></tr></thead>
+    <tbody>
+    {% for row in unplaced %}
+      <tr>
+        <td data-label="ชื่อ"><a href="{% url 'admin-user-detail' row.profile.user_id %}">{{ row.profile.display_name }}</a><br>{{ row.profile.user|unit_path }}</td>
+        <td data-label="ทะเบียนพนักงานระบุ">{{ row.roster|default:"ไม่มีข้อมูลในทะเบียน" }}</td>
+        <td data-label="ย้ายไป">
+          <form class="org-inline" method="post">{% csrf_token %}<input type="hidden" name="action" value="move_person"><input type="hidden" name="user" value="{{ row.profile.user_id }}">
+            <label class="visually-hidden" for="mv-{{ row.profile.pk }}">หน่วยของ {{ row.profile.display_name }}</label>
+            <select id="mv-{{ row.profile.pk }}" name="target" required>{% for key, label in row.options %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
+            <button class="btn btn--sm btn--secondary" type="submit">ย้าย</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endif %}
+
+<nav class="org-jump" aria-label="ไปที่กอง">{% for d in chart %}<a class="chip" href="#u-{{ d.key }}">{{ d.unit.label }}</a>{% endfor %}</nav>
+
+{% for d in chart %}
+<section class="section org-division" id="u-{{ d.key }}" aria-labelledby="h-{{ d.key }}">
+  <header class="org-division__head">
+    <div class="org-division__title"><span class="org-abbr">{{ d.unit.label }}</span><h2 id="h-{{ d.key }}">{{ d.unit.name }}</h2></div>
+    <div class="org-stats">
+      <span class="tag">{{ d.everyone|length }} คน</span>
+      <span class="tag">ผูก LINE {{ d.eligible_line|length }} คน</span>
+      <span class="tag">งานที่รับ {{ d.work_count }} รายการ</span>
+    </div>
+  </header>
+  {% include "operations/_org_card.html" with c=d division=d %}
+  {% if d.sections %}<div class="org-grid">
+    {% for s in d.sections %}{% include "operations/_org_card.html" with c=s division=d %}{% endfor %}
+  </div>{% endif %}
+  {% if d.everyone %}
+  <details class="fold org-move">
+    <summary><span class="fold__title">ย้ายคนใน {{ d.unit.label }}</span><span class="fold__sub">เปลี่ยนสังกัดของคนที่มีบทบาทในกองนี้</span></summary>
+    <div class="fold__body">
+      <form class="org-move__form" method="post">{% csrf_token %}<input type="hidden" name="action" value="move_person"><input type="hidden" name="unit" value="{{ d.key }}">
+        <div class="field"><label for="mp-{{ d.key }}">คน</label><select id="mp-{{ d.key }}" name="user" required>{% for p in d.everyone %}<option value="{{ p.user.pk }}">{{ p.name }} · {{ p.path|join:" › " }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="mt-{{ d.key }}">ย้ายไป</label><select id="mt-{{ d.key }}" name="target">{% for key, label in d.units %}<option value="{{ key }}">{{ label }}</option>{% endfor %}<option value="">ไม่มีสังกัด (N/A)</option></select></div>
+        <div class="field"><label for="mr-{{ d.key }}">เหตุผล (ไม่บังคับ)</label><input id="mr-{{ d.key }}" name="reason" maxlength="500"></div>
+        <button class="btn btn--sm" type="submit">ย้าย</button>
+      </form>
+    </div>
+  </details>
+  {% endif %}
+</section>
+{% empty %}
+<p class="muted">ยังไม่มีกองที่ใช้งานอยู่</p>
+{% endfor %}
+{% endblock %}

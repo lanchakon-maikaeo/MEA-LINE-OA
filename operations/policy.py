@@ -979,30 +979,6 @@ def refresh(case, trigger, now=None):
     return changed
 
 
-def section_for(case, owner_code=None, current=None):
-    """Q12: the แผนก the policy proposes inside the owner division, or None (the division
-    chooses). The first matching entry wins; a named item beats nothing, a category any item."""
-    current = current if current is not None else current_policy()
-    entries = current.doc.get("sections", []) if current else []
-    owner_code = owner_code or case.owner_division.code
-    rows = [
-        {"category": line.item.category, "item": line.item.code}
-        for line in case.lines.select_related("item")
-    ] or ([{"category": case.topic, "item": None}] if case.topic else [])
-    for entry in entries:
-        if entry["division"] != owner_code or case.kind not in entry["kinds"]:
-            continue
-        if any(
-            (row["item"] and row["item"] in entry.get("items", []))
-            or (entry.get("category") and entry["category"] == row["category"])
-            for row in rows
-        ):
-            return Section.objects.filter(
-                division__code=owner_code, name=entry["section"], is_active=True
-            ).first()
-    return None
-
-
 def after_submit(case):
     refresh(case, "submitted", case.submitted_at)
 

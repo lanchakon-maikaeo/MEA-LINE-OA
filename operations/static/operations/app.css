@@ -208,7 +208,6 @@ a:hover { color: var(--charcoal); }
   display: flex; align-items: center; gap: var(--s-24);
 }
 .brand { display: inline-flex; align-items: center; gap: var(--s-12); text-decoration: none; color: var(--ink); flex: none; }
-.brand__logo { display: block; height: 48px; width: auto; }
 
 .mainnav { display: flex; align-items: stretch; gap: var(--s-30); height: 100%; flex: 1; justify-content: center; }
 .mainnav a {
@@ -306,7 +305,6 @@ a:hover { color: var(--charcoal); }
   .brand { margin-right: auto; }
 }
 @media (max-width: 599px) {
-  .brand__logo { height: 38px; }
   .division-switch .chip__label { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 420px) {
@@ -314,7 +312,6 @@ a:hover { color: var(--charcoal); }
   .division-switch .chip__label { display: none; }
   .topbar__tools { gap: var(--s-4); }
   .topbar__inner { gap: var(--s-8); }
-  .brand__logo { height: 30px; }
 }
 
 /* Sub-navigation strip (admin) */
@@ -1265,3 +1262,71 @@ a.kpi--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 /* Q9: the approve bar stays in reach while ticking. */
 .bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-12); }
 .bulk-bar button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* DED Center (grill 29 ต.ค. 2569 Q1): the header's wordmark in place of the logo picture. */
+.brand__word { display: inline-flex; align-items: center; gap: var(--s-8); font-size: 21px; line-height: 1; white-space: nowrap; }
+.brand__mark { display: inline-block; padding: 7px 9px 6px; border-radius: 9px; background: var(--ink); color: var(--on-primary); font-weight: 800; letter-spacing: .06em; }
+.brand__rest { font-weight: 600; letter-spacing: -.01em; }
+.brand:hover .brand__rest { text-decoration: underline; text-underline-offset: 4px; }
+@media (max-width: 599px) { .brand__word { font-size: 18px; } .brand__mark { padding: 6px 7px 5px; } }
+@media (max-width: 420px) { .brand__word { font-size: 16px; gap: var(--s-4); } }
+
+/* ป้ายสังกัด (ADR 0031 Q13): three short names, N/A where a level is missing. */
+.unit-path { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 13px; color: var(--ash); }
+.unit-path__part { font-weight: 600; color: var(--ink); }
+.unit-path__part--na { font-weight: 400; color: var(--stone); }
+.unit-path__sep { color: var(--stone); }
+
+/* ผังหน่วยงาน (ADR 0031) */
+.org-try__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 var(--s-18); align-items: end; }
+.org-try__form .btn { margin-bottom: var(--s-18); }
+.org-steps { list-style: none; margin: var(--s-12) 0 0; padding: 0; display: grid; gap: var(--s-12); }
+.org-steps__item { display: grid; grid-template-columns: 36px 1fr; gap: var(--s-12); padding: var(--s-18); border-radius: 18px; background: var(--cloud); }
+.org-steps__item p { margin: var(--s-4) 0 0; }
+.org-steps__n { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-full); background: var(--ink); color: var(--on-primary); font-weight: 700; }
+.org-steps__people { margin: var(--s-4) 0 0; padding-left: var(--s-18); }
+.org-pill { display: inline-block; padding: 0 var(--s-8); border-radius: var(--r-full); background: var(--canvas); font-weight: 600; }
+.org-inline { display: flex; flex-wrap: wrap; gap: var(--s-8); align-items: center; }
+.org-inline select { min-width: 200px; }
+.org-jump { display: flex; flex-wrap: wrap; gap: var(--s-8); margin: 0 0 var(--s-24); }
+.org-division { scroll-margin-top: calc(var(--nav-h) + var(--s-12)); }
+.org-division__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--s-12); padding-bottom: var(--s-12); border-bottom: 1px solid var(--ink); margin-bottom: var(--s-18); }
+.org-division__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-4) var(--s-12); }
+.org-division__title h2 { font-size: 18px; font-weight: 500; color: var(--ash); }
+.org-abbr { font-size: 28px; font-weight: 700; line-height: 1.1; }
+.org-stats { display: flex; flex-wrap: wrap; gap: var(--s-8); }
+.org-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--s-18); margin-top: var(--s-18); }
+.org-card { display: flex; flex-direction: column; gap: var(--s-12); min-width: 0; padding: var(--s-18); border: 1px solid var(--hairline-soft); border-radius: 18px; background: var(--canvas); scroll-margin-top: calc(var(--nav-h) + var(--s-12)); }
+.org-card--division { background: var(--cloud); border-color: transparent; }
+.org-card--group { padding: var(--s-12) var(--s-12) var(--s-12) var(--s-18); border-left: 3px solid var(--ink); border-radius: 12px; }
+.org-card:target { box-shadow: 0 0 0 2px var(--ink); }
+.org-card__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2) var(--s-8); }
+.org-card__abbr { font-size: 20px; font-weight: 700; }
+.org-card--group .org-card__abbr { font-size: 16px; }
+.org-card__level { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--mute); }
+.org-card__name { width: 100%; font-size: 14px; color: var(--ash); }
+.org-card__block p { margin: 0; font-size: 15px; }
+.org-card__h { margin: 0 0 var(--s-4); font-size: 12px; font-weight: 600; color: var(--mute); }
+.org-people { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s-4) var(--s-8); }
+.org-person { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 var(--s-12) 0 var(--s-8); border-radius: var(--r-full); background: var(--cloud); font-size: 14px; }
+.org-card--division .org-person { background: var(--canvas); }
+.org-dot { flex: none; width: 9px; height: 9px; border-radius: var(--r-full); background: var(--hairline); }
+.org-dot--on { background: var(--success); }
+.org-work { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s-8); padding: 6px 0; border-top: 1px solid var(--hairline-soft); font-size: 15px; }
+.org-work:first-of-type { border-top: 0; padding-top: 0; }
+.org-work__label { font-weight: 600; }
+.org-work__label::after { content: " →"; color: var(--stone); font-weight: 400; }
+.org-edit { border-top: 1px solid var(--hairline-soft); padding-top: var(--s-8); }
+.org-edit > summary { cursor: pointer; font-size: 14px; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.org-edit > summary:hover { text-decoration: underline; }
+.org-edit__body { display: grid; gap: var(--s-12); padding-top: var(--s-8); }
+.org-form fieldset { margin: 0; padding: var(--s-12); border: 1px solid var(--hairline-soft); border-radius: 14px; }
+.org-form legend { padding: 0 var(--s-4); font-size: 14px; font-weight: 600; }
+.org-form .field { margin-bottom: var(--s-12); }
+.org-form__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0 var(--s-12); }
+.org-form__actions { display: flex; flex-wrap: wrap; gap: var(--s-4); }
+.choice--sm { min-height: 40px; padding: var(--s-4) var(--s-12); font-size: 14px; }
+.org-sub { display: grid; gap: var(--s-8); }
+.org-move { margin-top: var(--s-18); }
+.org-move__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 var(--s-18); align-items: end; }
+.org-move__form .btn { margin-bottom: var(--s-18); }

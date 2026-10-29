@@ -186,6 +186,13 @@ def timeline(case):
         data = decision.data if isinstance(decision.data, dict) else {}
         if decision.action == "set_sap_number" and data.get("sap_number"):
             label += f" {data.get('previous') or 'ไม่มี'} → {data['sap_number']}"
+        if decision.action == "assign" and data.get("auto"):
+            # ADR 0031: the system handed the case on; the reason says why.
+            label = (
+                f"ระบบมอบหมายให้ {data['assignee_name']}"
+                if data.get("assignee_name")
+                else "ระบบเอาผู้รับผิดชอบออก"
+            )
         moved = decision.from_status and decision.from_status != decision.to_status
         entries.append(
             {

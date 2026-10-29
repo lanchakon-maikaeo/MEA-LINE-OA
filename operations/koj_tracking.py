@@ -11,6 +11,7 @@ import unicodedata
 import uuid
 from datetime import timedelta
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -31,6 +32,7 @@ from operations.models import (
     NotificationDelivery,
     OutboxEvent,
     RoleGrant,
+    Section,
 )
 from operations.templatetags.ui import thai_datetime
 
@@ -582,6 +584,59 @@ def recipient_problem(delivery):
     if not notice.record_ids or not set(notice.record_ids) <= available:
         return "tracking no longer in scope"
     return ""
+
+
+# ADR 0031 Q12: each recipient set sits on the card of its unit in ผังหน่วยงาน.
+GROUP_SECTIONS = {
+    "mk": ("มค.", "แผนกหม้อแปลงและคาปาซิเตอร์"),
+    "sj": ("ซจ.", "แผนกซ่อมบำรุงสวิตช์ตัดตอนระบบจำหน่าย"),
+}
+
+
+def unit_groups():
+    """{unit key: recipient group} for the กอจ. cards: มค., ซจ. and the กอง itself."""
+    division = (
+        Division.objects.filter(code__in=DIVISION_CODES, is_active=True).order_by("pk").first()
+    )
+    if division is None:
+        return {}
+    out = {f"d{division.pk}": "other"}
+    for group, (code, name) in GROUP_SECTIONS.items():
+        section = (
+            Section.objects.filter(division=division, is_active=True)
+            .filter(Q(code=code) | Q(name=name))
+            .first()
+        )
+        if section is not None:
+            out[f"s{section.pk}"] = group
+    return out
+
+
+@transaction.atomic
+def set_group(actor, group, user_ids):
+    """Q25: exactly these people get the LINE notices of one recipient set (none: nobody)."""
+    if not identities.staff_scope(actor).is_admin:
+        raise PermissionDenied
+    if group not in GROUPS:
+        raise ValidationError("ชุดรับแจ้งไม่ถูกต้อง")
+    users = list(get_user_model().objects.filter(pk__in=[i for i in user_ids if str(i).isdigit()]))
+    for user in users:
+        if (
+            not staff_can_read(user)
+            or not ChannelIdentity.objects.filter(staff_user=user, is_following=True).exists()
+        ):
+            name = getattr(getattr(user, "staff_profile", None), "display_name", user.username)
+            raise ValidationError(f"{name} ต้องมีสิทธิ์ กอจ. และเชื่อมบัญชี LINE แล้ว")
+    KojRecipient.objects.filter(group=group).exclude(user__in=users).delete()
+    for user in users:
+        KojRecipient.objects.get_or_create(user=user, group=group)
+    identities.audit(
+        actor,
+        "koj.recipients_changed",
+        actor,
+        group=group,
+        people=sorted(u.username for u in users),
+    )
 
 
 @transaction.atomic

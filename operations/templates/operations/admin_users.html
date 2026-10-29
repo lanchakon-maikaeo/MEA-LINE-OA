@@ -1,5 +1,6 @@
 {% extends "operations/admin_base.html" %}
-{% block title %}บัญชีเจ้าหน้าที่ · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% load units_ui %}
+{% block title %}บัญชีเจ้าหน้าที่ · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
@@ -11,13 +12,13 @@
 </div>
 {% include "operations/_list_tools.html" with list="users" placeholder="ค้นหาชื่อผู้ใช้ ชื่อ หรือบทบาท" filters=user_filters %}
 <div class="table-wrap"><table class="table--cards">
-  <thead><tr><th scope="col">ชื่อผู้ใช้</th><th scope="col">ชื่อ</th><th scope="col">กอง</th><th scope="col">บทบาท</th><th scope="col">สถานะ</th></tr></thead>
+  <thead><tr><th scope="col">ชื่อผู้ใช้</th><th scope="col">ชื่อ</th><th scope="col">สังกัด</th><th scope="col">บทบาท</th><th scope="col">สถานะ</th></tr></thead>
   <tbody data-list-items="users">
     {% for u in users %}
       <tr data-item data-status="{{ u.is_active|yesno:'active,suspended' }}" data-division="{{ u.division_codes|join:' ' }}" data-search="{{ u.username|lower }} {{ u.staff_profile.display_name|lower }} {{ u.roles_label|lower }} {{ u.division_codes|join:' '|lower }}">
         <td><a href="{% url 'admin-user-detail' u.pk %}">{{ u.username }}</a></td>
         <td class="cell--wide">{{ u.staff_profile.display_name|default:"-" }}</td>
-        <td data-label="กอง">{{ u.division_codes|join:", "|default:"-" }}</td>
+        <td data-label="สังกัด">{{ u|unit_path }}</td>
         <td class="cell--wide" data-label="บทบาท">{{ u.roles_label|default:"-" }}</td>
         <td class="cell--end">{{ u.is_active|yesno:"ใช้งาน,ระงับ" }}</td>
       </tr>

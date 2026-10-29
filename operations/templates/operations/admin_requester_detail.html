@@ -1,6 +1,6 @@
 {% extends "operations/admin_base.html" %}
-{% load ui koj_ui %}
-{% block title %}{{ requester.display_name }} · ผู้ใช้ LINE OA · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% load ui units_ui %}
+{% block title %}{{ requester.display_name }} · ผู้ใช้ LINE OA · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
@@ -48,19 +48,11 @@
   <p>ไม่มีบัญชี LINE ที่ผูกอยู่</p>
   {% endif %}
   {% if managed %}
-  {% for alert in alerts %}
-  <form method="post" action="{% url 'admin-requester-action' requester.pk 'emergency' %}">
-    {% csrf_token %}<input type="hidden" name="user" value="{{ alert.user.pk }}">
-    <fieldset><legend>รับแจ้งเรื่องฉุกเฉินใหม่ทาง LINE และอีเมล</legend>
-      <p class="helptext">เมื่อมีเรื่องฉุกเฉินใหม่ ระบบแจ้งเฉพาะคนที่ติ๊กไว้ของกองนั้น กองที่ยังไม่ได้ติ๊กใคร ระบบส่งอีเมลถึงสมาชิกกองทุกคน และส่ง LINE ถึงหัวหน้ากอง เดือนนี้ส่ง LINE ไปแล้ว {{ budget.used }} จาก {{ budget.budget }} ข้อความ</p>
-      {% for division, chosen in alert.divisions %}<label class="choice"><input type="checkbox" name="division" value="{{ division.pk }}"{% if chosen %} checked{% endif %}><span>เรื่องฉุกเฉินของ {{ division.code }} {{ division.name }}</span></label>
-      {% empty %}<p class="muted">บัญชีเจ้าหน้าที่นี้ยังไม่มีสิทธิ์ในกองไหน จึงยังตั้งไม่ได้</p>{% endfor %}
-      {% if alert.divisions %}<p><button type="submit">บันทึกการรับแจ้งเรื่องฉุกเฉิน</button></p>{% endif %}
-    </fieldset>
-  </form>
-  {% koj_recipients alert.user request.get_full_path %}
+  {% for staff in alerts %}
+  <p>{{ staff|unit_path }}</p>
+  <p class="muted">ผู้รับแจ้งเรื่องสำคัญ ผู้รับผิดชอบประจำงาน และผู้รับแจ้งงานติดตาม กอจ. ของบัญชีเจ้าหน้าที่นี้ ตั้งได้ที่การ์ดของหน่วยใน<a href="{% url 'admin-org' %}">ผังหน่วยงาน</a></p>
   {% empty %}
-  {% if lines %}<p class="muted">บัญชี LINE นี้ยังไม่ได้เชื่อมกับบัญชีเจ้าหน้าที่ จึงยังตั้งให้รับแจ้งเรื่องฉุกเฉินหรืองาน กอจ. ไม่ได้</p>{% endif %}
+  {% if lines %}<p class="muted">บัญชี LINE นี้ยังไม่ได้เชื่อมกับบัญชีเจ้าหน้าที่ จึงยังตั้งให้รับแจ้งเรื่องสำคัญหรืองาน กอจ. ไม่ได้</p>{% endif %}
   {% endfor %}
   {% endif %}
 </section>

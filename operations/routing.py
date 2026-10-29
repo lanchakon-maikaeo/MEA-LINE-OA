@@ -79,6 +79,7 @@ def _move_owner(case, division):
     previous = case.owner_division.code
     case.owner_division = division
     case.assignee = None  # M02: a new owner division starts without a responsible person
+    case.auto_assigned, case.unit_work = False, None  # ADR 0031 Q22: the new กอง picks again
     approvals.after_move(case)  # ADR 0025: out of the coordinator's hands, into approval
     return previous
 

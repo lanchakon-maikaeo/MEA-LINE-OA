@@ -1,5 +1,5 @@
 {% extends "operations/admin_base.html" %}
-{% block title %}กองและบทบาทประสานงาน · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}กองและบทบาทประสานงาน · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
@@ -9,7 +9,7 @@
 </div>
 {% include "operations/_list_tools.html" with list="divisions" placeholder="ค้นหารหัสหรือชื่อกอง" filters=division_filters %}
 <div class="table-wrap"><table class="table--cards">
-  <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ประเภท</th><th scope="col">สถานะ</th><th scope="col">ผู้รับแจ้งเรื่องฉุกเฉิน</th><th scope="col">จัดการ</th></tr></thead>
+  <thead><tr><th scope="col">รหัส</th><th scope="col">ชื่อ</th><th scope="col">ประเภท</th><th scope="col">สถานะ</th><th scope="col">หน่วยและผู้รับแจ้ง</th><th scope="col">จัดการ</th></tr></thead>
   <tbody data-list-items="divisions">
   {% for division in divisions %}
     <tr data-item data-status="{{ division.is_active|yesno:'active,closed' }}" data-kind="{{ division.kind }}" data-search="{{ division.code|lower }} {{ division.name|lower }}">
@@ -17,7 +17,7 @@
       <td class="cell--wide">{{ division.name }}{% if division.is_synthetic and "จำลอง" not in division.name %} (จำลอง){% endif %}</td>
       <td class="cell--wide" data-label="ประเภท">{{ division.get_kind_display }}{% if division.is_intake %} · <strong>กองรับเรื่องกลาง</strong>{% endif %}</td>
       <td class="cell--end" data-label="สถานะ">{{ division.is_active|yesno:"ใช้งาน,ปิด" }}</td>
-      <td class="cell--wide" data-label="ผู้รับแจ้งเรื่องฉุกเฉิน">{% for name, page in division.emergency_contacts %}{% if page %}<a href="{% url 'admin-requester-detail' page %}#rq-line">{{ name }}</a>{% else %}{{ name }}{% endif %}{% if not forloop.last %}, {% endif %}{% empty %}<span class="muted">ยังไม่ตั้ง แจ้งสมาชิกกองและหัวหน้ากอง</span>{% endfor %}</td>
+      <td class="cell--wide" data-label="หน่วยและผู้รับแจ้ง">{% if division.kind == "division" and division.is_active %}<a href="{% url 'admin-org' %}#u-d{{ division.pk }}">ดูในผังหน่วยงาน</a>{% else %}<span class="muted">ไม่มีในผังหน่วยงาน</span>{% endif %}</td>
       <td class="cell--wide"><form class="inline" method="post" action="{% url 'admin-division-action' division.pk division.is_active|yesno:'deactivate,activate' %}">
         {% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">{{ division.is_active|yesno:"ปิด,เปิด" }}</button>
       </form>

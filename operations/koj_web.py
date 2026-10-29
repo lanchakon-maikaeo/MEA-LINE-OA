@@ -5,13 +5,11 @@ from io import StringIO
 
 from django import forms
 from django.contrib import messages
-from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.http import require_http_methods
 
 from operations import identity
 from operations import koj_tracking as tracking
@@ -198,21 +196,6 @@ def sources(request):
             "unmapped": KojRecord.objects.filter(present=True, district=None).count(),
         },
     )
-
-
-@admin_required
-@require_POST
-def recipients(request, pk):
-    user = get_object_or_404(get_user_model(), pk=pk)
-    try:
-        tracking.set_recipients(request.user, user, request.POST.getlist("koj_groups"))
-        messages.success(request, "บันทึกชุดรับแจ้ง กอจ. แล้ว")
-    except ValidationError as exc:
-        messages.error(request, "; ".join(exc.messages))
-    back = request.POST.get("next", "")
-    if back and url_has_allowed_host_and_scheme(back, {request.get_host()}):
-        return redirect(back)
-    return redirect("admin-user-detail", pk=user.pk)
 
 
 @admin_required

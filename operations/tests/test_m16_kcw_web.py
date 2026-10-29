@@ -9,15 +9,13 @@ from datetime import date, timedelta
 from django.test import Client
 from django.utils import timezone
 
-from operations import calendars, staff_email, warehouse
+from operations import calendars, warehouse
 from operations.models import (
     Appointment,
     Calendar,
     CalendarSlot,
     CaseMilestone,
-    Division,
     DivisionSchedule,
-    EmergencyContact,
     Holiday,
     Role,
 )
@@ -123,9 +121,10 @@ class CalendarTests(WorkTestCase):
 
 
 class EmergencyTests(WorkTestCase):
-    """28 ต.ค. 2569 Q7, Q12: set on the LINE account page only; the divisions page lists them."""
+    """28 ต.ค. 2569 Q7, Q12, then ADR 0031 Q12: the LINE account page points to the unit cards of
+    ผังหน่วยงาน, where ผู้รับแจ้งเรื่องสำคัญ took over the division's emergency contacts."""
 
-    def test_an_admin_chooses_who_hears_of_an_emergency_on_the_line_page(self):
+    def test_the_line_page_points_to_the_chart(self):
         from operations.models import ChannelIdentity, District, Requester
 
         admin = make_staff("emergency-admin", (Role.ADMIN, None))
@@ -140,29 +139,13 @@ class EmergencyTests(WorkTestCase):
         )
         client = Client()
         client.force_login(admin)
-        self.assertEqual(client.get("/console/admin/emergency/").status_code, 404)
         page = client.get(f"/console/admin/requesters/{requester.pk}/").content.decode()
-        self.assertIn("เรื่องฉุกเฉินของ กคว.", page)
-        division = Division.objects.get(code="กคว.")
-        other = Division.objects.exclude(pk=division.pk).filter(is_active=True).first()
-        client.post(
-            f"/console/admin/requesters/{requester.pk}/emergency/",
-            {"user": on_call.pk, "division": [division.pk, other.pk]},
+        self.assertIn('href="/console/admin/org/"', page)
+        self.assertNotIn("เรื่องฉุกเฉินของ กคว.", page)
+        response = client.post(
+            f"/console/admin/requesters/{requester.pk}/emergency/", {"user": on_call.pk}
         )
-        # Only the divisions the person works in count.
-        self.assertEqual(
-            list(EmergencyContact.objects.values_list("user_id", "division_id")),
-            [(on_call.pk, division.pk)],
-        )
-        self.assertEqual(
-            [u.pk for u in staff_email._with_email(c.user for c in EmergencyContact.objects.all())],
-            [on_call.pk],
-        )
-        self.assertContains(
-            client.get("/console/admin/divisions/"), f"/console/admin/requesters/{requester.pk}/"
-        )
-        client.post(f"/console/admin/requesters/{requester.pk}/emergency/", {"user": on_call.pk})
-        self.assertFalse(EmergencyContact.objects.exists())
+        self.assertEqual(response.status_code, 404)
 
     def test_a_line_not_linked_to_staff_cannot_be_chosen(self):
         from operations.models import ChannelIdentity, District, Requester

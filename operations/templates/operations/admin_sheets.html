@@ -1,6 +1,6 @@
 {% extends "operations/admin_base.html" %}
 {% load ui %}
-{% block title %}แหล่งข้อมูลค้นในชีท · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}แหล่งข้อมูลค้นในชีท · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · flow LINE</span><h1>แหล่งข้อมูลค้นในชีท</h1><p class="lede">กล่องค้นในชีทใน flow LINE ตอบสถานะจากชีทเหล่านี้ ระบบอ่านแค่คอลัมน์เลข คอลัมน์สถานะ และคอลัมน์รหัสพนักงาน (ถ้าตั้งไว้) ทุก {{ every }} นาที ด้วยสิทธิ์อ่านอย่างเดียว และไม่เขียนอะไรลงชีท</p></div></div>
 {% for source in sources %}

@@ -603,31 +603,23 @@ class SourceTests(KojTestCase):
         client.force_login(self.admin_koj)
         self.assertContains(client.get("/koj/"), self.source.name)
         self.assertContains(client.get(f"/koj/sources/{self.source.pk}/"), NUMBER)
-        self.assertContains(
-            client.get(f"/console/admin/users/{self.staff.pk}/"), "บันทึกชุดรับแจ้ง กอจ."
+        # ADR 0031 Q12, Q25: the recipient sets sit on the กอจ. cards of ผังหน่วยงาน.
+        page = client.get("/console/admin/org/").content.decode()
+        self.assertIn("ผู้รับแจ้งงานติดตาม กอจ.", page)
+        response = client.post(
+            "/console/admin/org/",
+            {"action": "koj", "group": "sj", "person": [self.staff.pk], "unit": "d1"},
         )
-        self.line.staff_user = self.staff
-        self.staff_line.staff_user = None
-        self.staff_line.save(update_fields=["staff_user"])
-        self.line.save(update_fields=["staff_user"])
-        self.assertContains(
-            client.get(f"/console/admin/requesters/{self.requester.pk}/"), "บันทึกชุดรับแจ้ง กอจ."
-        )
-        self.assertEqual(
-            client.post(
-                f"/koj/recipients/{self.staff.pk}/", {"koj_groups": ["sj", "other"]}
-            ).status_code,
-            302,
-        )
+        self.assertEqual(response.status_code, 302)
         self.assertEqual(
             set(KojRecipient.objects.filter(user=self.staff).values_list("group", flat=True)),
-            {"sj", "other"},
+            {"sj"},
         )
         foreign = make_staff("foreign-clerk", (Role.STAFF, "กคว."))
         client.force_login(foreign)
         self.assertEqual(client.get("/koj/").status_code, 403)
         self.assertEqual(
-            client.post(f"/koj/recipients/{self.staff.pk}/", {"koj_groups": []}).status_code, 403
+            client.post("/console/admin/org/", {"action": "koj", "group": "sj"}).status_code, 403
         )
         # 28 ต.ค. 2569: กอจ. staff wait for the hourly round; the page is admin only.
         client.force_login(self.staff)

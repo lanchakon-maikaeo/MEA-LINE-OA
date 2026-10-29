@@ -323,22 +323,12 @@ class OwnerDeskTests(OrgTestCase):
 
 
 class SectionTests(OrgTestCase):
-    def test_the_policy_proposes_a_section_and_the_division_changes_it(self):
-        current = policy.active_policy()
-        document = {
-            **current.document,
-            "code": "FAJO-2-S",
-            "sections": [
-                {
-                    "kinds": ["withdrawal"],
-                    "category": "meter",
-                    "division": "กคว.",
-                    "section": "แผนกคลังเครื่องวัด",
-                }
-            ],
-        }
-        version = policy.import_policy(document)
-        policy.activate_policy(None, version, "ผู้ทดสอบ", "TEST", "ตารางแผนก")
+    def test_the_unit_that_takes_the_work_names_the_section_and_the_division_changes_it(self):
+        # ADR 0031 Q14: the งานที่หน่วยรับ of ผังหน่วยงาน, no longer the policy's table.
+        from operations import units
+
+        stock = Section.objects.get(name="แผนกคลังเครื่องวัด")
+        units.add_work(self.admin, units.Unit.of(section=stock), "withdrawal", "meter")
         _, case = self.submit(withdrawal(("MTR_SYN_A", "1")))
         self.assertEqual(case.section.name, "แผนกคลังเครื่องวัด")
         test_section = Section.objects.get(name="แผนกทดสอบเครื่องวัด")

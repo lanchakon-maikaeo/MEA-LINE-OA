@@ -33,6 +33,7 @@ from operations import (
     routing,
     routing_words,
     support,
+    units,
     workflow,
 )
 from operations.contracts import (
@@ -245,6 +246,21 @@ def _replay(ctx, action, key, request_hash):
     if not _can_view(ctx, receipt.case):
         fail(ErrorCode.NOT_FOUND)
     return CommandResult(**receipt.result)
+
+
+def record_system(case, action, reason, data, label="ระบบ (ผังหน่วยงาน)"):
+    """A step the system took on its own (ADR 0031), on the timeline like any decision."""
+    return _record(
+        _Context(label=label),
+        case,
+        action,
+        case.status,
+        reason,
+        data,
+        EVENT_DECISION_RECORDED,
+        None,
+        None,
+    )
 
 
 def _record(ctx, case, action, from_status, reason, data, event_type, key, request_hash):
@@ -565,7 +581,7 @@ def submit_case(actor, *, idempotency_key, payload):
             if intake is None:
                 # ADR 0008: straight to the division the rules name; unclear → coordinator.
                 case.owner_division = owner or _proposed_owner(case, coordinator, now)
-                case.section = policy.section_for(case)
+                case.section = units.section_for(case)  # ADR 0031 Q14
                 case.status = approvals.first_status(case)  # ADR 0025
                 case.save(update_fields=["owner_division", "section", "status"])
             cases.append(case)
@@ -585,6 +601,7 @@ def submit_case(actor, *, idempotency_key, payload):
             )
             policy.after_submit(case)
             approvals.start_emergency(case)  # ADR 0025 Q24
+            units.assign_new(case)  # ADR 0031 Q20: the ผู้รับผิดชอบประจำงาน takes it at once
         first = dataclasses.replace(
             results[0],
             split=[{"case_id": r.case_id, "case_number": r.case_number} for r in results[1:]],
@@ -611,6 +628,7 @@ def _take(ctx, case, payload, reason, target):
     if case.assignee_id == ctx.user.pk:
         fail(ErrorCode.VALIDATION_ERROR, "You are already responsible for this case.")
     case.assignee = ctx.user
+    case.auto_assigned = False  # ADR 0031 Q24: a person chose; the system leaves it alone
     case.status = target
     return {"assignee_id": ctx.user.pk}
 
@@ -643,7 +661,7 @@ def route_by_ai(case_id, run):
             "quote": run.quote,
             "routing_run": run.pk,
         }
-        case.section = policy.section_for(case)
+        case.section = units.section_for(case)
         case.revision += 1
         case.updated_at = timezone.now()
         case.save()
@@ -653,6 +671,7 @@ def route_by_ai(case_id, run):
             context, case, "route_by_ai", from_status, "", data, EVENT_DECISION_RECORDED, None, None
         )
         policy.after_decision(case, "route_by_ai", actor_is_staff=False)
+        units.after_owner_change(case)
         return case
 
 
@@ -674,6 +693,7 @@ def _assign(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "This person is already responsible.")
     previous = case.assignee_id
     case.assignee = assignee
+    case.auto_assigned = False  # ADR 0031 Q24
     return {"assignee_id": assignee.pk, "previous_assignee_id": previous}
 
 
@@ -849,7 +869,7 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         from_status, from_owner = case.status, case.owner_division_id
         data = _handler(action, case)(ctx, case, payload, reason, target)
         if case.owner_division_id != from_owner:
-            case.section = policy.section_for(case)  # Q12: the new owner's own แผนก, if any
+            case.section = units.section_for(case)  # Q12: the new owner's own แผนก, if any
         if acting_for is not None:
             data = {**(data or {}), "support": acting_for}
         data = _with_notes(ctx, case, action, from_status, payload, reason, data)
@@ -867,4 +887,9 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
             ctx, case, action, from_status, reason, data, EVENT_DECISION_RECORDED, key, request_hash
         )
         policy.after_decision(case, action, actor_is_staff=ctx.requester is None)
+        # ADR 0031 Q22, Q24: a new owner picks its own person; a new แผนก moves a system pick.
+        if case.owner_division_id != from_owner:
+            units.after_owner_change(case)
+        elif action == "set_section":
+            units.after_section_change(case)
         return result

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"historyEnabled":false,"selfRequestsOnly":true}'>
-  <title>{% block title %}ระบบรับเรื่อง ฝอจ.{% endblock %}</title>
+  <title>{% block title %}DED Center{% endblock %}</title>
   <link rel="preload" href="{% static 'operations/fonts/ibm-plex-sans-thai-thai-400-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{% static 'operations/app.css' %}">
   <script src="{% static 'operations/htmx.min.js' %}" defer></script>
@@ -40,8 +40,8 @@
           </nav>
         </details>
       {% endif %}
-      <a class="brand" href="{% if user.is_authenticated %}{% url 'console' %}{% else %}{% url 'index' %}{% endif %}" aria-label="ระบบรับเรื่อง ฝอจ. หน้าแรก">
-        <img class="brand__logo" src="{% static 'operations/img/fajo-plus.webp' %}" alt="ฝอจ. Plus การไฟฟ้านครหลวง" width="115" height="48">
+      <a class="brand" href="{% if user.is_authenticated %}{% url 'console' %}{% else %}{% url 'index' %}{% endif %}" aria-label="DED Center หน้าแรก">
+        <span class="brand__word" aria-hidden="true"><span class="brand__mark">DED</span><span class="brand__rest">Center</span></span>
       </a>
       {% if nav and nav.scope.has_any_access %}
         <nav class="mainnav" aria-label="เมนูหลัก" data-tour="nav">

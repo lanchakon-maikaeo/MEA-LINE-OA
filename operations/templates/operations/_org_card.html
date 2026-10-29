@@ -1,0 +1,119 @@
+{% load units_ui %}
+<article class="org-card{% if c.unit.group %} org-card--group{% elif not c.unit.section %} org-card--division{% endif %}" id="u-{{ c.key }}" aria-labelledby="t-{{ c.key }}">
+  <header class="org-card__head">
+    <span class="org-card__abbr" id="t-{{ c.key }}">{{ c.unit.label }}</span>
+    <span class="org-card__level">{% if c.unit.section or c.unit.group %}{{ c.unit.level }}{% else %}คนและงานระดับกอง{% endif %}</span>
+    {% if c.unit.label != c.unit.name %}<span class="org-card__name">{{ c.unit.name }}</span>{% endif %}
+  </header>
+
+  <div class="org-card__block">
+    <h3 class="org-card__h">คน</h3>
+    {% if c.people %}<ul class="org-people">
+      {% for p in c.people %}<li class="org-person">
+        <span class="org-dot{% if p.line %} org-dot--on{% endif %}" role="img" aria-label="{% if p.line %}ผูก LINE แล้ว{% else %}ยังไม่ผูก LINE{% endif %}" title="{% if p.line %}ผูก LINE แล้ว{% else %}ยังไม่ผูก LINE{% endif %}"></span>
+        <span class="org-person__name">{{ p.name }}</span>
+        {% if p.away %}<span class="tag tag--muted">ไม่อยู่ถึง {{ p.away|thai_day }}</span>{% endif %}
+      </li>{% endfor %}
+    </ul>{% else %}<p class="muted">ยังไม่มีคนสังกัดหน่วยนี้{% if not c.unit.section %}โดยตรง{% endif %}</p>{% endif %}
+  </div>
+
+  <div class="org-card__block">
+    <h3 class="org-card__h">งานที่หน่วยรับ</h3>
+    {% for w in c.works %}<div class="org-work">
+      <span class="org-work__label">{{ w.label }}</span>
+      <span class="org-work__who">{% for n in w.owners %}{% if forloop.first %}<strong>{{ n }}</strong>{% else %}<span class="muted"> · สำรอง {{ n }}</span>{% endif %}{% empty %}<span class="muted">ยังไม่ตั้งผู้รับผิดชอบ</span>{% endfor %}</span>
+    </div>{% empty %}<p class="muted">ยังไม่รับงานไหน</p>{% endfor %}
+  </div>
+
+  <div class="org-card__block">
+    <h3 class="org-card__h">ผู้รับแจ้งเรื่องสำคัญ</h3>
+    {% if c.receivers %}<p>{{ c.receivers|join:", " }}</p>
+    {% else %}<p class="muted">{% if c.unit.section or c.unit.group %}ไม่ได้เลือก จึงใช้ของหน่วยที่ใหญ่กว่า{% else %}ไม่ได้เลือก จึงส่งหา Supervisor ของกอง{% endif %}</p>{% endif %}
+  </div>
+
+  {% if c.koj %}<div class="org-card__block">
+    <h3 class="org-card__h">ผู้รับแจ้งงานติดตาม กอจ.</h3>
+    <p>{% if c.koj.names %}{{ c.koj.names|join:", " }}{% else %}<span class="muted">ไม่ได้เลือก จึงไม่ส่งใคร</span>{% endif %}</p>
+    <p class="muted">{{ c.koj.label }}</p>
+  </div>{% endif %}
+
+  <details class="org-edit">
+    <summary>แก้ไข {{ c.unit.label }}</summary>
+    <div class="org-edit__body">
+      {% for w in c.works %}
+      <form class="org-form" method="post">{% csrf_token %}<input type="hidden" name="unit" value="{{ c.key }}"><input type="hidden" name="work" value="{{ w.work.pk }}">
+        <fieldset><legend>{{ w.label }}</legend>
+          {% for i in owner_slots %}{% with chosen=w.owner_ids|nth:i %}
+          <div class="field"><label for="o-{{ w.work.pk }}-{{ i }}">{% if forloop.first %}ผู้รับผิดชอบหลัก{% else %}คนสำรองลำดับ {{ i }}{% endif %}</label>
+            <select id="o-{{ w.work.pk }}-{{ i }}" name="owner"><option value="">ไม่มี</option>{% for p in division.everyone %}<option value="{{ p.user.pk }}"{% if chosen == p.user.pk %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
+          {% endwith %}{% endfor %}
+          <div class="field"><label for="or-{{ w.work.pk }}">เหตุผล (ไม่บังคับ)</label><input id="or-{{ w.work.pk }}" name="reason" maxlength="500"></div>
+          <div class="org-form__actions">
+            <button class="btn btn--sm" type="submit" name="action" value="owners">บันทึกผู้รับผิดชอบ</button>
+            <button class="btn btn--sm btn--ghost" type="submit" name="action" value="work_up" aria-label="เลื่อน {{ w.label }} ขึ้น">ขึ้น</button>
+            <button class="btn btn--sm btn--ghost" type="submit" name="action" value="work_down" aria-label="เลื่อน {{ w.label }} ลง">ลง</button>
+            <button class="btn btn--sm btn--ghost" type="submit" name="action" value="remove_work">เลิกรับงานนี้</button>
+          </div>
+        </fieldset>
+      </form>
+      {% endfor %}
+
+      <form class="org-form" method="post">{% csrf_token %}<input type="hidden" name="action" value="add_work"><input type="hidden" name="unit" value="{{ c.key }}">
+        <fieldset><legend>เพิ่มงานที่หน่วยรับ</legend>
+          <div class="org-form__row">
+            <div class="field"><label for="ak-{{ c.key }}">ประเภทเรื่อง</label><select id="ak-{{ c.key }}" name="kind">{% for value, label in kinds %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="field"><label for="ag-{{ c.key }}">ของหรือหัวข้อ</label><select id="ag-{{ c.key }}" name="group">{% for value, label in groups %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+          </div>
+          <button class="btn btn--sm" type="submit">เพิ่มงาน</button>
+        </fieldset>
+      </form>
+
+      <form class="org-form" method="post">{% csrf_token %}<input type="hidden" name="action" value="receivers"><input type="hidden" name="unit" value="{{ c.key }}">
+        <fieldset><legend>ผู้รับแจ้งเรื่องสำคัญ</legend>
+          {% if division.eligible_line %}{% for p in division.eligible_line %}<label class="choice choice--sm"><input type="checkbox" name="person" value="{{ p.user.pk }}"{% if p.user.pk in c.receiver_ids %} checked{% endif %}><span>{{ p.name }}</span></label>{% endfor %}
+          <button class="btn btn--sm" type="submit">บันทึกผู้รับแจ้ง</button>
+          {% else %}<p class="muted">ยังไม่มีใครใน {{ division.unit.label }} ผูก LINE จึงยังเลือกไม่ได้</p>{% endif %}
+        </fieldset>
+      </form>
+
+      {% if c.koj %}<form class="org-form" method="post">{% csrf_token %}<input type="hidden" name="action" value="koj"><input type="hidden" name="unit" value="{{ c.key }}"><input type="hidden" name="group" value="{{ c.koj.group }}">
+        <fieldset><legend>ผู้รับแจ้งงานติดตาม กอจ.</legend>
+          {% if division.eligible_line %}{% for p in division.eligible_line %}<label class="choice choice--sm"><input type="checkbox" name="person" value="{{ p.user.pk }}"{% if p.user.pk in c.koj.ids %} checked{% endif %}><span>{{ p.name }}</span></label>{% endfor %}
+          <button class="btn btn--sm" type="submit">บันทึกผู้รับแจ้งงานติดตาม</button>
+          {% else %}<p class="muted">ยังไม่มีใครผูก LINE จึงยังเลือกไม่ได้</p>{% endif %}
+        </fieldset>
+      </form>{% endif %}
+
+      <form class="org-form" method="post">{% csrf_token %}<input type="hidden" name="action" value="short_name"><input type="hidden" name="unit" value="{{ c.key }}">
+        <fieldset><legend>ชื่อย่อ</legend>
+          <div class="field"><label for="sn-{{ c.key }}">ชื่อย่อของ {{ c.unit.name }}</label><input id="sn-{{ c.key }}" name="value" maxlength="32" value="{% if c.unit.group %}{{ c.unit.group.code }}{% elif c.unit.section %}{{ c.unit.section.code }}{% else %}{{ c.unit.division.short_name }}{% endif %}" placeholder="{% if c.unit.section or c.unit.group %}เว้นว่างได้ ระบบจะแสดงชื่อเต็ม{% else %}{{ c.unit.division.code }}{% endif %}"></div>
+          <button class="btn btn--sm" type="submit">บันทึกชื่อย่อ</button>
+        </fieldset>
+      </form>
+
+      {% if c.unit.section and not c.unit.group %}
+      <form class="org-form" method="post">{% csrf_token %}<input type="hidden" name="action" value="add_group"><input type="hidden" name="unit" value="{{ c.key }}">
+        <fieldset><legend>เพิ่มกลุ่มงานใน {{ c.unit.label }}</legend>
+          <div class="org-form__row">
+            <div class="field"><label for="gn-{{ c.key }}">ชื่อกลุ่มงาน</label><input id="gn-{{ c.key }}" name="name" maxlength="200" required></div>
+            <div class="field"><label for="gc-{{ c.key }}">ชื่อย่อ (ไม่บังคับ)</label><input id="gc-{{ c.key }}" name="code" maxlength="32"></div>
+          </div>
+          <p class="helptext">ถ้าชื่อตรงกับกลุ่มงานในทะเบียนพนักงาน คนในแผนกที่ยังเป็น N/A จะย้ายเข้ากลุ่มนี้เอง</p>
+          <button class="btn btn--sm" type="submit">เพิ่มกลุ่มงาน</button>
+        </fieldset>
+      </form>
+      {% endif %}
+      {% if c.unit.group %}
+      <form class="org-form" method="post">{% csrf_token %}<input type="hidden" name="action" value="close_group"><input type="hidden" name="unit" value="{{ c.key }}">
+        <fieldset><legend>ปิดกลุ่มงาน</legend>
+          <p class="helptext">คนในกลุ่มยังอยู่ในแผนกเดิม งานที่กลุ่มนี้รับจะเลิกใช้ เรื่องที่มีคนรับผิดชอบอยู่แล้วยังอยู่กับคนเดิม</p>
+          <div class="field"><label for="cr-{{ c.key }}">เหตุผล (ไม่บังคับ)</label><input id="cr-{{ c.key }}" name="reason" maxlength="500"></div>
+          <button class="btn btn--sm btn--secondary" type="submit">ปิดกลุ่มงานนี้</button>
+        </fieldset>
+      </form>
+      {% endif %}
+    </div>
+  </details>
+
+  {% if c.groups %}<div class="org-sub">{% for g in c.groups %}{% include "operations/_org_card.html" with c=g division=division %}{% endfor %}</div>{% endif %}
+</article>

@@ -382,6 +382,21 @@ def revoke_role(actor, grant, reason):
         division=grant.division.code if grant.division else None,
     )
     _menu_follows(grant.user)
+    if (
+        grant.division_id
+        and not RoleGrant.objects.filter(
+            user=grant.user, division_id=grant.division_id, revoked_at__isnull=True
+        ).exists()
+    ):
+        from operations import units  # local: units builds on identity
+
+        # ADR 0031 Q24: the cases the system gave this person move to the next one.
+        units.release(grant.user, f"{_name(grant.user)} ไม่มีสิทธิ์ใน {grant.division.code} แล้ว")
+
+
+def _name(user):
+    profile = getattr(user, "staff_profile", None)
+    return profile.display_name if profile else user.username
 
 
 @transaction.atomic
@@ -404,6 +419,10 @@ def change_division(actor, user, from_division, to_division, reason):
             user=user, role=grant.role, division=to_division, revoked_at__isnull=True
         ).exists():
             grant_role(actor, user, grant.role, to_division, reason)
+    # ADR 0031: the สังกัด moves with the roles, to the new กอง itself.
+    StaffProfile.objects.filter(user=user, division=from_division).update(
+        division=to_division, section=None, work_group=None
+    )
 
 
 def _profile(user):
@@ -433,6 +452,10 @@ def set_staff_active(actor, user, active, reason):
     user.is_active = active
     user.save(update_fields=["is_active"])
     _end_sessions(user)
+    if not active:
+        from operations import units  # local: units builds on identity
+
+        units.release(user, f"บัญชีของ {_name(user)} ถูกระงับ")  # ADR 0031 Q24
     if not active:
         # ADR 0010: a suspended account loses its LINE link too, and the staff menu with it.
         from operations import line_menu  # local: line_menu builds on identity
@@ -632,7 +655,10 @@ def set_section(actor, user, section, reason=""):
         raise ValidationError("บัญชีนี้อยู่แผนกนี้แล้ว")
     previous = profile.section
     profile.section = section
-    profile.save(update_fields=["section"])
+    profile.work_group = None  # ADR 0031: a กลุ่มงาน belongs to one แผนก
+    if section is not None:
+        profile.division = section.division
+    profile.save(update_fields=["section", "work_group", "division"])
     audit(
         actor,
         "staff.section_changed",
@@ -877,6 +903,9 @@ def provision_employee_staff(identity_row, employee, actor):
                 division=employee.division.code,
             )
             sync_membership_authority(user, actor)
+    from operations import units  # local: units builds on identity
+
+    units.bind_from_roster(user, employee)  # ADR 0031 Q5: the สังกัด the roster names
     identity_row.staff_user, identity_row.staff_linked_at = user, timezone.now()
     identity_row.save(update_fields=["staff_user", "staff_linked_at"])
     from operations import line_menu

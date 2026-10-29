@@ -1,5 +1,5 @@
 {% extends "operations/admin_base.html" %}
-{% block title %}การตั้งค่า AI · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% block title %}การตั้งค่า AI · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>การตั้งค่า AI</h1></div></div>
 {% if not can_change %}<div class="notice notice--info mb-24" role="status"><div class="notice__body"><strong>ดูได้อย่างเดียว</strong> การเปลี่ยนรุ่น ประเมิน หรือแก้โมเดลทำได้ตาม <a href="{% url 'admin-options' %}">ตัวเลือกระบบ</a> "ใครเปลี่ยนการตั้งค่า AI ได้"</div></div>{% endif %}

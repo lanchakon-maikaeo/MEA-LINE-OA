@@ -25,14 +25,17 @@ S = CaseMilestone.Stage
 
 
 class HeaderTests(WorkTestCase):
-    def test_the_logo_leads_and_the_koj_page_is_not_a_tab(self):
+    def test_the_name_leads_and_the_koj_page_is_not_a_tab(self):
         admin = make_staff("header-admin", (Role.ADMIN, None))
         koj = make_staff("header-koj", (Role.STAFF, "กอจ."))
         for user in (admin, koj, self.kcw):
             client = Client()
             client.force_login(user)
             page = client.get("/console/").content.decode()
-            self.assertIn("operations/img/fajo-plus.webp", page)
+            # grill 29 ต.ค. 2569 Q1, Q18: DED Center in place of the logo, and in the tab.
+            self.assertIn('<span class="brand__mark">DED</span>', page)
+            self.assertNotIn("fajo-plus.webp", page)
+            self.assertIn("· DED Center</title>", page)
             self.assertNotIn('href="/koj/"', page)
         client = Client()
         client.force_login(koj)

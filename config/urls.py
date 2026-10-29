@@ -13,6 +13,7 @@ from operations import (
     problems_web,
     registry_web,
     routing_web,
+    units_web,
     views,
     warehouse_web,
     web,
@@ -21,7 +22,6 @@ from operations import (
 urlpatterns = [
     path("koj/", koj_web.sources, name="koj-sources"),
     path("koj/sources/<int:pk>/", koj_web.history, name="koj-history"),
-    path("koj/recipients/<int:pk>/", koj_web.recipients, name="koj-recipients"),
     path("", views.index, name="index"),
     path("health/live/", views.live, name="health-live"),
     path("health/ready/", views.ready, name="health-ready"),
@@ -181,6 +181,7 @@ urlpatterns = [
     path("console/admin/answers/", views.admin_answers, name="admin-answers"),
     path("console/admin/questions/", views.admin_questions, name="admin-questions"),
     path("console/admin/duties/", duties_web.admin_page, name="admin-duties"),
+    path("console/admin/org/", units_web.admin_page, name="admin-org"),
     path(
         "console/admin/divisions/<int:pk>/<slug:action>/",
         views.admin_division_action,

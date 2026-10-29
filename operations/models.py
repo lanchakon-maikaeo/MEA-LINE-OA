@@ -65,6 +65,8 @@ class Division(models.Model):
     # เลขใบเบิก/ใบส่งคืน SAP (user, 23 Oct 2569): a withdrawal or return this division takes
     # follows a slip already made in SAP, so the LINE chat asks for its number. Admins switch it.
     requires_sap = models.BooleanField(default=False)
+    # ชื่อย่อ (ADR 0031 Q3): what the chart and the สังกัด show; the code when empty.
+    short_name = models.CharField(max_length=32, blank=True)
 
     class Meta:
         ordering = ["code"]
@@ -93,6 +95,26 @@ class Section(models.Model):
         ordering = ["division__code", "order", "name"]
         constraints = [
             models.UniqueConstraint(fields=["division", "name"], name="section_unique_name")
+        ]
+
+    def __str__(self):
+        return self.code or self.name
+
+
+class WorkGroup(models.Model):
+    """กลุ่มงาน (ADR 0031): a group inside a แผนก, the smallest unit. Only admins create one
+    (Q13); it owns no case and holds no right."""
+
+    section = models.ForeignKey(Section, on_delete=models.PROTECT, related_name="work_groups")
+    name = models.CharField(max_length=200)
+    code = models.CharField(max_length=32, blank=True)  # ชื่อย่อ, when the unit has one
+    order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["section__division__code", "section__order", "order", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["section", "name"], name="work_group_unique_name")
         ]
 
     def __str__(self):
@@ -137,10 +159,20 @@ class StaffProfile(models.Model):
     display_name = models.CharField(max_length=200)
     # รหัสพนักงาน (10 Oct 2569 Q3): links LINE to this account after an employee check.
     employee_id = models.CharField(max_length=32, blank=True)
+    # สังกัด (ADR 0031): one unit, the deepest of กอง › แผนก › กลุ่มงาน; each level may be
+    # empty (N/A). Set from the roster when the employee is verified, moved by an admin.
+    division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     # แผนก (Q13): at most one; empty for heads of division and staff outside any section.
     section = models.ForeignKey(
         Section, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    work_group = models.ForeignKey(
+        WorkGroup, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # ไม่อยู่ ถึงวันที่ (ADR 0031 Q21): set by the person; the system skips them until then.
+    away_until = models.DateField(null=True, blank=True)
     must_change_password = models.BooleanField(default=False)
     notify_registrations = models.BooleanField(default=False)
     # ADR 0030 Q25: an admin hears on LINE of each case waiting for the admins (on unless set off).
@@ -500,6 +532,12 @@ class Case(models.Model):
     assignee = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # ADR 0031: the งานที่หน่วยรับ the case matched, and whether the system (not a person) chose
+    # the assignee; only such cases move on by themselves (Q24).
+    unit_work = models.ForeignKey(
+        "UnitWork", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    auto_assigned = models.BooleanField(default=False)
     # Empty when the requester submitted on LINE; the staff member when filed on their behalf.
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
@@ -3314,9 +3352,9 @@ class Holiday(models.Model):
 
 
 class EmergencyContact(models.Model):
-    """ผู้รับแจ้งเรื่องฉุกเฉินของกอง (grill กคว. รอบใหม่ Q33): when a division has any, a new
-    emergency case is told to them (email, and LINE if linked) instead of to the whole division
-    and its heads. An admin keeps the list."""
+    """ผู้รับแจ้งเรื่องฉุกเฉินของกอง (grill กคว. รอบใหม่ Q33). Since ADR 0031 (Q12) the rows were
+    copied to the กอง cards as ผู้รับแจ้งเรื่องสำคัญ (UnitRecipient) and nothing reads them; the
+    table stays one release so the previous release still runs during a deploy."""
 
     division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name="+")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
@@ -3329,6 +3367,55 @@ class EmergencyContact(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["division", "user"], name="emergency_contact_once")
         ]
+
+
+class UnitWork(models.Model):
+    """งานที่หน่วยรับ (ADR 0031 Q8): a kind of case with a group of goods or a topic that one
+    unit takes. The first active row of the กอง in `order` that the case matches wins (Q23)."""
+
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="unit_works")
+    section = models.ForeignKey(Section, null=True, blank=True, on_delete=models.PROTECT)
+    work_group = models.ForeignKey(WorkGroup, null=True, blank=True, on_delete=models.PROTECT)
+    kind = models.CharField(max_length=16, choices=Case.Kind.choices)
+    group = models.CharField(max_length=16)  # an EquipmentType.LineGroup or a Case.Topic value
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["division__code", "order", "pk"]
+
+
+class UnitWorkOwner(models.Model):
+    """ผู้รับผิดชอบประจำงาน (Q16, Q21): the people who take a matching case at once, คนหลัก
+    first and then the backups."""
+
+    work = models.ForeignKey(UnitWork, on_delete=models.CASCADE, related_name="owners")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["work", "user"], name="unit_work_owner_once")
+        ]
+
+
+class UnitRecipient(models.Model):
+    """ผู้รับแจ้งเรื่องสำคัญของหน่วย (Q12, Q25): who hears of an important case on LINE when the
+    case has no responsible person; a unit without any defers to the bigger unit."""
+
+    division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name="+")
+    section = models.ForeignKey(Section, null=True, blank=True, on_delete=models.CASCADE)
+    work_group = models.ForeignKey(WorkGroup, null=True, blank=True, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["pk"]
 
 
 class CaseMessage(models.Model):

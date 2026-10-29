@@ -26,12 +26,13 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
-from operations import identity, options, orchestration, queues
+from operations import identity, options, orchestration, queues, units
 from operations.models import (
     AuditEvent,
     Case,
     ChannelIdentity,
     District,
+    Division,
     NotificationDelivery,
     OutboxEvent,
     Requester,
@@ -273,11 +274,22 @@ def internal_requester(identity_row, user):
 # --- Alerts -------------------------------------------------------------------------------------
 
 
-def _important_people(case, users):
-    """The person responsible, else the supervisors (ผอ.) among those told, else everyone."""
+def _important_people(case, users, division_id=None):
+    """ADR 0031 Q15: the person responsible, else the ผู้รับแจ้งเรื่องสำคัญ of the unit that takes
+    the work and then of the bigger units, else the supervisors (ผอ.), else everyone told."""
     people = [u for u in users if u.is_active]
-    if case is not None and case.assignee_id and any(u.pk == case.assignee_id for u in people):
-        return [u for u in people if u.pk == case.assignee_id][:1]
+    assignee = next((u for u in people if case is not None and u.pk == case.assignee_id), None)
+    if assignee is not None and units.has_line(assignee):
+        return [assignee]
+    division_id = division_id or (case.owner_division_id if case is not None else None)
+    if case is not None and division_id:
+        division = Division.objects.filter(pk=division_id).first()
+        if division is not None:
+            work = units.match_case(case, division_id)
+            section = case.section if case.owner_division_id == division_id else None
+            chosen = units.line_people(division, work, section=section)
+            if chosen:
+                return chosen
     heads = set(
         RoleGrant.objects.filter(
             user__in=people, role=Role.SUPERVISOR, revoked_at__isnull=True
@@ -312,16 +324,20 @@ def _text(kind, case):
     return f"{SUBJECTS[kind]}\nเรื่อง {case.number} · กอง {case.owner_label}"
 
 
-def plan(kind, key, case, users, chosen=False):
+def plan(kind, key, case, users, chosen=False, division_id=None):
     """LINE deliveries for staff with a linked LINE; nothing when the budget option is 0.
-    `chosen`: the people were picked by an admin (Q33), so each of them is told."""
+    `chosen`: the people were picked by an admin (Q33), so each of them is told. `division_id`:
+    the กอง being told (a handoff's target), when it is not the owner."""
     if kind not in IMPORTANT or case is None or options.get(options.STAFF_LINE_BUDGET) == "0":
         return []
     from operations.conversation import text_message
 
     now = timezone.now()
     planned = []
-    for user in [u for u in users if u.is_active] if chosen else _important_people(case, users):
+    people = (
+        [u for u in users if u.is_active] if chosen else _important_people(case, users, division_id)
+    )
+    for user in people:
         line = ChannelIdentity.objects.filter(staff_user=user, is_following=True).first()
         if line is None:
             continue

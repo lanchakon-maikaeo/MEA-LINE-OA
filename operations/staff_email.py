@@ -118,7 +118,7 @@ def _text(kind, case, detail=""):
     return "\n".join(rows)
 
 
-def plan(kind, key, case, users, detail="", text=None, chosen=False):
+def plan(kind, key, case, users, detail="", text=None, chosen=False, division_id=None):
     """One email per recipient for one situation; the same key never plans twice. Nothing is
     planned while staff email is off, so the queue holds no mail that will never be sent.
     `case` is None only for situations about no single case (M11 registry summary). Staff
@@ -127,7 +127,7 @@ def plan(kind, key, case, users, detail="", text=None, chosen=False):
 
     if case is not None and case.is_example:
         return []  # ตัวอย่าง (15 ต.ค. 2569 Q33): no email or LINE about it
-    staff_line.plan(kind, key, case, users, chosen)
+    staff_line.plan(kind, key, case, users, chosen, division_id)
     if not enabled():
         return []
     now = timezone.now()
@@ -185,16 +185,11 @@ def plan_for_event(event):
         # The desk that holds new cases: intake, or (ADR 0008) the owner division itself.
         desk = Division.objects.filter(is_intake=True, is_active=True).first()
         desk_id = desk.pk if desk else case.owner_division_id
-        from operations.models import EmergencyContact
-
-        # Q33: the people an admin chose for this division, else its members (LINE: heads).
-        chosen = _with_email(
-            c.user
-            for c in EmergencyContact.objects.filter(division_id=desk_id).select_related("user")
+        # ADR 0031 Q15: email to the members; LINE to the person responsible, else the unit's
+        # ผู้รับแจ้งเรื่องสำคัญ (which took over the division's ผู้รับแจ้งเรื่องฉุกเฉิน, Q12).
+        return plan(
+            "staff_hazard", f"hazard:{case.pk}", case, members(desk_id), division_id=desk_id
         )
-        if chosen:
-            return plan("staff_hazard", f"hazard:{case.pk}", case, chosen, chosen=True)
-        return plan("staff_hazard", f"hazard:{case.pk}", case, members(desk_id))
     if event.event_type != orchestration.EVENT_DECISION:
         return []
     decision = (
@@ -230,12 +225,23 @@ def _plan_decision(decision):
     if decision.action == "request_handoff":
         handoff = Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).first()
         if handoff:
-            return plan("staff_handoff", key, case, members(handoff.to_division_id))
+            return plan(
+                "staff_handoff",
+                key,
+                case,
+                members(handoff.to_division_id),
+                division_id=handoff.to_division_id,
+            )
     if decision.action == "request_child_work":
         child = ChildWork.objects.filter(case=case).order_by("-seq").first()
         if child and child.status == ChildWork.Status.PENDING:
             return plan(
-                "staff_child_work", key, case, members(child.division_id), f"งาน: {child.task}"
+                "staff_child_work",
+                key,
+                case,
+                members(child.division_id),
+                f"งาน: {child.task}",
+                division_id=child.division_id,
             )
     if decision.action in {"request_routing_decision", "decline_handoff", "decline_child_work"}:
         from operations.models import RoutingReview

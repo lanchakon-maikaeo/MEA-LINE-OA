@@ -25,7 +25,6 @@ from operations import (
     answers,
     attachments,
     email_codes,
-    emergency,
     employees,
     forms,
     identity,
@@ -600,12 +599,9 @@ def admin_requester_detail(request, pk):
             "row": row,
             "districts": District.objects.filter(is_active=True).order_by("code"),
             "lines": lines,
-            # 28 ต.ค. 2569 Q7: LINE alerts for the staff account this LINE is linked to.
-            "alerts": [
-                {"user": line.staff_user, "divisions": emergency.choices(line.staff_user)}
-                for line in lines
-                if line.staff_user
-            ],
+            # ADR 0031 Q12: LINE alerts of the staff account this LINE is linked to are set on
+            # its unit's card in ผังหน่วยงาน.
+            "alerts": [line.staff_user for line in lines if line.staff_user],
             "budget": notifications.budget_state(),
             "history": history,
             "message_count": ConversationMessage.objects.filter(requester=requester).count(),
@@ -695,17 +691,6 @@ def admin_requester_action(request, pk, action):
             lambda: identity.unlink_requester_employee(actor, requester, reason),
             "ยกเลิกการผูกกับทะเบียนพนักงานแล้ว",
         )
-    elif action == "emergency":
-        if not data.get("user", "").isdigit():
-            raise Http404
-        staff = get_object_or_404(
-            ChannelIdentity, requester=requester, staff_user_id=int(data["user"])
-        ).staff_user
-        _run(
-            request,
-            lambda: emergency.set_for(actor, staff, data.getlist("division")),
-            "บันทึกการรับแจ้งเรื่องฉุกเฉินแล้ว",
-        )
     elif action == "district":
         _run(
             request,
@@ -778,10 +763,7 @@ def admin_divisions(request):
                 "เพิ่มกองแล้ว",
             )
             return redirect("admin-divisions")
-    contacts = emergency.by_division()
     divisions = list(Division.objects.all())
-    for division in divisions:
-        division.emergency_contacts = contacts.get(division.pk, [])
     return render(
         request,
         "operations/admin_divisions.html",
