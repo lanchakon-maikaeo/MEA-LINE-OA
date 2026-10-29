@@ -16,9 +16,13 @@ x-app: &app
     PRIVATE_MEDIA_ROOT: /data/private-media
     BEHIND_TLS_PROXY: "true"
     RELEASE_ID: ${RELEASE_ID:?release.env}
+    # ค้นในชีท (ADR 0027): the read-only service-account key, put there by
+    # `deploy/e5-move.sh google-key`; without it the sheets stay off with a clear message.
+    KOJ_GOOGLE_CREDENTIALS_FILE: /run/faoj-google/sheets-reader.json
   volumes:
     - ${FAOJ_ROOT}/data/media:/data/private-media
     - ${FAOJ_ROOT}/tls/db/ca.crt:/run/faoj-tls/ca.crt:ro
+    - ${FAOJ_ROOT}/env/google:/run/faoj-google:ro
   init: true
   restart: unless-stopped
   logging: &logging

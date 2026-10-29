@@ -33,7 +33,7 @@ write_once() {  # path, mode, content — never overwrites
   ( umask 077; printf '%s\n' "$3" > "$1" ); chmod "$2" "$1"; echo "made $1"
 }
 
-mkdir -p "$FAOJ_ROOT"/{env,releases,run,drills,restore,tls/db} \
+mkdir -p "$FAOJ_ROOT"/{env,env/google,releases,run,drills,restore,tls/db} \
   "$FAOJ_ROOT"/data/{postgres,media,n8n,caddy,clamav,dumps,restic-cache,pgbackrest-spool}
 chmod 755 "$FAOJ_ROOT" "$FAOJ_ROOT/run"
 if $LINUX; then

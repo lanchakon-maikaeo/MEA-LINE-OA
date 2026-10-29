@@ -16,6 +16,9 @@
 #                                  ngrok config on a yes, or typed hidden); shown nowhere
 #   deploy/e5-move.sh line-keys    only the LINE channel secret + token from the Mac .env (another
 #                                  OA), then web and worker restart; the old file is kept on E5
+#   deploy/e5-move.sh google-key FILE  the read-only Google service-account key (JSON) for ค้นในชีท
+#                                  to /srv/faoj/env/google, then web and worker restart; prints the
+#                                  account's e-mail to share the sheets with (the key is never shown)
 #   deploy/e5-move.sh check        are the owner's secrets in? (hashes compared, never shown)
 #   deploy/e5-move.sh s3-test      does the backup key work? (OCI's error code only)
 #   deploy/e5-move.sh diagnose     why a deploy's smoke failed (status, smoke, n8n import, logs)
@@ -370,6 +373,25 @@ PY
   { echo "$REMOTE_LIB"; echo 'dc up -d --no-deps web worker'; } | as_root
 }
 
+google_key() {  # ADR 0027: the sheets reader's key, mounted read-only into web and worker
+  local file=${1:-} email
+  [ -r "$file" ] || die "usage: deploy/e5-move.sh google-key <service-account.json>"
+  email=$(python3 - "$file" <<'PY'
+import json, sys
+key = json.load(open(sys.argv[1]))
+if key.get("type") != "service_account" or not key.get("private_key") or not key.get("client_email"):
+    raise SystemExit("not a Google service-account key (JSON with type service_account)")
+print(key["client_email"])
+PY
+) || die "that file is not a service-account key"
+  tunnel
+  on_e5 'sudo install -d -o root -g root -m 755 /srv/faoj/env/google &&
+    sudo install -o 10001 -g 10001 -m 400 /dev/stdin /srv/faoj/env/google/sheets-reader.json' < "$file"
+  say "restarting web and worker so they read the key"
+  { echo "$REMOTE_LIB"; echo 'dc up -d --no-deps web worker'; } | as_root
+  say "share each sheet (Viewer) with $email, then turn the sheet on in the admin web"
+}
+
 put_secrets() {  # {"file": {"KEY": "value"}} on stdin, written by root on E5; never in argv
   on_e5 'sudo python3 -c "
 import json, os, re, sys
@@ -623,6 +645,7 @@ case "${1:-}" in
   configure) configure;;
   secrets) secrets;;
   line-keys) line_keys;;
+  google-key) shift; google_key "$@";;
   check) check;;
   s3-test) s3_test;;
   diagnose) diagnose;;

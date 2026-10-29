@@ -562,6 +562,19 @@ class SourceTests(KojTestCase):
                     with self.assertRaises(ValidationError):
                         koj_sheets.fetch(self.source)
 
+    def test_google_reader_without_the_mounted_key_says_so(self):
+        from operations import koj_sheets
+
+        self.source.provider = "google"
+        self.source.spreadsheet_id = "synthetic-spreadsheet-id-0001"
+        self.source.sheet_name = "ข้อมูลจำลอง"
+        missing = {"KOJ_GOOGLE_CREDENTIALS_FILE": "/synthetic/no-such-dir/sheets-reader.json"}
+        with patch.dict("os.environ", missing):
+            with self.assertRaisesMessage(ValidationError, "ยังไม่มีไฟล์กุญแจ Google"):
+                koj_sheets.fetch(self.source)
+            with self.assertRaisesMessage(ValidationError, "ยังไม่มีไฟล์กุญแจ Google"):
+                koj_sheets.read_columns("synthetic-spreadsheet-id-0001", "ข้อมูลจำลอง", ["J"])
+
     def test_invalid_snapshot_is_atomic_and_keeps_previous_data(self):
         before = list(KojRecord.objects.values_list("row_key", "status"))
         changed = deepcopy(self.matrix)
