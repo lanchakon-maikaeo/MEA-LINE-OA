@@ -47,11 +47,6 @@ result = subprocess.run(
         sys.executable,
         "-m",
         "pip_audit",
-        # NLTK is only a declared Evidently dependency here; the app and Evidently code never
-        # call its vulnerable model-artifact path APIs. Upstream lists no patched release yet.
-        # Remove this exception as soon as NLTK publishes a fix for GHSA-8mgp-746c-j5xp.
-        "--ignore-vuln",
-        "GHSA-8mgp-746c-j5xp",
         "--format=json",
         "--output=reports/dependencies.json",
     ],
