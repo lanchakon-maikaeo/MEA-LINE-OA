@@ -196,39 +196,3 @@ def admin_flow_publish(request, key):
     else:
         messages.success(request, f"เผยแพร่ {flow.name} รุ่น {draft.number} แล้ว")
     return redirect("admin-flow", key=flow.key)
-
-
-@admin_required
-def admin_sheets(request):
-    """แหล่งข้อมูลค้นในชีท (ADR 0027): the sheets a ค้นในชีท box reads, two columns each."""
-    from operations import sheet_lookup
-
-    sources = list(SheetSource.objects.all())
-    editing = next((s for s in sources if s.key == request.GET.get("key")), None)
-    if request.method == "POST":
-        source = next((s for s in sources if s.key == request.POST.get("source")), None)
-        try:
-            if request.POST.get("do") == "refresh" and source is not None:
-                sheet_lookup.request_refresh(request.user, source)
-                messages.success(request, f"สั่งดึงข้อมูล {source.name} ใหม่แล้ว")
-            else:
-                source = sheet_lookup.save_source(
-                    request.user, source, request.POST, request.POST.get("reason")
-                )
-                messages.success(request, f"บันทึก {source.name} แล้ว ระบบกำลังดึงข้อมูลใหม่")
-        except ValidationError as exc:
-            messages.error(request, " ".join(exc.messages))
-            suffix = f"?key={source.key}" if source else "?new=1"
-            return redirect(reverse("admin-sheets") + suffix)
-        return redirect("admin-sheets")
-    return render(
-        request,
-        "operations/admin_sheets.html",
-        {
-            "sources": sources,
-            "editing": editing,
-            "adding": request.GET.get("new") == "1" or not sources,
-            "every": int(sheet_lookup.EVERY.total_seconds() // 60),
-            "matches": SheetSource.Match.choices,
-        },
-    )

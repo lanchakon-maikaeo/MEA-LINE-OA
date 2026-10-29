@@ -1,7 +1,7 @@
 {% extends "operations/base.html" %}
 {% load ui %}
 {% block title %}{{ source.name }} · กอจ.{% endblock %}
-{% block content %}<div class="page-head"><div class="page-head__text"><h1>{{ source.name }}</h1><p class="lede">ข้อมูลล่าสุด {{ source.last_synced_at|thai_datetime|default:"ยังไม่มีข้อมูล" }} · <a href="{% url 'koj-sources' %}">แหล่งข้อมูล กอจ.</a></p></div></div>
+{% block content %}<div class="page-head"><div class="page-head__text"><h1>{{ source.name }}</h1><p class="lede">ข้อมูลล่าสุด {{ source.last_synced_at|thai_datetime|default:"ยังไม่มีข้อมูล" }} · <a href="{% url 'sheets' %}">ชีทที่ระบบอ่าน</a></p></div></div>
 <form method="get"><label>ค้นเลขเอกสาร <input name="q" value="{{ q }}" maxlength="100"></label><button type="submit">ค้นหา</button></form>
 <div class="table-wrap"><table><thead><tr><th>เลขเอกสาร</th><th>อุปกรณ์</th><th>เขต</th><th>สถานะงาน</th><th>รายการ</th></tr></thead><tbody>{% for row in page %}<tr><td>{{ row.reference }}</td><td>{{ row.equipment_name }}</td><td>{{ row.district.name|default:"ยังจับคู่ไม่ได้" }}</td><td>{{ row.status }}</td><td>{{ row.present|yesno:"มีในข้อมูลล่าสุด,ไม่อยู่ในข้อมูลล่าสุด" }}</td></tr>{% empty %}<tr><td colspan="5">ไม่พบรายการ</td></tr>{% endfor %}</tbody></table></div>
 <p>หน้า {{ page.number }}/{{ page.paginator.num_pages }} {% if page.has_previous %}<a href="?q={{ q|urlencode }}&amp;page={{ page.previous_page_number }}">ก่อนหน้า</a>{% endif %} {% if page.has_next %}<a href="?q={{ q|urlencode }}&amp;page={{ page.next_page_number }}">ถัดไป</a>{% endif %}</p>

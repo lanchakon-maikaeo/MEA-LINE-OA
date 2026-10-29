@@ -33,6 +33,7 @@ from operations import (
     registry,
     reports,
     services,
+    sheet_access,
     support,
     units,
     uploads,
@@ -119,6 +120,8 @@ def navigation(request):
             # ตัวเลือกระบบ (ADR 0009): a non-admin who may approve LINE registrations.
             "registrations": not scope.is_admin and identity.may_decide_registrations(user),
             "registry": registry.may_open(user),
+            # ADR 0033: a ผู้ดูแลชีท who is not an admin reaches the sheets from the top menu.
+            "sheets": not scope.is_admin and sheet_access.may_open(user),
             "admin": admin_menu,
             "admin_waiting": _admin_waiting() if scope.is_admin else 0,
         }

@@ -297,9 +297,10 @@ def apply_snapshot(source_id, matrix, *, expected_config=None, token=None, now=N
 
 
 def request_refresh(actor, source):
-    # 28 ต.ค. 2569: only admins pull a source between the hourly rounds (ADR 0026).
-    if not identities.staff_scope(actor).is_admin:
-        raise PermissionDenied
+    # ADR 0033: the sheet's ผู้ดูแลชีท or an admin pulls it between the hourly rounds.
+    from operations import sheet_access
+
+    sheet_access.require(actor, source)
     if source.provider != "google":
         raise ValidationError("แหล่ง CSV ใช้ปุ่มนำเข้าไฟล์ใหม่")
     check_source(source)

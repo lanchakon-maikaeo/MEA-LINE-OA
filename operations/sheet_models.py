@@ -45,6 +45,17 @@ class SheetSource(models.Model):
     extra_columns = models.JSONField(default=list, blank=True)
     ai_words = models.BooleanField(default=True)  # AI may word the answer (ADR 0027)
     contact = models.CharField(max_length=100, blank=True)  # said when a number is not found
+    # หน่วยเจ้าของชีท (ADR 0033): its ผู้ดูแลชีท and those of the units above change it; a sheet
+    # of no unit is the admins' only.
+    division = models.ForeignKey(
+        "operations.Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    section = models.ForeignKey(
+        "operations.Section", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    work_group = models.ForeignKey(
+        "operations.WorkGroup", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     last_synced_at = models.DateTimeField(null=True, blank=True)
     next_sync_at = models.DateTimeField(default=timezone.now)
     refresh_requested = models.BooleanField(default=False)
@@ -61,6 +72,27 @@ class SheetSource(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class SheetEditor(models.Model):
+    """ผู้ดูแลชีท (ADR 0033): one person an admin lets change the sheets of one กอง, แผนก or
+    กลุ่มงาน and of the units below it, both kinds of sheet; one row each, taken back alone."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    division = models.ForeignKey("operations.Division", on_delete=models.CASCADE, related_name="+")
+    section = models.ForeignKey(
+        "operations.Section", null=True, blank=True, on_delete=models.CASCADE, related_name="+"
+    )
+    work_group = models.ForeignKey(
+        "operations.WorkGroup", null=True, blank=True, on_delete=models.CASCADE, related_name="+"
+    )
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["pk"]
 
 
 class SheetEntry(models.Model):

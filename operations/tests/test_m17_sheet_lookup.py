@@ -119,8 +119,10 @@ class ReadTests(SourceTestCase):
         admin = make_staff("sheet-admin", (Role.ADMIN, None))
         client = Client()
         client.force_login(admin)
-        self.assertEqual(client.get("/console/admin/sheets/").status_code, 200)
+        self.assertEqual(client.get("/console/sheets/").status_code, 200)
         form = {
+            "do": "save",
+            "kind": "lookup",
             "key": "smg-problems",
             "name": "ชีทแจ้งปัญหา",
             "spreadsheet_id": "1" + "a" * 40,
@@ -131,15 +133,15 @@ class ReadTests(SourceTestCase):
             "first_row": "2",
             "enabled": "1",
         }
-        client.post("/console/admin/sheets/", form)
+        client.post("/console/sheets/", form)
         self.assertFalse(SheetSource.objects.exists())  # no reason
-        client.post("/console/admin/sheets/", {**form, "reason": "เริ่มใช้ตาม ADR 0027"})
+        client.post("/console/sheets/", {**form, "reason": "เริ่มใช้ตาม ADR 0027"})
         source = SheetSource.objects.get()
         self.assertEqual(
             (source.key_column, source.owner_columns, source.enabled), ("J", "B,M", True)
         )
         self.assertTrue(AuditEvent.objects.filter(action="sheet_source.created").exists())
-        self.assertEqual(client.get("/console/admin/sheets/").status_code, 200)
+        self.assertEqual(client.get("/console/sheets/").status_code, 200)
 
 
 class LookupChatTestCase(FlowTestCase):

@@ -17,7 +17,7 @@ import logging
 import re
 from datetime import timedelta
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -644,6 +644,67 @@ FIELDS = (
 )
 
 
+# grill 29 ต.ค. 2569 ("ไม่เอาการตั้งค่าที่เป็นลักษณะแต่ละชีทมาปนกับชีทอื่น"): each แบบชีท has
+# columns of its own. Saving a sheet clears those of the other แบบ, so nothing the form no longer
+# shows still changes the answer (a left-over ฟข. column would still hide rows).
+OWN_COLUMNS = {
+    SheetSource.Match.DIGITS: ("owner_columns",),
+    SheetSource.Match.CODE: ("district_column", "name_column", "order_column", "done_column"),
+}
+NUMBER_LABELS = {SheetSource.Match.DIGITS: "เลข UI", SheetSource.Match.CODE: "หมายเลขอุปกรณ์"}
+
+
+def read_list(source):
+    """[(column, what it holds)] the sheet's แบบ reads, in the order ทดสอบอ่าน shows them."""
+    found = [(c, source.number_label) for c in key_columns(source)]
+    found += [(source.status_column, "สถานะ")]
+    if source.match == source.Match.DIGITS:
+        found += [(c, "รหัสพนักงานผู้แจ้ง") for c in owner_columns(source)]
+    else:
+        found += [
+            (column, what)
+            for column, what in (
+                (source.district_column, "ฟข."),
+                (source.name_column, "ชื่อเครื่องมือ"),
+                (source.order_column, "วันที่"),
+                (source.done_column, "งานจบแล้ว"),
+            )
+            if column
+        ]
+    found += [(c, label) for c, label in extra_columns(source)]
+    shown = {}
+    for column, what in found:
+        shown.setdefault(column, what)
+    return list(shown.items())
+
+
+def sample(source, row):
+    """The program's line for one sheet row ({column: cell}) as the chat would answer it, before
+    any AI wording; "" for a row with no number."""
+
+    def cell(column):
+        return " ".join(str(row.get(column, "") if column else "").split())
+
+    numbers = [n for c in key_columns(source) for n in _row_numbers(source, cell(c))]
+    if not numbers:
+        return ""
+    number, status = numbers[0], cell(source.status_column)
+    if source.match == source.Match.DIGITS:
+        status = segment(number, status)
+    return line(
+        {
+            "number": number,
+            "found": True,
+            "count": 1,
+            "statuses": [word(source, status, bool(cell(source.done_column)))],
+            "extras": [[label, cell(c)] for c, label in extra_columns(source) if cell(c)],
+            "kind": source.match,
+            "label": source.number_label,
+            "name": cell(source.name_column),
+        }
+    )
+
+
 def _pairs(text, limit):
     """{"a": "b"} of "a=b" lines (the admin form's status words and extra columns)."""
     found = {}
@@ -657,18 +718,19 @@ def _pairs(text, limit):
     return found
 
 
-@transaction.atomic
-def save_source(actor, source, data, reason):
-    """Create or change a source with a reason; a changed sheet is read again at once."""
-    from operations import identity
+def build_source(actor, source, data):
+    """The sheet as the form says, checked and not saved; ทดสอบอ่าน and บันทึก both use it."""
+    from operations import sheet_access
 
-    identity.require_admin(actor)
-    reason = identity._require_reason(reason)
-    if not reason:
-        raise ValidationError("ใส่เหตุผลก่อนบันทึก")
     created = source is None
     if created:
-        key = (data.get("key") or "").strip()
+        if not sheet_access.may_open(actor):
+            raise PermissionDenied
+    else:
+        sheet_access.require(actor, source)  # ADR 0033: the unit's ผู้ดูแลชีท, or an admin
+    if created:
+        # The flow box picks a sheet by name; the key only has to be unique and stay put.
+        key = (data.get("key") or "").strip() or _new_key()
         if not re.fullmatch(r"[a-z0-9-]{2,40}", key):
             raise ValidationError("รหัสแหล่งข้อมูลใช้ a-z 0-9 และ - ยาว 2 ถึง 40 ตัว")
         if SheetSource.objects.filter(key=key).exists():
@@ -687,9 +749,14 @@ def save_source(actor, source, data, reason):
         ):
             value = value.upper().replace(" ", "")
         setattr(source, name, value)
-    source.number_label = source.number_label[:40] or "เลข UI"
+    if "link" in data:
+        source.spreadsheet_id = data.get("link") or ""
+    source.spreadsheet_id = sheet_access.spreadsheet_id(source.spreadsheet_id)
+    if created or "unit" in data:
+        sheet_access.place(actor, source, data.get("unit") or "")
     if data.get("match") in SheetSource.Match.values:
         source.match = data["match"]
+    source.number_label = source.number_label[:40] or NUMBER_LABELS[source.match]
     if "status_words" in data:
         source.status_words = _pairs(data.get("status_words"), 40)
     if "done_words" in data:
@@ -704,6 +771,12 @@ def save_source(actor, source, data, reason):
         ]
     if "ai_words_shown" in data:
         source.ai_words = bool(data.get("ai_words"))
+    for kind, names in OWN_COLUMNS.items():
+        if kind != source.match:
+            for name in names:
+                setattr(source, name, "")
+    if source.match != source.Match.CODE:
+        source.done_words = {}
     try:
         source.first_row = max(1, min(int(source.first_row), 1000))
     except (TypeError, ValueError) as exc:
@@ -714,6 +787,19 @@ def save_source(actor, source, data, reason):
         raise ValidationError("ตั้งชื่อแหล่งข้อมูล")
     check_source(source)
     source.enabled = bool(data.get("enabled"))
+    return source
+
+
+@transaction.atomic
+def save_source(actor, source, data, reason):
+    """Create or change a source with a reason; a changed sheet is read again at once."""
+    from operations import identity
+
+    created = source is None
+    reason = identity._require_reason(reason)
+    if not reason:
+        raise ValidationError("ใส่เหตุผลก่อนบันทึก")
+    source = build_source(actor, source, data)
     source.refresh_requested = True
     source.updated_by = actor
     source.save()
@@ -728,9 +814,16 @@ def save_source(actor, source, data, reason):
     return source
 
 
-def request_refresh(actor, source):
-    from operations import identity
+def _new_key():
+    number = SheetSource.objects.count() + 1
+    while SheetSource.objects.filter(key=f"sheet-{number}").exists():
+        number += 1
+    return f"sheet-{number}"
 
-    identity.require_admin(actor)
+
+def request_refresh(actor, source):
+    from operations import identity, sheet_access
+
+    sheet_access.require(actor, source)
     SheetSource.objects.filter(pk=source.pk).update(refresh_requested=True)
     identity.audit(actor, "sheet_source.refresh_requested", source)

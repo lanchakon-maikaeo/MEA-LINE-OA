@@ -628,7 +628,7 @@ class SourceTests(KojTestCase):
     def test_web_grants_sources_history_and_refresh_are_scoped(self):
         client = Client()
         client.force_login(self.admin_koj)
-        self.assertContains(client.get("/koj/"), self.source.name)
+        self.assertContains(client.get("/console/sheets/"), self.source.name)
         self.assertContains(client.get(f"/koj/sources/{self.source.pk}/"), NUMBER)
         # ADR 0031 Q12, Q25: the recipient sets sit on the กอจ. cards of ผังหน่วยงาน.
         page = client.get("/console/admin/org/").content.decode()
@@ -644,21 +644,25 @@ class SourceTests(KojTestCase):
         )
         foreign = make_staff("foreign-clerk", (Role.STAFF, "กคว."))
         client.force_login(foreign)
-        self.assertEqual(client.get("/koj/").status_code, 403)
+        self.assertEqual(client.get("/console/sheets/").status_code, 403)
         self.assertEqual(
             client.post("/console/admin/org/", {"action": "koj", "group": "sj"}).status_code, 403
         )
-        # 28 ต.ค. 2569: กอจ. staff wait for the hourly round; the page is admin only.
+        # 28 ต.ค. 2569: กอจ. staff wait for the hourly round; ADR 0033: only an admin or the
+        # sheet's ผู้ดูแลชีท opens the page.
         client.force_login(self.staff)
-        self.assertEqual(client.get("/koj/").status_code, 403)
+        self.assertEqual(client.get("/console/sheets/").status_code, 403)
         self.assertEqual(client.get(f"/koj/sources/{self.source.pk}/").status_code, 403)
-        self.assertEqual(client.post("/koj/", {"action": "save"}).status_code, 403)
+        save = {"do": "save", "kind": "koj"}
+        self.assertEqual(client.post("/console/sheets/", save).status_code, 403)
 
     def test_admin_configures_columns_without_disclosing_source_data(self):
         client = Client()
         client.force_login(self.admin_koj)
         payload = {
-            "action": "save",
+            "do": "save",
+            "kind": "koj",
+            "reason": "เพิ่มแหล่งทดสอบ",
             "name": "มค. จำลอง",
             "enabled": "on",
             "provider": "csv",
@@ -671,7 +675,7 @@ class SourceTests(KojTestCase):
             "column_district": "เขต",
             "completed": "จ่ายแล้ว\nส่งมอบแล้ว",
         }
-        self.assertEqual(client.post("/koj/", payload).status_code, 302)
+        self.assertEqual(client.post("/console/sheets/", payload).status_code, 302)
         source = KojSource.objects.get(name="มค. จำลอง")
         self.assertEqual(source.columns["reference"], "ใบเบิก")
         self.assertEqual(source.completed_statuses, ["จ่ายแล้ว", "ส่งมอบแล้ว"])
