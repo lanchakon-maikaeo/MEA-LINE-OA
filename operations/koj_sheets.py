@@ -7,6 +7,19 @@ from urllib.parse import quote
 from django.core.exceptions import ValidationError
 
 
+def _credentials(service_account):
+    """The read-only key the host mounts (deploy/e5-move.sh google-key); no file, a clear error."""
+    path = os.environ.get("KOJ_GOOGLE_CREDENTIALS_FILE", "")
+    if not path:
+        raise ValidationError("ยังไม่ได้ตั้งค่า KOJ_GOOGLE_CREDENTIALS_FILE บนเซิร์ฟเวอร์")
+    try:
+        return service_account.Credentials.from_service_account_file(
+            path, scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        )
+    except FileNotFoundError as exc:
+        raise ValidationError("ยังไม่มีไฟล์กุญแจ Google สำหรับอ่านชีทบนเซิร์ฟเวอร์") from exc
+
+
 def fetch(source):
     from google.auth.transport.requests import AuthorizedSession
     from google.oauth2 import service_account
@@ -14,12 +27,7 @@ def fetch(source):
     from operations.koj_tracking import check_source
 
     check_source(source)
-    path = os.environ.get("KOJ_GOOGLE_CREDENTIALS_FILE", "")
-    if not path:
-        raise ValidationError("ยังไม่ได้ตั้งค่า KOJ_GOOGLE_CREDENTIALS_FILE บนเซิร์ฟเวอร์")
-    credentials = service_account.Credentials.from_service_account_file(
-        path, scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    )
+    credentials = _credentials(service_account)
     # The endpoint is fixed; administrators select only a spreadsheet ID and tab, not a URL.
     cell_range = "'" + source.sheet_name.replace("'", "''") + "'!A:ZZ"
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{source.spreadsheet_id}/values/" + quote(
@@ -49,12 +57,7 @@ def read_columns(spreadsheet_id, sheet_name, columns, first_row=1):
     from google.auth.transport.requests import AuthorizedSession
     from google.oauth2 import service_account
 
-    path = os.environ.get("KOJ_GOOGLE_CREDENTIALS_FILE", "")
-    if not path:
-        raise ValidationError("ยังไม่ได้ตั้งค่า KOJ_GOOGLE_CREDENTIALS_FILE บนเซิร์ฟเวอร์")
-    credentials = service_account.Credentials.from_service_account_file(
-        path, scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    )
+    credentials = _credentials(service_account)
     tab = "'" + sheet_name.replace("'", "''") + "'"
     ranges = [f"{tab}!{c}{first_row}:{c}" for c in columns]
     url = (
