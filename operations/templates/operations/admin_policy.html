@@ -1,4 +1,5 @@
 {% extends "operations/admin_base.html" %}
+{% block title %}กติกาและอำนาจ · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>กติกาและอำนาจ</h1></div></div>
 <p>กติกาการส่งเข้ากองและระดับความเร่งด่วนนำเข้าด้วยคำสั่ง <code>manage.py import_policy</code> แก้ไม่ได้หลังนำเข้า เจ้าของกติกาเป็นผู้รับรอง แอดมินเป็นผู้เปิดใช้ รุ่นที่มีป้าย (จำลอง) ใช้ทดสอบเท่านั้น ไม่ใช่ระเบียบหรือมาตรฐานบริการทางการ</p>
@@ -6,7 +7,7 @@
 <h2>รุ่นกติกา</h2>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">รหัส</th><th scope="col">สถานะ</th><th scope="col">มีผล</th><th scope="col">ผู้รับรอง</th><th scope="col">จัดการ</th></tr></thead>
-  <tbody>
+  <tbody data-more>
   {% for v in versions %}
     <tr>
       <td>{{ v.code }}{% if v.is_synthetic %} (จำลอง){% endif %}<br><code>{{ v.digest|slice:":12" }}</code></td>
@@ -25,7 +26,7 @@
 <p>อำนาจที่ให้แยกรายคนบันทึกตามกิจกรรม ขอบเขต และวันมีผล พร้อมผู้รับรอง แอดมินให้อำนาจแก่ตัวเองไม่ได้ อำนาจอนุมัติเบิกและจัดสรรของขาดจำกัดหมวด/รายการได้ จำนวนสูงสุดเทียบกับจำนวนอนุมัติต่อรายการและต้องระบุรายการของ</p>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col">ผู้ได้รับ</th><th scope="col">กิจกรรม</th><th scope="col">ขอบเขต</th><th scope="col">มีผล</th><th scope="col">อ้างอิง</th><th scope="col">สถานะ</th></tr></thead>
-  <tbody>
+  <tbody data-more>
   {% for g in grants %}
     <tr>
       <td>{{ g.user.staff_profile.display_name|default:g.user.username }}</td>

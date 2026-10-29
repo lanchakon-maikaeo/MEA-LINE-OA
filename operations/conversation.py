@@ -20,7 +20,15 @@ from django.db.models import Exists, F, OuterRef, Q, Subquery
 from django.utils import timezone
 
 from operations import identity as identity_services
-from operations import line_api, services, typed_lines, usage_meters, workflow
+from operations import (
+    line_api,
+    problem_pick,
+    requester_steps,
+    services,
+    typed_lines,
+    usage_meters,
+    workflow,
+)
 from operations.contracts import (
     Actor,
     CommandFailed,
@@ -62,6 +70,15 @@ THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 KIND_LABELS = {K.WITHDRAWAL: "เบิก", K.RETURN: "ส่งคืน", K.PROBLEM: "แจ้งปัญหา/ข้อเสนอแนะ"}
 KIND_SHORT = {K.WITHDRAWAL: "เบิก", K.RETURN: "คืน", K.PROBLEM: "ปัญหา/ข้อเสนอแนะ"}
 KIND_ORDER = [K.WITHDRAWAL, K.RETURN, K.PROBLEM]
+KIND_STEP_LABELS = {
+    K.WITHDRAWAL: "ติดตามใบเบิก",
+    K.RETURN: "ติดตามใบส่งคืน",
+    K.PROBLEM: KIND_LABELS[K.PROBLEM],
+}
+# ADR 0032: DED Center follows slips issued in SAP; typed text never opens a เบิก or ส่งคืน draft.
+SLIP_REFUSAL = "ขณะนี้ยังไม่สามารถเบิกหรือคืนของผ่าน DED Center ได้"
+SLIP_REQUEST = re.compile(r"(?:ขอ|อยาก|ต้องการ|จะ)\s*(?:เบิก|ส่งคืน|คืน)(?!เงิน)|^\s*(?:เบิก|ส่งคืน)")
+SLIP_HOW = "การเบิกและการส่งคืนทำใน SAP แล้วส่งใบที่เซ็นแล้วให้คลังของกอง ถ้ามีเลขใบแล้ว ติดตามได้จากปุ่มด้านล่าง"
 # หมวดเรื่องจริงของ Case ใช้ส่งต่อและแสดงผลภายหลัง ส่วนเมนูเริ่มต้นของ LINE ใช้
 # METER_GROUPS ด้านล่างเพื่อให้ทุกบริการอุปกรณ์มีตัวเลือกชุดเดียวกัน.
 TOPIC_LABELS = {
@@ -77,6 +94,8 @@ SUGGESTION_FIELDS = [
     ("impact", "ถ้ามีรายละเอียดเพิ่ม เช่น สถานที่หรืองานที่เกี่ยวข้อง พิมพ์ต่อได้ หรือกดข้าม", False),
     ("related_case_number", "หากเกี่ยวข้องกับเรื่องเดิม กรุณาเลือกเรื่อง หรือเลือกข้าม", False),
 ]
+# ADR 0030 Q6: a division picked from the carousel, then the details in one message.
+GENERAL_FIELDS = [("description", problem_pick.DETAIL, True)]
 # 25 Oct 2569 Q11: after the meters and their districts; the details may be skipped.
 USAGE_FIELDS = [
     (
@@ -138,6 +157,7 @@ FIELD_LABELS = {
 # Story topics ask different questions, so their answers carry their own labels.
 TOPIC_FIELD_LABELS = {
     "suggestion": {"description": "ข้อเสนอแนะ", "impact": "รายละเอียดเพิ่ม"},
+    "general": {"description": "รายละเอียด"},
     "usage": {"description": "เรื่องที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
     "inquiry": {"description": "สิ่งที่สอบถาม"},
     "repair": {"description": "สิ่งที่ต้องการติดตาม"},
@@ -148,7 +168,9 @@ MENU_WORDS = {label: data for label, data in MENU}
 MENU_WORDS.update({"บริการ": "m=home", "ติดตามเรื่องของฉัน": "m=mine", "เมนูตามสิทธิ์": "m=roles"})
 MENU_WORDS.update(
     {
-        "เบิกอุปกรณ์": "m=equipment&kind=withdrawal",
+        "ติดตามใบเบิก": "m=slips",
+        "ติดตามใบส่งคืน": "m=slips",
+        "เบิกอุปกรณ์": "m=equipment&kind=withdrawal",  # typed: the ADR 0032 reply
         "ส่งคืนอุปกรณ์": "m=equipment&kind=return",
         "แจ้งปัญหา": "m=problems",
         "เมนูเพิ่มเติม": "m=roles",
@@ -395,7 +417,7 @@ def _dispatch(inbox, event_override=None, allow_agent=True):
         return [], True
     if inbox.event_type == "follow":
         ChannelIdentity.objects.filter(pk=identity.pk).update(is_following=True)
-        turn.say("ช่องทางนี้รับเรื่องเบิก ส่งคืน แจ้งปัญหา และข้อเสนอแนะถึง ฝอจ.")
+        turn.say("ช่องทางนี้ใช้ติดตามใบเบิก ใบส่งคืน และแจ้งปัญหาหรือข้อเสนอแนะถึง ฝอจ.")
     command = (_event_text(turn) or "").strip()
     external = identity.requester_id and identity.requester.is_external
     if command in {"ลงทะเบียนพนักงาน", "ยืนยันพนักงาน"} and (
@@ -541,12 +563,27 @@ def _staff_turn(turn):
     user = staff_line.staff_of(turn.identity)
     if user is None:
         return False
+    if (
+        data.startswith("m=koj")
+        or (token is not None and token.action.startswith("koj_"))
+        or (prompt.startswith("koj_") and text is not None and not data)
+    ):
+        from operations import koj_chat
+
+        turn.requester = turn.identity.requester
+        if data.startswith("m=koj"):
+            koj_chat.static(turn, data)
+        elif token is not None:
+            koj_chat.on_token(turn, token)
+        elif text is not None:
+            koj_chat.on_text(turn, text)
+        return True
     if data == "m=roles" or command in {"เมนูตามสิทธิ์", "เมนูเพิ่มเติม"}:
         turn.set_prompt()
         staff_work.navigation(turn, user)
         return True
     navigation = data or MENU_WORDS.get(command) or ""
-    if navigation in {"m=mine", "m=home", "m=problems"} or navigation.startswith(
+    if navigation in {"m=mine", "m=home", "m=problems", "m=slips"} or navigation.startswith(
         ("m=equipment&", "m=problem&")
     ):
         if turn.identity.requester_id is not None:
@@ -1140,7 +1177,7 @@ def _not_a_name(turn, text):
         _ask_name(turn, f"ยังไม่ได้ลงทะเบียนเป็นผู้แจ้ง\n{ask}")
         return True
     if shape == "request":
-        _ask_name(turn, f"ต้องลงทะเบียนก่อนจึงเบิก คืน หรือแจ้งเรื่องได้\n{ask}")
+        _ask_name(turn, f"ต้องลงทะเบียนก่อนจึงติดตามใบเบิก ใบส่งคืน หรือแจ้งเรื่องได้\n{ask}")
         return True
     if re.search(r"[0-9๐-๙]", text) or len(text.split()) < 2:
         _ask_name(turn, f"พิมพ์ทั้งชื่อและนามสกุล เว้นวรรคระหว่างกัน ไม่มีตัวเลข {NAME_EXAMPLE}")
@@ -1288,6 +1325,13 @@ def _requester_turn(turn):
         turn.conversation.refresh_from_db()
         turn.say("ร่างเรื่องที่ไม่ได้ทำต่อเกิน 7 วันหมดอายุแล้ว")
     _updates(turn)
+    from operations import case_chat  # local: case_chat builds on this module (ADR 0024)
+
+    chat = case_chat.chatting(turn)  # read before held messages open a new chat
+    case_chat.deliver(turn)
+    from operations import koj_chat  # local: koj_chat builds on this module
+
+    koj_chat.deliver_updates(turn)  # กอจ. jobs followed (owner, 28 Oct 2569: no push)
     draft = turn.conversation.active_draft
     if draft is not None and draft.status != D.OPEN:
         draft = None
@@ -1328,6 +1372,17 @@ def _requester_turn(turn):
     command = " ".join(text.split()) if text is not None else None
     if command in MENU_WORDS and command not in turn.conversation.reply_choices.get("actions", {}):
         return _static_postback(turn, MENU_WORDS[command], draft)
+    if text is not None and turn.conversation.prompt.startswith("koj_"):
+        from operations import koj_chat
+
+        return koj_chat.on_text(turn, text)
+    in_chat = chat is not None and turn.conversation.prompt == "case_chat"
+    if text is not None and in_chat and not CASE_NUMBER.fullmatch((command or "").upper()):
+        return case_chat.on_text(turn, chat, text, message)
+    if text is not None and turn.conversation.prompt in ("track_slip", "track_meter"):
+        from operations import case_search  # local: case_search builds on this module
+
+        return case_search.on_text(turn, text)
     if text is not None and turn.conversation.prompt == "receipt":
         from operations import receipts  # local: receipts builds on this module (M07)
 
@@ -1357,10 +1412,31 @@ def _requester_turn(turn):
 
 def _free_text(turn, draft, text, message=None):
     """Agent first when enabled; otherwise approved answers, extraction and the current step."""
+    from operations import flow_runner  # local: flow_runner builds on this module
+
+    if text is not None and flow_runner.is_flow(draft) and turn.conversation.prompt != "track":
+        # ADR 0023 Q44: a published flow asks step by step with its own rules, without AI.
+        return flow_runner.on_text(turn, draft, text)
+    if (
+        text is not None
+        and draft is None
+        and not turn.conversation.prompt
+        and flow_runner.sheet_hit(turn, text)
+    ):
+        return None  # ADR 0029: a piece in a repair sheet, answered from the sheet
     if text is not None and turn.conversation.prompt != "track":
         from operations import agent_chat, ai_chat, answers  # local: build on this module
 
         use_ai = turn.allow_agent and ai_chat.wants_ai(turn, draft, text)
+        if (
+            not use_ai
+            and not settings.LINE_TYPED_SLIPS
+            and not turn.conversation.prompt
+            and (draft is None or draft.kind not in (K.WITHDRAWAL, K.RETURN))
+            and SLIP_REQUEST.search(text)
+        ):
+            # ADR 0032 Q15, Q19: without AI the program says it; with AI, ai_chat.apply refuses.
+            return slip_refusal(turn, text)
         if use_ai and agent_chat.enabled():
             return ai_chat.queue(turn, draft, text, message)
         found = answers.keyword_answer(turn, draft, text)  # คลังคำตอบ ก (ADR 0012)
@@ -1393,21 +1469,55 @@ def _updates(turn):
     status_changed = Decision.objects.filter(case=OuterRef("pk"), created_at__gt=since).exclude(
         from_status=F("to_status")
     )
-    changed = list(
+    changed = (
         services.visible_cases(_actor(turn))
         .filter(Exists(status_changed))
-        .order_by("-updated_at")[:3]
+        .order_by("-updated_at")[:10]
     )
-    lines = []
+    lines, opening = [], _opening_case(turn)
     for case in changed:
-        line = f"{case.number} · {case.get_status_display()}"
+        if case.number == opening:
+            continue  # its card shows the step and the notice in this same reply
+        if not _news(case, since):
+            continue  # ADR 0028: a move inside the same step is not news for the requester
+        if len(lines) == 3:
+            break
+        line = f"{case.number} · {requester_steps.label(case)}"
         if case.status == Case.Status.AWAITING_INFO:
             asked = case.decisions.filter(action="request_info").order_by("-id").first()
             if asked is not None:
                 line += f"\nเจ้าหน้าที่ขอข้อมูล: {asked.reason}"
+        else:
+            latest = next(iter(requester_steps.notices(case)), None)
+            if latest is not None and latest[0].created_at > since:
+                line += f"\nข้อความจากเจ้าหน้าที่: {latest[1]}"
         lines.append(line)
     if lines:
         turn.say("มีอัปเดตใหม่\n" + "\n".join(lines))
+
+
+def _news(case, since):
+    """The requester's step changed since they last looked, or staff wrote them a notice."""
+    moves = list(
+        case.decisions.filter(created_at__gt=since)
+        .exclude(from_status=F("to_status"))
+        .order_by("id")
+    )
+    if any(isinstance(d.data, dict) and d.data.get("notice") for d in moves):
+        return True
+    return bool(moves) and (
+        requester_steps.key(moves[0].from_status) != requester_steps.key(case.status)
+    )
+
+
+def _opening_case(turn):
+    """The case number this turn opens with its card (a tapped or typed number), else ''."""
+    event = getattr(turn, "event", None) or {}
+    data = (event.get("postback") or {}).get("data", "")
+    if data.startswith("c="):
+        return data[2:].upper()
+    text = ((event.get("message") or {}).get("text") or "").strip().upper()
+    return text if CASE_NUMBER.fullmatch(text) else ""
 
 
 def _awaiting_info(turn, draft):
@@ -1540,6 +1650,10 @@ def _expects_text(draft):
     """Steps whose answer is typed; elsewhere a typed case number means 'show this case'."""
     if draft is None:
         return False
+    if draft.step == "flow":
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        return flow_runner.expects_text(draft)
     return draft.step in {
         "item_search",
         "quantity",
@@ -1578,23 +1692,26 @@ def off_step(draft, text):
 
 
 def _static_postback(turn, data, draft):
+    if data.startswith("m=koj"):
+        from operations import koj_chat
+
+        return koj_chat.static(turn, data)
+    if data in ("m=find_slip", "m=find_meter") and turn.requester:
+        from operations import case_search  # local: case_search builds on this module
+
+        return case_search.ask(turn, data.removeprefix("m=find_"))
+    if data == "m=chat_end":
+        from operations import case_chat  # local: case_chat builds on this module
+
+        return case_chat.end(turn)
     if data == "m=register":
         return _ask_kind(turn, "ลงทะเบียนหรือยืนยันตัวตน")
     if data == "m=problems":
-        turn.set_prompt()
-        return turn.say(
-            "เลือกประเภทปัญหาหรือข้อเสนอแนะ",
-            [
-                (label, f"m=problem&topic={topic}")
-                for topic, label in (
-                    ("equipment", "ปัญหาอุปกรณ์"),
-                    ("system", "ระบบ SMG-AMR/บิล"),
-                    ("usage", "การใช้ไฟฟ้า"),
-                    ("suggestion", "ข้อเสนอแนะ"),
-                )
-            ],
-        )
+        return _general_draft(turn)  # ADR 0030 Q14: the division carousel, typed or tapped
     if data in {"m=equipment&kind=withdrawal", "m=equipment&kind=return"}:
+        if not settings.LINE_TYPED_SLIPS:
+            # ADR 0032: buttons "เบิกอุปกรณ์" and "ส่งคืนอุปกรณ์" still in people's chats.
+            return slip_refusal(turn)
         if turn.internal or any(
             getattr(turn.requester, flag, False)
             for flag in ("is_internal", "is_external", "is_anonymous")
@@ -1602,6 +1719,9 @@ def _static_postback(turn, data, draft):
             return _menu(turn, "กรุณายืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
         kind = K.WITHDRAWAL if data.endswith("=withdrawal") else K.RETURN
         return _equipment_draft(turn, kind)
+    if data == "m=slips":
+        turn.set_prompt()
+        return turn.say("เลือกอุปกรณ์ที่ต้องการติดตาม", slip_buttons())
     if data == "m=problem&topic=equipment":
         return _equipment_draft(turn, K.PROBLEM)
     if data == "m=problem&topic=suggestion":
@@ -1641,6 +1761,35 @@ def _static_postback(turn, data, draft):
     if data.startswith("c="):
         return _case_detail(turn, data[2:])
     return _reprompt(turn, draft)
+
+
+def _general_draft(turn):
+    """ADR 0030: a problem or suggestion that starts at the division carousel."""
+    turn.set_prompt()
+    draft = _new_draft(turn)
+    keep = {"anonymous": True} if draft.data.get("anonymous") else {}
+    _touch(draft, turn.now, kind=K.PROBLEM, step="topic", data={"lines": [], "fields": {}, **keep})
+    return _ask(turn, draft)
+
+
+def _pick_division(turn, draft, code):
+    """ADR 0030: the division tapped (or ปัญหาการใช้งานหรืออื่นๆ for the admins), then the
+    details; a change from the summary goes back to the summary."""
+    if code not in dict(problem_pick.choices()):
+        return _ask(turn, draft)
+    data = draft.data
+    keep = {k: data[k] for k in ("anonymous", "location", "menu_label") if data.get(k)}
+    fields = data["fields"] if data.get("topic") == Case.Topic.GENERAL else {}
+    held = code == problem_pick.ADMIN
+    draft.data = {
+        **keep,
+        "lines": [],
+        "fields": fields,
+        "topic": Case.Topic.GENERAL,
+        "division": "" if held else code,
+        **({"hold_for_admin": True} if held else {}),
+    }
+    return _set(turn, draft, _next_field(draft))
 
 
 def _equipment_draft(turn, kind):
@@ -1711,6 +1860,21 @@ def _menu_item(turn, pk, go=False):
         # The draft stays among the open drafts; this tap starts from the menu.
         turn.conversation.active_draft = None
         turn.conversation.save(update_fields=["active_draft", "updated_at"])
+    if item.place == LineMenuItem.Place.TILE:
+        from operations import (
+            flow_runner,  # local: flow_runner builds on this module
+            koj_chat,
+        )
+
+        published = flow_runner.published_for(item.label)
+        koj = koj_chat.is_item(item)
+        if koj and koj_chat.live(item) and not koj_chat.allowed(turn):
+            return koj_chat.home(turn)  # says who may follow กอจ. work
+        if koj and not koj_chat.live(item):
+            published = None  # owner, 28 Oct 2569: the earlier card until a valid publish
+        if published is not None:  # ADR 0023: the flow an admin published for this tile
+            turn.set_prompt()
+            return flow_runner.start(turn, published)
     choices = (
         list(item.choices.filter(is_active=True).order_by("position", "pk")[:12])
         if action == A.TOPIC
@@ -1748,6 +1912,10 @@ def _menu_item(turn, pk, go=False):
         )
         return
     if action == A.EQUIPMENT:
+        from operations import koj_chat
+
+        if koj_chat.is_item(item) and koj_chat.live(item):
+            return koj_chat.services(turn, item.topic)
         if item.topic not in TYPED_GROUPS:
             return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
         if _problems_only(turn):
@@ -1884,8 +2052,18 @@ def _menu_act(turn, data):
         return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
     if kind not in ACTION_LABELS:
         return _action_card(turn, item)
+    from operations import koj_chat
+
+    if koj_chat.is_item(item) and koj_chat.live(item):
+        if item.topic not in {"transformer", "lbs", "rmu", "other"}:
+            return koj_chat.home(turn)
+        if kind not in {K.WITHDRAWAL, K.RETURN, REPAIR} or (
+            kind == REPAIR and item.topic not in {"lbs", "rmu"}
+        ):
+            return koj_chat.services(turn, item.topic)
+        return koj_chat.ask(turn, item.topic, kind)
     if kind in (K.WITHDRAWAL, K.RETURN) and _problems_only(turn):
-        return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
+        return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนติดตามใบเบิกหรือใบส่งคืน")
     prompt = turn.conversation.prompt_data if turn.conversation.prompt == "equipment_name" else {}
     name = prompt.get("name", "") if prompt.get("item") == item.pk else ""
     return _typed_draft(turn, item, kind, name=name)
@@ -1967,6 +2145,35 @@ def _menu_ask(turn, pk, lead=""):
     return _set(turn, draft, _next_field(draft))
 
 
+def slip_buttons(text=""):
+    """ADR 0032: the equipment the text names (its action card: ติดตามใบเบิก, ติดตามใบส่งคืน),
+    else every tile that asks for the equipment first."""
+    A = LineMenuItem.Action
+    equipment = list(
+        LineMenuItem.objects.filter(
+            is_active=True, action=A.EQUIPMENT, parent__is_active=True, parent__action=A.TOPIC
+        )
+        .select_related("parent")
+        .order_by("parent__position", "parent__pk", "position", "pk")
+    )
+    named = [
+        item
+        for item in equipment
+        if item.topic != "other"
+        and re.search(rf"(?<![A-Za-z]){re.escape(item.label)}(?![A-Za-z])", text or "", re.I)
+    ]
+    if named:
+        return [(item.label, f"m=item&id={item.pk}") for item in named[:MAX_QUICK]]
+    tiles = {item.parent_id: item.parent for item in equipment}
+    return [(tile.label, f"m=item&id={tile.pk}") for tile in tiles.values()][:MAX_QUICK]
+
+
+def slip_refusal(turn, text=""):
+    """ADR 0032 Q16, Q20: the fixed opening, how a slip is made, and where to follow it."""
+    turn.set_prompt()
+    turn.say(f"{SLIP_REFUSAL}\n{SLIP_HOW}", slip_buttons(text))
+
+
 def _menu(turn, text):
     from operations import staff_line
 
@@ -2003,8 +2210,8 @@ def _when(moment):
     return f"{local.day:02d}/{local.month:02d}/{local.year + 543} {local:%H:%M} น."
 
 
-def _status_label(case):
-    label = case.get_status_display()
+def _status_label(case, label=None):
+    label = label or case.get_status_display()
     if case.kind == K.WITHDRAWAL:
         from operations import fulfilment
 
@@ -2041,7 +2248,12 @@ def _case_list(turn, mode="open", page=1, item=None):
         return turn.button(label, "case_list", {**scope, "mode": selected, "page": number})
 
     title = _menu_label(item) if item else "เรื่องของฉัน"
-    lines = [f"{c.number} · {_kind_label(c.kind, c.topic)} · {_status_label(c)}" for c in rows]
+    lines = [
+        " · ".join(
+            (c.number, _kind_label(c.kind, c.topic), _status_label(c, requester_steps.label(c)))
+        )
+        for c in rows
+    ]
     text = f"{title} · {modes[mode]} {rows.paginator.count} เรื่อง\n"
     text += "\n".join(lines) if lines else "ยังไม่มีเรื่องในรายการนี้"
     text += f"\nหน้า {rows.number}/{rows.paginator.num_pages} · กดเลขเรื่องเพื่อดูรายละเอียด"
@@ -2051,6 +2263,11 @@ def _case_list(turn, mode="open", page=1, item=None):
     if rows.has_next():
         quick.append(link("ถัดไป", number=rows.next_page_number()))
     quick += [link(label, selected=key) for key, label in modes.items() if key != mode]
+    if item is None and turn.requester and not turn.requester.is_anonymous:
+        from operations import case_search  # local: case_search builds on this module
+
+        # grill กคว. 27 Oct 2569 Q7: by slip number (its start is enough) or meter number.
+        quick += [(label, f"m=find_{by}") for by, label in case_search.LABELS.items()]
     quick.append(turn.button("ค้นหาเลขเรื่อง", "case_search"))
     if item:
         quick.append(("ถามเรื่องอื่น", f"m=ask&id={item.pk}"))
@@ -2112,19 +2329,46 @@ def _case_detail(turn, number):
     )
     if case.meters:
         sap += f"\nเครื่องวัดฯ: {usage_meters.describe(case.meters)}"
+    bar = requester_steps.bar(case.status)
+    step = (
+        f"{bar} {requester_steps.label(case)}\nสถานะในระบบ: {_status_label(case)}"
+        if bar
+        else f"สถานะ: {_status_label(case)}"
+    )
+    owner = problem_pick.ADMIN_TARGET if case.held_by_admin else case.owner_division.name
     text = (
         f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}{sap}\n"
-        f"สถานะ: {_status_label(case)}\nกองเจ้าภาพ: {case.owner_division.name}\n"
+        f"{step}\nกองเจ้าภาพ: {owner}\n"
         f"อัปเดตล่าสุด: {_when(case.updated_at)}" + (f"\nไฟล์แนบ: {files} ไฟล์" if files else "")
     )
     buttons = []
+    notices = requester_steps.notices(case)
+    if notices and not (
+        case.status == Case.Status.AWAITING_INFO and notices[0][0].action == "request_info"
+    ):
+        text += "\n" + _notice_text(*notices[0])
+        buttons.append(turn.button("ตอบเจ้าหน้าที่", "case_reply", {"case": str(case.pk)}))
+        if len(notices) > 1:
+            buttons.append(turn.button("ดูข้อความก่อนหน้า", "case_notices", {"case": str(case.pk)}))
+    from operations import case_chat, warehouse  # local: both build on this module
+
+    stage_lines = warehouse.status_lines(case)
+    if stage_lines:
+        text += "\n" + "\n".join(stage_lines)
+        keyed = warehouse.stages(case).get(warehouse.S.KEYED)
+        if keyed and keyed.planned_on and not warehouse.stages(case).get(warehouse.S.ISSUED):
+            # Q31: ฟข. may change how the goods come until they are issued.
+            offer = warehouse.offer_buttons(case, turn.identity, keyed.planned_on)
+            buttons += [tuple(b) for b in offer]
+    if case_chat.M.objects.filter(case=case).exists():
+        text += "\nมีการคุยกับเจ้าหน้าที่ในเรื่องนี้ พิมพ์ในแชตนี้หลังข้อความของเจ้าหน้าที่เพื่อตอบ"
     if case.kind == K.WITHDRAWAL:
         from operations import receipts  # local: receipts builds on this module (M07)
 
         detail = receipts.status_text(case)
         if detail:
             text += "\n" + detail
-        buttons = receipts.pending_buttons(turn, case)
+        buttons = [*receipts.pending_buttons(turn, case), *buttons]
     elif case.kind == K.RETURN:
         from operations import returns  # local: returns builds on services (M08)
 
@@ -2135,7 +2379,7 @@ def _case_detail(turn, number):
         detail = problem_chat.status_text(case)
         if detail:
             text += "\n" + detail
-        buttons = problem_chat.buttons(turn, case)
+        buttons = [*problem_chat.buttons(turn, case), *buttons]
     if case.status == Case.Status.AWAITING_INFO:
         text += "\nเจ้าหน้าที่ขอ: " + _info_asked(case)
         buttons += [
@@ -2143,6 +2387,36 @@ def _case_detail(turn, number):
             for label in ["ตอบข้อมูลเพิ่ม", "แนบหลักฐาน"]
         ]
     turn.say(text, buttons[:MAX_QUICK])
+
+
+def _notice_text(decision, text):
+    """ข้อความแจ้งสถานะ as the requester reads it: who wrote it, when, and the words."""
+    profile = getattr(decision.actor, "staff_profile", None) if decision.actor_id else None
+    who = profile.display_name if profile else "เจ้าหน้าที่"
+    return f"ข้อความจากเจ้าหน้าที่ ({_when(decision.created_at)} · {who})\n{text}"
+
+
+def _case_reply(turn, case):
+    """ตอบเจ้าหน้าที่ (ADR 0028 Q13): the notice was one way; this opens the case's chat."""
+    from operations import case_chat  # local: case_chat builds on this module
+
+    until = (turn.now + case_chat.OPEN_FOR).isoformat()
+    turn.set_prompt("case_chat", case=str(case.pk), until=until)
+    turn.say(
+        f"พิมพ์ข้อความถึงเจ้าหน้าที่เรื่อง {case.number} ได้เลย ข้อความจะเข้าเรื่องนี้",
+        [(case_chat.END_LABEL, case_chat.END_POSTBACK)],
+    )
+
+
+def _case_notices(turn, case):
+    rows = requester_steps.notices(case)[:10]
+    if not rows:
+        return _case_detail(turn, case.number)
+    turn.say(
+        f"ข้อความจากเจ้าหน้าที่ เรื่อง {case.number}\n\n"
+        + "\n\n".join(_notice_text(d, t) for d, t in rows),
+        [(case.number, f"c={case.number}")],
+    )
 
 
 # --- Drafts -------------------------------------------------------------------------------------
@@ -2222,6 +2496,10 @@ def _owned_draft(turn, draft_id):
 
 def _token_action(turn, token, draft):
     action = token.action
+    if action.startswith("koj_"):
+        from operations import koj_chat
+
+        return koj_chat.on_token(turn, token)
     if action == "info_target":
         case = (
             services.visible_cases(_actor(turn))
@@ -2236,8 +2514,21 @@ def _token_action(turn, token, draft):
             "พิมพ์ข้อความหรือส่งรูป JPEG/PNG หรือไฟล์ PDF ในแชทนี้ได้"
         )
         return
+    if action in ("case_reply", "case_notices"):
+        case = services.visible_cases(_actor(turn)).filter(pk=token.value.get("case")).first()
+        if case is None:
+            return _menu(turn, "ไม่พบเรื่องนี้ในเรื่องของคุณ")
+        return (_case_reply if action == "case_reply" else _case_notices)(turn, case)
     if action == "case_search":
         return _search_cases(turn)
+    if action == "delivery":
+        from operations import warehouse  # local: warehouse builds on this module
+
+        return warehouse.on_choice(turn, token)
+    if action == "flow_again":
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        return flow_runner.again(turn, token.value)  # ส่งใบถัดไป (grill กคว. รอบใหม่ Q7)
     if action == "case_list":
         item = _menu_entry(token.value["item"]) if token.value.get("item") else None
         if token.value.get("item") and item is None:
@@ -2280,6 +2571,10 @@ def _token_action(turn, token, draft):
         return _reprompt(turn, draft)
     if draft is None or draft.pk != bound.pk:
         _activate(turn, bound)
+    if action == "flow":
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        return flow_runner.on_button(turn, bound, token.value)
     return _draft_button(turn, bound, action, token.value)
 
 
@@ -2317,20 +2612,29 @@ def _ask_question(turn, draft):
     step = draft.step
     data = draft.data
     b = turn.button
+    if step == "flow":
+        from operations import flow_runner  # local: flow_runner builds on this module
+
+        return flow_runner.render(turn, draft)
     if step == "kind":
+        labels = KIND_LABELS if settings.LINE_TYPED_SLIPS else KIND_STEP_LABELS
+        lead = "ต้องการแจ้งเรื่องประเภทใด" if settings.LINE_TYPED_SLIPS else "ต้องการทำเรื่องใด"
         turn.say(
-            "ต้องการแจ้งเรื่องประเภทใด\n1. เบิก\n2. ส่งคืน\n"
+            f"{lead}\n1. {labels[K.WITHDRAWAL]}\n2. {labels[K.RETURN]}\n"
             "3. แจ้งปัญหา/ข้อเสนอแนะ (ของชำรุด ใช้งานไม่ได้ ไฟแพง ลักใช้ไฟ หรือข้อเสนอแนะ)",
-            [b(KIND_LABELS[k], "kind", {"kind": k}, draft) for k in KIND_ORDER]
+            [b(labels[k], "kind", {"kind": k}, draft) for k in KIND_ORDER]
             + [b("ยกเลิกร่าง", "discard", draft=draft)],
         )
     elif step == "topic":
-        topics = _topics()
-        lines = [f"{n}. {_topic_menu_label(t)}" for n, t in enumerate(topics, 1)]
-        turn.say(
-            "เรื่องนี้เกี่ยวกับอะไร\n" + "\n".join(lines),
-            [b(_topic_menu_label(t), "topic", {"topic": t}, draft) for t in topics]
-            + [b("ยกเลิกร่าง", "discard", draft=draft)],
+        # ADR 0030: one bubble per division, then ปัญหาการใช้งานหรืออื่นๆ (no topic menu).
+        turn.say(problem_pick.PROMPT)
+        turn.replies.append(
+            problem_pick.carousel(
+                [
+                    (label, b(label, "pick_division", {"division": code}, draft)[1])
+                    for code, label in problem_pick.choices()
+                ]
+            )
         )
     elif step in {"meter_group", "category"}:
         buttons = [
@@ -2441,6 +2745,16 @@ def _ask_question(turn, draft):
         return _typed_group_card(turn, draft)
     elif step == "detail":
         return _detail_row(turn, draft)
+    elif step == "summary" and data.get("topic") == Case.Topic.GENERAL:
+        turn.say(  # ADR 0030 Q11, Q26: the division may still change before confirming
+            _summary(draft),
+            [
+                b(CONFIRM_LABEL, "confirm", draft=draft, ttl=CONFIRM_TTL),
+                b("เปลี่ยนกอง", "change_division", draft=draft),
+                b("แก้ไข", "edit_details", draft=draft),
+                b("ยกเลิกร่าง", "discard", draft=draft),
+            ],
+        )
     elif step == "summary":
         turn.say(
             _summary(draft),
@@ -2464,9 +2778,13 @@ def _skip_model(turn, draft):
 def _summary(draft):
     data = draft.data
     lines = [f"{SUMMARY_HEAD} {_kind_label(draft.kind, data.get('topic'))}"]
-    if data.get("menu_label"):
+    general = data.get("topic") == Case.Topic.GENERAL
+    if data.get("menu_label") and not general:
         lines.append(f"หัวข้อ: {data['menu_label']}")
-    if data.get("division"):
+    if general:
+        pick = problem_pick.ADMIN if data.get("hold_for_admin") else data.get("division", "")
+        lines.append(f"ส่งถึง: {problem_pick.target(pick)}")
+    elif data.get("division"):
         lines.append(f"ส่งถึง: {data['division']}")
     if data.get("sap_number"):
         label = typed_lines.sap_label(draft.kind, data.get("topic"))
@@ -2539,6 +2857,8 @@ def _returns_to_topic_menu(draft):
 
 
 def _kind_label(kind, topic=""):
+    if topic == Case.Topic.GENERAL:
+        return KIND_SHORT[K.PROBLEM]
     if topic in (Case.Topic.USAGE, Case.Topic.SUGGESTION):
         return TOPIC_LABELS[topic]
     if topic == Case.Topic.INQUIRY:
@@ -2552,6 +2872,8 @@ def _kind_label(kind, topic=""):
 
 def _fields(draft):
     topic = draft.data.get("topic")
+    if topic == Case.Topic.GENERAL:
+        return GENERAL_FIELDS
     if topic == Case.Topic.USAGE:
         return USAGE_FIELDS
     if topic == Case.Topic.SUGGESTION:
@@ -2636,12 +2958,30 @@ def _draft_button(turn, draft, action, value):
         else:
             _touch(draft, turn.now, kind="", step="kind", data={"lines": [], "fields": {}})
         return _ask(turn, draft)
+    if (
+        action == "kind"
+        and value["kind"] in (K.WITHDRAWAL, K.RETURN)
+        and not settings.LINE_TYPED_SLIPS
+    ):
+        # ADR 0032: a slip is followed from its equipment's tile, never typed as a new draft.
+        _touch(draft, turn.now, status=D.DISCARDED)
+        turn.conversation.active_draft = None
+        turn.conversation.save(update_fields=["active_draft", "updated_at"])
+        return turn.say("เลือกอุปกรณ์ที่ต้องการติดตาม", slip_buttons())
     if action == "kind":
         step = "topic" if value["kind"] == K.PROBLEM else "category"
         if value["kind"] != K.PROBLEM:
             draft.data = dict(data, equipment_menu="equipment")
         _touch(draft, turn.now, kind=value["kind"], step=step)
         return _ask(turn, draft)
+    if action == "pick_division" and draft.step == "topic":
+        return _pick_division(turn, draft, value.get("division", ""))
+    if action == "change_division" and draft.step == "summary":
+        return _set(turn, draft, "topic")
+    if action == "edit_details" and draft.step == "summary":
+        fields = {k: v for k, v in data["fields"].items() if k != "description"}
+        draft.data = dict(data, fields=fields)
+        return _set(turn, draft, "field:description")
     if action == "topic":
         topic = value.get("topic")
         if topic not in _topics():
@@ -3220,15 +3560,13 @@ def _draft_text(turn, draft, text):
         kind = KIND_ORDER[int(text.translate(THAI_DIGITS)) - 1]
         return _draft_button(turn, draft, "kind", {"kind": kind})
     if step == "topic":
-        raw = text.translate(THAI_DIGITS)
-        topics = _topics()
-        if raw.isdigit():
-            number = int(raw)
-            if 1 <= number <= len(topics):
-                return _draft_button(turn, draft, "topic", {"topic": topics[number - 1]})
-        for topic in topics:
-            if raw.casefold() == _topic_menu_label(topic).casefold():
-                return _draft_button(turn, draft, "topic", {"topic": topic})
+        raw = text.translate(THAI_DIGITS).strip()
+        picks = problem_pick.choices()
+        if raw.isdigit() and 1 <= int(raw) <= len(picks):
+            return _pick_division(turn, draft, picks[int(raw) - 1][0])
+        for code, label in picks:
+            if raw.casefold() in (code.casefold(), label.casefold()):
+                return _pick_division(turn, draft, code)
     if step in {"meter_group", "category"}:
         raw = text.translate(THAI_DIGITS)
         groups = list(METER_GROUPS)
@@ -3244,7 +3582,7 @@ def _draft_text(turn, draft, text):
 
 CHOICE_HINTS = {
     "kind": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
-    "topic": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อหรือชื่อหมวด",
+    "topic": "แตะชื่อกองด้านบน หรือพิมพ์ชื่อกอง",
     "category": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
     "location": "กด 'ส่งตำแหน่ง' ด้านล่าง",
 }
@@ -3259,6 +3597,8 @@ def _payload(draft):
         payload["latitude"], payload["longitude"] = data["location"]
     if data.get("division"):
         payload["division_code"] = data["division"]
+    elif data.get("hold_for_admin"):
+        payload["hold_for_admin"] = True  # ADR 0030: ปัญหาการใช้งานหรืออื่นๆ
     if data.get("menu_label"):
         payload["menu_label"] = data["menu_label"]
     if data.get("sap_number") and typed_lines.sap_label(draft.kind, data.get("topic")):
@@ -3302,7 +3642,9 @@ def _confirm(turn, draft):
     turn.conversation.save(update_fields=["active_draft", "updated_at"])
     remaining = _open_drafts(turn).count()
     numbers = [case.number, *(s["case_number"] for s in result.split)]
-    if len(numbers) > 1:
+    if case.topic == Case.Topic.GENERAL:
+        text = problem_pick.done_text(case)  # ADR 0030 Q26
+    elif len(numbers) > 1:
         # ADR 0008: one request with items of several divisions becomes one case per division.
         text = (
             f"ยื่นเรื่องแล้ว แยกเป็น {len(numbers)} เรื่องตามกองที่ดูแลของ\n"

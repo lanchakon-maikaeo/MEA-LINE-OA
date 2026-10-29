@@ -103,7 +103,7 @@ class FoundationTests(TestCase):
         ):
             self.assertEqual(self.client.get("/health/live/").json(), {"status": "ok"})
             self.assertEqual(self.client.get("/health/ready/").json(), {"status": "ok"})
-            self.assertContains(self.client.get("/"), "ระบบรับเรื่อง ฝอจ.")
+            self.assertContains(self.client.get("/"), "DED Center")
         self.assertEqual(self.client.post("/health/live/").status_code, 405)
 
     def test_database_failure_is_503_without_details_and_liveness_stays_up(self):

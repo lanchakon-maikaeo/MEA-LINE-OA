@@ -52,7 +52,7 @@ LEVEL_TITLES = {
     "P2": "ตามกำหนดงาน",
     "P3": "งานปกติ",
 }
-UNTRIAGED = "รอคัดกรอง"
+UNTRIAGED = "ยังไม่ตั้งระดับ"  # ADR 0025: no screening step names it any more
 
 
 def level_name(level):
@@ -106,7 +106,8 @@ def _decide_condition(user, scope_admin_all, now):
 
 def tab_condition(tab, division, user, now, admin_all=False):
     """The cases of one tab; `division` None is the admin's every-division view."""
-    owner = Q(owner_division=division) if division else Q()
+    # ADR 0030: a case the admins hold waits on their own tab, in no division's queue.
+    owner = (Q(owner_division=division) if division else Q()) & Q(held_by_admin=False)
     if tab == "host":
         return owner & Q(status__in=workflow.OPEN - WAITING_DISTRICT)
     if tab == "incoming":
@@ -334,14 +335,17 @@ def level_of(triage):
 def summary_text(case):
     text = case.description or case.purpose or case.return_reason or case.intake_note
     text = " ".join(text.split())
-    lines = ", ".join(
-        f"{line.item.code} ×{line.requested_quantity.normalize():f}"
-        if line.requested_quantity is not None
-        else line.item.code
-        for line in case.lines.all()
-    )
+
+    # 28 ต.ค. 2569: the item's name reads better than its code in a queue row.
+    def one(line):
+        name = line.item.name or line.item.code
+        if line.requested_quantity is None:
+            return name
+        return f"{name} {line.requested_quantity.normalize():f} {line.item.unit}".strip()
+
+    lines = ", ".join(one(line) for line in case.lines.all())
     if text and lines:
-        return f"{lines} — {text}"
+        return f"{lines} · {text}"
     return text or lines
 
 
@@ -505,11 +509,25 @@ def build_rows(cases, now):
     return [by_number[item.number] for item in items]
 
 
-def ordered(cases, tab, orders=()):
-    """B.4 order (level → date needed → arrival); closed cases newest first."""
+SORTS = {"newest": "ล่าสุดก่อน", "urgent": "เรียงตามความเร่งด่วน"}
+
+
+def ordered(cases, tab, orders=(), sort="newest"):
+    """Newest first with emergencies on top (grill กคว. 27 ต.ค. 2569 Q12), or the B.4 order
+    (level → date needed → arrival) on request; closed cases newest first."""
     cases = [*cases.select_related("triage"), *orders]
     if tab == "closed":
         return sorted(cases, key=lambda c: c.ended_at or c.updated_at, reverse=True)
+    if sort != "urgent":
+
+        def newest(case):
+            if isinstance(case, WorkOrder):
+                return (1, -case.created_at.timestamp())
+            triage = getattr(case, "triage", None)
+            level = triage and (triage.effective_priority or triage.suggested_priority)
+            return (0 if level == Priority.P0 else 1, -case.submitted_at.timestamp())
+
+        return sorted(cases, key=newest)
 
     def key(case):
         if isinstance(case, WorkOrder):
@@ -526,13 +544,22 @@ def ordered(cases, tab, orders=()):
     return sorted(cases, key=key)
 
 
-def page(cases, tab, number, orders=()):
-    items = ordered(cases, tab, orders)
+def page(cases, tab, number, orders=(), sort="newest", shown=0):
+    """One page of PAGE_SIZE rows, or the first `shown` rows once "แสดงเพิ่มเติม" has been
+    pressed (28 ต.ค. 2569 Q8); `more` and `next` drive that button."""
+    items = ordered(cases, tab, orders, sort)
     total = len(items)
     pages = max(1, -(-total // PAGE_SIZE))
     number = min(max(1, number), pages)
-    start = (number - 1) * PAGE_SIZE
-    return items[start : start + PAGE_SIZE], {"number": number, "pages": pages, "total": total}
+    start = 0 if shown else (number - 1) * PAGE_SIZE
+    end = max(PAGE_SIZE, shown) if shown else start + PAGE_SIZE
+    return items[start:end], {
+        "number": number,
+        "pages": pages,
+        "total": total,
+        "more": max(0, total - end),
+        "next": end + PAGE_SIZE,
+    }
 
 
 def prefetch(cases):

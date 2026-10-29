@@ -3,19 +3,25 @@ from django.urls import path
 
 from operations import (
     duties_web,
+    flows_web,
     internal_api,
     items_web,
+    koj_web,
     line,
     orders_web,
     pii_web,
     problems_web,
     registry_web,
     routing_web,
+    units_web,
     views,
+    warehouse_web,
     web,
 )
 
 urlpatterns = [
+    path("koj/", koj_web.sources, name="koj-sources"),
+    path("koj/sources/<int:pk>/", koj_web.history, name="koj-history"),
     path("", views.index, name="index"),
     path("health/live/", views.live, name="health-live"),
     path("health/ready/", views.ready, name="health-ready"),
@@ -46,6 +52,14 @@ urlpatterns = [
     path("console/", web.home, name="console"),
     path("divisions/<str:code>/", web.division_queue, name="division-detail"),
     path("divisions/<str:code>/export.csv", web.division_export, name="division-export"),
+    path("divisions/<str:code>/approve/", web.division_approve, name="division-approve"),
+    path("divisions/<str:code>/warehouse/", warehouse_web.warehouse_page, name="warehouse"),
+    path(
+        "divisions/<str:code>/warehouse/schedule/",
+        warehouse_web.schedule_page,
+        name="warehouse-schedule",
+    ),
+    path("divisions/<str:code>/calendar/", warehouse_web.calendar_page, name="calendar"),
     path("queue/", web.all_queue, name="queue-all"),
     path("orders/", orders_web.orders, name="orders"),
     path("orders/new/", orders_web.order_new, name="order-new"),
@@ -63,6 +77,18 @@ urlpatterns = [
     path("cases/<str:number>/revision/", web.case_revision, name="case-revision"),
     path("cases/<str:number>/act/<slug:action>/", web.case_action, name="case-action"),
     path("cases/<str:number>/files/", web.case_upload, name="case-upload"),
+    path("cases/<str:number>/chat/", warehouse_web.case_chat_post, name="case-chat"),
+    path(
+        "cases/<str:number>/chat/thread/",
+        warehouse_web.case_chat_thread,
+        name="case-chat-thread",
+    ),
+    path("cases/<str:number>/stage/", warehouse_web.case_stage, name="case-stage"),
+    path(
+        "cases/<str:number>/appointment/",
+        warehouse_web.case_appointment,
+        name="case-appointment",
+    ),
     path("account/", web.account, name="account"),
     path("console/pii/", pii_web.page, name="pii"),
     path("routing/words/", routing_web.words, name="routing-words"),
@@ -89,6 +115,7 @@ urlpatterns = [
     ),
     path("console/admin/problems/", problems_web.problems, name="admin-problems"),
     path("console/admin/problems.csv", problems_web.problems_csv, name="admin-problems-csv"),
+    path("console/admin/problems/send/", problems_web.problems_send, name="admin-problems-send"),
     path("console/admin/requesters/new/", views.admin_requester_new, name="admin-requester-new"),
     path(
         "console/admin/requesters/<int:pk>/",
@@ -106,6 +133,21 @@ urlpatterns = [
         name="admin-requester-action",
     ),
     path("console/admin/line/", views.admin_line, name="admin-line"),
+    path("console/admin/flows/", flows_web.admin_flows, name="admin-flows"),
+    path("console/admin/flows/<slug:key>/", flows_web.admin_flow, name="admin-flow"),
+    path(
+        "console/admin/flows/<slug:key>/start/", flows_web.admin_flow_start, name="admin-flow-start"
+    ),
+    path("console/admin/flows/<slug:key>/save/", flows_web.admin_flow_save, name="admin-flow-save"),
+    path("console/admin/flows/<slug:key>/try/", flows_web.admin_flow_try, name="admin-flow-try"),
+    path(
+        "console/admin/flows/<slug:key>/publish/",
+        flows_web.admin_flow_publish,
+        name="admin-flow-publish",
+    ),
+    path("console/admin/sheets/", flows_web.admin_sheets, name="admin-sheets"),
+    path("console/admin/holidays/", warehouse_web.admin_holidays, name="admin-holidays"),
+    path("console/admin/districts/", warehouse_web.admin_districts, name="admin-districts"),
     path("console/admin/policy/", views.admin_policy, name="admin-policy"),
     path(
         "console/admin/policy/<slug:action>/<int:pk>/",
@@ -139,6 +181,7 @@ urlpatterns = [
     path("console/admin/answers/", views.admin_answers, name="admin-answers"),
     path("console/admin/questions/", views.admin_questions, name="admin-questions"),
     path("console/admin/duties/", duties_web.admin_page, name="admin-duties"),
+    path("console/admin/org/", units_web.admin_page, name="admin-org"),
     path(
         "console/admin/divisions/<int:pk>/<slug:action>/",
         views.admin_division_action,

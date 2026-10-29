@@ -29,6 +29,7 @@ class Option:
 
 
 DIVISION_WORK = "division_work"
+SCREENING = "screening"
 SEPARATION = "separation_of_duties"
 LINE_AUDIENCE = "line_audience"
 REGISTRATION = "registration_approver"
@@ -54,6 +55,7 @@ ROUTING_AI_ACCURACY = "routing_ai_accuracy"
 CATCH_UP = "catch_up_push"
 CATCH_UP_APOLOGY = "catch_up_apology"
 REGISTRY_ACCESS = "registry_access"
+OLD_STOCK = "old_stock_work"
 SAP_LINE_ENTRY = "sap_line_entry"
 AI_EDITORS = "ai_editors"
 EMAIL_METHODS = "employee_email_methods"
@@ -72,6 +74,23 @@ MONITOR_JUDGE = "monitoring_judge"
 AI_RIGHT = {MONITOR_ERROR, MONITOR_P95, MONITOR_UNANSWERED, MONITOR_EMAIL, MONITOR_JUDGE}
 
 OPTIONS = {
+    SCREENING: Option(
+        "ขั้นคัดกรองเรื่องใหม่",
+        (
+            (
+                "off",
+                "ไม่มีขั้นคัดกรอง: เรื่องใหม่เข้ารอกองรับเรื่องของกองเจ้าภาพทันที",
+                "กองตั้งระดับความเร่งด่วนตอนรับเรื่อง เรื่องฉุกเฉินเริ่มงานทันที "
+                "เรื่องที่ระบบบอกกองไม่ได้ยังรอผู้ประสานก่อน (ADR 0025)",
+            ),
+            (
+                "on",
+                "มีขั้นคัดกรอง: เรื่องใหม่รอคัดกรองแล้วค่อยส่งเข้าขั้นดำเนินงาน",
+                "แบบก่อน 27 ต.ค. 2569",
+            ),
+        ),
+        "มีผลกับเรื่องใหม่ เรื่องที่อยู่ในขั้นอื่นแล้วไม่เปลี่ยน",
+    ),
     DIVISION_WORK: Option(
         "หน้าที่ในกอง",
         (
@@ -471,6 +490,25 @@ OPTIONS = {
             ),
         ),
     ),
+    # ADR 0032: DED Center tracks slips; the stock work of M07, M08 and M11 stays in the code.
+    OLD_STOCK: Option(
+        "แสดงงานคลังเดิม (จำนวนอนุมัติ จัดสรร จ่าย รับของคืน ตรวจสภาพ)",
+        (
+            (
+                "off",
+                "ไม่แสดง",
+                "ค่าที่ตกลงไว้ (ADR 0032, 29 ต.ค. 2569) ระบบติดตามใบเบิกและใบส่งคืนที่ออกใน SAP "
+                "ไม่มีจำนวนของในคลัง กองรับเรื่องทั้งเรื่องด้วยปุ่มเดียว และไม่เห็นปุ่มจัดสรร "
+                "บันทึกจ่าย รับของคืน ตรวจสภาพ และหน้าคลังของ ข้อมูลที่เคยบันทึกยังเก็บไว้",
+            ),
+            (
+                "on",
+                "แสดง",
+                "กองอนุมัติจำนวนรายการ จัดสรร บันทึกจ่าย รับของคืน และตรวจสภาพในระบบได้ "
+                "แอดมินเห็นหน้าคลังของ ใช้เมื่อมียอดจากไฟล์ CSV ของ SAP แล้วเท่านั้น",
+            ),
+        ),
+    ),
     AI_EDITORS: Option(
         "ใครเปลี่ยนการตั้งค่า AI ได้ (เปิดใช้รุ่น ประเมิน โมเดล credential)",
         (
@@ -592,11 +630,46 @@ OPTIONS = {
 }
 
 
+# ADR 0028: the step a requester sees in LINE for each open status; closed, rejected and
+# cancelled are fixed (เสร็จแล้ว, and no step bar for the other two).
+STEP_PREFIX = "requester_step:"
+STEP_CHOICES = {
+    "received": ("รับเรื่องแล้ว", "แถบขั้น ●○○○"),
+    "working": ("กำลังดำเนินการ", "แถบขั้น ●●○○"),
+    "need_you": ("รอข้อมูลจากคุณ", "แถบขั้น ●●●○"),
+    "done_confirm": ("เสร็จแล้ว รอคุณยืนยัน", "แถบขั้น ●●●● พร้อมปุ่มยืนยัน"),
+}
+STEP_DEFAULTS = (
+    ("submitted", "รอคัดกรอง", "received"),
+    ("triage", "กำลังคัดกรอง", "received"),
+    ("awaiting_approval", "รอกองรับเรื่อง", "received"),
+    ("awaiting_execution", "รอดำเนินการ", "received"),
+    ("in_progress", "กำลังดำเนินการ", "working"),
+    ("on_hold", "พักเรื่อง", "working"),
+    ("awaiting_info", "รอข้อมูลเพิ่ม", "need_you"),
+    ("awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย) ยืนยัน", "done_confirm"),
+)
+for _status, _label, _default in STEP_DEFAULTS:
+    OPTIONS[STEP_PREFIX + _status] = Option(
+        f"ขั้นที่ผู้แจ้งเห็นใน LINE: สถานะ{_label}",
+        (
+            (_default, STEP_CHOICES[_default][0], "ค่าที่ตกลงไว้ (ADR 0028)"),
+            *((v, title, bar) for v, (title, bar) in STEP_CHOICES.items() if v != _default),
+        ),
+        "ผู้แจ้งเห็นขั้นนี้ใน เรื่องของฉัน พร้อมสถานะจริงเป็นบรรทัดรอง",
+    )
+
+
 def get(key):
     """The current value, or the option's safe default."""
     option = OPTIONS[key]
     value = SystemOption.objects.filter(key=key).values_list("value", flat=True).first()
     return value if value in {v for v, _, _ in option.choices} else option.default
+
+
+def old_stock():
+    """ADR 0032: the stock work of M07, M08 and M11 shows only when an admin turned it on."""
+    return get(OLD_STOCK) == "on"
 
 
 @transaction.atomic

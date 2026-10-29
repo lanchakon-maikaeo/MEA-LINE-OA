@@ -1,6 +1,6 @@
 {% extends "operations/admin_base.html" %}
-{% load ui %}
-{% block title %}{{ requester.display_name }} · ผู้ใช้ LINE OA · แอดมิน · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% load ui units_ui %}
+{% block title %}{{ requester.display_name }} · ผู้ใช้ LINE OA · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
@@ -13,7 +13,7 @@
 
 <dl class="facts">
   <div><dt>ตัวตน</dt><dd>{{ row.proof }}</dd></div>
-  <div><dt>ตำแหน่ง · ฝ่าย</dt><dd>{{ row.position|default:"—" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</dd></div>
+  <div><dt>ตำแหน่ง · ฝ่าย</dt><dd>{{ row.position|default:"ไม่ระบุ" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</dd></div>
   <div><dt>บทบาทในระบบ</dt><dd>{{ row.role }}</dd></div>
   <div><dt>ช่องทาง</dt><dd>{{ row.channel }}</dd></div>
   <div><dt>รับรองโดย</dt><dd>{{ requester.approved_by.staff_profile.display_name|default:requester.approved_by.username }} · {{ requester.approved_at|thai_datetime }}</dd></div>
@@ -46,6 +46,14 @@
   </ul>
   {% else %}
   <p>ไม่มีบัญชี LINE ที่ผูกอยู่</p>
+  {% endif %}
+  {% if managed %}
+  {% for staff in alerts %}
+  <p>{{ staff|unit_path }}</p>
+  <p class="muted">ผู้รับแจ้งเรื่องสำคัญ ผู้รับผิดชอบประจำงาน และผู้รับแจ้งงานติดตาม กอจ. ของบัญชีเจ้าหน้าที่นี้ ตั้งได้ที่การ์ดของหน่วยใน<a href="{% url 'admin-org' %}">ผังหน่วยงาน</a></p>
+  {% empty %}
+  {% if lines %}<p class="muted">บัญชี LINE นี้ยังไม่ได้เชื่อมกับบัญชีเจ้าหน้าที่ จึงยังตั้งให้รับแจ้งเรื่องสำคัญหรืองาน กอจ. ไม่ได้</p>{% endif %}
+  {% endfor %}
   {% endif %}
 </section>
 

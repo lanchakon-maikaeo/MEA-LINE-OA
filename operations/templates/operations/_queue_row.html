@@ -20,7 +20,7 @@
 </li>
 {% endwith %}{% else %}
 <li class="qrow{% if row.level == 'P0' %} qrow--hazard{% endif %}" data-kind="{{ row.case.kind }}">
-  <div class="qrow__prio">{% prio row.level %}</div>
+  <div class="qrow__prio">{% if may_approve and row.case.status == "awaiting_approval" %}<label class="qrow__pick"><input type="checkbox" name="case" value="{{ row.case.number }}" form="bulk-approve" aria-label="เลือก {{ row.case.number }} เพื่อรับเรื่อง"></label>{% endif %}{% prio row.level %}</div>
   <div class="qrow__main">
     <div class="qrow__title">
       <a class="qrow__link" href="{% url 'case-detail' row.case.number %}">{{ row.case.number }}</a>
@@ -49,7 +49,7 @@
     {% elif row.case.ended_at %}
       <span class="muted">ปิด {{ row.case.ended_at|thai_short }}</span>
     {% endif %}
-    <span class="muted">{% if row.case.owner_division %}ดูแลโดย {{ row.case.owner_division.code }}{% if row.case.section %} · {{ row.case.section.name }}{% endif %}{% endif %}{% if row.case.assignee %} · {{ row.case.assignee.staff_profile.display_name|default:row.case.assignee.username }}{% endif %}</span>
+    <span class="muted">{% if row.case.owner_division %}ดูแลโดย {{ row.case.owner_division.code }}{% if row.case.section %} · {{ row.case.section.name }}{% endif %}{% endif %}{% if row.case.assignee %} · {{ row.case.assignee.staff_profile.display_name|default:row.case.assignee.username }}{% if row.case.auto_assigned %} <span class="tag tag--outline">ระบบมอบให้</span>{% endif %}{% endif %}</span>
   </div>
 </li>
 {% endif %}

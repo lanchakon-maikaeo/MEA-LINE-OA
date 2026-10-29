@@ -1,0 +1,44 @@
+{% extends "operations/admin_base.html" %}
+{% load static ui %}
+{% block title %}วันหยุด · แอดมิน · DED Center{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}"><script src="{% static 'operations/holidays.js' %}" defer></script>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <h1>วันหยุด</h1>
+    <p class="lede">กดวันในปฏิทินเพื่อตั้งเป็นวันหยุด วันหยุดไม่นับเป็นวันทำการตอนระบบเสนอวันจ่าย และขึ้นในปฏิทินนัดของทุกกอง เปิดช่วงนัดในวันหยุดได้ แต่ระบบถามยืนยันก่อน</p>
+  </div>
+</div>
+<div class="cal-nav">
+  <a class="btn btn--sm btn--secondary" href="?month={{ previous|date:'Y-m-d' }}">← เดือนก่อน</a>
+  <strong class="cal-nav__month">{{ month_label }}</strong>
+  <a class="btn btn--sm btn--secondary" href="?month={{ next|date:'Y-m-d' }}">เดือนถัดไป →</a>
+</div>
+<div class="mcal mcal--pick">
+  <div class="mcal__row mcal__row--head">{% for w in weekdays %}<div class="mcal__head">{{ w }}</div>{% endfor %}</div>
+  {% for week in weeks %}
+  <div class="mcal__row">
+    {% for d in week %}
+    <button type="button" class="mcal__day mcal__pick{% if not d.in_month %} is-out{% endif %}{% if d.date == today %} is-today{% endif %}{% if d.holiday %} is-holiday{% endif %}" data-day="{{ d.date|date:'Y-m-d' }}" data-label="{{ d.label }}" data-name="{{ d.holiday }}" aria-label="{{ d.label }}{% if d.holiday %} วันหยุด {{ d.holiday }}{% endif %}">
+      <span class="mcal__num">{{ d.date.day }}</span>
+      {% if d.holiday %}<span class="mcal__chip mcal__chip--holiday">{{ d.holiday }}</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+<form method="post" class="panel hol-form" id="hol-form">
+  {% csrf_token %}
+  <input type="hidden" name="day" id="hol-day">
+  <div class="panel__head"><h2 id="hol-picked">กดวันในปฏิทินก่อน</h2></div>
+  <div class="field"><label for="hol-name">ชื่อวันหยุด</label><input type="text" id="hol-name" name="name" maxlength="120" placeholder="เช่น วันปิยมหาราช"></div>
+  <div class="cluster">
+    <button class="btn" type="submit" name="action" value="set" id="hol-save" disabled>ตั้งเป็นวันหยุด</button>
+    <button class="btn btn--ghost" type="submit" name="action" value="remove" id="hol-remove" hidden>ลบวันหยุดนี้</button>
+  </div>
+</form>
+<section class="panel">
+  <div class="panel__head"><h2>วันหยุดปี {{ year_label }}</h2><span class="panel__note">{{ year|length }} วัน</span></div>
+  {% for h, label in year %}<p>{{ label }} · {{ h.name }}</p>{% empty %}<p class="muted">ยังไม่มีวันหยุดในปีนี้</p>{% endfor %}
+</section>
+{% endblock %}

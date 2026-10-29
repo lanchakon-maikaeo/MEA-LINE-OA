@@ -1,0 +1,30 @@
+{% extends "operations/admin_base.html" %}
+{% load static ui %}
+{% block title %}เขต · แอดมิน · DED Center{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <h1>เขต</h1>
+    <p class="lede">ใส่ชื่อย่อ ฟข. ของแต่ละเขต เช่น ฟขป. ตารางรถของกองที่เรียกเขตด้วยชื่อย่อจะใช้ช่องนี้หาวันรถ เขตที่ยังไม่มีวันรถจะได้เบอร์ติดต่อของกองแทน</p>
+  </div>
+</div>
+{% if waiting %}
+<div class="panel">
+  <h2>ชื่อย่อที่ยังไม่รู้ว่าเป็นเขตไหน</h2>
+  <ul>{% for code, keys in waiting %}<li>ตารางรถของ {{ code }}: {{ keys|join:", " }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+<form method="post" class="panel stack">
+  {% csrf_token %}
+  <table class="table">
+    <thead><tr><th scope="col">เขต</th><th scope="col">ชื่อย่อ ฟข.</th></tr></thead>
+    <tbody>
+    {% for d in districts %}
+      <tr><td>{{ d.name }}</td><td><input type="text" name="short_{{ d.code }}" value="{{ d.short_name }}" maxlength="16" placeholder="เช่น ฟขป." aria-label="ชื่อย่อ ฟข. ของ{{ d.name }}"></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="field"><label for="dt-reason">เหตุผลที่แก้</label><input type="text" id="dt-reason" name="reason" required maxlength="300" placeholder="เช่น ตามตารางรถ TE-Delivery ของ คม."></div>
+  <button class="btn" type="submit">บันทึก</button>
+</form>
+{% endblock %}

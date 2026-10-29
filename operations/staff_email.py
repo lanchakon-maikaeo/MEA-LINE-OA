@@ -46,6 +46,7 @@ SUBJECTS = {
     "staff_hazard": "เรื่องใหม่แจ้งเหตุอันตราย (ฉุกเฉิน)",
     "staff_registry": "พบส่วนต่างทะเบียนใหม่จากไฟล์ SAP",  # M11 Q19: one per import
     "staff_support": "ผู้ช่วยเหลือระบบทำแทนกองในเรื่องของกอง",  # ADR 0007
+    "staff_admin_waiting": "มีเรื่องรอแอดมิน",  # ADR 0030: LINE only
 }
 CRITICAL = {"staff_hazard", "staff_escalated", "staff_routing"}
 
@@ -113,11 +114,11 @@ def _text(kind, case, detail=""):
     if detail:
         rows.append(detail)
     rows.append(f"เปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}/cases/{case.number}/")
-    rows.append("อีเมลนี้ส่งอัตโนมัติจากระบบรับเรื่อง ฝอจ. (ข้อมูลกองและกติกาเป็นข้อมูลจำลอง)")
+    rows.append("อีเมลนี้ส่งอัตโนมัติจาก DED Center (ข้อมูลกองและกติกาเป็นข้อมูลจำลอง)")
     return "\n".join(rows)
 
 
-def plan(kind, key, case, users, detail="", text=None):
+def plan(kind, key, case, users, detail="", text=None, chosen=False, division_id=None):
     """One email per recipient for one situation; the same key never plans twice. Nothing is
     planned while staff email is off, so the queue holds no mail that will never be sent.
     `case` is None only for situations about no single case (M11 registry summary). Staff
@@ -126,7 +127,7 @@ def plan(kind, key, case, users, detail="", text=None):
 
     if case is not None and case.is_example:
         return []  # ตัวอย่าง (15 ต.ค. 2569 Q33): no email or LINE about it
-    staff_line.plan(kind, key, case, users)
+    staff_line.plan(kind, key, case, users, chosen, division_id)
     if not enabled():
         return []
     now = timezone.now()
@@ -169,6 +170,13 @@ def plan_for_event(event):
     """Decisions and new cases from the outbox (deadline events come from the sweep)."""
     if event.event_type == orchestration.EVENT_CASE_SUBMITTED:
         case = Case.objects.filter(pk=event.subject_id).select_related("district").first()
+        if case is not None and case.held_by_admin and not case.is_example:
+            from operations import staff_line  # local: staff_line reads subjects from here
+
+            # ADR 0030 Q21, Q25: LINE to the admins who keep this on (no email, no division).
+            staff_line.plan(
+                "staff_admin_waiting", f"admin:{case.pk}", case, staff_line.admin_receivers(), True
+            )
         floor = (
             CaseTriage.objects.filter(case=case).values_list("priority_floor", flat=True).first()
         )
@@ -177,7 +185,11 @@ def plan_for_event(event):
         # The desk that holds new cases: intake, or (ADR 0008) the owner division itself.
         desk = Division.objects.filter(is_intake=True, is_active=True).first()
         desk_id = desk.pk if desk else case.owner_division_id
-        return plan("staff_hazard", f"hazard:{case.pk}", case, members(desk_id))
+        # ADR 0031 Q15: email to the members; LINE to the person responsible, else the unit's
+        # ผู้รับแจ้งเรื่องสำคัญ (which took over the division's ผู้รับแจ้งเรื่องฉุกเฉิน, Q12).
+        return plan(
+            "staff_hazard", f"hazard:{case.pk}", case, members(desk_id), division_id=desk_id
+        )
     if event.event_type != orchestration.EVENT_DECISION:
         return []
     decision = (
@@ -213,12 +225,23 @@ def _plan_decision(decision):
     if decision.action == "request_handoff":
         handoff = Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).first()
         if handoff:
-            return plan("staff_handoff", key, case, members(handoff.to_division_id))
+            return plan(
+                "staff_handoff",
+                key,
+                case,
+                members(handoff.to_division_id),
+                division_id=handoff.to_division_id,
+            )
     if decision.action == "request_child_work":
         child = ChildWork.objects.filter(case=case).order_by("-seq").first()
         if child and child.status == ChildWork.Status.PENDING:
             return plan(
-                "staff_child_work", key, case, members(child.division_id), f"งาน: {child.task}"
+                "staff_child_work",
+                key,
+                case,
+                members(child.division_id),
+                f"งาน: {child.task}",
+                division_id=child.division_id,
             )
     if decision.action in {"request_routing_decision", "decline_handoff", "decline_child_work"}:
         from operations.models import RoutingReview
@@ -229,6 +252,12 @@ def _plan_decision(decision):
         )
         if waiting:
             return plan("staff_routing", key, case, routing_holders(case))
+    if case.held_by_admin and decision.action in ("dispute_resolution", "reopen"):
+        from operations import staff_line  # local: staff_line reads subjects from here
+
+        kind = "staff_dispute" if decision.action == "dispute_resolution" else "staff_reopen"
+        staff_line.plan(kind, key, case, staff_line.admin_receivers(), True)  # ADR 0030
+        return []
     if decision.action == "dispute_resolution":
         return plan("staff_dispute", key, case, _assignee_or_owner(case))
     if decision.action == "reopen":

@@ -36,9 +36,9 @@ def _clock_minutes(clock, calendar):
 PERIODS = (7, 30, 90)
 AGE_BUCKETS = (
     ("lt1", "น้อยกว่า 1 วัน", 0, 1),
-    ("1to3", "1–3 วัน", 1, 3),
-    ("3to7", "3–7 วัน", 3, 7),
-    ("7to14", "7–14 วัน", 7, 14),
+    ("1to3", "1 ถึง 3 วัน", 1, 3),
+    ("3to7", "3 ถึง 7 วัน", 3, 7),
+    ("7to14", "7 ถึง 14 วัน", 7, 14),
     ("gt14", "เกิน 14 วัน", 14, None),
 )
 LEVELS = ("P0", "P1", "P2", "P3", "none")
@@ -62,7 +62,10 @@ class _Sets:
         self.since = now - timedelta(days=days)
         self.visible = queues.visible(user).exclude(is_example=True)  # ตัวอย่าง: never counted
         self.owned = (
-            self.visible if division is None else self.visible.filter(owner_division=division)
+            self.visible
+            if division is None
+            # ADR 0030 Q19: a case the admins hold counts for no division.
+            else self.visible.filter(owner_division=division, held_by_admin=False)
         )
         self.owned_open = self.owned.filter(status__in=workflow.OPEN)
         self.host = self.visible.filter(
@@ -430,7 +433,7 @@ def export_csv(cases, now=None):
                     case.get_status_display(),
                     queues.level_name(row.level),
                     case.district.name,
-                    case.owner_division.code,
+                    case.owner_label,
                     _person(assignee),
                     _when(case.submitted_at),
                     _when(case.reported_at),

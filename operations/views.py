@@ -286,8 +286,13 @@ def admin_user_action(request, pk, action):
 
         _run(
             request,
-            lambda: admin_line.set_notifications(actor, target, data.get("enabled") == "1"),
-            "บันทึกผู้รับแจ้งการสมัครแล้ว",
+            lambda: admin_line.set_notifications(
+                actor,
+                target,
+                data.get("enabled") == "1",
+                admin_waiting=data.get("admin_waiting") == "1",
+            ),
+            "บันทึกการแจ้งเตือนแล้ว",
         )
     elif action == "revoke":
         grant_id = data.get("grant_id", "")
@@ -395,6 +400,9 @@ def admin_registrations(request):
     requesters = _requester_rows(people.exclude(status=Requester.Status.REVOKED)[:100])
     revoked = _requester_rows(people.filter(status=Requester.Status.REVOKED)[:100])
     is_admin = identity.staff_scope(request.user).is_admin
+    pending = list(pending)
+    if is_admin and pending:
+        _earlier_requesters(pending)
     return render(
         request,
         "operations/admin_registrations.html",
@@ -434,6 +442,30 @@ def admin_registrations(request):
             "requester_form": forms.RequesterCreateForm(),
         },
     )
+
+
+def _earlier_requesters(pending):
+    """ย้าย LINE OA (28 Oct 2569): who each new LINE may have been on the old OA. The same
+    employee ID, else the same name without spaces, is suggested; the admin decides."""
+    earlier = list(
+        Requester.objects.filter(
+            status=Requester.Status.ACTIVE,
+            is_anonymous=False,
+            channelidentity__channel=ChannelIdentity.Channel.LINE,
+        )
+        .select_related("district")
+        .distinct()
+        .order_by("display_name")
+    )
+
+    def same(requester, reg):
+        if reg.employee_id:
+            return requester.employee_id == reg.employee_id
+        return "".join(requester.display_name.split()) == "".join(reg.submitted_name.split())
+
+    for reg in pending:
+        reg.earlier = [r for r in earlier if r.pk != reg.identity.requester_id]
+        reg.suggested = next((r.pk for r in reg.earlier if same(r, reg)), None)
 
 
 def _requester_rows(requesters):
@@ -536,6 +568,11 @@ def admin_requester_detail(request, pk):
         .order_by("-pk")[:50]
     )
     row = _requester_rows([requester])[0]
+    lines = list(
+        ChannelIdentity.objects.filter(requester=requester).select_related(
+            "staff_user__staff_profile"
+        )
+    )
     history = []
     for event in events:
         actor = event.actor
@@ -561,9 +598,11 @@ def admin_requester_detail(request, pk):
             "grant_form": forms.GrantRoleForm(),
             "row": row,
             "districts": District.objects.filter(is_active=True).order_by("code"),
-            "lines": ChannelIdentity.objects.filter(requester=requester).select_related(
-                "staff_user__staff_profile"
-            ),
+            "lines": lines,
+            # ADR 0031 Q12: LINE alerts of the staff account this LINE is linked to are set on
+            # its unit's card in ผังหน่วยงาน.
+            "alerts": [line.staff_user for line in lines if line.staff_user],
+            "budget": notifications.budget_state(),
             "history": history,
             "message_count": ConversationMessage.objects.filter(requester=requester).count(),
             "case_count": requester.cases.count(),
@@ -691,10 +730,16 @@ def admin_registration_action(request, pk, action):
     registration = get_object_or_404(RegistrationRequest, pk=pk)
     reason = request.POST.get("reason", "")
     if action == "approve":
+        earlier = request.POST.get("requester", "")
+        if earlier and not earlier.isdigit():
+            raise Http404
+        target = get_object_or_404(Requester, pk=int(earlier)) if earlier else None
         _run(
             request,
-            lambda: identity.approve_registration(request.user, registration, reason),
-            "รับรองผู้ใช้แล้ว",
+            lambda: identity.approve_registration(
+                request.user, registration, reason, requester=target
+            ),
+            "รับรองแล้ว และย้ายเรื่องเดิมมาที่ LINE นี้แล้ว" if target else "รับรองผู้ใช้แล้ว",
         )
     elif action == "reject":
         _run(
@@ -718,7 +763,7 @@ def admin_divisions(request):
                 "เพิ่มกองแล้ว",
             )
             return redirect("admin-divisions")
-    divisions = Division.objects.all()
+    divisions = list(Division.objects.all())
     return render(
         request,
         "operations/admin_divisions.html",
@@ -793,9 +838,27 @@ def admin_line(request):
             "dead": OutboxEvent.objects.filter(status=OutboxEvent.Status.FAILED).order_by("-id")[
                 :50
             ],
-            "health": orchestration.health(),
+            "health": (health := orchestration.health()),
+            # 28 ต.ค. 2569: each kind of waiting job by its Thai name, in minutes.
+            "waiting_jobs": [
+                (EVENT_LABELS.get(kind, kind), seconds // 60)
+                for kind, seconds in health["oldest_pending_seconds"].items()
+            ],
         },
     )
+
+
+EVENT_LABELS = {
+    orchestration.EVENT_CONVERSATION: "ข้อความเข้าจาก LINE",
+    orchestration.EVENT_CASE_SUBMITTED: "เรื่องใหม่",
+    orchestration.EVENT_DECISION: "การตัดสินในเรื่อง",
+    orchestration.EVENT_REGISTRATION: "ผลการลงทะเบียน",
+    orchestration.EVENT_NOTIFICATION: "การแจ้งเตือน",
+    orchestration.EVENT_AI: "AI ตอบแชต",
+    orchestration.EVENT_TRIAGE_AI: "AI อ่านข้อเท็จจริงของเรื่อง",
+    orchestration.EVENT_ROUTING_AI: "AI เลือกกอง",
+    orchestration.EVENT_KEYWORDS_AI: "AI หาคำสำคัญ",
+}
 
 
 @admin_required
@@ -897,6 +960,8 @@ def admin_policy_action(request, action, pk):
 @require_safe
 def admin_inventory(request):
     """Ready figures per item, who waits for them, allocations, and the fake store's history."""
+    if not options.old_stock():
+        raise Http404  # ADR 0032
     now = timezone.now()
     rows = []
     for item in EquipmentType.objects.filter(is_active=True).order_by("code"):
@@ -933,6 +998,8 @@ def admin_inventory(request):
 @admin_required
 @require_POST
 def admin_inventory_action(request, action):
+    if not options.old_stock():
+        raise Http404  # ADR 0032
     if action == "adjust":
         form = forms.InventoryAdjustForm(request.POST)
         if form.is_valid():
@@ -1174,6 +1241,10 @@ def admin_ai_action(request, action, pk=None):
                     d["menu_fields"]
                     and d["typed_fields"]
                     and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
+                    d["slip_facts"]
+                    and d["menu_fields"]
+                    and d["typed_fields"]
+                    and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
                 ),
                 "สร้างรุ่นการตั้งค่าแล้ว (รอทดสอบและประเมิน)",
             )
@@ -1194,6 +1265,7 @@ def admin_ai_action(request, action, pk=None):
                     d["task"] or AIConfigVersion.Task.EXTRACT,
                     d["typed_fields"],
                     d["menu_fields"],
+                    d["slip_facts"],
                 ),
                 "สร้างรุ่นใหม่จากโมเดลสำเร็จรูปแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อ → ประเมิน → เปลี่ยน",
             )

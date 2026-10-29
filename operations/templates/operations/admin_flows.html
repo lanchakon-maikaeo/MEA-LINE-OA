@@ -1,0 +1,39 @@
+{% extends "operations/admin_base.html" %}
+{% load static %}
+{% block title %}flow LINE · แอดมิน · DED Center{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/flows.css' %}">{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>flow LINE</h1>
+    <p class="lede">แท็บเรียงตามปุ่มบน rich menu ที่ผู้ใช้ LINE เห็นจริง กดแท็บเพื่อดูหรือแก้ flow ของปุ่มนั้น แก้ในร่างแบบลากวาง ระบบตรวจทางตันและข้อจำกัดของ LINE ทุกครั้งที่บันทึก แล้วแอดมินเผยแพร่พร้อมเหตุผล</p>
+  </div>
+</div>
+{% include "operations/_flow_tabs.html" %}
+{% if current %}
+<section class="panel flow-tile">
+  <div class="panel__head"><h2>{{ current.item.label }}</h2><span class="panel__note">{% if current.item.place == "bar" %}ปุ่มแถบล่าง{% else %}ปุ่มใหญ่ลำดับ {{ current.item.position }}{% endif %}{% if current.item.division %} · {{ current.item.division.code }}{% endif %}</span></div>
+  {% if current.row %}{% with row=current.row %}
+    <p>เผยแพร่อยู่: {% if row.published %}รุ่น {{ row.published.number }} แชตใช้ flow นี้แล้ว{% else %}ยังไม่เผยแพร่ แชตยังใช้ขั้นในโปรแกรม{% endif %}</p>
+    <p>ร่าง: {% if row.draft %}รุ่น {{ row.draft.number }} · แก้ล่าสุด {{ row.draft.updated_at|date:"j M H:i" }}{% else %}ไม่มี{% endif %}
+      {% if row.errors %}<span class="tag tag--alert">ต้องแก้ {{ row.errors }}</span>{% endif %}{% if row.warnings %} <span class="tag tag--outline">ควรดู {{ row.warnings }}</span>{% endif %}{% if not row.errors and not row.warnings %} <span class="tag tag--closed">ผ่าน</span>{% endif %}</p>
+    <div class="cluster">{% if row.draft or row.published %}<a class="btn" href="{% url 'admin-flow' row.flow.key %}">{% if row.draft %}เปิดตัวแก้{% else %}ดู flow{% endif %}</a>{% endif %}{% if not row.draft %}<form method="post" action="{% url 'admin-flow-start' row.flow.key %}" class="inline">{% csrf_token %}<button class="btn btn--secondary" type="submit">เริ่มร่างใหม่</button></form>{% endif %}</div>
+  {% endwith %}{% elif current.can_flow %}
+    <p>ปุ่มนี้ยังไม่มี flow แชตทำงานตามขั้นในโปรแกรม{% if current.choices %} ตัวเลือกตอนนี้:{% endif %}</p>
+    {% if current.choices %}<ul class="flow-tile__choices">{% for c in current.choices %}<li>{{ c.label }}</li>{% endfor %}</ul>{% endif %}
+    <form method="post">{% csrf_token %}<input type="hidden" name="tile" value="{{ current.item.pk }}"><button class="btn" type="submit">สร้างร่าง flow ของปุ่มนี้</button></form>
+    <p class="muted">ร่างแรกเริ่มจากตัวเลือกข้างบน แชตยังใช้ขั้นในโปรแกรมจนแอดมินเผยแพร่</p>
+  {% else %}
+    <p>ปุ่มนี้เปิด{{ current.item.get_action_display }} เป็นฟังก์ชันในโปรแกรม ไม่ใช้ flow</p>
+  {% endif %}
+</section>
+{% endif %}
+<p class="muted">กล่องค้นในชีทอ่านสถานะจาก <a href="{% url 'admin-sheets' %}">แหล่งข้อมูลค้นในชีท</a></p>
+{% if others %}
+<section class="section" aria-labelledby="f-other">
+  <div class="section-head"><h2 id="f-other">flow ที่ไม่ได้ผูกกับปุ่มบน rich menu</h2></div>
+  {% for row in others %}<p><a href="{% url 'admin-flow' row.flow.key %}">{{ row.flow.name }}</a> <span class="muted">ปุ่ม {{ row.flow.tile|default:"(ไม่ได้ตั้ง)" }} ไม่อยู่บนเมนูตอนนี้</span></p>{% endfor %}
+</section>
+{% endif %}
+{% endblock %}

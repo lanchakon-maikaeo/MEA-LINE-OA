@@ -1371,7 +1371,7 @@ def _mail_registry(upload, summary):
             f" (ช่วง {upload.period_from or '-'} ถึง {upload.period_to or '-'})",
             *rows,
             f"เปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}/registry/",
-            "อีเมลนี้ส่งอัตโนมัติจากระบบรับเรื่อง ฝอจ.",
+            "อีเมลนี้ส่งอัตโนมัติจาก DED Center",
         ]
     )
     return staff_email.plan(

@@ -294,7 +294,7 @@ class ProblemTests(ProblemTestCase):
 
     def test_staff_close_only_after_seven_days_without_an_answer(self):
         case = self.resolved()
-        close = {"reason": "ผู้แจ้งไม่ตอบ"}
+        close = {"reason": "ผู้แจ้งไม่ตอบ", "notice": "ปิดเรื่องเพราะไม่ได้รับคำตอบภายใน 7 วัน"}
         self.assertFails(ErrorCode.VALIDATION_ERROR, self.act, self.trf_staff, case, "close", close)
         case.decisions.filter(action="resolve").update(
             created_at=timezone.now() - timedelta(days=8)

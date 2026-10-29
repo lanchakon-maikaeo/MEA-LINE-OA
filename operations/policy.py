@@ -979,30 +979,6 @@ def refresh(case, trigger, now=None):
     return changed
 
 
-def section_for(case, owner_code=None, current=None):
-    """Q12: the แผนก the policy proposes inside the owner division, or None (the division
-    chooses). The first matching entry wins; a named item beats nothing, a category any item."""
-    current = current if current is not None else current_policy()
-    entries = current.doc.get("sections", []) if current else []
-    owner_code = owner_code or case.owner_division.code
-    rows = [
-        {"category": line.item.category, "item": line.item.code}
-        for line in case.lines.select_related("item")
-    ] or ([{"category": case.topic, "item": None}] if case.topic else [])
-    for entry in entries:
-        if entry["division"] != owner_code or case.kind not in entry["kinds"]:
-            continue
-        if any(
-            (row["item"] and row["item"] in entry.get("items", []))
-            or (entry.get("category") and entry["category"] == row["category"])
-            for row in rows
-        ):
-            return Section.objects.filter(
-                division__code=owner_code, name=entry["section"], is_active=True
-            ).first()
-    return None
-
-
 def after_submit(case):
     refresh(case, "submitted", case.submitted_at)
 
@@ -1070,15 +1046,25 @@ def _wanted_work_clocks(case):
     owner = case.owner_division_id
     wanted = {}
     if case.kind == K.PROBLEM:
-        if _status_in(case, {S.SUBMITTED, S.TRIAGE}):
+        if _status_in(case, {S.SUBMITTED, S.TRIAGE, S.AWAITING_APPROVAL}):
             wanted[(K_.FIRST_RESPONSE, None)] = (owner, case.submitted_at)
         if _status_in(case, {S.IN_PROGRESS}):
-            start = _entered(case, action__in=["complete_triage", "dispute_resolution", "reopen"])
+            start = _entered(
+                case,
+                action__in=[
+                    "complete_triage",
+                    "approve",
+                    "start_work",
+                    "dispute_resolution",
+                    "reopen",
+                ],
+            )
             if start:
                 wanted[(K_.RESOLVE, None)] = (owner, start)
     elif case.kind == K.WITHDRAWAL:
         if _status_in(case, {S.AWAITING_APPROVAL}):
-            start = _entered(case, action="complete_triage")
+            # ADR 0025: without screening the approval clock starts when the case arrives.
+            start = _entered(case, action="complete_triage") or case.submitted_at
             if start:
                 wanted[(K_.APPROVAL, None)] = (owner, start)
         if _status_in(case, {S.AWAITING_EXECUTION, S.IN_PROGRESS}):
@@ -1154,7 +1140,10 @@ def reconcile_clocks(case, state, policy, now):
         if clock.kind in ACK_KINDS:
             finished = (
                 case.status in workflow.TERMINAL
-                or (clock.kind == AckClock.Kind.INTAKE and case.status != S.SUBMITTED)
+                or (
+                    clock.kind == AckClock.Kind.INTAKE
+                    and (case.status != S.SUBMITTED or case.held_by_admin)
+                )
                 or (
                     clock.kind == AckClock.Kind.HANDOFF
                     and (pending is None or clock.handoff_id != pending.pk)
@@ -1172,6 +1161,7 @@ def reconcile_clocks(case, state, policy, now):
     priority = _clock_priority(state)
     if (
         case.status == S.SUBMITTED
+        and not case.held_by_admin  # ADR 0030: no coordinator clock for the admins' cases
         and not AckClock.objects.filter(case=case, kind=AckClock.Kind.INTAKE).exists()
     ):
         intake = Division.objects.filter(is_intake=True).first() or case.owner_division
@@ -1616,7 +1606,13 @@ def card(case):
         "problem": _problem(case),
         "decision_made": Decision.objects.filter(
             case=case,
-            action__in=["set_priority", "accept_handoff", "decide_routing", "complete_triage"],
+            action__in=[
+                "set_priority",
+                "accept_handoff",
+                "decide_routing",
+                "complete_triage",
+                "approve",
+            ],
         ).exists(),
         "fulfilment": _fulfilment(case),
     }

@@ -1,4 +1,6 @@
 {% extends "operations/admin_base.html" %}
+{% load ui %}
+{% block title %}LINE งบข้อความ และงานค้าง · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>LINE งบข้อความ และงานค้าง</h1></div></div>
 <section class="section" aria-labelledby="line-budget">
@@ -41,7 +43,7 @@
 
 <section class="section" aria-labelledby="line-dead">
 <div class="section-head"><h2 id="line-dead">งานค้างและงานที่ส่งไม่สำเร็จ</h2></div>
-<p class="section-note">รออยู่นานสุดต่อชนิดงาน: {% for type, age in health.oldest_pending_seconds.items %}<span class="tag tag--outline">{{ type }} {{ age }} วินาที</span> {% empty %}ไม่มีงานค้าง{% endfor %}</p>
+<p class="section-note">งานที่รอนานที่สุดของแต่ละชนิด: {% for label, minutes in waiting_jobs %}<span class="tag tag--outline">{{ label }} รอ {{ minutes|duration }}</span> {% empty %}ไม่มีงานค้าง{% endfor %}</p>
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">#</th><th scope="col">ชนิด</th><th scope="col">ครั้งที่ลอง</th><th scope="col">ข้อผิดพลาดล่าสุด</th><th scope="col">ลองใหม่</th></tr></thead>
   <tbody>

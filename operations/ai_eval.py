@@ -24,6 +24,7 @@ from types import SimpleNamespace
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, transaction
+from django.test import override_settings
 from django.utils import timezone
 
 from config.environment import require_demo_database
@@ -60,6 +61,8 @@ DATASETS = {
     "menu1": FIXTURES / "ai_menu_v1.json",
     # Whole LINE dialogues through the intake agent (owner, 25 Oct 2569 Q11): menu versions.
     "dialogue1": FIXTURES / "ai_dialogue_v1.json",
+    # ADR 0032 Q18: typed เบิก and ส่งคืน get the fixed reply; versions with slip_facts only.
+    "dialogue2": FIXTURES / "ai_dialogue_v2.json",
 }
 # SHA-256 of typed-v1, locked before any model saw it (not a secret).
 TYPED_SHA256 = (
@@ -83,7 +86,19 @@ DIALOGUE_SHA256 = (
     "fe9dd03694c9abd6cbbe7188ff227dbd"  # pragma: allowlist secret
     "3b871a95b037729e6722c20ccbd01d6c"  # pragma: allowlist secret
 )
-DIALOGUE_LOCKS = {"dialogue1": DIALOGUE_SHA256}
+# SHA-256 of dialogue-v2, locked before the gate first ran on it.
+DIALOGUE2_SHA256 = (
+    "7c959da4fd5db83b404971113aa0b6b8"  # pragma: allowlist secret
+    "50a048b1434f71039c2fea43173e7855"  # pragma: allowlist secret
+)
+DIALOGUE_LOCKS = {"dialogue1": DIALOGUE_SHA256, "dialogue2": DIALOGUE2_SHA256}
+
+
+def dialogue_sets(version):
+    """dialogue-v2 for a version that knows DED Center follows slips (ADR 0032), else v1."""
+    return ("dialogue2",) if ai.reads_slips(version) else ("dialogue1",)
+
+
 # Q11: the right case after a confirmation, nothing filed without one, no menu that does not
 # exist, no loop, no more turns than the guided bot, no attack obeyed.
 DIALOGUE_THRESHOLDS = {
@@ -208,6 +223,7 @@ def config_digest(version):
         # Only a version that reads typed rows carries the key, so older evidence keeps its digest.
         **({"typed_fields": True} if ai.reads_typed(version) else {}),
         **({"menu_fields": True} if ai.reads_menu(version) else {}),
+        **({"slip_facts": True} if ai.reads_slips(version) else {}),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
@@ -279,7 +295,10 @@ def application_projection(extraction, case, catalog, actor):
                 "fields": dict(context.get("fields", {})),
             }
             draft.save()
-        ai_chat.apply(turn, draft, extraction, SimpleNamespace(pk=0))
+        # ADR 0032: these sets measure what the AI reads into a draft; whether typed text may
+        # open a เบิก or ส่งคืน draft at all is the program's rule, played on dialogue-v2.
+        with override_settings(LINE_TYPED_SLIPS=True):
+            ai_chat.apply(turn, draft, extraction, SimpleNamespace(pk=0))
         requests = []
         for draft in ConversationDraft.objects.filter(identity=channel):
             if not draft.kind:
@@ -848,7 +867,7 @@ def run_gate(version):
         rows += [run_typed(version, name) for name in TYPED_LOCKS]
     if ai.reads_menu(version):
         rows += [run_menu(version, name) for name in MENU_LOCKS]
-        rows += [run_dialogue(version, name) for name in DIALOGUE_LOCKS]
+        rows += [run_dialogue(version, name) for name in dialogue_sets(version)]
     report = {
         "gate": ai.eval_gate_for(version),
         "version": version.number,
@@ -862,7 +881,12 @@ def run_gate(version):
             **{key: THRESHOLDS[key] for key in QUALITY},
             **({"typed-v1, typed-v2": TYPED_THRESHOLDS} if ai.reads_typed(version) else {}),
             **(
-                {"menu-v1": MENU_THRESHOLDS, "dialogue-v1": DIALOGUE_THRESHOLDS}
+                {
+                    "menu-v1": MENU_THRESHOLDS,
+                    ("dialogue-v2" if ai.reads_slips(version) else "dialogue-v1"): (
+                        DIALOGUE_THRESHOLDS
+                    ),
+                }
                 if ai.reads_menu(version)
                 else {}
             ),
@@ -1341,7 +1365,7 @@ def gate_datasets(version):
     """The sets a version's evaluation covers: the typed sets too for one reading typed rows,
     and menu-v1 for one reading the menu path."""
     sets = (*GATE_DATASETS, *TYPED_LOCKS) if ai.reads_typed(version) else GATE_DATASETS
-    return (*sets, *MENU_LOCKS, *DIALOGUE_LOCKS) if ai.reads_menu(version) else sets
+    return (*sets, *MENU_LOCKS, *dialogue_sets(version)) if ai.reads_menu(version) else sets
 
 
 def _application_passes(row, report):
@@ -1350,7 +1374,7 @@ def _application_passes(row, report):
     for name, digest in DIALOGUE_LOCKS.items():
         if dataset == load(DATASETS[name])[0]:
             return (
-                report.get("gate") == ai.MENU_EVAL_GATE
+                report.get("gate") in (ai.MENU_EVAL_GATE, ai.SLIP_EVAL_GATE)
                 and row.get("role") == "application"
                 and row.get("dataset_sha256") == digest
                 and metrics.get("cases") == len(load(DATASETS[name])[2])
@@ -1359,7 +1383,7 @@ def _application_passes(row, report):
     for name, digest in MENU_LOCKS.items():
         if dataset == load(DATASETS[name])[0]:
             return (
-                report.get("gate") == ai.MENU_EVAL_GATE
+                report.get("gate") in (ai.MENU_EVAL_GATE, ai.SLIP_EVAL_GATE)
                 and row.get("role") == "application"
                 and row.get("dataset_sha256") == digest
                 and metrics.get("cases") == len(load(DATASETS[name])[2])
@@ -1368,7 +1392,7 @@ def _application_passes(row, report):
     for name, digest in TYPED_LOCKS.items():
         if dataset == load(DATASETS[name])[0]:
             return (
-                report.get("gate") in (ai.TYPED_EVAL_GATE, ai.MENU_EVAL_GATE)
+                report.get("gate") in (ai.TYPED_EVAL_GATE, ai.MENU_EVAL_GATE, ai.SLIP_EVAL_GATE)
                 and row.get("role") == "application"
                 and row.get("dataset_sha256") == digest
                 and metrics.get("cases") == len(load(DATASETS[name])[2])
@@ -1441,7 +1465,8 @@ def rescore(report):
     for profile in report["profiles"]:
         profile["passed"] = (
             _application_passes(profile, report)
-            if report.get("gate") in (ai.EVAL_GATE, ai.TYPED_EVAL_GATE, ai.MENU_EVAL_GATE)
+            if report.get("gate")
+            in (ai.EVAL_GATE, ai.TYPED_EVAL_GATE, ai.MENU_EVAL_GATE, ai.SLIP_EVAL_GATE)
             else _passes(profile["metrics"], _names(profile))
         ) and not report.get("limit")
     return report
@@ -1494,6 +1519,10 @@ def run_next_job():
             from operations import ai_keywords
 
             report = ai_keywords.run_gate(job.version)
+        elif job.version.task == AIConfigVersion.Task.SHEET_STATUS:
+            from operations import ai_sheet_status
+
+            report = ai_sheet_status.run_gate(job.version)
         else:
             report = run_gate(job.version)
         version = ai.record_eval(job.version, report)

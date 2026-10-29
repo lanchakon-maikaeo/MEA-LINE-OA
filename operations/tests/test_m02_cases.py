@@ -95,7 +95,12 @@ def setup_world(target):
     """Shared reference data for TestCase and TransactionTestCase classes."""
     # The SIM world keeps the design before 16 Oct 2569 Q3: each division's work is split into
     # duties and consecutive steps need different people, so the duty tests test that mode.
-    for key, value in ((options.DIVISION_WORK, "roles"), (options.SEPARATION, "on")):
+    # ...and screens new cases, as before ADR 0025 (tests of the new way switch it off).
+    for key, value in (
+        (options.DIVISION_WORK, "roles"),
+        (options.SEPARATION, "on"),
+        (options.SCREENING, "on"),
+    ):
         SystemOption.objects.update_or_create(key=key, defaults={"value": value})
     call_command("load_districts", stdout=StringIO())
     call_command("seed_demo_units", stdout=StringIO())
@@ -190,8 +195,9 @@ WORKING = {
         "in_progress",
         "awaiting_confirmation",
     },
-    K.RETURN: {"triage", "awaiting_execution", "in_progress"},
-    K.PROBLEM: {"triage", "in_progress", "awaiting_confirmation"},
+    # ADR 0025: returns and problem reports wait for the owner division's approval too.
+    K.RETURN: {"triage", "awaiting_approval", "awaiting_execution", "in_progress"},
+    K.PROBLEM: {"triage", "awaiting_approval", "in_progress", "awaiting_confirmation"},
 }
 PAUSED = {"awaiting_info", "on_hold"}
 # Agreed design (grilling Q4, Q15, Q16), written independently of workflow.py.

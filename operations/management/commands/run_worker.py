@@ -47,6 +47,14 @@ class Command(BaseCommand):
                 target=line_menu_release.run_loop, name="line-menu", daemon=True
             ).start()
             threading.Thread(target=ai_eval.job_loop, name="ai-eval", daemon=True).start()
+            from operations import koj_tracking
+
+            threading.Thread(target=koj_tracking.sync_loop, name="koj-sources", daemon=True).start()
+            from operations import sheet_lookup
+
+            threading.Thread(
+                target=sheet_lookup.sync_loop, name="sheet-sources", daemon=True
+            ).start()
         next_approval_check = 0
         while True:
             if time.monotonic() >= next_approval_check:
@@ -73,6 +81,10 @@ def handle_event(event):
         ai_routing.process(event.payload["ai_routing_run_id"])  # ADR 0013
     elif event.event_type == orchestration.EVENT_KEYWORDS_AI:
         ai_keywords.process(event.payload["ai_keyword_run_id"])  # 15 ต.ค. 2569 Q9
+    elif event.event_type == orchestration.EVENT_SHEET_STATUS_AI:
+        from operations import ai_sheet_status
+
+        ai_sheet_status.process(event.payload["sheet_status_run_id"])  # ADR 0027
     else:
         notifications.plan_for_event(event)
         staff_email.plan_for_event(event)  # M10: การแจ้งเตือนเจ้าหน้าที่
@@ -111,6 +123,9 @@ def run_once(limit=20):
         except orchestration.LeaseError as lost:
             _lease_lost(event, lost)
     ai_chat.expire_waiting()
+    from operations import ai_sheet_status
+
+    ai_sheet_status.expire_waiting()  # ADR 0027: the program's reply when the AI is late
     conversation.expire_drafts()
     policy.sweep_clocks()  # M06: acknowledgement reminders and escalation
     work_orders.remind()  # 16 ต.ค. 2569 Q14: งานสั่ง near and past its due date

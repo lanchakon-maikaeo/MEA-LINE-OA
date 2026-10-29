@@ -28,6 +28,7 @@ class AgentTestCase(AITestCase):
         return agent_mcp.Tools(self.line.pk)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class MCPTests(AgentTestCase):
     def agent_reply(self, message, selected):
         self.llm.default = {
@@ -417,6 +418,7 @@ def step(**decision):
     return {"choices": [{"message": {"content": json.dumps(full, ensure_ascii=False)}}]}
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class AgentLoopTests(AgentTestCase):
     """The agent as an LLM with tools in a loop (the course notebook's run_agent), kept to
     read tools, a few steps and the person's confirmation for every change."""

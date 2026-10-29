@@ -44,6 +44,10 @@ EXACT = {
         "เลือกหมวดผลให้ตรงกับเรื่อง (ข้อเสนอแนะมีหมวดผลของตัวเอง)"
     ),
     "topic must be meter, transformer, other, usage or suggestion.": "เลือกหัวข้อจากรายการในฟอร์ม",
+    "sap_kind must be slip, return_slip, work_order, meter, project or memo.": (
+        "เลือกชนิดเลขติดตาม: ใบเบิก ใบส่งคืน ใบสั่งงานจาก SAP หมายเลขเครื่องวัดฯ โครงการ หรือ M/N"
+    ),
+    "intake_data must be a small object.": "ข้อมูลที่ flow เก็บเพิ่มยาวเกินไป",
     "Only division staff can file a case for a requester.": (
         "เจ้าหน้าที่ที่สังกัดกองเท่านั้นบันทึกเรื่องแทนผู้แจ้งได้"
     ),
@@ -61,6 +65,9 @@ EXACT = {
     ),
     "An anonymous report needs a location.": "แจ้งแบบไม่ระบุตัวตนต้องส่งตำแหน่งที่พบเรื่อง",
     "Daily limit of anonymous reports reached.": "วันนี้แจ้งแบบไม่ระบุตัวตนครบจำนวนแล้ว ลองใหม่พรุ่งนี้",
+    "Only a problem with no division waits for the admins.": (
+        "เรื่องที่ส่งถึงแอดมินต้องเป็นเรื่องแจ้งปัญหาที่ไม่ได้เลือกกอง"
+    ),
     # registry_ops (ระบบทะเบียน)
     "This key was used for another registry request.": (
         "คำขอนี้ส่งไประบบทะเบียนแล้วด้วยข้อมูลอื่น เปิดฟอร์มใหม่"

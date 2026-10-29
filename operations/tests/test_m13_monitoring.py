@@ -163,7 +163,7 @@ class PageTests(MonitoringTestCase):
             self.client_for(self.staff).get("/console/admin/monitoring/").status_code, 403
         )
         page = self.client_for(self.admin).get("/console/admin/monitoring/")
-        self.assertContains(page, "Monitoring")
+        self.assertContains(page, "ติดตามระบบและ AI")
         self.assertNotContains(page, "คำนวณตอนนี้")
         self.assertEqual(
             self.client_for(self.admin).post("/console/admin/monitoring/").status_code, 403

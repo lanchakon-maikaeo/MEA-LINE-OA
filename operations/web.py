@@ -6,12 +6,13 @@ cases are audited (round 2 Q3). Actions on a case go through services.perform_ac
 """
 
 import uuid
+from datetime import date
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponse, JsonResponse
@@ -22,27 +23,43 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from operations import (
     admin_nav,
+    approvals,
     casepage,
     charts,
     identity,
+    options,
+    policy,
     queues,
     registry,
     reports,
     services,
     support,
+    units,
     uploads,
+    warehouse_web,
     web_actions,
     wording,
     work_orders,
     workflow,
 )
 from operations.contracts import Actor, CommandFailed, ErrorCode
-from operations.models import Case, District, Division, Priority, Role, RoleGrant, WorkOrder
+from operations.models import (
+    AuthorityGrant,
+    Case,
+    District,
+    Division,
+    Priority,
+    Role,
+    RoleGrant,
+    WorkOrder,
+)
 
 ADMIN_URLS = ("admin-",)
 REFERENCE_URLS = {"pii", "routing-words", "duties"}
 ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
 ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
+# ADR 0030 Q12: ปัญหาและข้อเสนอแนะ is a tab of its own after คิวงาน, for admins only.
+PROBLEM_URLS = {"admin-problems", "admin-problems-csv", "admin-problems-send"}
 
 
 def environment(request):
@@ -63,7 +80,9 @@ def navigation(request):
     admin_menu = (
         admin_nav.menu(scope, name) if scope.is_admin and name in admin_nav.URL_NAMES else None
     )
-    if admin_menu or (name and name.startswith(ADMIN_URLS)):
+    if name in PROBLEM_URLS:
+        section = "problems"
+    elif admin_menu or (name and name.startswith(ADMIN_URLS)):
         section = "admin"
     elif name in REFERENCE_URLS:
         section = "reference"
@@ -101,8 +120,16 @@ def navigation(request):
             "registrations": not scope.is_admin and identity.may_decide_registrations(user),
             "registry": registry.may_open(user),
             "admin": admin_menu,
+            "admin_waiting": _admin_waiting() if scope.is_admin else 0,
         }
     }
+
+
+def _admin_waiting():
+    """The number on the ปัญหาและข้อเสนอแนะ tab: open cases the admins hold (ADR 0030)."""
+    from operations import problems_web  # local: problems_web imports views
+
+    return problems_web._waiting().count()
 
 
 def _scope(request):
@@ -212,7 +239,7 @@ def _attention(user, scope, report, link):
     if scope.is_admin:
         add("การแจ้งเตือนที่ส่งไม่สำเร็จ", waiting["line"], reverse("admin-line"), alert=True)
         add("คำถามที่บอทตอบไม่ได้", waiting["questions"], reverse("admin-questions"))
-        add("Monitoring มีเรื่องที่ควรดู", waiting["monitoring"], reverse("admin-monitoring"), True)
+        add("ตัวเลขติดตามระบบมีเรื่องที่ควรดู", waiting["monitoring"], reverse("admin-monitoring"), True)
     return items
 
 
@@ -234,8 +261,12 @@ def _queue(request, division, admin_all=False):
         number = int(request.GET.get("page", "1"))
     except ValueError:
         number = 1
+    shown = request.GET.get("shown", "")
+    shown = min(int(shown), 2000) if shown.isdigit() else 0
     orders = queues.order_queryset(request.user, tab, division, now, filters)
-    items, pager = queues.page(cases, tab, number, orders)
+    sort = request.GET.get("sort", "newest")
+    sort = sort if sort in queues.SORTS else "newest"
+    items, pager = queues.page(cases, tab, number, orders, sort, shown)
     if division or admin_all:
         request.session["division"] = division.code if division else ALL_QUEUE
     context = {
@@ -247,9 +278,17 @@ def _queue(request, division, admin_all=False):
         "base_query": urlencode(filters.query()),
         "rows": queues.build_rows(items, now),
         "pager": pager,
+        "shown": shown,
         "now": now,
-        "kinds": Case.Kind.choices,
-        "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "รอคัดกรอง")],
+        "kinds": list(units.KIND_SHORT.items()),
+        "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "ยังไม่ตั้งระดับ")],
+        "sort": sort,
+        "sorts": queues.SORTS.items(),
+        "may_approve": bool(division)
+        and approvals.no_screening()
+        and policy.has_authority(
+            request.user, AuthorityGrant.Activity.WITHDRAWAL_APPROVAL, division.pk
+        ),
         "statuses": [
             *Case.Status.choices,
             *(
@@ -331,6 +370,23 @@ def all_queue(request):
     if not (scope.is_admin or scope.is_support):
         raise PermissionDenied
     return _queue(request, None, admin_all=True)
+
+
+@login_required
+@require_POST
+def division_approve(request, code):
+    """ADR 0025 Q26: approve the ticked cases at the level the system proposed."""
+    division = _division_or_404(_scope(request), code)
+    numbers = request.POST.getlist("case")[:100]
+    cases = list(queues.visible(request.user).filter(owner_division=division, number__in=numbers))
+    done, skipped = approvals.bulk_approve(request.user, cases)
+    if done:
+        messages.success(request, f"อนุมัติแล้ว {len(done)} เรื่อง")
+    for case, why in skipped[:20]:
+        messages.error(request, f"{case.number}: {why}")
+    if not numbers:
+        messages.error(request, "ติ๊กเรื่องที่จะอนุมัติก่อน")
+    return redirect("division-detail", code=division.code)
 
 
 # Queue tabs the tour may take a case from, in order of preference.
@@ -417,6 +473,7 @@ def case_detail(request, number):
             "irreversible": ", ".join(o.label for o in offers if o.irreversible),
             "hints": web_actions.hints(st, offers),
             "can_upload": uploads.may_upload(st),
+            "panel": warehouse_web.case_panel(request.user, case),
         },
     )
 
@@ -469,6 +526,8 @@ def case_action(request, number, action):
     scope = _scope(request)
     if not scope.has_any_access or action not in web_actions.RULES:
         raise Http404
+    if action in web_actions.STOCK and not options.old_stock():
+        raise Http404  # ADR 0032
     case = _visible_case(request, number)
     st = web_actions.situation(request.user, case)
     offered = {o.name for o in web_actions.available(request.user, case, st)}
@@ -612,6 +671,9 @@ def account(request):
             if line is not None and staff_line.unlink(line, request.user, "เลิกเชื่อมจากหน้าเว็บ"):
                 messages.success(request, "เลิกเชื่อม LINE แล้ว")
             return redirect("account")
+        elif request.POST.get("action") in ("away", "back"):
+            _set_away(request)
+            return redirect("account")
     grants = (
         RoleGrant.objects.filter(user=request.user, revoked_at__isnull=True)
         .select_related("division")
@@ -626,8 +688,31 @@ def account(request):
             "line": ChannelIdentity.objects.filter(staff_user=request.user).first(),
             "code": code,
             "code_minutes": staff_line.CODE_MINUTES,
+            "away": units.away_until(request.user),
+            "today": timezone.localdate(),
         },
     )
+
+
+def _set_away(request):
+    """ADR 0031 Q21: "ไม่อยู่ ถึงวันที่" set by the person; their system-given cases move on."""
+    until = None
+    if request.POST.get("action") == "away":
+        try:
+            until = date.fromisoformat(request.POST.get("until", ""))
+        except ValueError:
+            messages.error(request, "เลือกวันสุดท้ายที่ไม่อยู่")
+            return
+    try:
+        moved = units.set_away(request.user, until)
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+        return
+    if until is None:
+        messages.success(request, "บันทึกว่ากลับมาแล้ว เรื่องที่ย้ายไปแล้วยังอยู่กับคนใหม่")
+        return
+    extra = f" ย้ายเรื่องที่ยังไม่จบให้คนสำรอง {moved} เรื่อง" if moved else ""
+    messages.success(request, f"บันทึกว่าไม่อยู่ถึง {units.thai_date(until)} แล้ว{extra}")
 
 
 @login_required
@@ -667,7 +752,9 @@ def _export(request, division, admin_all=False):
         queues.tab_condition(tab, division, request.user, now, admin_all)
     )
     orders = queues.order_queryset(request.user, tab, division, now, filters)
-    cases = queues.ordered(queues.apply_filters(queues.prefetch(cases), filters), tab, orders)
+    sort = request.GET.get("sort", "newest")  # the CSV keeps the order on screen
+    sort = sort if sort in queues.SORTS else "newest"
+    cases = queues.ordered(queues.apply_filters(queues.prefetch(cases), filters), tab, orders, sort)
     text, count, truncated = reports.export_csv(cases, now)
     identity.audit(
         request.user,

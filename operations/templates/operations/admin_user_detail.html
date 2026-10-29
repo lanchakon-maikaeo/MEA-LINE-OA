@@ -1,4 +1,6 @@
 {% extends "operations/admin_base.html" %}
+{% block title %}{{ target.staff_profile.display_name|default:target.username }} · บัญชีเจ้าหน้าที่ · แอดมิน · DED Center{% endblock %}
+{% load units_ui %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · บัญชีเจ้าหน้าที่</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>
 
@@ -25,9 +27,10 @@
 
 <div class="form-grid">
     <form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">
-  <fieldset><legend>แจ้งการสมัครผ่าน LINE แอดมิน</legend>{% csrf_token %}
+  <fieldset><legend>แจ้งเตือนแอดมินทาง LINE</legend>{% csrf_token %}
     <p>บัญชีผู้รับต้องเป็นแอดมินและเชื่อม LINE แล้ว ระบบตรวจสิทธิ์อีกครั้งก่อนส่ง</p>
     <label><input type="checkbox" name="enabled" value="1"{% if target.staff_profile.notify_registrations %} checked{% endif %}> รับแจ้งคำขอลงทะเบียนและผลการอนุมัติ</label>
+    <label><input type="checkbox" name="admin_waiting" value="1"{% if target.staff_profile.notify_admin_waiting %} checked{% endif %}> รับแจ้งเรื่องใหม่ที่รอแอดมิน (ปัญหาการใช้งานหรืออื่นๆ)</label>
     <button type="submit">บันทึกผู้รับแจ้ง</button>
   </fieldset>
 </form>
@@ -53,14 +56,11 @@
     <p><label for="u-full-ref">เลขอ้างอิงการมอบอำนาจ</label> <input id="u-full-ref" name="approval_reference" maxlength="200" required></p>
     <button type="submit">ให้ทำได้ทุกงานในกองนี้</button></fieldset>
 </form>{% endif %}
-{% if sections %}
-<form method="post" action="{% url 'admin-user-action' target.pk 'section' %}">
-  <fieldset><legend>แผนก (ใช้แยกคิวและรายงาน ไม่เปลี่ยนสิทธิ์)</legend>{% csrf_token %}
-    <p><label for="u-section">แผนก</label> <select id="u-section" name="section"><option value="">ไม่สังกัดแผนก</option>{% for s in sections %}<option value="{{ s.pk }}"{% if target.staff_profile.section_id == s.pk %} selected{% endif %}>{{ s.division.code }} · {{ s.name }}</option>{% endfor %}</select></p>
-    <p><label for="u-section-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-section-reason" name="reason" maxlength="500"></p>
-    <button type="submit">บันทึกแผนก</button></fieldset>
-</form>
-{% endif %}
+<section class="org-here" aria-labelledby="u-unit">
+  <h2 id="u-unit">สังกัด</h2>
+  <p>{{ target|unit_path }}</p>
+  <p class="muted">ย้ายหน่วย ตั้งเป็นผู้รับผิดชอบประจำงาน หรือผู้รับแจ้งเรื่องสำคัญ ได้ที่<a href="{% url 'admin-org' %}">ผังหน่วยงาน</a> การย้ายหน่วยไม่เปลี่ยนสิทธิ์</p>
+</section>
 <form method="post" action="{% url 'admin-user-action' target.pk 'move' %}">
   <fieldset><legend>ย้ายกอง (ย้ายทุกบทบาทในกองต้นทาง)</legend>{% csrf_token %}{{ move_form.as_p }}<button type="submit">ย้าย</button></fieldset>
 </form>

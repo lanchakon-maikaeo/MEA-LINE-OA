@@ -53,6 +53,7 @@ from operations import (
     line_menu_catalog,
     options,
     policy,
+    problem_pick,
     services,
     staff_email,
     staff_line,
@@ -195,7 +196,12 @@ def validate_graph(doc):
         raise ValidationError(problems)
 
 
+SENT = re.compile(r"ส่งเรื่อง [WRP]\d{2}-\d{6}")
+
+
 def graph_step(step):
+    if step == "meter_group":  # the equipment problem card's groups, as the category step
+        return "category"
     return "field" if step.startswith("field:") else step
 
 
@@ -677,8 +683,12 @@ class Dialogue:
                 )
             if message.get("type") == "flex":
                 for bubble in message["contents"]["contents"]:
-                    for button in bubble["body"]["contents"]:
-                        found[button["action"]["label"]] = button["action"]["data"]
+                    body = bubble["body"]
+                    if body.get("action"):  # a bubble that is its own button (ADR 0030)
+                        found[body["action"]["displayText"]] = body["action"]["data"]
+                    for button in body["contents"]:
+                        if "action" in button:
+                            found[button["action"]["label"]] = button["action"]["data"]
         return found
 
     def button(self, label, reply=None):
@@ -963,8 +973,9 @@ class Dialogue:
 
     def _confirm_reply(self):
         for turn in reversed(self.turns):
-            if turn["role"] == "bot" and "ยื่นเรื่องแล้ว" in turn["said"]:
-                return turn["said"]
+            said = turn["said"] if turn["role"] == "bot" else ""
+            if "ยื่นเรื่องแล้ว" in said or SENT.search(said):  # ADR 0030: ส่งเรื่อง … แล้ว
+                return said
         return ""
 
     def _case_outcome(self):
@@ -1009,19 +1020,27 @@ class Dialogue:
         goal = self.goal
         if goal.kind != K.PROBLEM or goal.choose != "topic":
             return ""
+        if self.flags.get("picked") is not None:
+            return Case.Topic.GENERAL  # ADR 0030: staff say which it is at the result
         if goal.lines or goal.topic not in EQUIPMENT:
             return goal.topic
-        # The general menu deliberately groups transformers with other equipment.  If the
-        # requester skips the catalogue item, the selected group is the only known topic.
-        return "meter" if goal.topic == "meter" else "other"
+        # The equipment card opens on อุปกรณ์อื่น and keeps it when the model is skipped, even
+        # after a group was tapped; the item, when chosen, names the topic.
+        return "other"
 
     def _owner_outcome(self):
         goal = self.goal
-        if goal.kind == K.PROBLEM:
+        if goal.kind == K.PROBLEM and self.flags.get("picked") is not None:
+            # ADR 0030: the division tapped, or the coordinator standing in for the admins.
+            picked = self.flags["picked"]
+            wanted = {picked if picked != problem_pick.ADMIN else self.doc["units"]["coordinator"]}
+        elif goal.kind == K.PROBLEM:
             if goal.lines:
                 category, item = goal.lines[0]["item"].category, goal.lines[0]["item"].code
             else:
-                category, item = (self._submitted_topic(), None)
+                # No item: the story's own equipment words route it (the card asks no group).
+                topic = goal.topic if goal.topic in EQUIPMENT else self._submitted_topic()
+                category, item = (topic, None)
             wanted = {expected_owner(self.doc, K.PROBLEM, category, item)}
         else:
             wanted = {
@@ -1063,9 +1082,13 @@ class Dialogue:
         own = [t for t in self.typed.values() if t] + [
             c.requester.display_name for c in self.cases if not c.requester.is_anonymous
         ]
+        names = [c.requester.display_name for c in self.cases if not c.requester.is_anonymous]
         for case in self.cases:
             for kind in staff_line.IMPORTANT:
-                found = leak(staff_line._text(kind, case), own)
+                # The admins' waiting alert shows the masked text (owner, 29 Oct 2569); never
+                # the name.
+                shown = names if kind in staff_line.SHOWS_TYPED else own
+                found = leak(staff_line._text(kind, case), shown)
                 if found:
                     self.fail("staff_private", f"ข้อความเด้ง {kind} มี '{found}' ของผู้แจ้ง")
         self.passed("staff_private")
@@ -1301,17 +1324,42 @@ def i_skip_location(d):
     return d.press("skip_location", "ข้าม") if "ข้าม" in d.buttons(d.last) else None
 
 
+# Problem cards that still open a topic's own questions; the general problem choice became the
+# division carousel (ADR 0030), which asks no items.
+CARDS = {
+    Case.Topic.USAGE: ("m=problem&topic=usage", "แจ้งปัญหาการใช้ไฟฟ้า"),
+    Case.Topic.SUGGESTION: ("m=problem&topic=suggestion", "ข้อเสนอแนะ"),
+}
+EQUIPMENT_CARD = ("m=problem&topic=equipment", "แจ้งปัญหาอุปกรณ์")
+
+
+def _card(d):
+    """The card a problem starts from; half the equipment and suggestion stories go through
+    ส่งเรื่องใหม่ and the carousel instead, so both ways stay walked."""
+    goal = d.goal
+    if goal.kind != K.PROBLEM:
+        return None
+    if goal.topic != Case.Topic.USAGE:
+        if "card" not in d.flags:  # a story that gives up does so at the kind or the carousel
+            d.flags["card"] = goal.finish == "confirm" and d.rng.random() < 0.5
+        if not d.flags["card"]:
+            return None
+    return CARDS.get(goal.topic, EQUIPMENT_CARD)
+
+
 def i_press_new(d):
-    if d.goal.kind == K.PROBLEM and d.goal.topic == Case.Topic.USAGE:
-        d.flags["usage_choice_pending"] = True
-        return d.postback("press_new", "m=problem&topic=usage", "[กด] แจ้งปัญหาการใช้ไฟฟ้า")
+    card = _card(d)
+    if card is not None:
+        d.flags["usage_choice_pending"] = d.goal.topic == Case.Topic.USAGE
+        return d.postback("press_new", card[0], f"[กด] {card[1]}")
     return d.postback("press_new", "m=new", "[กด] ส่งเรื่องใหม่")
 
 
 def i_type_new(d):
-    if d.goal.kind == K.PROBLEM and d.goal.topic == Case.Topic.USAGE:
-        d.flags["usage_choice_pending"] = True
-        return d.postback("type_new", "m=problem&topic=usage", "แจ้งปัญหาการใช้ไฟฟ้า")
+    card = _card(d)
+    if card is not None:
+        d.flags["usage_choice_pending"] = d.goal.topic == Case.Topic.USAGE
+        return d.postback("type_new", card[0], card[1])
     return d.text("type_new", "ส่งเรื่องใหม่", repair="press_new")
 
 
@@ -1327,24 +1375,33 @@ def i_type_kind_number(d):
 
 
 def i_press_topic(d):
+    """The division carousel (ADR 0030): the division the policy names for the story, else
+    ปัญหาการใช้งานหรืออื่นๆ; no items are asked after it."""
     if d.goal.choose != "topic":
         return None
-    return d.press("press_topic", conversation._topic_menu_label(_topic_choice(d.goal)))
+    code, label = _bubble(d)
+    d.flags["picked"] = code
+    d.goal.lines = []
+    return d.press("press_topic", label)
 
 
 def i_type_topic_number(d):
-    topics = conversation._topics()
-    choice = _topic_choice(d.goal)
-    if d.goal.choose != "topic" or choice not in topics or not _types(d):
+    if d.goal.choose != "topic" or not _types(d):
         return None
-    number = str(topics.index(choice) + 1)
+    code, _ = _bubble(d)
+    d.flags["picked"] = code
+    d.goal.lines = []
+    number = str([c for c, _ in problem_pick.choices()].index(code) + 1)
     return d.text("type_topic_number", d.digits(number), repair="press_topic")
 
 
-def _topic_choice(goal):
-    if goal.topic in EQUIPMENT:
-        return "meter" if goal.topic == "meter" else "other"
-    return goal.topic
+def _bubble(d):
+    picks = dict(problem_pick.choices())
+    if d.goal.topic in EQUIPMENT:
+        code = expected_owner(d.doc, K.PROBLEM, d.goal.topic)
+        if code in picks:
+            return code, picks[code]
+    return problem_pick.ADMIN, problem_pick.ADMIN_LABEL
 
 
 def i_press_usage_choice(d):
@@ -1363,7 +1420,14 @@ def i_press_discard(d):
 def i_press_category(d):
     line_ = _next_line(d)
     if line_ is None:
-        return None
+        # A problem without a known model on the equipment card: the group the person knows,
+        # then ไม่ระบุรุ่น (the topic menu used to open the group itself, ADR 0030).
+        goal = d.goal
+        if goal.kind != K.PROBLEM or goal.topic not in EQUIPMENT or d.flags.get("grouped"):
+            return None
+        d.flags["grouped"] = True
+        group = "meter" if goal.topic == "meter" else "other"
+        return d.press("press_category", conversation.METER_GROUPS[group])
     item = line_["item"]
     group = item.line_group or ("meter" if item.category == "meter" else "other")
     return d.press("press_category", conversation.METER_GROUPS[group])
@@ -1382,7 +1446,8 @@ def i_type_category_number(d):
 def i_press_lines_done(d):
     if _next_line(d) is not None:
         return None
-    label = "ไปต่อ" if "ไปต่อ" in d.buttons(d.last) else "ข้าม (ไม่ระบุของ)"
+    offered = d.buttons(d.last)
+    label = next((x for x in ("ไปต่อ", "ไม่ระบุอุปกรณ์") if x in offered), "ข้าม (ไม่ระบุของ)")
     return d.press("press_lines_done", label)
 
 
@@ -1555,13 +1620,15 @@ def i_press_skip_field(d):
 
 
 def i_press_confirm(d):
-    if d.goal.finish != "confirm" or (d.goal.restart and not d.flags.get("restarted")):
+    restarts = d.goal.restart and "กรอกใหม่" in d.buttons(d.last)  # not on the carousel's
+    if d.goal.finish != "confirm" or (restarts and not d.flags.get("restarted")):
         return None
     return d.press("press_confirm", "ยืนยันส่งเรื่อง")
 
 
 def i_press_restart(d):
-    if not d.goal.restart or d.flags.get("restarted"):
+    # The carousel's summary changes the division or the details instead (ADR 0030).
+    if not d.goal.restart or d.flags.get("restarted") or "กรอกใหม่" not in d.buttons(d.last):
         return None
     d.flags["restarted"] = True
     d.typed.clear()

@@ -12,7 +12,7 @@ number, and admins change the fields, units and the division switch (StaffAndAdm
 
 import uuid
 
-from django.test import Client
+from django.test import Client, override_settings
 
 from operations import line_menu_catalog, options, services
 from operations.contracts import Actor, CommandFailed
@@ -127,7 +127,7 @@ class TypedRowTests(KcwTestCase):
     def test_a_withdrawal_follows_its_sap_slip_with_typed_rows(self):
         reply = self.start()
         self.assertIn("เลขใบเบิก SAP", texts(reply))
-        self.assertIn("4 ถึง 20 ตัว", texts(self.type(ALICE, "ab")))
+        self.assertIn("4 ถึง 30 ตัว", texts(self.type(ALICE, "ab")))
         reply = self.type(ALICE, "4500012345")
         self.assertIn("หมายเลขเครื่องวัด / ขนาด / จำนวน", texts(reply))
         reply = self.type(ALICE, "M-1001 M-1002 / 5(100)A / 2")
@@ -405,7 +405,7 @@ class RepairTests(KcwTestCase):
     def test_repair_tracking_starts_with_the_sap_number(self):
         reply = self.start(action="ติดตามสถานะการซ่อม")
         self.assertIn("เลข SAP งานซ่อม", texts(reply))
-        self.assertIn("4 ถึง 20 ตัว", texts(self.type(ALICE, "ab")))
+        self.assertIn("4 ถึง 30 ตัว", texts(self.type(ALICE, "ab")))
         reply = self.type(ALICE, "6000012345")
         self.assertIn("หมายเลขเครื่องวัด / ขนาด", texts(reply))
         self.assertNotIn("จำนวน", texts(reply))
@@ -487,6 +487,7 @@ class RepairTests(KcwTestCase):
             )
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class OtherPathTests(KcwTestCase):
     def withdraw_by_command(self):
         self.say(self.postback(ALICE, "m=equipment&kind=withdrawal"))

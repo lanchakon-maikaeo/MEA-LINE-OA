@@ -22,6 +22,7 @@ from operations.tests.test_m03_line import ALICE, BOB, texts
 from operations.tests.test_m05_ai import answer, request
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class SecurityGuardTests(support.AITestCase):
     free_text = support.ChatTests.free_text
 
@@ -153,6 +154,7 @@ class SecurityGuardTests(support.AITestCase):
         self.assertFalse(Case.objects.exists())
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class SourceGroundingTests(support.AITestCase):
     free_text = support.ChatTests.free_text
 

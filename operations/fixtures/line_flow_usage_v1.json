@@ -1,0 +1,286 @@
+{
+ "version": "line-flow-usage-v1",
+ "note": "ร่างตามขั้นที่แชตถามอยู่ตอนนี้ (28 ต.ค. 2569) ยังไม่เผยแพร่ ใช้ปรับหลัง grill ของกองนี้",
+ "flow": {
+  "key": "usage",
+  "name": "ตรวจสอบการใช้ไฟฟ้า",
+  "division": "กตฟ.",
+  "tile": "ตรวจสอบการใช้ไฟฟ้า"
+ },
+ "graph": {
+  "nodes": [
+   {
+    "id": "start",
+    "kind": "entry",
+    "title": "ตรวจสอบการใช้ไฟฟ้า",
+    "text": "ปุ่มบน rich menu ของ กตฟ.",
+    "buttons": [],
+    "config": {},
+    "x": 40,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "c1",
+    "kind": "message",
+    "title": "ตรวจสอบการใช้ไฟฟ้า",
+    "text": "เลือกเรื่องที่ต้องการ",
+    "buttons": [
+     {
+      "id": "c1.b0",
+      "label": "เครื่องวัดฯ ผิดปกติ",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "c1.b1",
+      "label": "เครื่องวัดฯ ชำรุด",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "c1.b2",
+      "label": "เครื่องวัดฯ ถูกกระทำ",
+      "full": "เครื่องวัดฯ มีการกระทำ",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "c1.b3",
+      "label": "ร้องเรียนไฟแพง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "c1.b4",
+      "label": "ทบทวนหน่วยไฟฟ้า",
+      "full": "ทบทวนหน่วยไฟฟ้าจากการร้องเรียน",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "c1.b5",
+      "label": "ติดตามเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     }
+    ],
+    "config": {},
+    "x": 360,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "meters",
+    "kind": "ask",
+    "title": "หมายเลขเครื่องวัดฯ",
+    "text": "พิมพ์หมายเลขเครื่องวัดฯ หลายเครื่องคั่นด้วย ,\nเช่น 12345678, 12345679",
+    "buttons": [],
+    "config": {
+     "field": "meter_numbers",
+     "rule": "numbers"
+    },
+    "x": 680,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "district",
+    "kind": "ask",
+    "title": "เขตของเครื่องวัดฯ",
+    "text": "พิมพ์ชื่อเขต เช่น เขตวัดเลียบ",
+    "buttons": [],
+    "config": {
+     "field": "district",
+     "rule": "district"
+    },
+    "x": 1000,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "more",
+    "kind": "ask",
+    "title": "รายละเอียดเพิ่มเติม",
+    "text": "เช่น สิ่งที่พบ ช่วงเวลา หรือเลขผู้ใช้ไฟ (CA) หรือกดข้าม",
+    "buttons": [
+     {
+      "id": "more.b0",
+      "label": "ข้าม",
+      "full": "",
+      "note": "",
+      "set": ""
+     }
+    ],
+    "config": {
+     "field": "description",
+     "rule": "text",
+     "optional": "1"
+    },
+    "x": 1320,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "sum",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: ตรวจสอบการใช้ไฟฟ้า",
+    "text": "",
+    "buttons": [
+     {
+      "id": "sum.b0",
+      "label": "ยืนยันส่งเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sum.b1",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
+    "config": {},
+    "x": 1640,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "case",
+    "kind": "create_case",
+    "title": "สร้างเรื่องการใช้ไฟฟ้า",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "case_kind": "problem",
+     "topic": "usage",
+     "division": "กตฟ."
+    },
+    "x": 1960,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "done",
+    "kind": "result",
+    "title": "ยื่นเรื่องแล้ว",
+    "text": "ติดตามได้ที่ เรื่องของฉัน",
+    "buttons": [],
+    "config": {},
+    "x": 2280,
+    "y": 40,
+    "w": 260
+   },
+   {
+    "id": "track",
+    "kind": "find_case",
+    "title": "เรื่องของฉัน",
+    "text": "แสดงเรื่องของผู้แจ้งในกองนี้",
+    "buttons": [],
+    "config": {},
+    "x": 680,
+    "y": 270,
+    "w": 260
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "from": "start",
+    "port": null,
+    "to": "c1",
+    "label": ""
+   },
+   {
+    "id": "e2",
+    "from": "c1",
+    "port": "c1.b0",
+    "to": "meters",
+    "label": ""
+   },
+   {
+    "id": "e3",
+    "from": "c1",
+    "port": "c1.b1",
+    "to": "meters",
+    "label": ""
+   },
+   {
+    "id": "e4",
+    "from": "c1",
+    "port": "c1.b2",
+    "to": "meters",
+    "label": ""
+   },
+   {
+    "id": "e5",
+    "from": "c1",
+    "port": "c1.b3",
+    "to": "meters",
+    "label": ""
+   },
+   {
+    "id": "e6",
+    "from": "c1",
+    "port": "c1.b4",
+    "to": "meters",
+    "label": ""
+   },
+   {
+    "id": "e7",
+    "from": "c1",
+    "port": "c1.b5",
+    "to": "track",
+    "label": ""
+   },
+   {
+    "id": "e8",
+    "from": "meters",
+    "port": null,
+    "to": "district",
+    "label": ""
+   },
+   {
+    "id": "e9",
+    "from": "district",
+    "port": null,
+    "to": "more",
+    "label": ""
+   },
+   {
+    "id": "e10",
+    "from": "more",
+    "port": "more.b0",
+    "to": "sum",
+    "label": ""
+   },
+   {
+    "id": "e11",
+    "from": "more",
+    "port": null,
+    "to": "sum",
+    "label": ""
+   },
+   {
+    "id": "e12",
+    "from": "sum",
+    "port": "sum.b0",
+    "to": "case",
+    "label": ""
+   },
+   {
+    "id": "e13",
+    "from": "case",
+    "port": null,
+    "to": "done",
+    "label": ""
+   }
+  ]
+ }
+}

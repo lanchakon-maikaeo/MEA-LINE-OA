@@ -120,6 +120,7 @@ class GraphTests(TestCase):
             self.assertIn(part, text)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class SimulationTests(SimTestCase):
     def test_seeded_dialogues_pass_keep_nothing_and_send_nothing(self):
         before = (
@@ -235,6 +236,7 @@ class SimulationTests(SimTestCase):
             self.run_sim(count=1)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class MutationTests(SimTestCase):
     """Break the bot on purpose: the rule meant for that fault must fail."""
 
@@ -302,6 +304,7 @@ class MutationTests(SimTestCase):
         self.assertIn("isolation", self.failed(records))
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class RetryTests(SimTestCase):
     def test_a_text_that_names_another_category_is_drawn_again(self):
         graph = only(dialogue_sim.load_graph(), "problem_equipment", topics=["meter"], hazard=0)
@@ -394,8 +397,7 @@ class FoundBySimulatorTests(LineTestCase):
                 code=f"MTR_L{n:02d}", name=f"มิเตอร์ L{n:02d}", category="meter", unit="เครื่อง"
             )
         self.approve(ALICE)
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        self.say(self.postback(ALICE, "m=problem&topic=equipment"))  # the equipment card
         reply = self.press(ALICE, "มิเตอร์")
         self.assertIn("ค้นหา", texts(reply))
         self.assertIn("ไม่ระบุรุ่น", buttons(reply))
@@ -407,9 +409,7 @@ class FoundBySimulatorTests(LineTestCase):
 
     def test_the_summary_follows_the_questions_with_the_topics_labels(self):
         self.approve(ALICE)
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "ข้อเสนอแนะ")
+        self.say(self.postback(ALICE, "m=problem&topic=suggestion"))  # the suggestion card
         self.type(ALICE, "อยากให้มีรอบรับของช่วงบ่าย (ทดสอบ)")
         self.type(ALICE, "ใช้กับคลังเขต (ทดสอบ)")
         summary = texts(self.press(ALICE, "ข้าม"))

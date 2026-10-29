@@ -10,6 +10,7 @@ from django.utils import timezone
 from operations import (
     coordination,
     fulfilment,
+    options,
     policy,
     problems,
     queues,
@@ -43,7 +44,7 @@ JOURNEY = {
     ],
     K.WITHDRAWAL: [
         ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
-        ("อนุมัติ", {S.AWAITING_APPROVAL}),
+        ("กองรับเรื่อง", {S.AWAITING_APPROVAL}),
         ("จ่ายของ", {S.AWAITING_EXECUTION, S.IN_PROGRESS}),
         ("รอหน่วยงาน (เขต/ฝ่าย)ยืนยันรับ", {S.AWAITING_CONFIRMATION}),
         ("ปิดเรื่อง", {S.CLOSED}),
@@ -58,7 +59,7 @@ JOURNEY = {
 ASIDE = {
     S.AWAITING_INFO: "รอข้อมูลเพิ่มจากหน่วยงาน (เขต/ฝ่าย)",
     S.ON_HOLD: "พักเรื่องไว้",
-    S.REJECTED: "ไม่รับเรื่อง/ไม่อนุมัติ",
+    S.REJECTED: "ไม่รับเรื่อง",
     S.CANCELLED: "ยกเลิก",
 }
 
@@ -86,7 +87,11 @@ RULE_TITLES = {
     "R10": "ไม่พบรายการหรือขอบเขตไม่ชัด",
 }
 
-EXTRA_ACTIONS = {"submit": "ยื่นเรื่อง", "route_by_ai": "AI ส่งกองตามหน้าที่"}
+EXTRA_ACTIONS = {
+    "close_on_delivery": "ปิดเรื่องเมื่อเขตได้รับของ",
+    "submit": "ยื่นเรื่อง",
+    "route_by_ai": "AI ส่งกองตามหน้าที่",
+}
 
 SYSTEM_EVENTS = {
     "case.ack_overdue": "เกินเวลาตอบรับ",
@@ -182,6 +187,13 @@ def timeline(case):
         data = decision.data if isinstance(decision.data, dict) else {}
         if decision.action == "set_sap_number" and data.get("sap_number"):
             label += f" {data.get('previous') or 'ไม่มี'} → {data['sap_number']}"
+        if decision.action == "assign" and data.get("auto"):
+            # ADR 0031: the system handed the case on; the reason says why.
+            label = (
+                f"ระบบมอบหมายให้ {data['assignee_name']}"
+                if data.get("assignee_name")
+                else "ระบบเอาผู้รับผิดชอบออก"
+            )
         moved = decision.from_status and decision.from_status != decision.to_status
         entries.append(
             {
@@ -199,6 +211,9 @@ def timeline(case):
                 )
                 if moved
                 else "",
+                # ADR 0028: what the requester read, and the note only staff read.
+                "notice": data.get("notice", "") if data.get("notice") != decision.reason else "",
+                "note": data.get("internal_note", ""),
                 "system": False,
             }
         )
@@ -316,13 +331,18 @@ def line_owners(case):
 
 
 def lines(case):
-    """The line table, with what the requester typed for a shared item (typed_lines)."""
-    if case.kind == K.WITHDRAWAL:
+    """The line table, with what the requester typed for a shared item (typed_lines). While the
+    stock work is hidden (ADR 0032) a slip shows only รายละเอียดตามใบ, as a problem report does."""
+    stock = options.old_stock()
+    if case.kind == K.WITHDRAWAL and stock:
         page = fulfilment.summary(case)
-    elif case.kind == K.RETURN:
+    elif case.kind == K.RETURN and stock:
         page = returns.summary(case)
     else:
         page = _problem_lines(case)
+        if case.kind == K.RETURN:
+            page["instructions"] = returns.latest_instructions(case)  # แจ้งวิธีส่งคืน stays
+    page["stock"] = stock
     typed = {}
     for line in case.lines.select_related("item"):
         unit = line.item.unit if typed_lines.is_shared(line.item) else ""

@@ -1,5 +1,5 @@
 /*
- * ระบบรับเรื่อง ฝอจ. — design system (M10 Q1–Q3, Q7).
+ * DED Center — design system (M10 Q1–Q3, Q7).
  * Chrome of DESIGN-nike.md: black/white/soft-cloud, pill buttons, flat cards, 1px hairlines,
  * 8px rhythm. No photography and no 96px campaign lockups; the display tier is used for
  * summary numbers only. Red marks danger (P0, hazard, overdue, escalated), green a closed
@@ -208,14 +208,6 @@ a:hover { color: var(--charcoal); }
   display: flex; align-items: center; gap: var(--s-24);
 }
 .brand { display: inline-flex; align-items: center; gap: var(--s-12); text-decoration: none; color: var(--ink); flex: none; }
-.brand__mark {
-  display: inline-grid; place-items: center;
-  width: 40px; height: 40px; border-radius: var(--r-full);
-  background: var(--ink); color: var(--on-primary);
-  font-size: 13px; font-weight: 700; letter-spacing: 0;
-}
-.brand__name { font-weight: 600; font-size: 17px; line-height: 1.2; }
-.brand__name small { display: block; font-size: 12px; color: var(--mute); font-weight: 500; }
 
 .mainnav { display: flex; align-items: stretch; gap: var(--s-30); height: 100%; flex: 1; justify-content: center; }
 .mainnav a {
@@ -309,18 +301,17 @@ a:hover { color: var(--charcoal); }
   .topbar .search input::placeholder { color: transparent; }
   .topbar .search input:focus { position: fixed; left: var(--gutter); right: var(--gutter); top: 12px; width: auto; padding: 0 var(--s-18) 0 40px; color: var(--ink); cursor: text; z-index: 60; }
   .search .icon { left: 12px; }
-  .brand__name small { display: none; }
   .topbar__inner { gap: var(--s-12); }
   .brand { margin-right: auto; }
 }
 @media (max-width: 599px) {
-  .brand__name { display: none; }
   .division-switch .chip__label { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 420px) {
   /* The division switch keeps its name in aria-label; the icon alone fits a 390px phone. */
   .division-switch .chip__label { display: none; }
-  .topbar__tools { gap: var(--s-8); }
+  .topbar__tools { gap: var(--s-4); }
+  .topbar__inner { gap: var(--s-8); }
 }
 
 /* Sub-navigation strip (admin) */
@@ -553,7 +544,12 @@ a.stat--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 }
 .qrow:hover { background: var(--cloud); }
 .qrow--hazard { box-shadow: inset 4px 0 0 var(--danger); }
-.qrow__prio { padding-top: 2px; }
+.qrow__prio { padding-top: 2px; display: flex; align-items: center; gap: var(--s-8); }
+/* The row link covers the whole row; the bulk-approve tick must sit above it. */
+.qrow__pick { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -6px 0 -6px -6px; border-radius: var(--r-full); cursor: pointer; }
+.qrow__pick:hover { background: var(--hairline-soft); }
+.qrow__pick input { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); cursor: pointer; }
+.qrow:has(.qrow__pick input:checked) { background: var(--cloud); }
 .qrow__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-4) var(--s-12); }
 .qrow__link { font-weight: 600; font-size: 17px; text-decoration: none; font-variant-numeric: tabular-nums; }
 .qrow__link::after { content: ""; position: absolute; inset: 0; }
@@ -681,6 +677,7 @@ a.stat--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 .timeline__what { font-weight: 600; }
 .timeline__who { font-size: 14px; color: var(--mute); }
 .timeline__why { margin-top: var(--s-4); font-size: 15px; overflow-wrap: anywhere; }
+.timeline__note { color: var(--mute); }
 .timeline__system .timeline__what { color: var(--danger); }
 @media (max-width: 599px) { .timeline > li { grid-template-columns: minmax(0, 1fr); gap: var(--s-2); } }
 
@@ -1251,3 +1248,85 @@ a.kpi--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 .menu-item-form .cluster input { flex: 1 1 220px; }
 .menu-choice { padding: var(--s-12) 0; border-top: 1px solid var(--hairline-soft); }
 .menu-choice__title { margin: 0 0 var(--s-8); font-weight: 600; }
+
+/* 28 ต.ค. 2569 Q8: long lists fold after their first rows (app.js). */
+.is-folded { display: none !important; }
+.more-button {
+  display: flex; align-items: center; justify-content: center; width: 100%;
+  min-height: 44px; margin: var(--s-12) 0; padding: 0 var(--s-18);
+  border: 1px dashed var(--hairline); border-radius: var(--r-pill); background: transparent;
+  color: var(--ink); font: inherit; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer;
+}
+.more-button:hover { border-style: solid; border-color: var(--ink); background: var(--cloud); }
+.more-button[hidden] { display: none; }
+/* Q9: the approve bar stays in reach while ticking. */
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-12); }
+.bulk-bar button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* DED Center (grill 29 ต.ค. 2569 Q1): the header's wordmark in place of the logo picture. */
+.brand__word { display: inline-flex; align-items: center; gap: var(--s-8); font-size: 21px; line-height: 1; white-space: nowrap; }
+.brand__mark { display: inline-block; padding: 7px 9px 6px; border-radius: 9px; background: var(--ink); color: var(--on-primary); font-weight: 800; letter-spacing: .06em; }
+.brand__rest { font-weight: 600; letter-spacing: -.01em; }
+.brand:hover .brand__rest { text-decoration: underline; text-underline-offset: 4px; }
+@media (max-width: 599px) { .brand__word { font-size: 18px; } .brand__mark { padding: 6px 7px 5px; } }
+@media (max-width: 420px) { .brand__word { font-size: 16px; gap: var(--s-4); } }
+
+/* ป้ายสังกัด (ADR 0031 Q13): three short names, N/A where a level is missing. */
+.unit-path { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 13px; color: var(--ash); }
+.unit-path__part { font-weight: 600; color: var(--ink); }
+.unit-path__part--na { font-weight: 400; color: var(--stone); }
+.unit-path__sep { color: var(--stone); }
+
+/* ผังหน่วยงาน (ADR 0031) */
+.org-try__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 var(--s-18); align-items: end; }
+.org-try__form .btn { margin-bottom: var(--s-18); }
+.org-steps { list-style: none; margin: var(--s-12) 0 0; padding: 0; display: grid; gap: var(--s-12); }
+.org-steps__item { display: grid; grid-template-columns: 36px 1fr; gap: var(--s-12); padding: var(--s-18); border-radius: 18px; background: var(--cloud); }
+.org-steps__item p { margin: var(--s-4) 0 0; }
+.org-steps__n { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-full); background: var(--ink); color: var(--on-primary); font-weight: 700; }
+.org-steps__people { margin: var(--s-4) 0 0; padding-left: var(--s-18); }
+.org-pill { display: inline-block; padding: 0 var(--s-8); border-radius: var(--r-full); background: var(--canvas); font-weight: 600; }
+.org-inline { display: flex; flex-wrap: wrap; gap: var(--s-8); align-items: center; }
+.org-inline select { min-width: 200px; }
+.org-jump { display: flex; flex-wrap: wrap; gap: var(--s-8); margin: 0 0 var(--s-24); }
+.org-division { scroll-margin-top: calc(var(--nav-h) + var(--s-12)); }
+.org-division__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--s-12); padding-bottom: var(--s-12); border-bottom: 1px solid var(--ink); margin-bottom: var(--s-18); }
+.org-division__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-4) var(--s-12); }
+.org-division__title h2 { font-size: 18px; font-weight: 500; color: var(--ash); }
+.org-abbr { font-size: 28px; font-weight: 700; line-height: 1.1; }
+.org-stats { display: flex; flex-wrap: wrap; gap: var(--s-8); }
+.org-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--s-18); margin-top: var(--s-18); }
+.org-card { display: flex; flex-direction: column; gap: var(--s-12); min-width: 0; padding: var(--s-18); border: 1px solid var(--hairline-soft); border-radius: 18px; background: var(--canvas); scroll-margin-top: calc(var(--nav-h) + var(--s-12)); }
+.org-card--division { background: var(--cloud); border-color: transparent; }
+.org-card--group { padding: var(--s-12) var(--s-12) var(--s-12) var(--s-18); border-left: 3px solid var(--ink); border-radius: 12px; }
+.org-card:target { box-shadow: 0 0 0 2px var(--ink); }
+.org-card__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2) var(--s-8); }
+.org-card__abbr { font-size: 20px; font-weight: 700; }
+.org-card--group .org-card__abbr { font-size: 16px; }
+.org-card__level { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--mute); }
+.org-card__name { width: 100%; font-size: 14px; color: var(--ash); }
+.org-card__block p { margin: 0; font-size: 15px; }
+.org-card__h { margin: 0 0 var(--s-4); font-size: 12px; font-weight: 600; color: var(--mute); }
+.org-people { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s-4) var(--s-8); }
+.org-person { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 var(--s-12) 0 var(--s-8); border-radius: var(--r-full); background: var(--cloud); font-size: 14px; }
+.org-card--division .org-person { background: var(--canvas); }
+.org-dot { flex: none; width: 9px; height: 9px; border-radius: var(--r-full); background: var(--hairline); }
+.org-dot--on { background: var(--success); }
+.org-work { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s-8); padding: 6px 0; border-top: 1px solid var(--hairline-soft); font-size: 15px; }
+.org-work:first-of-type { border-top: 0; padding-top: 0; }
+.org-work__label { font-weight: 600; }
+.org-work__label::after { content: " →"; color: var(--stone); font-weight: 400; }
+.org-edit { border-top: 1px solid var(--hairline-soft); padding-top: var(--s-8); }
+.org-edit > summary { cursor: pointer; font-size: 14px; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.org-edit > summary:hover { text-decoration: underline; }
+.org-edit__body { display: grid; gap: var(--s-12); padding-top: var(--s-8); }
+.org-form fieldset { margin: 0; padding: var(--s-12); border: 1px solid var(--hairline-soft); border-radius: 14px; }
+.org-form legend { padding: 0 var(--s-4); font-size: 14px; font-weight: 600; }
+.org-form .field { margin-bottom: var(--s-12); }
+.org-form__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0 var(--s-12); }
+.org-form__actions { display: flex; flex-wrap: wrap; gap: var(--s-4); }
+.choice--sm { min-height: 40px; padding: var(--s-4) var(--s-12); font-size: 14px; }
+.org-sub { display: grid; gap: var(--s-8); }
+.org-move { margin-top: var(--s-18); }
+.org-move__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 var(--s-18); align-items: end; }
+.org-move__form .btn { margin-bottom: var(--s-18); }

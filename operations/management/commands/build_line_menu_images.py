@@ -8,7 +8,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from operations import line_menu, line_menu_catalog
+from operations import line_menu
 
 
 class Command(BaseCommand):
@@ -17,7 +17,6 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from playwright.sync_api import sync_playwright
 
-        line_menu_catalog.sync()
         data = line_menu.drawing()
         static = Path(settings.BASE_DIR) / "operations/static/operations"
         output = Path(settings.BASE_DIR) / "operations/line_assets"
@@ -44,8 +43,10 @@ class Command(BaseCommand):
             for page in line_menu.PAGES
         )
         script = (static / "line_menu.js").read_text()
+        artwork = base64.b64encode((output / "space-template.png").read_bytes()).decode()
         html = (
-            f"<style>{font_css} body{{font-family:MenuThai,sans-serif}}</style>{canvases}"
+            f"<style>{font_css} body{{font-family:MenuThai,sans-serif}}</style>"
+            f'<img id="menu-artwork" hidden src="data:image/png;base64,{artwork}">{canvases}'
             f'<script id="menu-drawing" type="application/json">{json.dumps(data)}</script>'
             f"<script>{script}</script>"
         )
@@ -53,8 +54,10 @@ class Command(BaseCommand):
             browser = playwright.chromium.launch()
             page = browser.new_page()
             page.set_content(html)
-            page.evaluate("document.fonts.ready")
-            page.wait_for_timeout(100)
+            page.wait_for_function(
+                "Array.from(document.querySelectorAll('[data-menu-canvas]'))"
+                ".every(c => c.dataset.menuRendered === 'true')"
+            )
             for name in line_menu.PAGES:
                 encoded = page.locator(f'[data-menu-canvas="{name}"]').evaluate(
                     "c => c.toDataURL('image/jpeg', 0.85).split(',')[1]"

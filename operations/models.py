@@ -11,6 +11,20 @@ from django.db.models import F, Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
+from operations.koj_models import (  # noqa: F401 - register and re-export กอจ. models
+    KojHistory,
+    KojNotice,
+    KojRecipient,
+    KojRecord,
+    KojSource,
+    KojWatch,
+)
+from operations.sheet_models import (  # noqa: F401 - register and re-export ค้นในชีท models
+    SheetEntry,
+    SheetSource,
+    SheetStatusRun,
+)
+
 
 class District(models.Model):
     """Real MEA district name; `code` is the prototype D01-D18 key, never an official code."""
@@ -18,6 +32,9 @@ class District(models.Model):
     code = models.CharField(max_length=16, unique=True)
     name = models.CharField(max_length=200, unique=True)
     official_code = models.CharField(max_length=32, null=True, blank=True, unique=True)
+    # ชื่อย่อ ฟข. (grill กคอ. 28 ต.ค. 2569 Q26) such as ฟขป., used by the divisions' truck
+    # tables; an admin sets it, unique when set.
+    short_name = models.CharField(max_length=16, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -48,6 +65,8 @@ class Division(models.Model):
     # เลขใบเบิก/ใบส่งคืน SAP (user, 23 Oct 2569): a withdrawal or return this division takes
     # follows a slip already made in SAP, so the LINE chat asks for its number. Admins switch it.
     requires_sap = models.BooleanField(default=False)
+    # ชื่อย่อ (ADR 0031 Q3): what the chart and the สังกัด show; the code when empty.
+    short_name = models.CharField(max_length=32, blank=True)
 
     class Meta:
         ordering = ["code"]
@@ -82,6 +101,26 @@ class Section(models.Model):
         return self.code or self.name
 
 
+class WorkGroup(models.Model):
+    """กลุ่มงาน (ADR 0031): a group inside a แผนก, the smallest unit. Only admins create one
+    (Q13); it owns no case and holds no right."""
+
+    section = models.ForeignKey(Section, on_delete=models.PROTECT, related_name="work_groups")
+    name = models.CharField(max_length=200)
+    code = models.CharField(max_length=32, blank=True)  # ชื่อย่อ, when the unit has one
+    order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["section__division__code", "section__order", "order", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["section", "name"], name="work_group_unique_name")
+        ]
+
+    def __str__(self):
+        return self.code or self.name
+
+
 class Role(models.TextChoices):
     # Global roles (division must be empty).
     ADMIN = "admin", "แอดมินระบบ"
@@ -95,7 +134,7 @@ class Role(models.TextChoices):
     # every step and holds the division's authority; the duties below matter only when the
     # organisation splits them again.
     STAFF = "staff", "สมาชิกกอง"
-    APPROVER = "approver", "ผู้อนุมัติ"
+    APPROVER = "approver", "ผู้รับเรื่องของกอง"
     ISSUER = "issuer", "ผู้จ่าย"
     RECEIVER = "receiver", "ผู้รับคืน"
     INSPECTOR = "inspector", "ผู้ตรวจสภาพ"
@@ -120,12 +159,24 @@ class StaffProfile(models.Model):
     display_name = models.CharField(max_length=200)
     # รหัสพนักงาน (10 Oct 2569 Q3): links LINE to this account after an employee check.
     employee_id = models.CharField(max_length=32, blank=True)
+    # สังกัด (ADR 0031): one unit, the deepest of กอง › แผนก › กลุ่มงาน; each level may be
+    # empty (N/A). Set from the roster when the employee is verified, moved by an admin.
+    division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     # แผนก (Q13): at most one; empty for heads of division and staff outside any section.
     section = models.ForeignKey(
         Section, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    work_group = models.ForeignKey(
+        WorkGroup, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # ไม่อยู่ ถึงวันที่ (ADR 0031 Q21): set by the person; the system skips them until then.
+    away_until = models.DateField(null=True, blank=True)
     must_change_password = models.BooleanField(default=False)
     notify_registrations = models.BooleanField(default=False)
+    # ADR 0030 Q25: an admin hears on LINE of each case waiting for the admins (on unless set off).
+    notify_admin_waiting = models.BooleanField(default=True)
     # Sessions authenticated before this instant are rejected (forced logout).
     sessions_valid_after = models.DateTimeField(null=True, blank=True)
 
@@ -420,21 +471,21 @@ class Case(models.Model):
     """เรื่อง: exists only once submitted (drafts live in the conversation layer, M03)."""
 
     class Kind(models.TextChoices):
-        WITHDRAWAL = "withdrawal", "คำขอเบิก"
-        RETURN = "return", "คำขอคืน"
-        PROBLEM = "problem", "เรื่องแจ้งปัญหา/ข้อเสนอแนะ"
+        WITHDRAWAL = "withdrawal", "ติดตามใบเบิก"
+        RETURN = "return", "ติดตามใบส่งคืน"
+        PROBLEM = "problem", "แจ้งปัญหา/ข้อเสนอแนะ"
 
     class Status(models.TextChoices):
         SUBMITTED = "submitted", "รอคัดกรอง"
         TRIAGE = "triage", "กำลังคัดกรอง"
-        AWAITING_APPROVAL = "awaiting_approval", "รออนุมัติ"
+        AWAITING_APPROVAL = "awaiting_approval", "รอกองรับเรื่อง"
         AWAITING_EXECUTION = "awaiting_execution", "รอดำเนินการ"
         IN_PROGRESS = "in_progress", "กำลังดำเนินการ"
         AWAITING_CONFIRMATION = "awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย)ยืนยัน"
         AWAITING_INFO = "awaiting_info", "รอข้อมูลเพิ่ม"
         ON_HOLD = "on_hold", "พักเรื่อง"
         CLOSED = "closed", "ปิดเรื่อง"
-        REJECTED = "rejected", "ไม่รับเรื่อง/ไม่อนุมัติ"
+        REJECTED = "rejected", "ไม่รับเรื่อง"
         CANCELLED = "cancelled", "ยกเลิก"
 
     class Topic(models.TextChoices):
@@ -448,6 +499,12 @@ class Case(models.Model):
         SYSTEM = "system", "ระบบงาน"
         # ปุ่ม Meter, CT, VT (user, 24 Oct 2569): follow a repair by its SAP number.
         REPAIR = "repair", "ติดตามสถานะการซ่อม"
+        # grill กคว. 27 Oct 2569 (Q4, Q5): โน้ตบุ๊กและหัวอ่าน, and ขอเครื่องวัดฯ กลับคืน by MEA No.
+        SERVICE = "service", "ขอรับบริการ"
+        METER_BACK = "meter_back", "ขอเครื่องวัดฯ กลับคืน"
+        # ADR 0030: the requester picks a division and types; staff say which it is at the result.
+        GENERAL = "general", "ยังไม่ระบุ"
+        PROBLEM = "problem", "ปัญหา"
 
     class Channel(models.TextChoices):
         LINE = "line", "LINE"
@@ -475,6 +532,12 @@ class Case(models.Model):
     assignee = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # ADR 0031: the งานที่หน่วยรับ the case matched, and whether the system (not a person) chose
+    # the assignee; only such cases move on by themselves (Q24).
+    unit_work = models.ForeignKey(
+        "UnitWork", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    auto_assigned = models.BooleanField(default=False)
     # Empty when the requester submitted on LINE; the staff member when filed on their behalf.
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
@@ -496,7 +559,11 @@ class Case(models.Model):
     return_reason = models.TextField(blank=True)
     source_reference = models.CharField(max_length=100, blank=True)
     # เลขใบเบิก/ใบส่งคืน SAP the requester gave (user, 23 Oct 2569); staff may correct it.
-    sap_number = models.CharField(max_length=20, blank=True, db_index=True)
+    # grill กคว. 27 Oct 2569 Q9, Q21: kept as typed ("4500012345/10"), and which document it is.
+    # รอบใหม่ Q1–Q2: เลขติดตาม may also be a meter number or a project name (up to 60).
+    sap_number = models.CharField(max_length=60, blank=True, db_index=True)
+    sap_kind = models.CharField(max_length=16, blank=True)  # slip, return_slip, work_order,
+    # meter, project or memo (M/N, grill กคอ. Q20)
     description = models.TextField(blank=True)
     impact = models.TextField(blank=True)
     related_case = models.ForeignKey(
@@ -513,6 +580,12 @@ class Case(models.Model):
     menu_label = models.CharField(max_length=120, blank=True)
     # เรื่องการใช้ไฟฟ้า (25 Oct 2569 Q11, Q23): [{"number": …, "district": District.code}].
     meters = models.JSONField(default=list, blank=True)
+    # Values a published LINE flow collected beyond the fixed fields (ADR 0023): the multiplier
+    # check, the meter a CT set goes with, MEA numbers, warnings for staff.
+    intake_data = models.JSONField(default=dict, blank=True)
+    # ปัญหาการใช้งานหรืออื่นๆ (ADR 0030): no division was picked, so an admin holds the case. The
+    # coordinator stands in as owner_division; queues, clocks and reports leave it to the admins.
+    held_by_admin = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ["-submitted_at"]
@@ -545,6 +618,11 @@ class Case(models.Model):
 
     def __str__(self):
         return self.number
+
+    @property
+    def owner_label(self):
+        """The owner as people read it: แอดมิน for a case an admin holds (ADR 0030 Q19)."""
+        return "แอดมิน" if self.held_by_admin else self.owner_division.code
 
 
 class CaseLine(models.Model):
@@ -1106,6 +1184,7 @@ class AIConfigVersion(models.Model):
         ANSWER = "answer", "ตอบแชตผู้ใช้ LINE OA จากคลังคำตอบ"
         ROUTING = "routing", "เสนอกองจากหน้าที่ของกอง"
         KEYWORDS = "keywords", "ยกคำสำคัญให้ระบบจำ"
+        SHEET_STATUS = "sheet_status", "เรียบเรียงสถานะจากชีท"
 
     class Status(models.TextChoices):
         CANDIDATE = "candidate", "รอทดสอบ/ประเมิน"
@@ -1136,6 +1215,9 @@ class AIConfigVersion(models.Model):
     # Also reads where a message belongs on the LINE menu (owner, 25 Oct 2569 Q9): needs
     # typed_fields; evaluated on menu-v1 as well.
     menu_fields = models.BooleanField(default=False, db_default=False)
+    # ADR 0032 Q21: the LINE agent also knows what DED Center does and does not do (it follows
+    # slips issued in SAP, never requisitions, has no stock); needs menu_fields; dialogue-v2.
+    slip_facts = models.BooleanField(default=False, db_default=False)
     profiles = models.ManyToManyField(AIProfile, through="AIConfigEntry", related_name="+")
     test_passed = models.BooleanField(null=True)
     test_result = models.JSONField(default=dict, blank=True)
@@ -1336,7 +1418,7 @@ class AuthorityGrant(models.Model):
     class Activity(models.TextChoices):
         PRIORITY_EXCEPTION = "priority_exception", "ข้อยกเว้นระดับความเร่งด่วน"
         ROUTING_DECISION = "routing_decision", "ตัดสินเส้นทาง"
-        WITHDRAWAL_APPROVAL = "withdrawal_approval", "อนุมัติเบิก"
+        WITHDRAWAL_APPROVAL = "withdrawal_approval", "รับเรื่องของกอง"
         ALLOCATION = "allocation", "จัดสรรของขาด"
         CONDITION_CERTIFICATION = "condition_certification", "รับรองสภาพ"
 
@@ -1585,7 +1667,7 @@ class AckClock(models.Model):
         HANDOFF = "handoff", "รอตอบรับการส่งต่อ"
         FIRST_RESPONSE = "first_response", "ตรวจครั้งแรก"
         RESOLVE = "resolve", "แก้ไข"
-        APPROVAL = "approval", "รออนุมัติ"
+        APPROVAL = "approval", "รอกองรับเรื่อง"
         ISSUE = "issue", "รอจ่าย"
         INSPECTION = "inspection", "รอตรวจของคืน"
         CHILD_ACCEPT = "child_accept", "รอตอบรับงานย่อย"
@@ -2995,3 +3077,382 @@ class LineMenuRelease(models.Model):
     status = models.CharField(max_length=16, default="pending")
     error = models.CharField(max_length=200, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class LineFlow(models.Model):
+    """flow ผู้แจ้งของปุ่ม rich menu หนึ่งปุ่ม (ADR 0023): ขั้นสนทนาเป็นข้อมูลที่มีรุ่น แอดมินแก้ในร่าง
+    แล้วเผยแพร่ในระบบ ไม่ต้อง deploy โค้ด"""
+
+    key = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=120)
+    # The rich menu tile whose tap this flow answers once published (its label).
+    tile = models.CharField(max_length=60, blank=True)
+    division = models.ForeignKey(
+        Division, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class LineFlowVersion(models.Model):
+    """One version of a flow's graph ({"nodes": [...], "edges": [...]}). A flow has at most one
+    draft and one published version; publishing retires the previous one, which stays for
+    rollback. `revision` counts saves of a draft so two editors never overwrite each other."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "ร่าง"
+        PUBLISHED = "published", "เผยแพร่อยู่"
+        RETIRED = "retired", "รุ่นเก่า"
+
+    flow = models.ForeignKey(LineFlow, on_delete=models.CASCADE, related_name="versions")
+    number = models.PositiveIntegerField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.DRAFT)
+    graph = models.JSONField(default=dict)
+    note = models.TextField(blank=True)
+    checks = models.JSONField(default=list, blank=True)
+    revision = models.PositiveIntegerField(default=1)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+    publish_reason = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["flow", "-number"]
+        constraints = [
+            models.UniqueConstraint(fields=["flow", "number"], name="line_flow_version_number"),
+            models.UniqueConstraint(
+                fields=["flow"], condition=Q(status="draft"), name="line_flow_one_draft"
+            ),
+            models.UniqueConstraint(
+                fields=["flow"], condition=Q(status="published"), name="line_flow_one_published"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.flow} รุ่น {self.number}"
+
+
+class DivisionRequirement(models.Model):
+    """requirement ของกอง (grill กคว. 27 ต.ค. 2569 Q28, Q36). Not used since the กคอ. grill
+    (28 ต.ค. 2569 Q41) took its page away: the menu designer on Vercel keeps the requirements.
+    The table stays until a release that may drop it (dropping is a one-way migration)."""
+
+    class Topic(models.TextChoices):
+        PROBLEM = "problem", "ปัญหาที่เจอตอนนี้"
+        WANT = "want", "สิ่งที่อยากได้"
+        ASK = "ask", "ข้อมูลที่ต้องถามผู้แจ้ง"
+        TIME = "time", "ความเร่งด่วนและระยะเวลา"
+        OTHER = "other", "อื่น ๆ"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "รอคุย"
+        AGREED = "agreed", "ตกลงทำ"
+        DECLINED = "declined", "ไม่ทำ"
+        DONE = "done", "ทำแล้ว"
+
+    class Priority(models.TextChoices):
+        HIGH = "high", "สูง"
+        MEDIUM = "medium", "กลาง"
+        LOW = "low", "ต่ำ"
+
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="requirements")
+    topic = models.CharField(max_length=12, choices=Topic.choices, default=Topic.WANT)
+    text = models.TextField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.OPEN)
+    priority = models.CharField(max_length=8, choices=Priority.choices, default=Priority.MEDIUM)
+    remark = models.TextField(blank=True)
+    proposed_by = models.CharField(max_length=120, blank=True)
+    flow = models.ForeignKey(
+        LineFlow, null=True, blank=True, on_delete=models.SET_NULL, related_name="requirements"
+    )
+    node_id = models.CharField(max_length=40, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["division", "topic", "created_at", "pk"]
+
+
+# --- กคว. งานคลัง ปฏิทิน และการคุยในเรื่อง (grill กคว. 27 ต.ค. 2569 Q13 ถึง Q39) ----------------
+
+
+class Calendar(models.Model):
+    """ปฏิทินนัดของกอง (Q25, Q26): one per kind of job, e.g. โน้ตบุ๊กและหัวอ่าน or นัดรับของ.
+    A flow's book box names it by key; any member of the division manages its slots."""
+
+    key = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=120)
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="calendars")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["division", "name"]
+
+    def __str__(self):
+        return self.name
+
+
+class CalendarSlot(models.Model):
+    """ช่วงเวลาที่เจ้าหน้าที่เปิดให้ขอนัด (Q13, Q34): staff choose the times, freely."""
+
+    calendar = models.ForeignKey(Calendar, on_delete=models.PROTECT, related_name="slots")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    capacity = models.PositiveSmallIntegerField(default=1)
+    is_open = models.BooleanField(default=True)
+    note = models.CharField(max_length=200, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["starts_at", "pk"]
+        indexes = [models.Index(fields=["calendar", "starts_at"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(ends_at__gt=models.F("starts_at")), name="calendar_slot_ends_after"
+            )
+        ]
+
+
+class Appointment(models.Model):
+    """คำขอนัด (Q25): a request holds its slot until staff confirm, move or reject it; an
+    unconfirmed request counts as taken. `method` is how ฟข. gets the goods (Q31, Q46)."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "ขอนัด รอยืนยัน"
+        CONFIRMED = "confirmed", "ยืนยันนัดแล้ว"
+        REJECTED = "rejected", "ไม่รับนัด"
+        CANCELLED = "cancelled", "ยกเลิก"
+        DONE = "done", "ทำเสร็จแล้ว"
+
+    class Method(models.TextChoices):
+        NONE = "", "-"
+        TRUCK = "truck", "รถของกองไปส่ง"
+        PICKUP = "pickup", "ฟข. มารับเอง"
+
+    HOLDING = (Status.REQUESTED, Status.CONFIRMED)
+
+    calendar = models.ForeignKey(Calendar, on_delete=models.PROTECT, related_name="appointments")
+    slot = models.ForeignKey(
+        CalendarSlot, null=True, blank=True, on_delete=models.PROTECT, related_name="appointments"
+    )
+    case = models.ForeignKey(
+        "Case", null=True, blank=True, on_delete=models.PROTECT, related_name="appointments"
+    )
+    draft = models.ForeignKey(
+        ConversationDraft, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.REQUESTED)
+    method = models.CharField(max_length=8, choices=Method.choices, blank=True)
+    note = models.TextField(blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["-requested_at"]
+
+
+class CaseMilestone(models.Model):
+    """ขั้นงานคลังของใบเบิก (Q16, Q18): staff record each stage, many slips at once. `on` is the
+    day it happened; for คีย์จ่ายแล้ว `planned_on` is the issue day กคว. set (Q20)."""
+
+    class Stage(models.TextChoices):
+        RECEIVED = "received", "รับใบเบิกแล้ว"
+        KEYED = "keyed", "คีย์จ่ายแล้ว"
+        ISSUED = "issued", "จ่ายแล้ว"
+        DELIVERED = "delivered", "เขตได้รับแล้ว"
+
+    ORDER = [Stage.RECEIVED, Stage.KEYED, Stage.ISSUED, Stage.DELIVERED]
+
+    case = models.ForeignKey("Case", on_delete=models.PROTECT, related_name="milestones")
+    stage = models.CharField(max_length=12, choices=Stage.choices)
+    on = models.DateField()
+    planned_on = models.DateField(null=True, blank=True)
+    note = models.CharField(max_length=300, blank=True)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["case", "on", "pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["case", "stage"], name="case_milestone_once")
+        ]
+
+    @property
+    def label(self):
+        """The stage as the owner division names it for this kind of case (grill กคอ. Q32)."""
+        from operations import warehouse  # local: warehouse builds on the models
+
+        return warehouse.stage_label(self.case, self.stage)
+
+
+class DivisionSchedule(models.Model):
+    """ตารางของกอง (Q17, Q30, Q45): กำหนดจ่ายตามขนาด (working days after วันรับงาน), the
+    weekdays it issues, and วันส่งรถ of each ฟข. Staff of the division edit it with a reason."""
+
+    division = models.OneToOneField(Division, on_delete=models.PROTECT, related_name="schedule")
+    # [{"group": "meter", "size": "5(100)A", "days": 3}]; an empty size is the group's default.
+    sla = models.JSONField(default=list, blank=True)
+    issue_weekdays = models.JSONField(default=list, blank=True)  # 0 = Monday
+    # {District.code or ชื่อย่อ ฟข.: [weekday]}: a table copied from a division's poster names
+    # each ฟข. by its abbreviation until an admin says which district that is (กคอ. Q26).
+    truck_days = models.JSONField(default=dict, blank=True)
+
+    class Delivery(models.TextChoices):
+        CHOOSE = "choose", "ฟข. เลือกรถส่งหรือมารับเอง"  # กคว. Q46
+        TRUCK = "truck", "รถส่งเป็นค่าเริ่มต้น มีปุ่มมารับเอง"  # กคอ. Q16
+
+    delivery = models.CharField(max_length=8, choices=Delivery.choices, default=Delivery.CHOOSE)
+    # Working days between คีย์จ่ายแล้ว and the earliest truck day (กคอ. Q40, default 0).
+    lead_days = models.PositiveSmallIntegerField(default=0)
+    contact = models.CharField(max_length=100, blank=True)  # said when a ฟข. has no truck day
+    # {"withdrawal"|"return": {stage: name}}: the division's own names of the stages (Q7, Q32).
+    stage_labels = models.JSONField(default=dict, blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class Holiday(models.Model):
+    """วันหยุด (grill กคว. รอบใหม่ Q11): a day nobody works, chosen by an admin. It is not a
+    working day for กำหนดจ่าย and shows on the appointment calendars."""
+
+    day = models.DateField(unique=True)
+    name = models.CharField(max_length=120)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["day"]
+
+    def __str__(self):
+        return f"{self.day} {self.name}"
+
+
+class EmergencyContact(models.Model):
+    """ผู้รับแจ้งเรื่องฉุกเฉินของกอง (grill กคว. รอบใหม่ Q33). Since ADR 0031 (Q12) the rows were
+    copied to the กอง cards as ผู้รับแจ้งเรื่องสำคัญ (UnitRecipient) and nothing reads them; the
+    table stays one release so the previous release still runs during a deploy."""
+
+    division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name="+")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["division", "user"], name="emergency_contact_once")
+        ]
+
+
+class UnitWork(models.Model):
+    """งานที่หน่วยรับ (ADR 0031 Q8): a kind of case with a group of goods or a topic that one
+    unit takes. The first active row of the กอง in `order` that the case matches wins (Q23)."""
+
+    division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="unit_works")
+    section = models.ForeignKey(Section, null=True, blank=True, on_delete=models.PROTECT)
+    work_group = models.ForeignKey(WorkGroup, null=True, blank=True, on_delete=models.PROTECT)
+    kind = models.CharField(max_length=16, choices=Case.Kind.choices)
+    group = models.CharField(max_length=16)  # an EquipmentType.LineGroup or a Case.Topic value
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["division__code", "order", "pk"]
+
+
+class UnitWorkOwner(models.Model):
+    """ผู้รับผิดชอบประจำงาน (Q16, Q21): the people who take a matching case at once, คนหลัก
+    first and then the backups."""
+
+    work = models.ForeignKey(UnitWork, on_delete=models.CASCADE, related_name="owners")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["work", "user"], name="unit_work_owner_once")
+        ]
+
+
+class UnitRecipient(models.Model):
+    """ผู้รับแจ้งเรื่องสำคัญของหน่วย (Q12, Q25): who hears of an important case on LINE when the
+    case has no responsible person; a unit without any defers to the bigger unit."""
+
+    division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name="+")
+    section = models.ForeignKey(Section, null=True, blank=True, on_delete=models.CASCADE)
+    work_group = models.ForeignKey(WorkGroup, null=True, blank=True, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["pk"]
+
+
+class CaseMessage(models.Model):
+    """การคุยกับเจ้าหน้าที่ในเรื่อง (ADR 0024): what staff type on the case card and what the
+    requester answers. A staff message goes as a free LINE reply while the requester's last
+    message is under 50 seconds old, otherwise it is held for their next message."""
+
+    class Direction(models.TextChoices):
+        STAFF = "staff", "เจ้าหน้าที่"
+        REQUESTER = "requester", "ผู้แจ้ง"
+
+    class Status(models.TextChoices):
+        HELD = "held", "รอส่งตอนผู้แจ้งส่งข้อความมา"
+        SENT = "sent", "ส่งแล้ว"
+        FAILED = "failed", "ส่งไม่ได้"
+        RECEIVED = "received", "ได้รับ"
+
+    case = models.ForeignKey("Case", on_delete=models.PROTECT, related_name="chat")
+    direction = models.CharField(max_length=10, choices=Direction.choices)
+    text = models.TextField()
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # Q54: the first message of each staff member in a case carries how to reach them.
+    contact = models.CharField(max_length=200, blank=True)
+    # Quick replies a system message carries ([label, postback data, text shown]).
+    quick = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices)
+    inbox = models.ForeignKey(
+        WebhookInbox, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+        indexes = [models.Index(fields=["case", "status"])]

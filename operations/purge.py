@@ -33,6 +33,7 @@ from operations.models import (
     Attachment,
     AuthorityGrant,
     Case,
+    CaseNumberCounter,
     ChannelIdentity,
     ChatAnswer,
     Division,
@@ -234,8 +235,33 @@ def _problems(rows, kept):
     return out
 
 
+def plan_restart():
+    """ล้างผู้แจ้งและเรื่องทั้งหมด (29 Oct 2569): the move to LINE OA @705ttrga gives everyone a
+    new LINE user ID, and the user chose to start over. Every case, requester and LINE account
+    goes with what refers to them; staff accounts, employees and divisions stay."""
+    roots = {
+        Case: set(Case.objects.values_list("pk", flat=True)),
+        Requester: set(Requester.objects.values_list("pk", flat=True)),
+        ChannelIdentity: set(ChannelIdentity.objects.values_list("pk", flat=True)),
+    }
+    rows = closure(roots)
+    problems = _problems(rows, set())
+    if problems:
+        raise ValidationError("ลบไม่ได้: " + "; ".join(problems))
+    cases = list(Case.objects.select_related("owner_division").order_by("submitted_at"))
+    return Plan([], cases, [], rows, [], None)
+
+
 @transaction.atomic
-def apply(actor, the_plan, reason):
+def restart(actor, the_plan, reason, reset_numbers=False):
+    removed = apply(actor, the_plan, reason, action="line_data.restarted")
+    if reset_numbers:
+        CaseNumberCounter.objects.all().delete()
+    return removed
+
+
+@transaction.atomic
+def apply(actor, the_plan, reason, action="demo_data.purged"):
     """Remove what the plan lists, label the examples, turn the demo accounts off."""
     identity.require_admin(actor)
     reason = identity._require_reason(reason)
@@ -267,7 +293,7 @@ def apply(actor, the_plan, reason):
         answers.retire(actor, the_plan.contact.key, reason)
     identity.audit(
         actor,
-        "demo_data.purged",
+        action,
         actor,
         reason,
         removed=the_plan.summary(),

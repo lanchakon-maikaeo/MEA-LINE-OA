@@ -74,9 +74,13 @@ def previous_owners(case):
 
 
 def _move_owner(case, division):
+    from operations import approvals  # local: approvals reads routing_words, not this module
+
     previous = case.owner_division.code
     case.owner_division = division
     case.assignee = None  # M02: a new owner division starts without a responsible person
+    case.auto_assigned, case.unit_work = False, None  # ADR 0031 Q22: the new กอง picks again
+    approvals.after_move(case)  # ADR 0025: out of the coordinator's hands, into approval
     return previous
 
 
@@ -450,7 +454,30 @@ def set_sap_number(ctx, case, payload, reason, target):
     return {"sap_number": number, "previous": previous}
 
 
+def admin_send(ctx, case, payload, reason, target):
+    """ADR 0030 Q11, Q18: an admin names the division and it takes the case at once; a case the
+    admins held is theirs no longer."""
+    if ctx.requester is not None or not (ctx.scope.is_admin or ctx.scope.is_support):
+        fail(ErrorCode.FORBIDDEN, "เฉพาะแอดมินส่งเรื่องให้กองได้")
+    division = _division(payload.get("division"))
+    if division.pk == case.owner_division_id and not case.held_by_admin:
+        fail(ErrorCode.VALIDATION_ERROR, "เรื่องนี้อยู่ที่กองนี้แล้ว")
+    if _pending(case) is not None or _open_review(case) is not None:
+        fail(ErrorCode.VALIDATION_ERROR, "เรื่องนี้รอการส่งต่อหรือผู้ประสานตัดสินอยู่")
+    data = {"division": division.code, "held": case.held_by_admin}
+    case.held_by_admin = False
+    if division.pk != case.owner_division_id:
+        data["owner_from"] = _move_owner(case, division)
+        data["owner_to"] = division.code
+    else:
+        from operations import approvals  # local: approvals reads routing_words
+
+        approvals.after_move(case)
+    return data
+
+
 HANDLERS = {
+    "admin_send": admin_send,
     "set_section": set_section,
     "set_sap_number": set_sap_number,
     "complete_triage": complete_triage,

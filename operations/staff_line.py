@@ -23,15 +23,16 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
-from operations import identity, options, orchestration, queues
+from operations import identity, options, orchestration, queues, units
 from operations.models import (
     AuditEvent,
     Case,
     ChannelIdentity,
     District,
+    Division,
     NotificationDelivery,
     OutboxEvent,
     Requester,
@@ -53,7 +54,12 @@ IMPORTANT = {
     "staff_child_work": N.Level.NORMAL,
     "staff_dispute": N.Level.NORMAL,
     "staff_reopen": N.Level.NORMAL,
+    "staff_admin_waiting": N.Level.NORMAL,  # ADR 0030
 }
+# Alerts that may show what the requester typed, masked like text sent to the AI (owner, 29 Oct
+# 2569: an exception to the lock screen rule for the admins' waiting cases only).
+SHOWS_TYPED = frozenset({"staff_admin_waiting"})
+TYPED_CHARS = 80
 # Steps a staff member may take from LINE when ตัวเลือกระบบ allows it; anything irreversible or
 # that needs a long form stays on the web.
 LINE_ACTIONS = {
@@ -268,11 +274,22 @@ def internal_requester(identity_row, user):
 # --- Alerts -------------------------------------------------------------------------------------
 
 
-def _important_people(case, users):
-    """The person responsible, else the supervisors (ผอ.) among those told, else everyone."""
+def _important_people(case, users, division_id=None):
+    """ADR 0031 Q15: the person responsible, else the ผู้รับแจ้งเรื่องสำคัญ of the unit that takes
+    the work and then of the bigger units, else the supervisors (ผอ.), else everyone told."""
     people = [u for u in users if u.is_active]
-    if case is not None and case.assignee_id and any(u.pk == case.assignee_id for u in people):
-        return [u for u in people if u.pk == case.assignee_id][:1]
+    assignee = next((u for u in people if case is not None and u.pk == case.assignee_id), None)
+    if assignee is not None and units.has_line(assignee):
+        return [assignee]
+    division_id = division_id or (case.owner_division_id if case is not None else None)
+    if case is not None and division_id:
+        division = Division.objects.filter(pk=division_id).first()
+        if division is not None:
+            work = units.match_case(case, division_id)
+            section = case.section if case.owner_division_id == division_id else None
+            chosen = units.line_people(division, work, section=section)
+            if chosen:
+                return chosen
     heads = set(
         RoleGrant.objects.filter(
             user__in=people, role=Role.SUPERVISOR, revoked_at__isnull=True
@@ -281,22 +298,46 @@ def _important_people(case, users):
     return [u for u in people if u.pk in heads] or people
 
 
+def admin_receivers():
+    """ADR 0030 Q25: active admins who keep the waiting-case alert on (the default)."""
+    from django.contrib.auth import get_user_model
+
+    ids = RoleGrant.objects.filter(
+        role=Role.ADMIN, revoked_at__isnull=True, division__isnull=True
+    ).values_list("user_id", flat=True)
+    return list(
+        get_user_model()
+        .objects.filter(pk__in=ids, is_active=True, staff_profile__notify_admin_waiting=True)
+        .order_by("pk")
+    )
+
+
 def _text(kind, case):
     from operations.staff_email import SUBJECTS
 
+    if kind in SHOWS_TYPED:
+        from operations import pii  # local: pii reads the database for names
+
+        typed = " ".join(pii.Masker.for_ai().mask(case.description or "").split())
+        return f"{SUBJECTS[kind]} {case.number}\n{typed[:TYPED_CHARS]}".rstrip()
     # No requester name, no requester text: the push shows on the lock screen.
-    return f"{SUBJECTS[kind]}\nเรื่อง {case.number} · กอง {case.owner_division.code}"
+    return f"{SUBJECTS[kind]}\nเรื่อง {case.number} · กอง {case.owner_label}"
 
 
-def plan(kind, key, case, users):
-    """LINE deliveries for staff with a linked LINE; nothing when the budget option is 0."""
+def plan(kind, key, case, users, chosen=False, division_id=None):
+    """LINE deliveries for staff with a linked LINE; nothing when the budget option is 0.
+    `chosen`: the people were picked by an admin (Q33), so each of them is told. `division_id`:
+    the กอง being told (a handoff's target), when it is not the owner."""
     if kind not in IMPORTANT or case is None or options.get(options.STAFF_LINE_BUDGET) == "0":
         return []
     from operations.conversation import text_message
 
     now = timezone.now()
     planned = []
-    for user in _important_people(case, users):
+    people = (
+        [u for u in users if u.is_active] if chosen else _important_people(case, users, division_id)
+    )
+    for user in people:
         line = ChannelIdentity.objects.filter(staff_user=user, is_following=True).first()
         if line is None:
             continue
@@ -349,7 +390,10 @@ def _token(identity_row, action, value, now):
 
 
 def is_staff_delivery(delivery):
-    return delivery.kind.startswith("staff_") and delivery.channel == N.Channel.LINE_PUSH
+    return delivery.channel == N.Channel.LINE_PUSH and (
+        delivery.kind.startswith("staff_")
+        or (delivery.kind.startswith("koj_") and delivery.recipient_user_id is not None)
+    )
 
 
 def recipient_problem(delivery):
@@ -364,10 +408,18 @@ def recipient_problem(delivery):
         or staff_of(delivery.identity) is None
     ):
         return "staff LINE no longer linked or account inactive"
+    if delivery.kind == "staff_admin_waiting" and not (
+        identity.staff_scope(user).is_admin and user.staff_profile.notify_admin_waiting
+    ):
+        return "admin waiting alerts no longer allowed"
     if delivery.kind == "staff_registration":
         if not identity.staff_scope(user).is_admin or not user.staff_profile.notify_registrations:
             return "registration notifications no longer allowed"
         return ""
+    if delivery.kind.startswith("koj_"):
+        from operations import koj_tracking
+
+        return koj_tracking.recipient_problem(delivery)
     if delivery.work_order_id is not None:
         from operations import work_orders  # local: work_orders plans through this path
 
@@ -384,10 +436,13 @@ def budget_allows(level, now):
     used = (
         N.objects.filter(
             channel=N.Channel.LINE_PUSH,
-            kind__startswith="staff_",
             status__in=[N.Status.SENT, N.Status.UNKNOWN],
             sent_at__gte=month,
-        ).aggregate(total=Sum("counted"))["total"]
+        )
+        .filter(
+            Q(kind__startswith="staff_") | Q(kind__startswith="koj_", recipient_user__isnull=False)
+        )
+        .aggregate(total=Sum("counted"))["total"]
         or 0
     )
     if level == N.Level.CRITICAL:

@@ -1,0 +1,610 @@
+"""หน้าเว็บงานคลัง ปฏิทินนัด และการคุยในเรื่อง (grill กคว. 27 ต.ค. 2569 Q13 ถึง Q39).
+
+งานคลัง: the division's open slips with their stage, the issue day the schedule suggests, and a
+bulk form (scan or paste slip numbers, choose a stage). ตาราง: กำหนดจ่ายตามขนาด, issue days and
+truck days, saved with a reason. ปฏิทิน: a week of slots with their requests; staff open slots
+and confirm, move or reject requests. The case card posts staff messages to the case chat.
+"""
+
+from datetime import date, timedelta
+
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.http import require_POST
+
+from operations import calendars, case_chat, identity, queues, warehouse, workflow
+from operations.models import (
+    Appointment,
+    Calendar,
+    CalendarSlot,
+    Case,
+    CaseMilestone,
+    District,
+    Division,
+    DivisionSchedule,
+    Holiday,
+)
+from operations.views import admin_required
+
+S = CaseMilestone.Stage
+GROUPS = [
+    ("meter", "มิเตอร์"),
+    ("ct", "CT"),
+    ("vt", "VT"),
+    ("set", "ชุดมิเตอร์ CT VT"),
+    ("other", "อุปกรณ์อื่น"),
+]
+WEEKDAYS = list(enumerate(calendars.DAY_NAMES[:5]))
+TABS = [
+    ("all", "ทั้งหมดที่ต้องทำ"),
+    ("none", "ยังไม่รับใบเบิก"),
+    (S.RECEIVED, "รับใบเบิกแล้ว"),
+    (S.KEYED, "คีย์จ่ายแล้ว"),
+    (S.ISSUED, "จ่ายแล้ว"),
+    (S.DELIVERED, "เขตได้รับแล้ว"),
+    ("approval", "รออนุมัติ"),
+]
+# Calendar colours on the month (Q6): นัดรับของ orange like the logo, notebooks blue.
+TONES = {"pickup": "orange", "notebook": "blue"}
+SPARE_TONES = ["green", "purple", "teal"]
+# The button on each row names what the clerk does next.
+NEXT_LABELS = {
+    S.RECEIVED: "รับใบเบิก",
+    S.KEYED: "คีย์จ่าย",
+    S.ISSUED: "จ่ายแล้ว",
+    S.DELIVERED: "เขตได้รับแล้ว",
+}
+# The stage the selection bar offers first on each tab.
+BULK_DEFAULT = {"none": S.RECEIVED, S.RECEIVED: S.KEYED, S.KEYED: S.ISSUED, S.ISSUED: S.DELIVERED}
+
+
+def _division(request, code):
+    division = Division.objects.filter(code=code, is_active=True).first()
+    scope = identity.staff_scope(request.user)
+    if division is None or not identity.can_access_division(scope, division.pk):
+        raise Http404
+    return division
+
+
+def _day(text, default=None):
+    try:
+        return date.fromisoformat(text) if text else default
+    except ValueError:
+        return None
+
+
+@login_required
+def warehouse_page(request, code):
+    division = _division(request, code)
+    if request.method == "POST":
+        back = reverse("warehouse", args=[code]) + (
+            f"?tab={request.POST['tab']}" if request.POST.get("tab", "").isalpha() else ""
+        )
+        numbers = warehouse.read_numbers(request.POST.get("numbers", ""))
+        numbers += request.POST.getlist("case")
+        stage = request.POST.get("stage", "")
+        on = _day(request.POST.get("on"), timezone.localdate())
+        planned = _day(request.POST.get("planned_on"))
+        if on is None or (request.POST.get("planned_on") and planned is None):
+            messages.error(request, "วันที่ไม่ถูกต้อง")
+            return redirect(back)
+        cases, missing = warehouse.find_cases(request.user, division, numbers)
+        try:
+            done, skipped = warehouse.record(
+                request.user, cases, stage, on, planned, request.POST.get("note", "")
+            )
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return redirect(back)
+        if done:
+            messages.success(request, f"บันทึก{S(stage).label} {len(done)} ใบ")
+        for case, why in skipped[:20]:
+            messages.error(request, f"{case.number} ({case.sap_number or '-'}): {why}")
+        if missing:
+            messages.error(request, "ไม่พบในงานที่ยังไม่จบ: " + ", ".join(missing[:30]))
+        return redirect(back)
+    kinds = [Case.Kind.WITHDRAWAL, Case.Kind.RETURN]
+    cases = (
+        Case.objects.filter(owner_division=division, kind__in=kinds)
+        .exclude(status__in=workflow.TERMINAL)
+        .select_related("district")
+        .prefetch_related("milestones", "lines", "appointments")
+        .order_by("submitted_at")
+    )
+    today = timezone.localdate()
+    by_tab = {key: [] for key, _ in TABS}
+    for case in cases[:500]:
+        done = {m.stage: m for m in case.milestones.all()}
+        now = next((done[s] for s in reversed(CaseMilestone.ORDER) if s in done), None)
+        waiting = case.status == Case.Status.AWAITING_APPROVAL
+        keyed = done.get(S.KEYED)
+        received = done.get(S.RECEIVED)
+        planned = keyed.planned_on if keyed else None
+        method = next(
+            (a for a in case.appointments.all() if a.status in Appointment.HOLDING and a.method),
+            None,
+        )
+        nxt = None if waiting else _next_stage(case, done)
+        row = {
+            "case": case,
+            "stage": now,
+            "planned": planned,
+            "suggested": (
+                warehouse.suggested_issue(case, received.on) if received and not keyed else None
+            ),
+            "late": bool(planned and planned < today and S.ISSUED not in done),
+            "method": method,
+            "next": nxt,
+            "next_label": NEXT_LABELS.get(nxt, ""),
+        }
+        if waiting:
+            by_tab["approval"].append(row)
+            continue
+        by_tab[now.stage if now else "none"].append(row)
+        by_tab["all"].append(row)
+    # 28 ต.ค. 2569 Q3: tabs by stage, each with its count; all open work by default.
+    tab = request.GET.get("tab", "all")
+    tab = tab if tab in by_tab else "all"
+    return render(
+        request,
+        "operations/warehouse.html",
+        {
+            "division": division,
+            "rows": by_tab[tab],
+            "tabs": [(key, label, len(by_tab[key])) for key, label in TABS],
+            "tab": tab,
+            "stages": S.choices,
+            "bulk_stage": BULK_DEFAULT.get(tab, S.RECEIVED),
+            "today": today,
+            "schedule": warehouse.schedule_of(division),
+        },
+    )
+
+
+@login_required
+def schedule_page(request, code):
+    division = _division(request, code)
+    districts = list(District.objects.filter(is_active=True).order_by("code"))
+    schedule = warehouse.schedule_of(division)
+    if request.method == "POST":
+        sla = [
+            {"group": g, "size": s, "days": d}
+            for g, s, d in zip(
+                request.POST.getlist("sla_group"),
+                request.POST.getlist("sla_size"),
+                request.POST.getlist("sla_days"),
+                strict=False,
+            )
+        ]
+        trucks = {d.code: request.POST.getlist(f"truck_{d.code}") for d in districts}
+        labels = {
+            kind: {st: request.POST.get(f"stage_{kind}_{st}", "") for st in S.values}
+            for kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
+        }
+        try:
+            warehouse.save_schedule(
+                request.user,
+                division,
+                sla,
+                request.POST.getlist("issue"),
+                trucks,
+                request.POST.get("reason", ""),
+                delivery=request.POST.get("delivery", DivisionSchedule.Delivery.CHOOSE),
+                lead_days=request.POST.get("lead_days", 0),
+                contact=request.POST.get("contact", ""),
+                stage_labels=labels,
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์แก้ตารางนี้"])))
+        else:
+            messages.success(request, "บันทึกตารางแล้ว")
+        return redirect("warehouse-schedule", code=code)
+    rows = list(schedule.sla if schedule else [])
+    trucks = schedule.truck_days if schedule else {}
+    stage_names = schedule.stage_labels if schedule else {}
+    # 28 ต.ค. 2569 Q5: one box per group, its every-size row first, then each size.
+    groups = [
+        {
+            "key": key,
+            "label": label,
+            "default": next((r["days"] for r in rows if r["group"] == key and not r["size"]), ""),
+            "sizes": [r for r in rows if r["group"] == key and r["size"]],
+        }
+        for key, label in GROUPS
+    ]
+    today = timezone.localdate()
+    pick_group = request.GET.get("pg", "meter")
+    pick_district = request.GET.get("pd", districts[0].code if districts else "")
+    issue, truck = warehouse.preview(schedule, pick_group, pick_district, today)
+    return render(
+        request,
+        "operations/warehouse_schedule.html",
+        {
+            "division": division,
+            "groups": groups,
+            "group_choices": GROUPS,
+            "weekdays": WEEKDAYS,
+            "short_days": list(enumerate(["จ.", "อ.", "พ.", "พฤ.", "ศ."])),
+            "issue": schedule.issue_weekdays if schedule else [],
+            "districts": [(d, warehouse.truck_weekdays(schedule, d)) for d in districts],
+            "unmapped": [
+                (k, " ".join(WEEKDAYS[n][1] for n in trucks[k] if n < len(WEEKDAYS)))
+                for k in warehouse.unmapped_abbreviations(schedule)
+            ],
+            "delivery_choices": DivisionSchedule.Delivery.choices,
+            "stage_rows": [
+                (
+                    kind,
+                    label,
+                    [
+                        (st, S(st).label, (stage_names.get(kind) or {}).get(st, ""))
+                        for st in S.values
+                    ],
+                )
+                for kind, label in ((Case.Kind.WITHDRAWAL, "ใบเบิก"), (Case.Kind.RETURN, "ใบส่งคืน"))
+            ],
+            "schedule": schedule,
+            "example": {
+                "group": pick_group,
+                "district": pick_district,
+                "today": calendars.day_label(today),
+                "issue": calendars.day_label(issue) if issue else "",
+                "truck": calendars.day_label(truck) if truck else "",
+            },
+        },
+    )
+
+
+@login_required
+def calendar_page(request, code):
+    division = _division(request, code)
+    choices = list(Calendar.objects.filter(division=division, is_active=True).order_by("pk"))
+    if not choices:
+        messages.info(request, "กองนี้ยังไม่มีปฏิทินนัด")
+        return redirect("division-detail", code=code)
+    # 28 ต.ค. 2569 Q6: every calendar of the division in one month, told apart by colour;
+    # ?cal=KEY narrows it to one.
+    tones = {
+        c.pk: TONES.get(c.key) or SPARE_TONES[i % len(SPARE_TONES)] for i, c in enumerate(choices)
+    }
+    for c in choices:
+        c.tone = tones[c.pk]
+    picked_cal = next((c for c in choices if c.key == request.GET.get("cal")), None)
+    shown = [picked_cal] if picked_cal else choices
+    today = timezone.localdate()
+    start = (_day(request.GET.get("month"), today) or today).replace(day=1)
+    if request.method == "POST":
+        return _calendar_post(request, code, choices, picked_cal, start)
+    weeks = calendars.month(request.user, shown, start)
+    for week in weeks:
+        for d in week:
+            for slot in d["slots"]:
+                slot.tone = tones[slot.calendar_id]
+    picked = _day(request.GET.get("day"))
+    picked_day = next((d for week in weeks for d in week if picked and d["date"] == picked), None)
+    waiting = list(
+        Appointment.objects.filter(calendar__in=shown, status=Appointment.Status.REQUESTED)
+        .select_related("slot", "case__district", "calendar")
+        .order_by("requested_at")
+    )
+    free = {c.key: calendars.free_slots(c.key) for c in shown}
+    for a in waiting:
+        a.tone = tones[a.calendar_id]
+        a.free = free.get(a.calendar.key, [])
+    cal_query = f"cal={picked_cal.key}&" if picked_cal else ""
+    return render(
+        request,
+        "operations/calendar.html",
+        {
+            "division": division,
+            "calendars": choices,
+            "calendar": picked_cal,
+            "cal_query": cal_query,
+            "weeks": weeks,
+            "weekdays": ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."],
+            "start": start,
+            "month_label": f"{calendars.MONTH_NAMES[start.month - 1]} {start.year + 543}",
+            "previous": (start - timedelta(days=1)).replace(day=1),
+            "next": (start + timedelta(days=32)).replace(day=1),
+            "picked": picked_day,
+            "waiting": waiting,
+            "methods": [m for m in Appointment.Method.choices if m[0]],
+            "today": today,
+        },
+    )
+
+
+def _calendar_post(request, code, choices, picked_cal, start):
+    day = _day(request.POST.get("day"))
+    base = reverse("calendar", args=[code]) + "?" + (f"cal={picked_cal.key}&" if picked_cal else "")
+    back = f"{base}month={start.isoformat()}"
+    if day is not None:
+        back = f"{base}month={day.replace(day=1).isoformat()}&day={day.isoformat()}"
+    action = request.POST.get("action", "")
+    try:
+        if action == "add":
+            if day is None:
+                raise ValidationError("เลือกวันก่อน")
+            key = request.POST.get("calendar") or (picked_cal.key if picked_cal else "")
+            calendar = next((c for c in choices if c.key == key), None)
+            if calendar is None:
+                raise ValidationError("เลือกว่าเป็นนัดเรื่องไหน")
+            times = [t for t in request.POST.get("times", "").replace(" ", ",").split(",") if t]
+            made = calendars.add_slots(
+                request.user,
+                calendar,
+                day,
+                times,
+                request.POST.get("minutes") or 60,
+                request.POST.get("capacity") or 1,
+                request.POST.get("note", ""),
+                on_holiday=request.POST.get("on_holiday") == "1",
+            )
+            messages.success(request, f"เปิด {len(made)} ช่วงใน{calendar.name}")
+        elif action == "close":
+            slot = get_object_or_404(
+                CalendarSlot, pk=request.POST.get("slot"), calendar__in=choices
+            )
+            calendars.close_slot(request.user, slot)
+            messages.success(request, "ปิดช่วงนี้แล้ว คนที่ขอไว้ยังอยู่")
+        elif action in ("confirm", "move", "reject", "done"):
+            appointment = get_object_or_404(
+                Appointment, pk=request.POST.get("appointment"), calendar__in=choices
+            )
+            slot = None
+            if action == "move":
+                slot = get_object_or_404(
+                    CalendarSlot, pk=request.POST.get("slot"), calendar=appointment.calendar
+                )
+            calendars.decide(
+                request.user,
+                appointment,
+                action,
+                slot=slot,
+                method=request.POST.get("method", ""),
+                note=request.POST.get("note", ""),
+            )
+            messages.success(request, "บันทึกแล้ว ผู้แจ้งจะเห็นข้อความตอนส่งข้อความมาครั้งถัดไป")
+        else:
+            raise ValidationError("ไม่รู้จักรายการนี้")
+    except (ValidationError, PermissionDenied) as exc:
+        messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์ทำรายการนี้"])))
+    return redirect(back)
+
+
+@admin_required
+def admin_districts(request):
+    """ชื่อย่อ ฟข. (grill กคอ. 28 ต.ค. 2569 Q26): which district each abbreviation of the
+    divisions' truck tables is; saved with a reason."""
+    districts = list(District.objects.filter(is_active=True).order_by("code"))
+    if request.method == "POST":
+        names = {d.code: request.POST.get(f"short_{d.code}", "") for d in districts}
+        try:
+            changed = warehouse.save_short_names(request.user, names, request.POST.get("reason"))
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+        else:
+            messages.success(request, f"บันทึกชื่อย่อแล้ว {changed} เขต")
+        return redirect("admin-districts")
+    from operations.models import DivisionSchedule as Schedule
+
+    waiting = [
+        (s.division.code, warehouse.unmapped_abbreviations(s))
+        for s in Schedule.objects.select_related("division").order_by("division__code")
+    ]
+    return render(
+        request,
+        "operations/admin_districts.html",
+        {"districts": districts, "waiting": [(code, keys) for code, keys in waiting if keys]},
+    )
+
+
+@admin_required
+def admin_holidays(request):
+    """วันหยุด (รอบใหม่ Q11): admins pick days on a month grid; each day is named like
+    "อังคาร, 20 ต.ค. 69" where it is picked."""
+    today = timezone.localdate()
+    start = (_day(request.GET.get("month"), today) or today).replace(day=1)
+    if request.method == "POST":
+        day = _day(request.POST.get("day"))
+        try:
+            if day is None:
+                raise ValidationError("เลือกวันก่อน")
+            if request.POST.get("action") == "remove":
+                calendars.remove_holiday(request.user, day)
+                messages.success(request, f"ลบวันหยุด {calendars.day_label(day)} แล้ว")
+            else:
+                calendars.set_holiday(request.user, day, request.POST.get("name", ""))
+                messages.success(request, f"ตั้ง {calendars.day_label(day)} เป็นวันหยุดแล้ว")
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+        month = (day or start).replace(day=1).isoformat()
+        return redirect(f"{reverse('admin-holidays')}?month={month}")
+    first = start - timedelta(days=(start.weekday() + 1) % 7)
+    off = calendars.holidays(first, first + timedelta(days=42))
+    weeks = [
+        [
+            {
+                "date": d,
+                "in_month": d.month == start.month,
+                "holiday": off.get(d, ""),
+                "label": calendars.day_label(d),
+            }
+            for d in (first + timedelta(days=w * 7 + i) for i in range(7))
+        ]
+        for w in range(6)
+    ]
+    weeks = [w for n, w in enumerate(weeks) if n < 5 or any(d["in_month"] for d in w)]
+    year = Holiday.objects.filter(day__year=start.year).order_by("day")
+    return render(
+        request,
+        "operations/admin_holidays.html",
+        {
+            "weeks": weeks,
+            "weekdays": ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."],
+            "month_label": f"{calendars.MONTH_NAMES[start.month - 1]} {start.year + 543}",
+            "previous": (start - timedelta(days=1)).replace(day=1),
+            "next": (start + timedelta(days=32)).replace(day=1),
+            "year": [(h, calendars.day_label(h.day)) for h in year],
+            "year_label": start.year + 543,
+            "today": today,
+        },
+    )
+
+
+@login_required
+def case_chat_thread(request, number):
+    """The chat window's messages, polled every 10 seconds (Q15)."""
+    case = queues.visible(request.user).filter(number=number).first()
+    if case is None:
+        raise Http404
+    items = case_chat.thread(case)
+    scope = identity.staff_scope(request.user)
+    can_chat = identity.can_access_division(scope, case.owner_division_id)
+    return render(
+        request,
+        "operations/_case_chat_thread.html",
+        {
+            "items": items,
+            "last": case_chat.last_from_requester(items),
+            "fresh": bool(can_chat and case_chat.fresh_inbox(case)),
+        },
+    )
+
+
+@login_required
+@require_POST
+def case_chat_post(request, number):
+    case = queues.visible(request.user).filter(number=number).first()
+    if case is None:
+        raise Http404
+    try:
+        message = case_chat.send(
+            request.user, case, request.POST.get("text", ""), request.POST.get("contact", "")
+        )
+    except (ValidationError, PermissionDenied) as exc:
+        messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์ส่งข้อความในเรื่องนี้"])))
+    else:
+        if message.status == message.Status.SENT:
+            messages.success(request, "ส่งถึงผู้แจ้งแล้ว")
+        else:
+            messages.success(request, "เก็บข้อความไว้ ผู้แจ้งจะได้รับตอนส่งข้อความมาครั้งถัดไป")
+    return redirect(f"{reverse('case-detail', args=[case.number])}#chat")
+
+
+def _next_stage(case, done):
+    for stage in CaseMilestone.ORDER:
+        if stage not in done:
+            return stage
+    return None
+
+
+@login_required
+@require_POST
+def case_stage(request, number):
+    """Q38 (Q9): the next warehouse stage of one case, from its card."""
+    case = queues.visible(request.user).filter(number=number).first()
+    if case is None:
+        raise Http404
+    on = _day(request.POST.get("on"), timezone.localdate())
+    planned = _day(request.POST.get("planned_on"))
+    if on is None or (request.POST.get("planned_on") and planned is None):
+        messages.error(request, "วันที่ไม่ถูกต้อง")
+    else:
+        try:
+            done, skipped = warehouse.record(
+                request.user,
+                [case],
+                request.POST.get("stage", ""),
+                on,
+                planned,
+                request.POST.get("note", ""),
+            )
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+        else:
+            for _, why in skipped:
+                messages.error(request, why)
+            if done:
+                label = warehouse.stage_label(case, request.POST["stage"])
+                messages.success(request, f"บันทึก{label}แล้ว")
+    back = request.POST.get("back", "")
+    if back.startswith(reverse("warehouse", args=[case.owner_division.code])):
+        return redirect(back)
+    return redirect(f"{reverse('case-detail', args=[case.number])}#s-warehouse")
+
+
+@login_required
+@require_POST
+def case_appointment(request, number):
+    """Q9: confirm, move or reject this case's appointment, from its card."""
+    case = queues.visible(request.user).filter(number=number).first()
+    if case is None:
+        raise Http404
+    appointment = get_object_or_404(Appointment, pk=request.POST.get("appointment"), case=case)
+    action = request.POST.get("action", "")
+    slot = None
+    if action == "move":
+        slot = CalendarSlot.objects.filter(
+            pk=request.POST.get("slot") or 0, calendar=appointment.calendar
+        ).first()
+    try:
+        calendars.decide(
+            request.user,
+            appointment,
+            action,
+            slot=slot,
+            method=request.POST.get("method", ""),
+            note=request.POST.get("note", ""),
+        )
+    except (ValidationError, PermissionDenied) as exc:
+        messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์ทำรายการนี้"])))
+    else:
+        messages.success(request, "บันทึกนัดแล้ว ผู้แจ้งจะเห็นข้อความตอนส่งข้อความมาครั้งถัดไป")
+    return redirect(f"{reverse('case-detail', args=[case.number])}#s-warehouse")
+
+
+def case_panel(user, case):
+    """What the case card shows: the chat, the warehouse stages and the appointments."""
+    scope = identity.staff_scope(user)
+    can_chat = identity.can_access_division(scope, case.owner_division_id)
+    done = {m.stage: m for m in case.milestones.all()}
+    next_stage = _next_stage(case, done)
+    received = done.get(S.RECEIVED)
+    open_appointments = [
+        a for a in case.appointments.select_related("slot", "calendar") if a.status != "cancelled"
+    ]
+    return {
+        "can_act": identity.holds(scope, case.owner_division_id) or scope.is_admin,
+        "next_stage": next_stage,
+        "returning": case.kind == Case.Kind.RETURN,
+        "next_label": warehouse.stage_label(case, next_stage) if next_stage else "",
+        "suggested": (
+            warehouse.suggested_issue(case, received.on, timezone.localdate())
+            if next_stage == S.KEYED and received and case.kind != Case.Kind.RETURN
+            else None
+        ),
+        "today": timezone.localdate(),
+        "waiting": [a for a in open_appointments if a.status == Appointment.Status.REQUESTED],
+        "free": {
+            a.pk: [s for s in calendars.free_slots(a.calendar.key)]
+            for a in open_appointments
+            if a.status == Appointment.Status.REQUESTED
+        },
+        "methods": [m for m in Appointment.Method.choices if m[0]],
+        "chat": (chat := case_chat.thread(case)),
+        "chat_last": case_chat.last_from_requester(chat),
+        "chat_any": any(i["who"] != "status" for i in chat),  # strips alone open no window
+        "chat_open": can_chat and case_chat._identity(case) is not None,
+        "chat_contact": case_chat.contact_of(user) if case_chat.needs_contact(user, case) else "",
+        "chat_fresh": bool(can_chat and case_chat.fresh_inbox(case)),
+        "milestones": list(case.milestones.select_related("recorded_by__staff_profile")),
+        "appointments": open_appointments,
+        "warehouse": case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
+        and warehouse.schedule_of(case.owner_division) is not None,
+    }

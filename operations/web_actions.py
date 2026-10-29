@@ -15,13 +15,16 @@ from django.utils import timezone
 from operations import (
     ai_keywords,
     ai_routing,
+    approvals,
     coordination,
     identity,
     inventory,
+    options,
     policy,
     problems,
     queues,
     registry,
+    requester_steps,
     returns,
     routing_words,
     typed_lines,
@@ -65,12 +68,14 @@ BUTTON_LABELS = {
     "decline_handoff": "ไม่รับงานนี้",
     "request_routing_decision": "ขอให้ผู้ประสานตัดสิน",
     "decide_routing": "ตัดสินว่ากองใดรับ",
-    "set_priority": "ยืนยันระดับความเร่งด่วน",
+    "set_priority": "ตั้งระดับความเร่งด่วน",
     "set_section": "ระบุแผนก",
     "set_sap_number": "แก้เลข SAP ของคำขอ",
     "record_facts": "แก้ข้อเท็จจริง",
-    "approve": "อนุมัติ",
-    "deny_approval": "ไม่อนุมัติ",
+    "approve": "รับเรื่อง",
+    "start_work": "เริ่มงานทันที (เรื่องฉุกเฉิน)",
+    "skip_screening": "ข้ามขั้นคัดกรอง เข้ารอกองรับเรื่อง",
+    "deny_approval": "ไม่รับเรื่อง",
     "allocate": "จัดสรรของที่มีไม่พอ",
     "issue": "บันทึกการจ่ายของ",
     "terminate_outstanding": "ยุติส่วนที่ค้างจ่าย",
@@ -86,6 +91,8 @@ BUTTON_LABELS = {
     "resolve_return_discrepancy": "ปิดส่วนต่างการรับคืน",
     "terminate_return": "ยุติส่วนที่ค้างส่งคืน",
     "resolve": "บันทึกผลการแก้ปัญหา",
+    "admin_send": "ส่งให้กอง",
+    "admin_answer": "ตอบเรื่อง",
     "request_child_work": "สร้างงานย่อย",
     "accept_child_work": "รับงานย่อย",
     "decline_child_work": "ไม่รับงานย่อย",
@@ -94,6 +101,21 @@ BUTTON_LABELS = {
     "cancel_child_work": "ยกเลิกงานย่อย",
     "pause_deadlines": "พักกรอบเวลา",
 }
+
+# ADR 0032: the stock work of M07, M08 and M11, offered only when ตัวเลือกระบบ old_stock_work is on.
+STOCK = frozenset(
+    {
+        "allocate",
+        "issue",
+        "terminate_outstanding",
+        "resolve_discrepancy",
+        "receive",
+        "inspect",
+        "decide_inspection",
+        "resolve_return_discrepancy",
+        "terminate_return",
+    }
+)
 
 # Hard to undo: the form asks for an explicit tick before saving (round 1 Q9).
 IRREVERSIBLE = frozenset(
@@ -116,6 +138,7 @@ PRIMARY_ORDER = [
     "accept_handoff",
     "accept_child_work",
     "decide_routing",
+    "admin_answer",
     "decide_child_work",
     "decide_inspection",
     "approve",
@@ -169,6 +192,7 @@ class Situation:
     resolver_id: int | None = None  # who recorded the latest ผลการแก้ปัญหา
     sections: list = field(default_factory=list)  # the owner division's active แผนก
     overseen: frozenset = frozenset()  # divisions this viewer supervises (16 Oct 2569 Q5)
+    admin: bool = False  # ADR 0030: admins send cases to divisions and answer what they hold
 
     def member(self, division_id, roles=None):
         if self.support:
@@ -243,6 +267,7 @@ def situation(user, case):
         support=scope.is_support,
         separation=identity.separated(scope),
         overseen=scope.overseen,
+        admin=scope.is_admin or scope.is_support,
         **_readiness(case, lines),
     )
 
@@ -251,7 +276,7 @@ def _readiness(case, lines):
     """Read-only (never policy.state_for, which locks): the level, R09 and the close date."""
     triage = CaseTriage.objects.filter(case=case).select_related("current_recommendation").first()
     resolved = (
-        case.decisions.filter(action="resolve").order_by("-id").first()
+        case.decisions.filter(action__in=problems.RESULT_ACTIONS).order_by("-id").first()
         if case.kind == K.PROBLEM
         else None
     )
@@ -324,13 +349,16 @@ RULES = {
     "decide_routing": lambda st: st.routes and (st.review_open or st.handoff is not None),
     "set_priority": lambda st: st.member(st.owner),
     "record_facts": lambda st: st.member(st.owner),
+    # ADR 0025: every kind; a case without item rows (or not a withdrawal) is approved whole,
+    # and so is every case while the stock work is hidden (ADR 0032).
     "approve": lambda st: (
-        st.case.kind == K.WITHDRAWAL
-        and st.other(st.case.submitted_by_id)
+        st.other(st.case.submitted_by_id)
         and st.grant(A.WITHDRAWAL_APPROVAL)
-        and any(line.approved_quantity is None for line in st.lines)
+        and (approvals.whole(st.case) or any(line.approved_quantity is None for line in st.lines))
     ),
     "deny_approval": lambda st: RULES["approve"](st),
+    "start_work": lambda st: False,  # the system starts an emergency itself (ADR 0025)
+    "skip_screening": lambda st: False,
     "allocate": lambda st: (
         st.grant(A.ALLOCATION) and any(line.outstanding > 0 for line in st.lines)
     ),
@@ -400,8 +428,12 @@ RULES = {
         st.member(st.owner, [Role.SUPERVISOR])
         and any(line.return_outstanding > 0 for line in st.lines)
     ),
+    # The case page offers it for the admins' own cases; any case moves from the tab (Q11).
+    "admin_send": lambda st: st.admin and st.case.held_by_admin,
+    "admin_answer": lambda st: st.admin and st.case.held_by_admin and st.case.kind == K.PROBLEM,
     "resolve": lambda st: (
         st.case.kind == K.PROBLEM
+        and not st.case.held_by_admin
         and st.member(st.owner, [Role.RESOLVER])
         and not coordination.blocks_closing(st.case)
     ),
@@ -438,7 +470,10 @@ def available(user, case, st=None):
     """Actions this viewer may start now, the primary one first (empty for read-only viewers)."""
     st = st or situation(user, case)
     names = []
+    hidden = set() if options.old_stock() else STOCK
     for name, rule in RULES.items():
+        if name in hidden:
+            continue
         spec = workflow.ACTIONS.get(name)
         if (
             spec is None
@@ -610,11 +645,11 @@ def _members(division_id):
     return choices
 
 
-def _divisions(exclude=None):
-    return [
-        (d.code, f"{d.code} {d.name}")
-        for d in Division.objects.filter(is_active=True).exclude(pk=exclude).order_by("code")
-    ]
+def _divisions(exclude=None, real=False):
+    divisions = Division.objects.filter(is_active=True).exclude(pk=exclude)
+    if real:  # ADR 0030: the real divisions only, not the demo ones
+        divisions = divisions.filter(is_synthetic=False)
+    return [(d.code, f"{d.code} {d.name}") for d in divisions.order_by("code")]
 
 
 def _number(value):
@@ -755,6 +790,15 @@ def build_form(action, st, params, demo=False):
         for name, title in FACT_FIELDS:
             add(Field(f"fact-{name}", title, "select", False, FACT_CHOICES))
         add(_reason(True, help_text="บอกว่ารู้ข้อเท็จจริงนี้จากไหน เช่น หน่วยงาน (เขต/ฝ่าย)แจ้งทางโทรศัพท์"))
+    elif action == "approve" and approvals.whole(case):
+        # ADR 0025 Q25: one button for the whole case, the level in the same form.
+        if not st.priority_confirmed:
+            level = _priority_field(case)
+            form.intro = "รับเรื่องและตั้งระดับความเร่งด่วนไปพร้อมกัน " + (
+                "ระบบเลือกระดับที่เสนอไว้ให้แล้ว" if level.initial else "เลือกระดับแล้วบอกเหตุผล"
+            )
+            add(level)
+        add(_reason(label="หมายเหตุ", help_text="จำเป็นเมื่อระดับต่างจากที่ระบบเสนอ"))
     elif action == "approve":
         rows = [
             {
@@ -1070,18 +1114,41 @@ def build_form(action, st, params, demo=False):
         add(Field("category", "สาเหตุ", "radio", True, list(returns.STOP_CATEGORIES.items())))
         add(Field("reference", "เลขเอกสาร SAP", help="จำเป็นเมื่อสูญหาย"))
         add(_reason(True))
-    elif action == "resolve":
+    elif action == "admin_send":
+        here = None if case.held_by_admin else case.owner_division_id
+        add(Field("division", "ส่งให้กอง", "select", True, _divisions(here, real=True)))
+        add(Field("reason", "เหตุผล", "textarea", True))
+    elif action in ("resolve", "admin_answer"):
         suggestion = case.topic == Case.Topic.SUGGESTION
-        if suggestion:
-            form.intro = "ตอบข้อเสนอแนะ ผู้แจ้งจะได้ผลทาง LINE และกดรับทราบได้"
         results = dict(ProblemResolution.Category.choices)
+        if case.topic == Case.Topic.GENERAL:
+            # ADR 0030 Q13: staff say which it is; each kind keeps its own results.
+            form.intro = "เลือกว่าเรื่องนี้เป็นปัญหาหรือข้อเสนอแนะ แล้วเลือกผลในกลุ่มนั้น"
+            add(
+                Field(
+                    "as",
+                    "เรื่องนี้เป็น",
+                    "radio",
+                    True,
+                    [("problem", "ปัญหา"), ("suggestion", "ข้อเสนอแนะ")],
+                )
+            )
+            choices = [
+                (c, f"{group}: {results[c]}")
+                for kind, group in (("problem", "ปัญหา"), ("suggestion", "ข้อเสนอแนะ"))
+                for c in problems.categories_for(case, kind)
+            ]
+        else:
+            if suggestion:
+                form.intro = "ตอบข้อเสนอแนะ ผู้แจ้งจะได้ผลทาง LINE และกดรับทราบได้"
+            choices = [(c, results[c]) for c in problems.categories_for(case)]
         add(
             Field(
                 "category",
                 "ผลการพิจารณา" if suggestion else "ผลที่ได้",
                 "radio",
                 True,
-                [(c, results[c]) for c in problems.categories_for(case)],
+                choices,
             )
         )
         add(Field("message", "ข้อความถึงผู้แจ้ง", "textarea", True, help="ผู้แจ้งเห็นข้อความนี้ใน LINE"))
@@ -1175,6 +1242,7 @@ def build_form(action, st, params, demo=False):
                 help="ไม่บังคับ สแกนหรือรูปเอกสาร SAP ที่ตรงกับเลขเอกสาร ได้ถึง 5 ไฟล์ JPG, PNG หรือ PDF",
             )
         )
+    _status_notes(form, action, case, spec)
     if st.support and not demo:
         # ADR 0007: every การทำแทนกอง by ผู้ช่วยเหลือระบบ carries a reason.
         reason = next((f for f in form.fields if f.name == "reason"), None)
@@ -1187,6 +1255,32 @@ def build_form(action, st, params, demo=False):
             )
         )
     return form
+
+
+def _status_notes(form, action, case, spec):
+    """ADR 0028: a status change carries a notice for the requester and an internal note. An
+    action whose own reason or message reaches the requester uses that field instead."""
+    targets = spec.targets(case.kind, case.status)
+    if not any(t != case.status for t in targets):
+        return
+    own = requester_steps.REASON_IS_NOTICE | requester_steps.MESSAGE_IS_NOTICE
+    if action in own:
+        for f in form.fields:
+            if f.name == "reason" and not f.help:
+                f.help = "ผู้แจ้งเห็นข้อความนี้ใน LINE"
+    else:
+        required = all(requester_steps.notice_required(action, case.status, t) for t in targets)
+        form.fields.append(
+            Field(
+                "notice",
+                "ข้อความแจ้งสถานะ",
+                "textarea",
+                required,
+                help="ผู้แจ้งเห็นในรายละเอียดเรื่องใน LINE" + ("" if required else " ไม่บังคับ"),
+            )
+        )
+    if not any(f.name == "internal_note" for f in form.fields):
+        form.fields.append(Field("internal_note", "บันทึกภายใน (ผู้แจ้งไม่เห็น)", "textarea"))
 
 
 def _levels():

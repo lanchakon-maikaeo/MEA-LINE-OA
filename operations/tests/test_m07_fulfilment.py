@@ -27,6 +27,7 @@ from operations import (
     inventory,
     line_api,
     notifications,
+    options,
     orchestration,
     policy,
     receipts,
@@ -54,6 +55,7 @@ from operations.models import (
     Receipt,
     Role,
     StockMovement,
+    SystemOption,
 )
 from operations.tests.test_m02_cases import key, make_staff, setup_world, withdrawal
 from operations.tests.test_m03_line import ALICE, BOB, LineTestCase, texts
@@ -94,6 +96,8 @@ class Staffing:
     """Staff, grants and helpers shared by TestCase and TransactionTestCase classes."""
 
     def staff_up(self):
+        # ADR 0032: these tests cover the stock work kept behind ตัวเลือกระบบ old_stock_work.
+        SystemOption.objects.update_or_create(key=options.OLD_STOCK, defaults={"value": "on"})
         call_command("seed_demo_policy", stdout=StringIO())
         call_command("seed_fake_inventory", stdout=StringIO())
         self.issuer = make_staff("mtrissuer", (Role.ISSUER, "SIM-MTR"))
@@ -227,9 +231,12 @@ class FulfilmentTestCase(Staffing, TestCase):
 
 class MatrixTests(FulfilmentTestCase):
     def test_m07_actions_belong_to_withdrawals_only(self):
+        # ADR 0025: approval belongs to every kind; the rest stays with withdrawals.
+        for name in ("approve", "deny_approval"):
+            self.assertEqual(
+                workflow.ACTIONS[name].enabled_kinds, [K.WITHDRAWAL, K.RETURN, K.PROBLEM], name
+            )
         for name in (
-            "approve",
-            "deny_approval",
             "allocate",
             "issue",
             "terminate_outstanding",
@@ -934,7 +941,11 @@ class ReceiptTests(FulfilmentTestCase):
     def test_staff_close_only_after_seven_days_without_an_answer(self):
         case = self.approved(1)
         self.issue(self.issuer, case, 1, ["MTR_SYN_001"])
-        close = {"reason": "ผู้แจ้งไม่ตอบ", "reference": "SIM-ISS69-000001"}
+        close = {
+            "reason": "ผู้แจ้งไม่ตอบ",
+            "reference": "SIM-ISS69-000001",
+            "notice": "ปิดเรื่องเพราะไม่ได้รับคำตอบภายใน 7 วัน",  # ADR 0028
+        }
         self.assertFails(ErrorCode.VALIDATION_ERROR, self.act, self.meter, case, "close", close)
         Delivery.objects.filter(case=case).update(issued_at=timezone.now() - timedelta(days=8))
         self.assertFails(

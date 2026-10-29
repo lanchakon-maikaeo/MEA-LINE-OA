@@ -1,0 +1,286 @@
+{
+ "version": "line-flow-smg-amr-v2",
+ "note": "flow ของเจษ (ศอค.) ตามหน้า เจษ ในเว็บออกแบบเมนู และ grill 28 ต.ค. 2569 (ADR 0027): แจ้งปัญหาไป Google Form ตรวจสอบปัญหาแมพด้วยรหัสพนักงาน FAQ ตรวจด้วยเลข UI",
+ "flow": {
+  "key": "smg-amr",
+  "name": "ระบบ SMG, AMR",
+  "division": "ศอค.",
+  "tile": "ระบบ SMG, AMR"
+ },
+ "sheets": [
+  {
+   "key": "smg-problems",
+   "name": "ชีทแจ้งปัญหา SMG/AMR ของ ศอค.",
+   "spreadsheet_id": "1AaSVkVlv4_YF1a-1k6-V8p4kaOzlHU7GYtPCyLCYP0o",
+   "sheet_name": "การตอบแบบฟอร์ม 1",
+   "key_column": "J",
+   "status_column": "R",
+   "first_row": 2,
+   "owner_columns": "B,M"
+  }
+ ],
+ "graph": {
+  "nodes": [
+   {
+    "id": "start",
+    "kind": "entry",
+    "title": "ระบบ SMG, AMR",
+    "text": "ปุ่มบน rich menu ของ ศอค.",
+    "buttons": [],
+    "config": {},
+    "x": 450,
+    "y": 490,
+    "w": 220
+   },
+   {
+    "id": "c1",
+    "kind": "message",
+    "title": "ระบบ SMG, AMR",
+    "text": "เลือกเรื่องที่ต้องการ",
+    "buttons": [
+     {
+      "id": "c1.b0",
+      "label": "แจ้งปัญหา",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "c1.b1",
+      "label": "ตรวจสอบปัญหา",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "c1.b2",
+      "label": "FAQ",
+      "full": "",
+      "note": "",
+      "set": ""
+     }
+    ],
+    "config": {},
+    "x": 730,
+    "y": 480,
+    "w": 230
+   },
+   {
+    "id": "report",
+    "kind": "web",
+    "title": "ไปทำต่อบนเว็บ",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "url": "https://docs.google.com/forms/d/e/1FAIpQLSebWPQHd4LAj53Hap2ET92-T5HBG-Az9W7tvJEnEx4_nCMjTA/viewform"
+    },
+    "x": 1060,
+    "y": 360,
+    "w": 220
+   },
+   {
+    "id": "status",
+    "kind": "sheet_lookup",
+    "title": "ข้อมูลรายการจาก Google Sheets",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "source": "smg-problems",
+     "by": "employee"
+    },
+    "x": 1060,
+    "y": 620,
+    "w": 230
+   },
+   {
+    "id": "note_employee",
+    "kind": "note",
+    "title": "ข้อเสนอแนะ",
+    "text": "ใช้ Employee_ID แมพกับ Field \"รหัสพนักงาน\" ของผู้ที่แจ้งใน Google Sheets",
+    "buttons": [],
+    "config": {},
+    "x": 1440,
+    "y": 670,
+    "w": 220
+   },
+   {
+    "id": "faq",
+    "kind": "message",
+    "title": "FAQ",
+    "text": "เลือกเรื่องที่ต้องการทราบ",
+    "buttons": [
+     {
+      "id": "faq.b0",
+      "label": "ตรวจรหัสเครื่องวัด",
+      "full": "ตรวจสอบรหัสเครื่องวัด",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "faq.b1",
+      "label": "ตรวจสอบ Autobill",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "faq.b2",
+      "label": "ขอเข้าใช้งานระบบ SMG",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "faq.b3",
+      "label": "ขอคู่มือระบบ",
+      "full": "",
+      "note": "",
+      "set": ""
+     }
+    ],
+    "config": {},
+    "x": 1050,
+    "y": 910,
+    "w": 230
+   },
+   {
+    "id": "ui",
+    "kind": "sheet_lookup",
+    "title": "ค้นหาใน Excel / Google Sheets (แมพด้วย UI)",
+    "text": "พิมพ์เลข UI ที่ต้องการตรวจสอบได้เลย ถ้ามีหลายเลขให้เว้นวรรคหรือขึ้นบรรทัดใหม่ ได้ครั้งละไม่เกิน 10 เลข",
+    "buttons": [],
+    "config": {
+     "source": "smg-problems"
+    },
+    "x": 1400,
+    "y": 850,
+    "w": 220
+   },
+   {
+    "id": "note_rows",
+    "kind": "note",
+    "title": "แสดงข้อมูลมิเตอร์",
+    "text": "แสดงข้อมูลมิเตอร์ หากเจอมากกว่า 1 Row ให้แสดงหมด",
+    "buttons": [],
+    "config": {},
+    "x": 1700,
+    "y": 940,
+    "w": 230
+   },
+   {
+    "id": "note_ui",
+    "kind": "note",
+    "title": "ข้อเสนอแนะ",
+    "text": "ใช้เลข UI ในการแมพข้อมูล\n- ถ้า UI นั้นมี 1 มิเตอร์ขึ้นไปให้โชว์หมด\n- ถ้าทางเขตกรอก MEA Number ให้ตอบกลับว่า \"ไม่พบเลข UI\" เพราะระบบบังคับว่า เขตต้องกรอกเลข UI  เท่านั้น",
+    "buttons": [],
+    "config": {},
+    "x": 1990,
+    "y": 940,
+    "w": 220
+   },
+   {
+    "id": "access",
+    "kind": "result",
+    "title": "โปรดติดต่อที่อยู่อีเมล: thitirat.si@mea.or.th",
+    "text": "",
+    "buttons": [],
+    "config": {},
+    "x": 1400,
+    "y": 1010,
+    "w": 230
+   },
+   {
+    "id": "manual",
+    "kind": "web",
+    "title": "ไปทำต่อบนเว็บ",
+    "text": "",
+    "buttons": [],
+    "config": {
+     "url": "https://meacloud-my.sharepoint.com/:f:/g/personal/2716627_meanet_mea_or_th/IgAXEXp9boxIToDSUt6FNtXwARhYTHw68_JyYM_UsHwkkUI?e=ngTgBP"
+    },
+    "x": 1400,
+    "y": 1160,
+    "w": 220
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "from": "start",
+    "port": null,
+    "to": "c1",
+    "label": ""
+   },
+   {
+    "id": "e2",
+    "from": "c1",
+    "port": "c1.b0",
+    "to": "report",
+    "label": ""
+   },
+   {
+    "id": "e3",
+    "from": "c1",
+    "port": "c1.b1",
+    "to": "status",
+    "label": ""
+   },
+   {
+    "id": "e4",
+    "from": "c1",
+    "port": "c1.b2",
+    "to": "faq",
+    "label": ""
+   },
+   {
+    "id": "e5",
+    "from": "faq",
+    "port": "faq.b0",
+    "to": "ui",
+    "label": "เลข UI"
+   },
+   {
+    "id": "e6",
+    "from": "faq",
+    "port": "faq.b1",
+    "to": "ui",
+    "label": "เลข UI"
+   },
+   {
+    "id": "e7",
+    "from": "faq",
+    "port": "faq.b2",
+    "to": "access",
+    "label": ""
+   },
+   {
+    "id": "e8",
+    "from": "faq",
+    "port": "faq.b3",
+    "to": "manual",
+    "label": ""
+   },
+   {
+    "id": "e9",
+    "from": "note_employee",
+    "port": null,
+    "to": "status",
+    "label": ""
+   },
+   {
+    "id": "e10",
+    "from": "note_rows",
+    "port": null,
+    "to": "ui",
+    "label": ""
+   },
+   {
+    "id": "e11",
+    "from": "note_ui",
+    "port": null,
+    "to": "ui",
+    "label": ""
+   }
+  ]
+ }
+}

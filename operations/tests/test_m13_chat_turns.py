@@ -14,7 +14,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import Client
+from django.test import Client, override_settings
 from django.utils import timezone
 
 from operations import ai, ai_chat, answers, conversation, options, services
@@ -93,6 +93,7 @@ class NameTests(LineTestCase):
         self.assertIn("ชื่อ: สวัสดีครับ", texts(self.type(ALICE, "สวัสดีครับ")))
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class InfoTests(InfoCase):
     @classmethod
     def setUpTestData(cls):
@@ -144,6 +145,7 @@ class InfoTests(InfoCase):
         self.assertFalse(self.attached(case))
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class TypedStepTests(LineTestCase):
     @classmethod
     def setUpTestData(cls):
@@ -221,6 +223,7 @@ class TypedCase(FillCase):
         return ConversationDraft.objects.get(status="open", identity__external_id=ALICE)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class TypedStepAITests(TypedCase):
     def test_a_new_request_at_a_typed_step_goes_to_the_ai(self):
         self.assertEqual(self.draft().step, "field:purpose")
@@ -269,6 +272,7 @@ class TypedStepAITests(TypedCase):
         self.assertIn("ต้องการใช้ภายในวันที่", texts(self.sent[-1]))
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class InfoAITests(FillCase):
     """'ไม่ใช่ข้อมูลเพิ่ม' on a new request: the AI reads the message typed before the button."""
 
@@ -303,6 +307,7 @@ class InfoAITests(FillCase):
         self.assertFalse(ConversationMessage.objects.filter(case=case).exists())
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class ReviewTests(TypedCase):
     """ADR 0012: ฝอจ. read the AI's chat answers back on the AI page."""
 
@@ -320,6 +325,7 @@ class ReviewTests(TypedCase):
         self.assertNotContains(page, "ต้องรออีกนานแค่ไหน")  # the requester's own words stay out
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class ChoiceHintTests(AnswerTestCase):
     def test_free_text_at_a_choice_says_how_to_answer(self):
         self.approve(ALICE)
@@ -329,5 +335,5 @@ class ChoiceHintTests(AnswerTestCase):
         self.assertIn("ต้องการแจ้งเรื่องประเภทใด", reply)
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
         reply = texts(self.type(ALICE, "ไม่รู้เหมือนกัน"))
-        self.assertIn("พิมพ์เลขข้อหรือชื่อหมวด", reply)
-        self.assertIn("เรื่องนี้เกี่ยวกับอะไร", reply)
+        self.assertIn("แตะชื่อกองด้านบน หรือพิมพ์ชื่อกอง", reply)
+        self.assertIn("เลือกกองที่ต้องการแจ้ง", reply)  # ADR 0030: the division carousel

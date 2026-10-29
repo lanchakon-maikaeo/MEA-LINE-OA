@@ -134,6 +134,12 @@ class AIPresetForm(forms.Form):
         initial=True,
         required=False,
     )
+    slip_facts = forms.BooleanField(
+        label="รู้ว่า DED Center ติดตามใบเบิกและใบส่งคืนที่ออกใน SAP เบิกของไม่ได้ และไม่มียอดคลัง "
+        "(ADR 0032 ต้องอ่านกองและหัวข้อด้วย ประเมินด้วย dialogue-v2)",
+        initial=True,
+        required=False,
+    )
 
 
 class AIVersionForm(forms.Form):
@@ -170,6 +176,7 @@ class AIVersionForm(forms.Form):
     )
     typed_fields = AIPresetForm.base_fields["typed_fields"]
     menu_fields = AIPresetForm.base_fields["menu_fields"]
+    slip_facts = AIPresetForm.base_fields["slip_facts"]
     note = forms.CharField(label="หมายเหตุ", max_length=500, required=False)
 
     def profiles(self):

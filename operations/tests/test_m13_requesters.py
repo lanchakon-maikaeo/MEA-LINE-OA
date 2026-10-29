@@ -291,10 +291,8 @@ class MessagesTests(RequesterTestCase):
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
         self.say(self.event(ALICE, "follow"))
         self.press(ALICE, "ไม่ระบุตัวตน")
-        self.press(ALICE, "ข้อเสนอแนะ")
+        self.press(ALICE, "ปัญหาการใช้งานหรืออื่นๆ")  # ADR 0030: the division carousel
         self.type(ALICE, "อยากให้มีที่จอดรถรับของ")
-        self.press(ALICE, "ข้าม")
-        self.press(ALICE, "ข้าม")
         self.say(self.location(ALICE))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         registration = identity.submit_registration("line", ALICE, "สมหญิง ทดสอบ", "D01")

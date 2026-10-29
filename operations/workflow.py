@@ -30,8 +30,15 @@ KIND_STATUSES = {
         S.IN_PROGRESS,
         S.AWAITING_CONFIRMATION,
     ),
-    K.RETURN: (S.SUBMITTED, S.TRIAGE, S.AWAITING_EXECUTION, S.IN_PROGRESS),
-    K.PROBLEM: (S.SUBMITTED, S.TRIAGE, S.IN_PROGRESS, S.AWAITING_CONFIRMATION),
+    # ADR 0025: returns and problem reports wait for the owner division's approval too.
+    K.RETURN: (S.SUBMITTED, S.TRIAGE, S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.IN_PROGRESS),
+    K.PROBLEM: (
+        S.SUBMITTED,
+        S.TRIAGE,
+        S.AWAITING_APPROVAL,
+        S.IN_PROGRESS,
+        S.AWAITING_CONFIRMATION,
+    ),
 }
 PAUSED = frozenset({S.AWAITING_INFO, S.ON_HOLD})
 TERMINAL = frozenset({S.CLOSED, S.REJECTED, S.CANCELLED})
@@ -188,6 +195,14 @@ ACTIONS = {
             "M06",
             _per_kind(lambda k, st: _same(_working(st))),
         ),
+        # ADR 0030: an admin moves a case to a division at once (also many from the tab).
+        ActionSpec(
+            "admin_send",
+            "แอดมินส่งให้กอง",
+            "M06",
+            _per_kind(lambda k, st: _same([s for s in st if s not in TERMINAL])),
+            reason_required=True,
+        ),
         ActionSpec(
             "set_priority",
             "ยืนยันระดับความเร่งด่วน",
@@ -224,20 +239,39 @@ ACTIONS = {
         # Lines are decided one by one; the case waits until every line is decided (Q3).
         ActionSpec(
             "approve",
-            "อนุมัติ",
+            "รับเรื่อง",
             "M07",
-            _per_kind(
-                _only(
-                    K.WITHDRAWAL,
-                    {S.AWAITING_APPROVAL: {S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.REJECTED}},
-                )
-            ),
+            {
+                K.WITHDRAWAL: {
+                    S.AWAITING_APPROVAL: frozenset(
+                        {S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.REJECTED}
+                    )
+                },
+                K.RETURN: {S.AWAITING_APPROVAL: frozenset({S.AWAITING_EXECUTION})},
+                K.PROBLEM: {S.AWAITING_APPROVAL: frozenset({S.IN_PROGRESS})},
+            },
         ),
         ActionSpec(
             "deny_approval",
-            "ไม่อนุมัติ",
+            "ไม่รับเรื่อง",
             "M07",
-            _per_kind(_only(K.WITHDRAWAL, {S.AWAITING_APPROVAL: {S.REJECTED}})),
+            _per_kind(lambda k, st: {S.AWAITING_APPROVAL: {S.REJECTED}}),
+        ),
+        # ADR 0025: the system moves new cases past screening into approval, and starts an
+        # emergency problem report without waiting (Q24). No person performs these.
+        ActionSpec(
+            "skip_screening",
+            "ข้ามขั้นคัดกรอง เข้ารอกองรับเรื่อง",
+            "M06",
+            _per_kind(
+                lambda k, _: {S.SUBMITTED: {S.AWAITING_APPROVAL}, S.TRIAGE: {S.AWAITING_APPROVAL}}
+            ),
+        ),
+        ActionSpec(
+            "start_work",
+            "เริ่มงานทันที (เรื่องฉุกเฉิน)",
+            "M06",
+            _per_kind(_only(K.PROBLEM, {S.AWAITING_APPROVAL: {S.IN_PROGRESS}})),
         ),
         ActionSpec(
             "allocate",
@@ -350,6 +384,21 @@ ACTIONS = {
             "บันทึกผลแก้ปัญหา",
             "M09",
             _per_kind(_only(K.PROBLEM, {S.IN_PROGRESS: {S.AWAITING_CONFIRMATION}})),
+        ),
+        # ADR 0030 Q10: a case the admins hold is answered by an admin, like a resolver would.
+        ActionSpec(
+            "admin_answer",
+            "แอดมินตอบเรื่อง",
+            "M09",
+            _per_kind(
+                _only(
+                    K.PROBLEM,
+                    {
+                        S.SUBMITTED: {S.AWAITING_CONFIRMATION},
+                        S.IN_PROGRESS: {S.AWAITING_CONFIRMATION},
+                    },
+                )
+            ),
         ),
         ActionSpec(
             "dispute_resolution",

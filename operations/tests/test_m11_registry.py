@@ -35,6 +35,7 @@ from operations.models import (
     RegistryRecord,
     Role,
     StockSnapshot,
+    SystemOption,
 )
 from operations.tests.test_m02_cases import key, make_staff, setup_world
 from operations.tests.test_m07_fulfilment import Staffing, evidence_file, fuse
@@ -783,6 +784,8 @@ class ExternalOperationTests(TestCase):
 
 class DemoTests(TestCase):
     def test_demo_registry_shows_matches_and_each_kind_of_discrepancy(self):
+        # ADR 0032: the demo records issues, the stock work kept behind old_stock_work.
+        SystemOption.objects.update_or_create(key=options.OLD_STOCK, defaults={"value": "on"})
         out = StringIO()
         call_command("demo_registry", stdout=out)
         text = out.getvalue()

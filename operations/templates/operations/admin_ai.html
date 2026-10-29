@@ -1,4 +1,5 @@
 {% extends "operations/admin_base.html" %}
+{% block title %}การตั้งค่า AI · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>การตั้งค่า AI</h1></div></div>
 {% if not can_change %}<div class="notice notice--info mb-24" role="status"><div class="notice__body"><strong>ดูได้อย่างเดียว</strong> การเปลี่ยนรุ่น ประเมิน หรือแก้โมเดลทำได้ตาม <a href="{% url 'admin-options' %}">ตัวเลือกระบบ</a> "ใครเปลี่ยนการตั้งค่า AI ได้"</div></div>{% endif %}
@@ -61,7 +62,7 @@
 <h2>รุ่นการตั้งค่า (โมเดลหลัก + สำรองตามลำดับ)</h2>
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">รุ่น</th><th scope="col">สถานะ</th><th scope="col">รูปแบบ · ลำดับโมเดล</th><th scope="col">ทดสอบ</th><th scope="col">ประเมิน (security + heldout-v4 + redteam-v1/v2)</th><th scope="col">จัดการ</th></tr></thead>
-  <tbody>
+  <tbody data-more>
   {% for v in versions %}
     <tr id="v{{ v.number }}">
       <td>v{{ v.number }}</td>
@@ -96,7 +97,7 @@
 <h2>โปรไฟล์โมเดล</h2>
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">#</th><th scope="col">Model ID</th><th scope="col">คีย์ API</th><th scope="col">Timeout</th><th scope="col">Max tokens</th><th scope="col">Temperature</th><th scope="col">JSON schema</th></tr></thead>
-  <tbody>
+  <tbody data-more>
   {% for p in profiles %}<tr><td>{{ p.pk }}</td><td>{{ p.model_id }}</td><td>{{ p.credential }}</td><td>{{ p.timeout_seconds }} s</td><td>{{ p.max_tokens }}</td><td>{{ p.temperature }}</td><td>{{ p.use_json_schema|yesno:"ส่ง,ไม่ส่ง" }}</td></tr>
   {% empty %}<tr><td colspan="7">ยังไม่มี</td></tr>{% endfor %}
   </tbody>

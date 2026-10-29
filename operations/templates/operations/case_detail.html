@@ -1,6 +1,7 @@
 {% extends "operations/base.html" %}
-{% load ui %}
-{% block title %}{{ case.number }} · ระบบรับเรื่อง ฝอจ.{% endblock %}
+{% load static ui units_ui %}
+{% block title %}{{ case.number }} · DED Center{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}"><script src="{% static 'operations/case_chat.js' %}" defer></script>{% endblock %}
 {% block page_id %}case{% endblock %}
 {% block page_kind %}{{ case.kind }}{% endblock %}
 {% block content %}
@@ -18,9 +19,9 @@
     {% if case.is_example %}<span class="tag tag--outline" title="ไม่นับในรายงาน ไม่มีกรอบเวลา และไม่ส่งข้อความหาใคร">ตัวอย่าง</span>{% endif %}
   </div>
   <dl class="facts">
-    <div><dt>กองเจ้าภาพ</dt><dd>{{ case.owner_division.code }} {{ case.owner_division.name }}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>
+    <div><dt>กองเจ้าภาพ</dt><dd>{% if case.held_by_admin %}แอดมิน <span class="muted">(รอแอดมินตอบหรือส่งให้กอง)</span>{% else %}{{ case.owner_division.code }} {{ case.owner_division.name }}{% endif %}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>
     {% if case.topic == "usage" %}<div><dt>หัวข้อ</dt><dd>การใช้ไฟฟ้า{% if page.usage_private %} <span class="muted">(ไม่ส่งให้ AI)</span>{% endif %}</dd></div>{% endif %}
-    <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
+    <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}<br>{{ case.assignee|unit_path }}{% if case.auto_assigned %} <span class="tag tag--outline">ระบบมอบตามงานที่หน่วยรับ</span>{% endif %}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
     <div><dt>หน่วยงาน (เขต/ฝ่าย)</dt><dd>{{ case.district.name }}</dd></div>
     <div><dt>ผู้แจ้ง</dt><dd>{% if case.requester.is_anonymous %}<span class="tag">ไม่ระบุตัวตน</span>{% else %}{{ case.requester.display_name }}{% with e=case.requester.employee %}{% if e %}<br><span class="muted">{{ e.position }}{% if e.position and e.department %} · {% endif %}{{ e.department }}</span>{% endif %}{% endwith %}{% endif %}</dd></div>
     {% if case.latitude %}<div><dt>ตำแหน่งที่แจ้ง</dt><dd><a href="https://www.google.com/maps?q={{ case.latitude }},{{ case.longitude }}" target="_blank" rel="noopener">เปิดแผนที่</a></dd></div>{% endif %}
@@ -60,6 +61,8 @@
     </section>
     {% endif %}
 
+    {% include "operations/_case_panel.html" %}
+
     {% if page.texts %}
     <section class="section" aria-labelledby="s-request">
       <div class="section-head"><h2 id="s-request">ข้อความจากผู้แจ้ง</h2></div>
@@ -71,14 +74,14 @@
 
     <section class="section" aria-labelledby="s-lines" data-tour="lines">
       <div class="section-head">
-        <h2 id="s-lines">รายการอุปกรณ์</h2>
+        <h2 id="s-lines">{% if case.kind != "problem" and not page.lines.stock %}รายละเอียดตามใบ{% else %}รายการอุปกรณ์{% endif %}</h2>
         {% if page.lines.partially_issued %}<span class="tag">จ่ายบางส่วน</span>{% elif page.lines.partially_returned %}<span class="tag">คืนบางส่วน</span>{% endif %}
       </div>
       <div class="table-wrap">
-        {% if case.kind == "withdrawal" %}
+        {% if case.kind == "withdrawal" and page.lines.stock %}
         <table>
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอ</th><th scope="col" class="num">อนุมัติ</th><th scope="col" class="num">จ่ายแล้ว</th><th scope="col" class="num">หน่วยงาน (เขต/ฝ่าย)รับแล้ว</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างจ่าย</th></tr></thead>
-          <tbody>
+          <tbody data-more>
           {% for l in page.lines.lines %}
             <tr>
               <td class="num">{{ l.line_no }}</td>
@@ -93,10 +96,10 @@
           {% endfor %}
           </tbody>
         </table>
-        {% elif case.kind == "return" %}
+        {% elif case.kind == "return" and page.lines.stock %}
         <table>
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอคืน</th><th scope="col" class="num">มาถึง</th><th scope="col" class="num">พร้อมใช้</th><th scope="col" class="num">ซ่อม</th><th scope="col" class="num">อื่น ๆ</th><th scope="col" class="num">รอตรวจ</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างส่งคืน</th></tr></thead>
-          <tbody>
+          <tbody data-more>
           {% for l in page.lines.lines %}
             <tr>
               <td class="num">{{ l.line_no }}</td>
@@ -110,7 +113,7 @@
         {% else %}
         <table>
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">จำนวน</th><th scope="col">เลขเครื่อง</th></tr></thead>
-          <tbody>
+          <tbody data-more>
           {% for l in page.lines.lines %}
             <tr><td class="num">{{ l.line_no }}</td><td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }}</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}</td><td class="num">{{ l.requested }}</td><td>{{ l.serials|join:", "|default:"-" }}</td></tr>
           {% empty %}<tr><td colspan="4" class="muted">ไม่ได้ระบุรายการของ</td></tr>
@@ -137,14 +140,15 @@
     </section>
     {% endif %}
 
-    {% if case.kind == "return" %}
+    {% if case.kind == "return" %}{% if page.lines.stock or page.lines.instructions %}
     <section class="section" aria-labelledby="s-units" data-tour="units">
-      <div class="section-head"><h2 id="s-units">ของที่รับคืนและการตรวจ</h2>{% if page.lines.no_source_document %}<span class="flag flag--info">ไม่มีเอกสารอ้างอิงการจ่าย</span>{% endif %}</div>
+      <div class="section-head"><h2 id="s-units">{% if page.lines.stock %}ของที่รับคืนและการตรวจ{% else %}วิธีส่งคืน{% endif %}</h2>{% if page.lines.no_source_document %}<span class="flag flag--info">ไม่มีเอกสารอ้างอิงการจ่าย</span>{% endif %}</div>
       {% if page.lines.instructions %}<div class="notice notice--info mb-24">{% icon "info" %}<div class="notice__body"><strong>วิธีส่งคืนที่แจ้งหน่วยงาน (เขต/ฝ่าย)</strong>{{ page.lines.instructions }}</div></div>{% endif %}
-      {% if page.lines.units %}
+      {% if not page.lines.stock %}
+      {% elif page.lines.units %}
       <div class="table-wrap"><table>
         <thead><tr><th scope="col">หน่วย</th><th scope="col">รายการ</th><th scope="col">เลขเครื่อง/จำนวน</th><th scope="col">สถานะ</th><th scope="col">หมายเหตุ</th></tr></thead>
-        <tbody>
+        <tbody data-more>
         {% for u in page.lines.units %}
           <tr><td class="num">{{ u.unit }} <span class="muted">(ครั้งที่ {{ u.arrival }})</span></td><td>{{ u.item }}</td><td>{{ u.serial|default:u.quantity }}</td><td>{{ u.status_label }}</td>
             <td>{% if u.discrepancy %}<span class="t-alert">{{ u.discrepancy }}</span>{% if u.resolution %} → {{ u.resolution }}{% endif %}<br>{% endif %}{% if u.flag %}<span class="t-alert">{{ u.flag }}</span><br>{% endif %}{% if u.source %}<span class="muted">มาจาก {{ u.source }}</span>{% endif %}</td></tr>
@@ -153,7 +157,7 @@
       </table></div>
       {% else %}<div class="empty"><strong>ยังไม่มีของมาถึง</strong>ผู้รับคืนบันทึกเมื่อของมาถึงจริง</div>{% endif %}
     </section>
-    {% endif %}
+    {% endif %}{% endif %}
 
     {% if page.children %}
     <section class="section" aria-labelledby="s-children" data-tour="children">
@@ -244,7 +248,7 @@
       <details class="disclosure" open>
         <summary id="s-timeline">ไทม์ไลน์ ({{ page.timeline|length }})</summary>
         <div class="disclosure__body">
-          <ol class="timeline">
+          <ol class="timeline" data-more="5" data-more-end>
             {% for e in page.timeline %}
               <li class="{% if e.system %}timeline__system{% endif %}">
                 <time datetime="{{ e.at|date:'c' }}">{{ e.at|thai_datetime }}</time>
@@ -252,6 +256,8 @@
                   <div class="timeline__what">{{ e.what }}{% if e.support %} <span class="tag tag--outline">ผู้ช่วยเหลือระบบทำแทน {{ e.support }}</span>{% endif %}</div>
                   <div class="timeline__who">{{ e.who }}{% if e.status %} · {{ e.status }}{% endif %}</div>
                   {% if e.why %}<p class="timeline__why">{{ e.why }}</p>{% endif %}
+                  {% if e.notice %}<p class="timeline__why">ข้อความแจ้งสถานะ: {{ e.notice }}</p>{% endif %}
+                  {% if e.note %}<p class="timeline__why timeline__note">บันทึกภายใน: {{ e.note }}</p>{% endif %}
                 </div>
               </li>
             {% endfor %}

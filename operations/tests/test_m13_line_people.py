@@ -11,7 +11,7 @@ the important alerts without the requester's details, and lose the link when sus
 import uuid
 from decimal import Decimal
 
-from django.test import Client
+from django.test import Client, override_settings
 
 from operations import employees, identity, options, services, staff_line
 from operations.models import (
@@ -154,21 +154,18 @@ class AnonymousTests(PeopleTestCase):
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
         self.say(self.event(ALICE, "follow"))
         self.press(ALICE, "ไม่ระบุตัวตน")
-        self.press(ALICE, "ข้อเสนอแนะ")
-        self.type(ALICE, "อยากให้มีที่จอดรถรับของ (ทดสอบ)")
-        self.press(ALICE, "ข้าม")
-        reply = self.press(ALICE, "ข้าม")
+        self.press(ALICE, "ปัญหาการใช้งานหรืออื่นๆ")  # ADR 0030: the division carousel
+        reply = self.type(ALICE, "อยากให้มีที่จอดรถรับของ (ทดสอบ)")
         self.assertEqual(reply[-1]["quickReply"]["items"][0]["action"]["type"], "location")
         summary = self.say(self.location(ALICE))
         self.assertIn("แจ้งแบบไม่ระบุตัวตน", texts(summary))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
         self.assertTrue(case.requester.is_anonymous)
-        self.assertEqual((case.owner_division.code, case.latitude), ("ฝอจ.", Decimal("13.700000")))
+        self.assertEqual((case.owner_label, case.latitude), ("แอดมิน", Decimal("13.700000")))
         self.assertEqual(ChannelIdentity.objects.get(external_id=ALICE).status, "pending")
-        staff = make_staff("execview", (Role.STAFF, "ฝอจ."))
         client = Client()
-        client.force_login(staff)
+        client.force_login(self.admin)  # the admins hold it (ADR 0030)
         page = client.get(f"/cases/{case.number}/")
         self.assertContains(page, "ไม่ระบุตัวตน")
         self.assertContains(page, "google.com/maps?q=13.700000,100.500000")
@@ -198,6 +195,7 @@ class AnonymousTests(PeopleTestCase):
             services.submit_case(actor, idempotency_key="anon-report-over", payload=located)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class StaffLineTests(PeopleTestCase):
     def head(self):
         user = make_staff("kaehead", (Role.SUPERVISOR, "กองอุปกรณ์ฯ"), (Role.STAFF, "กองอุปกรณ์ฯ"))
@@ -299,12 +297,10 @@ class StaffLineTests(PeopleTestCase):
         self.linked(user)
         menu = self.type(ALICE, "งานของกอง")
         self.press(ALICE, "แจ้งปัญหา", menu)
-        self.press(ALICE, "ข้อเสนอแนะ")
+        self.press(ALICE, "กองอุปกรณ์การจำหน่าย")  # ADR 0030: the division carousel
         self.type(ALICE, "ควรเพิ่มชั้นวางของในคลัง (ทดสอบ)")
-        self.press(ALICE, "ข้าม")
-        self.press(ALICE, "ข้าม")
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
         self.assertTrue(case.requester.is_internal)
         self.assertEqual(case.requester.division.code, "กองอุปกรณ์ฯ")
-        self.assertEqual(case.topic, "suggestion")
+        self.assertEqual((case.topic, case.owner_division.code), ("general", "กองอุปกรณ์ฯ"))

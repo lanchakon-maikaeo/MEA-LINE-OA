@@ -753,18 +753,21 @@ class PriorityAndCompletionTests(PolicyTestCase):
             requester=self.req1,
             say=lambda text, quick=None: replies.append(text),
         )
-        self.act(self.intake, case, "start_triage")  # submitted → triage: visible
+        # ADR 0028: submitted, triage and approval are all รับเรื่องแล้ว for the requester.
+        self.act(self.intake, case, "start_triage")
         conversation._updates(turn)
-        self.assertEqual(len(replies), 1)
-        turn.conversation.updates_seen_at = timezone.now()
+        self.assertEqual(replies, [])
         self.act(self.intake, case, "request_handoff", {"to_division": "SIM-MTR"})
         self.act(self.meter, case, "accept_handoff")
         self.act(self.meter, case, "set_priority", {"priority": "P3"})
         conversation._updates(turn)
-        self.assertEqual(len(replies), 1)  # internal routing is not news for the requester
+        self.assertEqual(replies, [])  # internal routing is not news for the requester
         self.act(self.meter, case, "complete_triage")
         conversation._updates(turn)
-        self.assertIn("รออนุมัติ", replies[-1])
+        self.assertEqual(replies, [])
+        self.act(self.meter, case, "request_info", {"reason": "ขอรูปหน้าปัด"})
+        conversation._updates(turn)
+        self.assertIn(f"{case.number} · รอข้อมูลจากคุณ", replies[-1])
 
 
 # --- Clocks (S12) ------------------------------------------------------------------------------

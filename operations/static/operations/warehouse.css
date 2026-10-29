@@ -1,0 +1,187 @@
+/* งานคลัง ปฏิทินนัด การคุยในเรื่อง (grill กคว. 27 ต.ค. 2569) */
+.wh-bulk { margin-bottom: var(--s-24); }
+.wh-bulk__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 var(--s-18); align-items: start; }
+.wh-bulk__grid textarea { min-height: 80px; }
+.wh-table td, .wh-table th { vertical-align: top; }
+.wh-table input[type="number"] { max-width: 110px; }
+.wh-days { display: flex; flex-wrap: wrap; gap: var(--s-8); }
+.wh-steps { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; gap: var(--s-12); margin: var(--s-18) 0; }
+.cal-week { display: grid; grid-template-columns: repeat(7, minmax(130px, 1fr)); gap: var(--s-8); overflow-x: auto; margin-bottom: var(--s-24); }
+.cal-day { border: 1px solid var(--hairline-soft); border-radius: 14px; padding: var(--s-8); min-height: 140px; }
+.cal-day.is-today { border-color: var(--ink); }
+.cal-day h3 { font-size: 14px; margin: 0 0 var(--s-8); }
+.cal-slot { background: var(--cloud); border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
+.cal-slot.is-full { background: #fff4e5; }
+.cal-slot.is-closed { opacity: .55; }
+.cal-slot__time { font-weight: 600; }
+.cal-slot__who { margin-top: 2px; }
+.cal-slot .btn--sm { min-height: 28px; padding: 0 8px; font-size: 12px; }
+.inline-form { display: inline; }
+.cal-waiting { margin-bottom: var(--s-18); }
+.cal-req { border-top: 1px solid var(--hairline-soft); padding: var(--s-8) 0; }
+.cal-req__form { display: flex; flex-wrap: wrap; gap: var(--s-8); align-items: center; margin-top: 6px; }
+.cal-req__form select, .cal-req__form input { width: auto; min-width: 150px; }
+.chat { display: flex; flex-direction: column; gap: var(--s-8); background: #8cabd9; border-radius: 18px; padding: var(--s-12); max-height: 460px; overflow-y: auto; }
+.chat__msg { display: flex; flex-direction: column; max-width: 78%; }
+.chat__msg--staff { align-self: flex-end; align-items: flex-end; }
+.chat__msg--requester { align-self: flex-start; }
+.chat__bubble { background: #fff; border-radius: 16px; padding: 8px 12px; font-size: 14px; word-break: break-word; }
+.chat__msg--staff .chat__bubble { background: #85e249; }
+.chat__contact { font-size: 12px; margin-top: 4px; }
+.chat__meta { font-size: 11.5px; color: #1f2937; margin-top: 2px; }
+.chat__form { display: grid; gap: var(--s-8); margin-top: var(--s-12); }
+@media (max-width: 720px) { .cal-week { grid-template-columns: repeat(7, 160px); } }
+.wh-next { border: 1px solid var(--hairline-soft); border-radius: 14px; padding: var(--s-12); margin: var(--s-12) 0; }
+.wh-next__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 var(--s-12); }
+.wh-appt { border-top: 1px solid var(--hairline-soft); padding-top: var(--s-8); margin-top: var(--s-8); }
+/* หน้าต่างแชตลอย (Q15; ADR 0028 แบบ A): a round button that unfolds into a chat card above it */
+.chatwin { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.chatwin .chatwin__toggle { position: relative; width: 60px; height: 60px; min-height: 60px; padding: 0; border-radius: 50%; background: var(--ink); color: var(--on-primary); box-shadow: 0 10px 28px rgba(17,17,17,.24); display: grid; place-items: center; transition: transform .15s ease; }
+.chatwin .chatwin__toggle:hover { transform: translateY(-2px); }
+.chatwin__toggle .icon { width: 26px; height: 26px; }
+.chatwin.is-open .chatwin__toggle { background: var(--charcoal); }
+.chatwin__dot { position: absolute; top: -4px; right: -4px; background: var(--danger); color: #fff; border-radius: 999px; font-size: 11.5px; line-height: 20px; padding: 0 7px; border: 2px solid var(--canvas); }
+.chatwin__panel { width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--canvas); border: 1px solid var(--hairline-soft); border-radius: 22px; box-shadow: 0 16px 48px rgba(17,17,17,.18); display: flex; flex-direction: column; overflow: hidden; transform-origin: bottom right; animation: chatwin-pop .18s ease-out; }
+.chatwin__panel[hidden] { display: none; }
+@keyframes chatwin-pop { from { transform: scale(.94); opacity: .4; } to { transform: none; opacity: 1; } }
+.chatwin__head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 14px; border-bottom: 1px solid var(--hairline-soft); }
+.chatwin__avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--cloud-deep); display: grid; place-items: center; flex: none; }
+.chatwin__avatar .icon { width: 18px; height: 18px; }
+.chatwin__title { flex: 1; min-width: 0; display: grid; line-height: 1.35; }
+.chatwin__title strong { font-size: 14.5px; }
+.chatwin__title span { font-size: 12.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chatwin .chatwin__close { background: transparent; color: var(--ink); min-height: 34px; width: 34px; padding: 0; font-size: 22px; border-radius: 50%; }
+.chatwin .chatwin__close:hover { background: var(--cloud); }
+.chatwin__hint { font-size: 12px; color: var(--mute); padding: 6px 14px; margin: 0; background: var(--cloud); }
+.chatwin__body { flex: 1; overflow-y: auto; background: var(--canvas); padding: 14px; }
+.chat__list { display: flex; flex-direction: column; gap: 10px; }
+.chatwin .chat__msg { max-width: 80%; }
+.chatwin .chat__bubble { background: var(--cloud); border-radius: 18px; border-bottom-left-radius: 6px; padding: 9px 13px; }
+.chatwin .chat__msg--staff .chat__bubble { background: var(--ink); color: var(--on-primary); border-radius: 18px; border-bottom-right-radius: 6px; }
+.chatwin .chat__meta { color: var(--mute); }
+.chat__strip { align-self: center; max-width: 92%; text-align: center; font-size: 12.5px; color: var(--ash); background: var(--cloud); border: 1px solid var(--hairline-soft); border-radius: 12px; padding: 6px 12px; }
+.chat__strip strong { color: var(--ink); font-weight: 600; }
+.chat__strip-text { display: block; color: var(--ink); margin-top: 2px; }
+.chat__empty { color: var(--mute); font-size: 13px; }
+.chat__msg.is-faint { opacity: .6; }
+.chatwin__form { border-top: 1px solid var(--hairline-soft); padding: 10px; display: grid; gap: 6px; }
+.chatwin__contact { font-size: 12.5px; display: grid; gap: 4px; }
+.chatwin__send { display: flex; gap: 8px; align-items: flex-end; }
+.chatwin__send textarea { flex: 1; min-height: 42px; max-height: 120px; border-radius: 21px; padding: 9px 14px; resize: none; background: var(--cloud); }
+.chatwin .chatwin__sendbtn { width: 42px; height: 42px; min-height: 42px; padding: 0; border-radius: 50%; flex: none; display: grid; place-items: center; }
+.chatwin__sendbtn .icon { width: 18px; height: 18px; }
+@media (max-width: 600px) {
+  .chatwin { right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .chatwin.is-open { inset: 0; gap: 0; }
+  .chatwin.is-open .chatwin__panel { width: 100%; height: 100%; border-radius: 0; border: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .chatwin.is-open .chatwin__toggle { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .chatwin__panel { animation: none; } .chatwin .chatwin__toggle { transition: none; } }
+/* ปฏิทินรายเดือน (รอบใหม่ Q10) */
+.cal-nav__month { font-size: 18px; }
+.mcal { border: 1px solid var(--hairline-soft); border-radius: 14px; overflow: hidden; margin-bottom: var(--s-8); }
+.mcal__row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.mcal__row + .mcal__row { border-top: 1px solid var(--hairline-soft); }
+.mcal__head { text-align: center; font-weight: 600; padding: 8px 4px; background: var(--cloud); }
+.mcal__day { min-height: 118px; padding: 6px; border-left: 1px solid var(--hairline-soft); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mcal__day:first-child { border-left: 0; }
+.mcal__day.is-out { background: #fafafa; color: var(--mute); }
+.mcal__day.is-today { background: #eef5ff; }
+.mcal__day.is-picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+.mcal__top { display: flex; justify-content: space-between; align-items: center; }
+.mcal__num { font-size: 13px; text-decoration: none; color: inherit; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; }
+.mcal__day.is-today .mcal__num { background: #1d6fe0; color: #fff; }
+.mcal__add { width: 22px; height: 22px; border: 1px solid var(--hairline); border-radius: 50%; display: grid; place-items: center; font-size: 15px; text-decoration: none; color: var(--ink); }
+.mcal__chip { display: block; font-size: 12px; border-radius: 6px; padding: 2px 6px; text-decoration: none; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid transparent; }
+.mcal__chip.is-free { background: #e8f5e9; border-left-color: #2e7d32; }
+.mcal__chip.is-full { background: #fde3d2; border-left-color: #e8590c; }
+.mcal__chip.is-closed { background: var(--cloud); color: var(--mute); }
+.mcal__chip--holiday { background: #fde8e0; border-left-color: #f08c5a; text-align: center; }
+.mcal__legend { font-size: 13px; color: var(--mute); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: var(--s-18); }
+.mcal__legend .mcal__chip { display: inline-block; }
+.cal-dayview { margin-bottom: var(--s-18); }
+@media (max-width: 720px) { .mcal__day { min-height: 80px; padding: 3px; } .mcal__chip { font-size: 10.5px; padding: 1px 3px; } }
+.mcal--pick .mcal__pick { font: inherit; text-align: left; background: var(--canvas, #fff); color: inherit; border-radius: 0; min-height: 84px; height: auto; width: 100%; cursor: pointer; align-items: stretch; }
+.mcal--pick .mcal__pick:hover { background: #f3f6fb; color: inherit; }
+.mcal--pick .mcal__pick.is-holiday { background: #fff4ef; }
+.mcal--pick .mcal__pick.is-out { background: #fafafa; }
+.mcal__day.is-picked, .mcal--pick .mcal__pick.is-picked { outline: 2px solid var(--ink); outline-offset: -2px; }
+.hol-form { margin: var(--s-18) 0; }
+
+/* 28 ต.ค. 2569 Q3: stage tabs, a next-step button per row, a bar for ticked slips. */
+.wh-tabs { margin-bottom: var(--s-18); flex-wrap: wrap; }
+.wh-paste { margin-bottom: var(--s-18); }
+.wh-paste .disclosure__body { padding-top: var(--s-12); }
+.wh-table .wh-pick { width: 40px; }
+.wh-table tr.is-late td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.wh-act { text-align: right; white-space: nowrap; }
+.wh-act form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-8); justify-content: flex-end; }
+.wh-act__keyed > summary { list-style: none; cursor: pointer; }
+.wh-act__keyed > summary::-webkit-details-marker { display: none; }
+.wh-act__keyed[open] > summary { margin-bottom: var(--s-8); }
+.wh-act__keyed label { display: inline-flex; align-items: center; gap: var(--s-8); }
+.wh-act__keyed .helptext { flex-basis: 100%; text-align: right; white-space: normal; }
+.wh-bar {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-18);
+  margin-top: var(--s-18); padding: var(--s-12) var(--s-18);
+  background: var(--canvas); border: 1px solid var(--ink); border-radius: 16px;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, .08);
+}
+.wh-bar label { display: inline-flex; align-items: center; gap: var(--s-8); font-size: 15px; white-space: nowrap; }
+.wh-bar [hidden] { display: none; }
+.js .wh-bar.is-empty { display: none; }
+@media (max-width: 959px) {
+  .wh-act { text-align: left; white-space: normal; }
+  .wh-act form { justify-content: flex-start; }
+  .wh-act__keyed .helptext { text-align: left; }
+  .wh-table.table--cards tr > td.wh-pick { grid-column: 3; grid-row: 1; text-align: right; }
+  .wh-table.table--cards tr > td.wh-pick + td { grid-column: 1 / 3; grid-row: 1; font-weight: 600; }
+}
+
+/* 28 ต.ค. 2569 Q5: schedule as two tabs, a box per group, day pills per district. */
+.sc-tabs { margin-bottom: var(--s-18); }
+.sc-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--s-18); }
+.sc-group { border: 1px solid var(--hairline); border-radius: 16px; padding: var(--s-12) var(--s-18); margin: 0; min-width: 0; }
+.sc-group legend { font-weight: 700; padding: 0 var(--s-8); }
+.sc-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-12); padding: var(--s-8) 0; border-bottom: 1px solid var(--hairline-soft); }
+.sc-row__size { flex: 1 1 140px; min-width: 0; }
+span.sc-row__size { font-weight: 600; }
+.sc-row__days { display: inline-flex; align-items: center; gap: var(--s-8); white-space: nowrap; font-size: 15px; }
+.sc-row__days input { width: 76px; }
+.sc-group [data-sc-add] { margin-top: var(--s-8); }
+.sc-truck { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-18); padding: var(--s-8) 0; border-bottom: 1px solid var(--hairline-soft); }
+.sc-truck--all { background: var(--cloud); border-radius: 12px; padding: var(--s-12); border-bottom: 0; margin-bottom: var(--s-8); }
+.sc-truck__name { flex: 1 1 220px; font-weight: 600; }
+.sc-days { display: inline-flex; gap: var(--s-4); }
+.day-pill { position: relative; display: inline-flex; }
+.day-pill input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.day-pill span { display: inline-grid; place-items: center; min-width: 44px; height: 36px; padding: 0 var(--s-8); border: 1px solid var(--hairline); border-radius: var(--r-pill); font-size: 14px; font-weight: 600; }
+.day-pill input:checked + span { background: var(--ink); color: var(--on-primary); border-color: var(--ink); }
+.day-pill input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sc-save { position: sticky; bottom: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: end; gap: var(--s-12) var(--s-18); }
+.sc-save .field { flex: 1 1 260px; margin: 0; }
+
+/* 28 ต.ค. 2569 Q6: one month for every calendar of the division, told apart by colour. */
+.cal-filter { margin-bottom: var(--s-18); flex-wrap: wrap; }
+.cal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.cal-dot--orange { background: #e8590c; }
+.cal-dot--blue { background: #1c7ed6; }
+.cal-dot--green { background: #2f9e44; }
+.cal-dot--purple { background: #7048e8; }
+.cal-dot--teal { background: #0c8599; }
+.mcal__chip--orange { border-left-color: #e8590c !important; }
+.mcal__chip--blue { border-left-color: #1c7ed6 !important; }
+.mcal__chip--green { border-left-color: #2f9e44 !important; }
+.mcal__chip--purple { border-left-color: #7048e8 !important; }
+.mcal__chip--teal { border-left-color: #0c8599 !important; }
+.mcal__chip.is-free.mcal__chip--orange { background: #fff4e6; }
+.mcal__chip.is-free.mcal__chip--blue { background: #e7f5ff; }
+.cal-tag { border-left: 3px solid transparent; }
+.cal-tag--orange { background: #fff4e6; color: #1f2937; border-left-color: #e8590c; }
+.cal-tag--blue { background: #e7f5ff; color: #1f2937; border-left-color: #1c7ed6; }
+.cal-tag--green { background: #ebfbee; color: #1f2937; border-left-color: #2f9e44; }
+.cal-tag--purple { background: #f3f0ff; color: #1f2937; border-left-color: #7048e8; }
+.cal-tag--teal { background: #e3fafc; color: #1f2937; border-left-color: #0c8599; }
+.cal-dayview__group { display: flex; align-items: center; margin: var(--s-18) 0 var(--s-8); font-size: 17px; }

@@ -22,6 +22,7 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from operations import (
+    approvals,
     coordination,
     fulfilment,
     identity,
@@ -32,6 +33,7 @@ from operations import (
     routing,
     routing_words,
     support,
+    units,
     workflow,
 )
 from operations.contracts import (
@@ -45,6 +47,7 @@ from operations.contracts import (
     clean_idempotency_key,
     clean_reason,
     clean_revision,
+    clean_text,
     fail,
     parse_action_payload,
     parse_submission,
@@ -119,7 +122,7 @@ def _resolve(actor):
 def _waiting_for_coordinator(case_ref):
     """Open routing review, an unanswered (escalated) intake/handoff/child request, or child work
     a coordinator must place: what routing-authority holders see (M06, M09 Q6)."""
-    return (
+    return Q(held_by_admin=False) & (
         Q(Exists(RoutingReview.objects.filter(case=case_ref, status=RoutingReview.Status.OPEN)))
         | Q(
             Exists(
@@ -175,6 +178,8 @@ def _staff_condition(ctx):
 def _can_view(ctx, case):
     if ctx.requester is not None:
         return case.requester_id == ctx.requester.pk
+    if case.held_by_admin:
+        return ctx.scope.is_admin or ctx.scope.is_support  # ADR 0030: the admins hold it
     if identity.can_access_division(ctx.scope, case.owner_division_id):
         return True
     return Case.objects.filter(_staff_condition(ctx), pk=case.pk).exists()
@@ -194,7 +199,7 @@ def visible_cases(actor):
         return identity.filter_by_requester(cases, ctx.requester)
     if ctx.scope.is_admin or ctx.scope.is_support:
         return cases
-    return cases.filter(_staff_condition(ctx))
+    return cases.filter(_staff_condition(ctx)).exclude(held_by_admin=True)
 
 
 def _parse_case_id(case_id):
@@ -241,6 +246,21 @@ def _replay(ctx, action, key, request_hash):
     if not _can_view(ctx, receipt.case):
         fail(ErrorCode.NOT_FOUND)
     return CommandResult(**receipt.result)
+
+
+def record_system(case, action, reason, data, label="ระบบ (ผังหน่วยงาน)"):
+    """A step the system took on its own (ADR 0031), on the timeline like any decision."""
+    return _record(
+        _Context(label=label),
+        case,
+        action,
+        case.status,
+        reason,
+        data,
+        EVENT_DECISION_RECORDED,
+        None,
+        None,
+    )
 
 
 def _record(ctx, case, action, from_status, reason, data, event_type, key, request_hash):
@@ -374,7 +394,8 @@ def _check_sap(submission, fields, requester, routes, intake):
 
     number = fields.get("sap_number", "")
     if number:
-        problem = typed_lines.sap_in_use(number, requester)
+        # เลขติดตาม with its kind may repeat: it tracks, it counts nothing (Q3, Q17).
+        problem = "" if fields.get("sap_kind") else typed_lines.sap_in_use(number, requester)
         if problem:
             fail(ErrorCode.VALIDATION_ERROR, problem)
         return
@@ -528,6 +549,9 @@ def submit_case(actor, *, idempotency_key, payload):
             else None
         )
         routes = [(chosen, lines)] if chosen and intake is None else None
+        held = submission.hold_for_admin and intake is None
+        if held:
+            routes = [(coordinator, lines)]  # ADR 0030: an admin holds it, the rules wait
         routes = list(routes or _route(submission.kind, lines, intake, now))
         _check_sap(submission, fields, requester, routes, intake)
         _check_meters(submission, fields, intake)
@@ -545,6 +569,8 @@ def submit_case(actor, *, idempotency_key, payload):
                 related_case=related or (cases[0] if cases else None),
                 menu_label=submission.menu_label,
                 meters=list(submission.meters),
+                intake_data=dict(submission.intake_data or {}),
+                held_by_admin=held,
                 submitted_at=now,
                 updated_at=now,
                 **fields,
@@ -555,8 +581,9 @@ def submit_case(actor, *, idempotency_key, payload):
             if intake is None:
                 # ADR 0008: straight to the division the rules name; unclear → coordinator.
                 case.owner_division = owner or _proposed_owner(case, coordinator, now)
-                case.section = policy.section_for(case)
-                case.save(update_fields=["owner_division", "section"])
+                case.section = units.section_for(case)  # ADR 0031 Q14
+                case.status = approvals.first_status(case)  # ADR 0025
+                case.save(update_fields=["owner_division", "section", "status"])
             cases.append(case)
         numbers = [c.number for c in cases]
         results = []
@@ -573,6 +600,8 @@ def submit_case(actor, *, idempotency_key, payload):
                 _record(ctx, case, "submit", "", "", data, EVENT_CASE_SUBMITTED, None, None)
             )
             policy.after_submit(case)
+            approvals.start_emergency(case)  # ADR 0025 Q24
+            units.assign_new(case)  # ADR 0031 Q20: the ผู้รับผิดชอบประจำงาน takes it at once
         first = dataclasses.replace(
             results[0],
             split=[{"case_id": r.case_id, "case_number": r.case_number} for r in results[1:]],
@@ -599,6 +628,7 @@ def _take(ctx, case, payload, reason, target):
     if case.assignee_id == ctx.user.pk:
         fail(ErrorCode.VALIDATION_ERROR, "You are already responsible for this case.")
     case.assignee = ctx.user
+    case.auto_assigned = False  # ADR 0031 Q24: a person chose; the system leaves it alone
     case.status = target
     return {"assignee_id": ctx.user.pk}
 
@@ -631,7 +661,7 @@ def route_by_ai(case_id, run):
             "quote": run.quote,
             "routing_run": run.pk,
         }
-        case.section = policy.section_for(case)
+        case.section = units.section_for(case)
         case.revision += 1
         case.updated_at = timezone.now()
         case.save()
@@ -641,6 +671,7 @@ def route_by_ai(case_id, run):
             context, case, "route_by_ai", from_status, "", data, EVENT_DECISION_RECORDED, None, None
         )
         policy.after_decision(case, "route_by_ai", actor_is_staff=False)
+        units.after_owner_change(case)
         return case
 
 
@@ -662,6 +693,7 @@ def _assign(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "This person is already responsible.")
     previous = case.assignee_id
     case.assignee = assignee
+    case.auto_assigned = False  # ADR 0031 Q24
     return {"assignee_id": assignee.pk, "previous_assignee_id": previous}
 
 
@@ -720,6 +752,9 @@ HANDLERS = {
     **returns.HANDLERS,
     **coordination.HANDLERS,
     **problems.HANDLERS,
+    # ADR 0025: recorded by the system only
+    "start_work": approvals.system_only,
+    "skip_screening": approvals.system_only,
 }
 
 # Shared lifecycle actions: each kind has its own rules (M07 Q6, M08 Q11/Q13, M09 Q1-Q4).
@@ -744,7 +779,8 @@ def _handler(action, case):
 def perform_form_action(actor, case_id, action, *, expected_revision, idempotency_key, payload):
     """Commit the form's priority confirmation and triage decision together on every channel."""
     payload = dict(payload)
-    priority = payload.pop("priority", None) if action == "complete_triage" else None
+    with_level = action in ("complete_triage", "approve")  # ADR 0025 Q25: approve sets it too
+    priority = payload.pop("priority", None) if with_level else None
     if priority:
         perform_action(
             actor,
@@ -752,7 +788,10 @@ def perform_form_action(actor, case_id, action, *, expected_revision, idempotenc
             "set_priority",
             expected_revision=expected_revision,
             idempotency_key=idempotency_key,
-            payload={"priority": priority, **payload},
+            payload={
+                "priority": priority,
+                **{k: v for k, v in payload.items() if k not in ("notice", "internal_note")},
+            },
         )
         expected_revision += 1
     return perform_action(
@@ -763,6 +802,32 @@ def perform_form_action(actor, case_id, action, *, expected_revision, idempotenc
         idempotency_key=idempotency_key,
         payload=payload,
     )
+
+
+def _with_notes(ctx, case, action, from_status, payload, reason, data):
+    """ADR 0028: the status notice the requester reads and the internal note staff keep."""
+    from operations import requester_steps  # local: requester_steps reads options
+
+    notice = clean_text(payload, "notice", False) if "notice" in payload else ""
+    internal = clean_text(payload, "internal_note", False) if "internal_note" in payload else ""
+    if case.status == from_status:
+        notice = ""  # a notice belongs to a status change
+    else:
+        notice = requester_steps.notice_of(action, {**payload, "notice": notice}, reason)
+        staff = ctx.requester is None
+        if (
+            staff
+            and not notice
+            and requester_steps.notice_required(action, from_status, case.status)
+        ):
+            fail(ErrorCode.VALIDATION_ERROR, "เขียนข้อความแจ้งสถานะถึงผู้แจ้งก่อนบันทึก")
+    if not (notice or internal) or (data is not None and not isinstance(data, dict)):
+        return data
+    return {
+        **(data or {}),
+        **({"notice": notice} if notice else {}),
+        **({"internal_note": internal} if internal else {}),
+    }
 
 
 @_dependency_guard
@@ -804,9 +869,10 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         from_status, from_owner = case.status, case.owner_division_id
         data = _handler(action, case)(ctx, case, payload, reason, target)
         if case.owner_division_id != from_owner:
-            case.section = policy.section_for(case)  # Q12: the new owner's own แผนก, if any
+            case.section = units.section_for(case)  # Q12: the new owner's own แผนก, if any
         if acting_for is not None:
             data = {**(data or {}), "support": acting_for}
+        data = _with_notes(ctx, case, action, from_status, payload, reason, data)
         if len(targets) > 1 and case.status not in targets:
             raise RuntimeError(f"{action} chose {case.status}, outside the matrix.")
         coordination.after_action(case)  # M09: R09 child work ends with its lines or the case
@@ -821,4 +887,9 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
             ctx, case, action, from_status, reason, data, EVENT_DECISION_RECORDED, key, request_hash
         )
         policy.after_decision(case, action, actor_is_staff=ctx.requester is None)
+        # ADR 0031 Q22, Q24: a new owner picks its own person; a new แผนก moves a system pick.
+        if case.owner_division_id != from_owner:
+            units.after_owner_change(case)
+        elif action == "set_section":
+            units.after_section_change(case)
         return result

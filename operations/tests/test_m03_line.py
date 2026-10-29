@@ -21,6 +21,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from operations import conversation, identity, line_api
+from operations import options as system_options
 from operations.management.commands.run_worker import run_once
 from operations.models import (
     Attachment,
@@ -35,6 +36,7 @@ from operations.models import (
     RegistrationRequest,
     Requester,
     Role,
+    SystemOption,
     WebhookInbox,
 )
 from operations.tests.test_m02_cases import ITEMS, make_staff
@@ -82,8 +84,12 @@ def buttons(messages):
             found[action["label"]] = action.get("data") or action.get("uri") or action["type"]
         if message["type"] == "flex":
             for bubble in message["contents"]["contents"]:
-                for button in bubble["body"]["contents"]:
-                    found[button["action"]["label"]] = button["action"]["data"]
+                body = bubble["body"]
+                if body.get("action"):  # a bubble that is its own button (ADR 0030)
+                    found[body["action"]["displayText"]] = body["action"]["data"]
+                for button in body["contents"]:
+                    if "action" in button:
+                        found[button["action"]["label"]] = button["action"]["data"]
     return found
 
 
@@ -94,6 +100,10 @@ def texts(messages):
 class LineTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
+        # New cases are screened, as before ADR 0025 (tests of the new way switch it off).
+        SystemOption.objects.update_or_create(
+            key=system_options.SCREENING, defaults={"value": "on"}
+        )
         call_command("load_districts", stdout=StringIO())
         call_command("seed_demo_units", stdout=StringIO())
         for code, category, unit, serialized, divisible in ITEMS:
@@ -355,6 +365,7 @@ class RegistrationTests(LineTestCase):
 # --- Guided drafts -----------------------------------------------------------------------------
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class DraftConversationTests(LineTestCase):
     def setUp(self):
         super().setUp()
@@ -481,8 +492,8 @@ class DraftConversationTests(LineTestCase):
         self.press(BOB, "ยืนยันส่งเรื่อง")
         other = Case.objects.exclude(pk=own.pk).get()
 
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        # The equipment problem card (ADR 0030 took it off the general menu).
+        self.say(self.postback(ALICE, "m=problem&topic=equipment"))
         self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "ไม่ระบุรุ่น")
         self.type(ALICE, "หม้อแปลงมีเสียงดัง")
@@ -535,7 +546,7 @@ class DraftConversationTests(LineTestCase):
         mine = Case.objects.get()
         self.approve(BOB)  # same district, different person
         reply = self.say(self.postback(ALICE, "m=mine"))
-        self.assertIn(f"{mine.number} · เบิก · รอคัดกรอง", texts(reply))
+        self.assertIn(f"{mine.number} · เบิก · รับเรื่องแล้ว", texts(reply))  # ADR 0028
         reply = self.press(ALICE, mine.number, reply)
         self.assertIn("กองเจ้าภาพ: ", texts(reply))
         for attempt in (self.text(BOB, mine.number), self.postback(BOB, f"c={mine.number}")):
@@ -672,6 +683,7 @@ class CatchUpTests(LineTestCase):
 # --- Attachments ------------------------------------------------------------------------------
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class AttachmentTests(LineTestCase):
     def setUp(self):
         super().setUp()
@@ -858,6 +870,7 @@ class InfoCase(LineTestCase):
         return Case.objects.get(pk=case.pk)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class InfoReplyTests(InfoCase):
     """The push says "ตอบกลับในแชตนี้ได้เลย": the answer must reach the case and its staff,
     not start a new draft or go to AI as a new request."""

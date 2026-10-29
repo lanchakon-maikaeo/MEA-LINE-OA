@@ -59,24 +59,25 @@ class AnswerTestCase(LineTestCase):
         return Case.objects.get(pk=result.case_id)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class KeywordTests(AnswerTestCase):
     def test_off_by_default(self):
         self.assertEqual(options.get(options.CHAT_ANSWERS), "off")
         self.approve(ALICE)
         reply = texts(self.type(ALICE, "สวัสดีครับ"))
-        self.assertNotIn("ช่องทางนี้รับเรื่อง", reply)
+        self.assertNotIn("ช่องทางนี้ใช้ติดตาม", reply)
         self.assertIn("เมนูด้านล่าง", reply)
 
     def test_greetings_and_questions_are_answered_from_the_bank(self):
         self.mode("faq")
         self.approve(ALICE)
-        self.assertIn("ช่องทางนี้รับเรื่องเบิก", texts(self.type(ALICE, "สวัสดีครับ")))
+        self.assertIn("ช่องทางนี้ใช้ติดตามใบเบิก", texts(self.type(ALICE, "สวัสดีครับ")))
         contact = self.type(ALICE, "ขอเบอร์ติดต่อหน่อย")
         self.assertIn("02-000-0001", texts(contact))
         self.assertNotIn("เบิกอุปกรณ์", buttons(contact))  # Q2: the rich menu is the menu
         # A greeting with a story is a report, not a greeting.
         reply = texts(self.type(ALICE, "สวัสดีครับ ขอแจ้งไฟดับที่ซอย 5 ตั้งแต่เมื่อคืน"))
-        self.assertNotIn("ช่องทางนี้รับเรื่องเบิก", reply)
+        self.assertNotIn("ช่องทางนี้ใช้ติดตามใบเบิก", reply)
 
     def test_equipment_words_go_to_the_guided_flow(self):
         self.mode("faq")
@@ -107,24 +108,23 @@ class KeywordTests(AnswerTestCase):
         self.approve(ALICE)
         self.say(self.postback(ALICE, "m=new"))
         self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
-        self.press(ALICE, "ข้อเสนอแนะ")
+        self.press(ALICE, "ปัญหาการใช้งานหรืออื่นๆ")  # ADR 0030: the division carousel
         reply = texts(self.type(ALICE, "อยากให้มีเบอร์ติดต่อแต่ละกองในไลน์"))
         self.assertNotIn("02-000-0001", reply)
-        self.assertIn("รายละเอียดเพิ่ม", reply)  # the next question of the suggestion
+        self.assertIn("สรุปเรื่อง", reply)  # the details were the one question
 
     def test_drafts_and_retired_answers_are_not_used(self):
         self.mode("faq")
         self.approve(ALICE)
         answers.retire(self.admin, "greeting", "ทดสอบเลิกใช้")
-        self.assertNotIn("ช่องทางนี้รับเรื่องเบิก", texts(self.type(ALICE, "สวัสดี")))
+        self.assertNotIn("ช่องทางนี้ใช้ติดตามใบเบิก", texts(self.type(ALICE, "สวัสดี")))
         ChatAnswer.objects.filter(key="thanks").update(status=ChatAnswer.Status.DRAFT)
         self.assertNotIn("ได้ทุกเมื่อ", texts(self.type(ALICE, "ขอบคุณครับ")))
 
     def test_hazard_words_get_the_guidance_at_once(self):
         self.mode("faq")
         self.approve(ALICE)
-        self.say(self.postback(ALICE, "m=new"))
-        self.press(ALICE, "แจ้งปัญหา/ข้อเสนอแนะ")
+        self.say(self.postback(ALICE, "m=problem&topic=equipment"))  # the equipment card
         self.press(ALICE, "อุปกรณ์อื่น")
         self.press(ALICE, "ไม่ระบุรุ่น")
         reply = texts(self.type(ALICE, "หม้อแปลงมีควันออกมาตอนนี้"))
@@ -465,6 +465,7 @@ class FillCase(AIAnswerCase):
         }
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class FollowupTests(FillCase):
     """The AI words the next question after it fills a draft (the user: "ใช่", 10 Oct 2569)."""
 

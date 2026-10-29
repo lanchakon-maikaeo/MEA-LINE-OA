@@ -5,6 +5,7 @@ so the same contract works for internal APIs and HTML views. Quantities travel a
 integers; floats are refused so no binary rounding ever reaches a stored amount.
 """
 
+import json
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
@@ -109,7 +110,7 @@ STAFF_CHANNELS = frozenset(
 )
 ON_BEHALF_FIELDS = {"requester_id", "channel", "intake_note", "reported_at"}
 # เมนู LINE (15 ต.ค. 2569 Q20): the division the person chose in the menu, and the choice's name.
-MENU_FIELDS = {"division_code", "menu_label"}
+MENU_FIELDS = {"division_code", "menu_label", "sap_kind", "intake_data", "hold_for_admin"}
 # เวลาแจ้งจริง may go back this far (an outage plus a weekend), never into the future.
 REPORTED_AT_MAX_AGE = timedelta(days=30)
 REPORTED_AT_SKEW = timedelta(minutes=5)
@@ -139,8 +140,25 @@ KIND_FIELDS = {
     },
 }
 LINE_FIELDS = {"item_code", "quantity", "serials", "details"}
-NO_ITEM_TOPICS = {Case.Topic.USAGE, Case.Topic.SUGGESTION, Case.Topic.INQUIRY, Case.Topic.SYSTEM}
-ACTION_FIELDS = {"reason"}
+SAP_PATTERN = (r"[A-Za-z0-9/-]{4,30}", "เลข SAP ใช้ตัวอักษร ตัวเลข ขีด หรือ / ได้ 4 ถึง 30 ตัว")
+TRACKING_PATTERNS = {
+    "": SAP_PATTERN,
+    "slip": SAP_PATTERN,
+    "return_slip": SAP_PATTERN,
+    "work_order": SAP_PATTERN,
+    "meter": (r"[A-Za-z0-9-]{4,20}", "หมายเลขเครื่องวัดฯ ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว"),
+    "project": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "ชื่อโครงการยาว 2 ถึง 60 ตัว"),
+    "memo": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "เลขที่ M/N ยาว 2 ถึง 60 ตัว"),
+}
+NO_ITEM_TOPICS = {
+    Case.Topic.USAGE,
+    Case.Topic.SUGGESTION,
+    Case.Topic.INQUIRY,
+    Case.Topic.SYSTEM,
+    Case.Topic.GENERAL,
+}
+# ADR 0028: any action may carry a status notice for the requester and an internal note.
+ACTION_FIELDS = {"reason", "notice", "internal_note"}
 ACTION_EXTRA_FIELDS = {
     "assign": {"assignee_id"},
     "request_handoff": {"to_division", "reason_category", "keywords"},
@@ -166,7 +184,10 @@ ACTION_EXTRA_FIELDS = {
     "resolve_return_discrepancy": {"unit", "resolution", "reference", "replaces"},
     "terminate_return": {"lines", "category", "reference"},
     # M09: children are numbered per case; an intake answer carries channel and intake_note.
-    "resolve": {"category", "message", "internal_note"},
+    "resolve": {"category", "message", "internal_note", "as"},
+    # ADR 0030: an admin sends a case to a division, or answers one the admins hold.
+    "admin_send": {"division"},
+    "admin_answer": {"category", "message", "internal_note", "as"},
     "dispute_resolution": {"channel", "intake_note"},
     "request_child_work": {"division", "task", "deliverable", "rule", "lines"},
     "accept_child_work": {"child"},
@@ -284,6 +305,8 @@ class Submission:
     division_code: str = ""
     menu_label: str = ""
     meters: tuple = ()  # เครื่องวัดในเรื่องการใช้ไฟฟ้า (usage_meters)
+    intake_data: dict | None = None  # values a published LINE flow collected (ADR 0023)
+    hold_for_admin: bool = False  # ปัญหาการใช้งานหรืออื่นๆ: no division picked (ADR 0030)
 
 
 def parse_submission(payload, on_behalf):
@@ -313,9 +336,17 @@ def parse_submission(payload, on_behalf):
     }:
         fields[name] = _text(payload, name, False, 100 if name == "source_reference" else TEXT_MAX)
     if "sap_number" in spec["optional"]:
-        fields["sap_number"] = _text(payload, "sap_number", False, 20)
-        if fields["sap_number"] and not re.fullmatch(r"[A-Za-z0-9-]{4,20}", fields["sap_number"]):
-            fail(ErrorCode.VALIDATION_ERROR, "เลข SAP ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว")
+        # เลขติดตาม (grill กคว. 27 ต.ค. 2569 รอบใหม่ Q1, Q2): the kind says which pattern applies.
+        fields["sap_kind"] = _text(payload, "sap_kind", False, 16)
+        if fields["sap_kind"] not in TRACKING_PATTERNS:
+            fail(
+                ErrorCode.VALIDATION_ERROR,
+                "sap_kind must be slip, return_slip, work_order, meter, project or memo.",
+            )
+        fields["sap_number"] = _text(payload, "sap_number", False, 60)
+        pattern, problem = TRACKING_PATTERNS[fields["sap_kind"]]
+        if fields["sap_number"] and not re.fullmatch(pattern, fields["sap_number"]):
+            fail(ErrorCode.VALIDATION_ERROR, problem)
     if "needed_by" in spec["optional"]:
         fields["needed_by"] = None
         if payload.get("needed_by"):
@@ -337,7 +368,8 @@ def parse_submission(payload, on_behalf):
     raw_lines = payload.get("lines") or []
     if not isinstance(raw_lines, list) or len(raw_lines) > MAX_LINES:
         fail(ErrorCode.VALIDATION_ERROR, f"lines must be a list of at most {MAX_LINES}.")
-    if kind != Case.Kind.PROBLEM and not raw_lines:
+    # A tracking case (เลขติดตาม with its kind) lists no items: they live in SAP (Q3, Q4).
+    if kind != Case.Kind.PROBLEM and not raw_lines and not fields.get("sap_kind"):
         fail(ErrorCode.VALIDATION_ERROR, "At least one item line is required.")
     lines = []
     for raw in raw_lines:
@@ -397,6 +429,12 @@ def parse_submission(payload, on_behalf):
             fail(ErrorCode.VALIDATION_ERROR, str(exc))
         if meters and fields.get("topic") != Case.Topic.USAGE:
             fail(ErrorCode.VALIDATION_ERROR, "ระบุเครื่องวัดได้เฉพาะเรื่องการใช้ไฟฟ้า")
+    intake_data = payload.get("intake_data") or {}
+    if not isinstance(intake_data, dict) or len(json.dumps(intake_data, ensure_ascii=False)) > 5000:
+        fail(ErrorCode.VALIDATION_ERROR, "intake_data must be a small object.")
+    hold = payload.get("hold_for_admin", False)
+    if hold not in (True, False) or (hold and (division_code or kind != Case.Kind.PROBLEM)):
+        fail(ErrorCode.VALIDATION_ERROR, "Only a problem with no division waits for the admins.")
     return Submission(
         kind,
         tuple(lines),
@@ -409,6 +447,8 @@ def parse_submission(payload, on_behalf):
         division_code,
         menu_label,
         meters,
+        intake_data,
+        hold,
     )
 
 

@@ -72,7 +72,7 @@ def admin_items(request):
             "kinds": [
                 ("withdrawal", "เบิก"),
                 ("return", "ส่งคืน"),
-                ("problem", "แจ้งปัญหา"),
+                ("problem", "ปัญหา/ข้อเสนอแนะ"),
             ],
         },
     )
