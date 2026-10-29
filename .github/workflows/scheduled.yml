@@ -16,7 +16,7 @@ jobs:
   rescan:
     if: vars.OCIR_REGISTRY != ''
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - name: Re-scan the release of the newest main commit
         env:

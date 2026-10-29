@@ -28,6 +28,7 @@ env:
 jobs:
   gate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     outputs:
       go: ${{ steps.check.outputs.go }}
     steps:
@@ -53,7 +54,7 @@ jobs:
           - {platform: linux/amd64, runner: ubuntu-24.04, arch: amd64}
           - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -81,6 +82,7 @@ jobs:
   db-index:
     needs: db
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     outputs:
       image: ${{ steps.index.outputs.image }}
     steps:
@@ -107,7 +109,7 @@ jobs:
           - {platform: linux/amd64, runner: ubuntu-24.04, arch: amd64}
           - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -137,7 +139,7 @@ jobs:
   release:
     needs: [db-index, app]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
