@@ -70,6 +70,15 @@ THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 KIND_LABELS = {K.WITHDRAWAL: "เบิก", K.RETURN: "ส่งคืน", K.PROBLEM: "แจ้งปัญหา/ข้อเสนอแนะ"}
 KIND_SHORT = {K.WITHDRAWAL: "เบิก", K.RETURN: "คืน", K.PROBLEM: "ปัญหา/ข้อเสนอแนะ"}
 KIND_ORDER = [K.WITHDRAWAL, K.RETURN, K.PROBLEM]
+KIND_STEP_LABELS = {
+    K.WITHDRAWAL: "ติดตามใบเบิก",
+    K.RETURN: "ติดตามใบส่งคืน",
+    K.PROBLEM: KIND_LABELS[K.PROBLEM],
+}
+# ADR 0032: DED Center follows slips issued in SAP; typed text never opens a เบิก or ส่งคืน draft.
+SLIP_REFUSAL = "ขณะนี้ยังไม่สามารถเบิกหรือคืนของผ่าน DED Center ได้"
+SLIP_REQUEST = re.compile(r"(?:ขอ|อยาก|ต้องการ|จะ)\s*(?:เบิก|ส่งคืน|คืน)(?!เงิน)|^\s*(?:เบิก|ส่งคืน)")
+SLIP_HOW = "การเบิกและการส่งคืนทำใน SAP แล้วส่งใบที่เซ็นแล้วให้คลังของกอง ถ้ามีเลขใบแล้ว ติดตามได้จากปุ่มด้านล่าง"
 # หมวดเรื่องจริงของ Case ใช้ส่งต่อและแสดงผลภายหลัง ส่วนเมนูเริ่มต้นของ LINE ใช้
 # METER_GROUPS ด้านล่างเพื่อให้ทุกบริการอุปกรณ์มีตัวเลือกชุดเดียวกัน.
 TOPIC_LABELS = {
@@ -159,7 +168,9 @@ MENU_WORDS = {label: data for label, data in MENU}
 MENU_WORDS.update({"บริการ": "m=home", "ติดตามเรื่องของฉัน": "m=mine", "เมนูตามสิทธิ์": "m=roles"})
 MENU_WORDS.update(
     {
-        "เบิกอุปกรณ์": "m=equipment&kind=withdrawal",
+        "ติดตามใบเบิก": "m=slips",
+        "ติดตามใบส่งคืน": "m=slips",
+        "เบิกอุปกรณ์": "m=equipment&kind=withdrawal",  # typed: the ADR 0032 reply
         "ส่งคืนอุปกรณ์": "m=equipment&kind=return",
         "แจ้งปัญหา": "m=problems",
         "เมนูเพิ่มเติม": "m=roles",
@@ -406,7 +417,7 @@ def _dispatch(inbox, event_override=None, allow_agent=True):
         return [], True
     if inbox.event_type == "follow":
         ChannelIdentity.objects.filter(pk=identity.pk).update(is_following=True)
-        turn.say("ช่องทางนี้รับเรื่องเบิก ส่งคืน แจ้งปัญหา และข้อเสนอแนะถึง ฝอจ.")
+        turn.say("ช่องทางนี้ใช้ติดตามใบเบิก ใบส่งคืน และแจ้งปัญหาหรือข้อเสนอแนะถึง ฝอจ.")
     command = (_event_text(turn) or "").strip()
     external = identity.requester_id and identity.requester.is_external
     if command in {"ลงทะเบียนพนักงาน", "ยืนยันพนักงาน"} and (
@@ -572,7 +583,7 @@ def _staff_turn(turn):
         staff_work.navigation(turn, user)
         return True
     navigation = data or MENU_WORDS.get(command) or ""
-    if navigation in {"m=mine", "m=home", "m=problems"} or navigation.startswith(
+    if navigation in {"m=mine", "m=home", "m=problems", "m=slips"} or navigation.startswith(
         ("m=equipment&", "m=problem&")
     ):
         if turn.identity.requester_id is not None:
@@ -1166,7 +1177,7 @@ def _not_a_name(turn, text):
         _ask_name(turn, f"ยังไม่ได้ลงทะเบียนเป็นผู้แจ้ง\n{ask}")
         return True
     if shape == "request":
-        _ask_name(turn, f"ต้องลงทะเบียนก่อนจึงเบิก คืน หรือแจ้งเรื่องได้\n{ask}")
+        _ask_name(turn, f"ต้องลงทะเบียนก่อนจึงติดตามใบเบิก ใบส่งคืน หรือแจ้งเรื่องได้\n{ask}")
         return True
     if re.search(r"[0-9๐-๙]", text) or len(text.split()) < 2:
         _ask_name(turn, f"พิมพ์ทั้งชื่อและนามสกุล เว้นวรรคระหว่างกัน ไม่มีตัวเลข {NAME_EXAMPLE}")
@@ -1417,6 +1428,15 @@ def _free_text(turn, draft, text, message=None):
         from operations import agent_chat, ai_chat, answers  # local: build on this module
 
         use_ai = turn.allow_agent and ai_chat.wants_ai(turn, draft, text)
+        if (
+            not use_ai
+            and not settings.LINE_TYPED_SLIPS
+            and not turn.conversation.prompt
+            and (draft is None or draft.kind not in (K.WITHDRAWAL, K.RETURN))
+            and SLIP_REQUEST.search(text)
+        ):
+            # ADR 0032 Q15, Q19: without AI the program says it; with AI, ai_chat.apply refuses.
+            return slip_refusal(turn, text)
         if use_ai and agent_chat.enabled():
             return ai_chat.queue(turn, draft, text, message)
         found = answers.keyword_answer(turn, draft, text)  # คลังคำตอบ ก (ADR 0012)
@@ -1689,6 +1709,9 @@ def _static_postback(turn, data, draft):
     if data == "m=problems":
         return _general_draft(turn)  # ADR 0030 Q14: the division carousel, typed or tapped
     if data in {"m=equipment&kind=withdrawal", "m=equipment&kind=return"}:
+        if not settings.LINE_TYPED_SLIPS:
+            # ADR 0032: buttons "เบิกอุปกรณ์" and "ส่งคืนอุปกรณ์" still in people's chats.
+            return slip_refusal(turn)
         if turn.internal or any(
             getattr(turn.requester, flag, False)
             for flag in ("is_internal", "is_external", "is_anonymous")
@@ -1696,6 +1719,9 @@ def _static_postback(turn, data, draft):
             return _menu(turn, "กรุณายืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
         kind = K.WITHDRAWAL if data.endswith("=withdrawal") else K.RETURN
         return _equipment_draft(turn, kind)
+    if data == "m=slips":
+        turn.set_prompt()
+        return turn.say("เลือกอุปกรณ์ที่ต้องการติดตาม", slip_buttons())
     if data == "m=problem&topic=equipment":
         return _equipment_draft(turn, K.PROBLEM)
     if data == "m=problem&topic=suggestion":
@@ -2037,7 +2063,7 @@ def _menu_act(turn, data):
             return koj_chat.services(turn, item.topic)
         return koj_chat.ask(turn, item.topic, kind)
     if kind in (K.WITHDRAWAL, K.RETURN) and _problems_only(turn):
-        return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
+        return _menu(turn, "ต้องยืนยันตัวตนพนักงานก่อนติดตามใบเบิกหรือใบส่งคืน")
     prompt = turn.conversation.prompt_data if turn.conversation.prompt == "equipment_name" else {}
     name = prompt.get("name", "") if prompt.get("item") == item.pk else ""
     return _typed_draft(turn, item, kind, name=name)
@@ -2117,6 +2143,35 @@ def _menu_ask(turn, pk, lead=""):
     if lead:
         turn.say(lead)
     return _set(turn, draft, _next_field(draft))
+
+
+def slip_buttons(text=""):
+    """ADR 0032: the equipment the text names (its action card: ติดตามใบเบิก, ติดตามใบส่งคืน),
+    else every tile that asks for the equipment first."""
+    A = LineMenuItem.Action
+    equipment = list(
+        LineMenuItem.objects.filter(
+            is_active=True, action=A.EQUIPMENT, parent__is_active=True, parent__action=A.TOPIC
+        )
+        .select_related("parent")
+        .order_by("parent__position", "parent__pk", "position", "pk")
+    )
+    named = [
+        item
+        for item in equipment
+        if item.topic != "other"
+        and re.search(rf"(?<![A-Za-z]){re.escape(item.label)}(?![A-Za-z])", text or "", re.I)
+    ]
+    if named:
+        return [(item.label, f"m=item&id={item.pk}") for item in named[:MAX_QUICK]]
+    tiles = {item.parent_id: item.parent for item in equipment}
+    return [(tile.label, f"m=item&id={tile.pk}") for tile in tiles.values()][:MAX_QUICK]
+
+
+def slip_refusal(turn, text=""):
+    """ADR 0032 Q16, Q20: the fixed opening, how a slip is made, and where to follow it."""
+    turn.set_prompt()
+    turn.say(f"{SLIP_REFUSAL}\n{SLIP_HOW}", slip_buttons(text))
 
 
 def _menu(turn, text):
@@ -2562,10 +2617,12 @@ def _ask_question(turn, draft):
 
         return flow_runner.render(turn, draft)
     if step == "kind":
+        labels = KIND_LABELS if settings.LINE_TYPED_SLIPS else KIND_STEP_LABELS
+        lead = "ต้องการแจ้งเรื่องประเภทใด" if settings.LINE_TYPED_SLIPS else "ต้องการทำเรื่องใด"
         turn.say(
-            "ต้องการแจ้งเรื่องประเภทใด\n1. เบิก\n2. ส่งคืน\n"
+            f"{lead}\n1. {labels[K.WITHDRAWAL]}\n2. {labels[K.RETURN]}\n"
             "3. แจ้งปัญหา/ข้อเสนอแนะ (ของชำรุด ใช้งานไม่ได้ ไฟแพง ลักใช้ไฟ หรือข้อเสนอแนะ)",
-            [b(KIND_LABELS[k], "kind", {"kind": k}, draft) for k in KIND_ORDER]
+            [b(labels[k], "kind", {"kind": k}, draft) for k in KIND_ORDER]
             + [b("ยกเลิกร่าง", "discard", draft=draft)],
         )
     elif step == "topic":
@@ -2901,6 +2958,16 @@ def _draft_button(turn, draft, action, value):
         else:
             _touch(draft, turn.now, kind="", step="kind", data={"lines": [], "fields": {}})
         return _ask(turn, draft)
+    if (
+        action == "kind"
+        and value["kind"] in (K.WITHDRAWAL, K.RETURN)
+        and not settings.LINE_TYPED_SLIPS
+    ):
+        # ADR 0032: a slip is followed from its equipment's tile, never typed as a new draft.
+        _touch(draft, turn.now, status=D.DISCARDED)
+        turn.conversation.active_draft = None
+        turn.conversation.save(update_fields=["active_draft", "updated_at"])
+        return turn.say("เลือกอุปกรณ์ที่ต้องการติดตาม", slip_buttons())
     if action == "kind":
         step = "topic" if value["kind"] == K.PROBLEM else "category"
         if value["kind"] != K.PROBLEM:

@@ -134,7 +134,7 @@ class Role(models.TextChoices):
     # every step and holds the division's authority; the duties below matter only when the
     # organisation splits them again.
     STAFF = "staff", "สมาชิกกอง"
-    APPROVER = "approver", "ผู้อนุมัติ"
+    APPROVER = "approver", "ผู้รับเรื่องของกอง"
     ISSUER = "issuer", "ผู้จ่าย"
     RECEIVER = "receiver", "ผู้รับคืน"
     INSPECTOR = "inspector", "ผู้ตรวจสภาพ"
@@ -471,21 +471,21 @@ class Case(models.Model):
     """เรื่อง: exists only once submitted (drafts live in the conversation layer, M03)."""
 
     class Kind(models.TextChoices):
-        WITHDRAWAL = "withdrawal", "คำขอเบิก"
-        RETURN = "return", "คำขอคืน"
-        PROBLEM = "problem", "เรื่องแจ้งปัญหา/ข้อเสนอแนะ"
+        WITHDRAWAL = "withdrawal", "ติดตามใบเบิก"
+        RETURN = "return", "ติดตามใบส่งคืน"
+        PROBLEM = "problem", "แจ้งปัญหา/ข้อเสนอแนะ"
 
     class Status(models.TextChoices):
         SUBMITTED = "submitted", "รอคัดกรอง"
         TRIAGE = "triage", "กำลังคัดกรอง"
-        AWAITING_APPROVAL = "awaiting_approval", "รออนุมัติ"
+        AWAITING_APPROVAL = "awaiting_approval", "รอกองรับเรื่อง"
         AWAITING_EXECUTION = "awaiting_execution", "รอดำเนินการ"
         IN_PROGRESS = "in_progress", "กำลังดำเนินการ"
         AWAITING_CONFIRMATION = "awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย)ยืนยัน"
         AWAITING_INFO = "awaiting_info", "รอข้อมูลเพิ่ม"
         ON_HOLD = "on_hold", "พักเรื่อง"
         CLOSED = "closed", "ปิดเรื่อง"
-        REJECTED = "rejected", "ไม่รับเรื่อง/ไม่อนุมัติ"
+        REJECTED = "rejected", "ไม่รับเรื่อง"
         CANCELLED = "cancelled", "ยกเลิก"
 
     class Topic(models.TextChoices):
@@ -1215,6 +1215,9 @@ class AIConfigVersion(models.Model):
     # Also reads where a message belongs on the LINE menu (owner, 25 Oct 2569 Q9): needs
     # typed_fields; evaluated on menu-v1 as well.
     menu_fields = models.BooleanField(default=False, db_default=False)
+    # ADR 0032 Q21: the LINE agent also knows what DED Center does and does not do (it follows
+    # slips issued in SAP, never requisitions, has no stock); needs menu_fields; dialogue-v2.
+    slip_facts = models.BooleanField(default=False, db_default=False)
     profiles = models.ManyToManyField(AIProfile, through="AIConfigEntry", related_name="+")
     test_passed = models.BooleanField(null=True)
     test_result = models.JSONField(default=dict, blank=True)
@@ -1415,7 +1418,7 @@ class AuthorityGrant(models.Model):
     class Activity(models.TextChoices):
         PRIORITY_EXCEPTION = "priority_exception", "ข้อยกเว้นระดับความเร่งด่วน"
         ROUTING_DECISION = "routing_decision", "ตัดสินเส้นทาง"
-        WITHDRAWAL_APPROVAL = "withdrawal_approval", "อนุมัติเบิก"
+        WITHDRAWAL_APPROVAL = "withdrawal_approval", "รับเรื่องของกอง"
         ALLOCATION = "allocation", "จัดสรรของขาด"
         CONDITION_CERTIFICATION = "condition_certification", "รับรองสภาพ"
 
@@ -1664,7 +1667,7 @@ class AckClock(models.Model):
         HANDOFF = "handoff", "รอตอบรับการส่งต่อ"
         FIRST_RESPONSE = "first_response", "ตรวจครั้งแรก"
         RESOLVE = "resolve", "แก้ไข"
-        APPROVAL = "approval", "รออนุมัติ"
+        APPROVAL = "approval", "รอกองรับเรื่อง"
         ISSUE = "issue", "รอจ่าย"
         INSPECTION = "inspection", "รอตรวจของคืน"
         CHILD_ACCEPT = "child_accept", "รอตอบรับงานย่อย"

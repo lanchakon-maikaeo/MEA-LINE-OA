@@ -55,6 +55,7 @@ ROUTING_AI_ACCURACY = "routing_ai_accuracy"
 CATCH_UP = "catch_up_push"
 CATCH_UP_APOLOGY = "catch_up_apology"
 REGISTRY_ACCESS = "registry_access"
+OLD_STOCK = "old_stock_work"
 SAP_LINE_ENTRY = "sap_line_entry"
 AI_EDITORS = "ai_editors"
 EMAIL_METHODS = "employee_email_methods"
@@ -78,8 +79,8 @@ OPTIONS = {
         (
             (
                 "off",
-                "ไม่มีขั้นคัดกรอง: เรื่องใหม่เข้ารออนุมัติของกองเจ้าภาพทันที",
-                "กองตั้งระดับความเร่งด่วนตอนอนุมัติ เรื่องฉุกเฉินเริ่มงานทันที "
+                "ไม่มีขั้นคัดกรอง: เรื่องใหม่เข้ารอกองรับเรื่องของกองเจ้าภาพทันที",
+                "กองตั้งระดับความเร่งด่วนตอนรับเรื่อง เรื่องฉุกเฉินเริ่มงานทันที "
                 "เรื่องที่ระบบบอกกองไม่ได้ยังรอผู้ประสานก่อน (ADR 0025)",
             ),
             (
@@ -489,6 +490,25 @@ OPTIONS = {
             ),
         ),
     ),
+    # ADR 0032: DED Center tracks slips; the stock work of M07, M08 and M11 stays in the code.
+    OLD_STOCK: Option(
+        "แสดงงานคลังเดิม (จำนวนอนุมัติ จัดสรร จ่าย รับของคืน ตรวจสภาพ)",
+        (
+            (
+                "off",
+                "ไม่แสดง",
+                "ค่าที่ตกลงไว้ (ADR 0032, 29 ต.ค. 2569) ระบบติดตามใบเบิกและใบส่งคืนที่ออกใน SAP "
+                "ไม่มีจำนวนของในคลัง กองรับเรื่องทั้งเรื่องด้วยปุ่มเดียว และไม่เห็นปุ่มจัดสรร "
+                "บันทึกจ่าย รับของคืน ตรวจสภาพ และหน้าคลังของ ข้อมูลที่เคยบันทึกยังเก็บไว้",
+            ),
+            (
+                "on",
+                "แสดง",
+                "กองอนุมัติจำนวนรายการ จัดสรร บันทึกจ่าย รับของคืน และตรวจสภาพในระบบได้ "
+                "แอดมินเห็นหน้าคลังของ ใช้เมื่อมียอดจากไฟล์ CSV ของ SAP แล้วเท่านั้น",
+            ),
+        ),
+    ),
     AI_EDITORS: Option(
         "ใครเปลี่ยนการตั้งค่า AI ได้ (เปิดใช้รุ่น ประเมิน โมเดล credential)",
         (
@@ -622,7 +642,7 @@ STEP_CHOICES = {
 STEP_DEFAULTS = (
     ("submitted", "รอคัดกรอง", "received"),
     ("triage", "กำลังคัดกรอง", "received"),
-    ("awaiting_approval", "รออนุมัติ", "received"),
+    ("awaiting_approval", "รอกองรับเรื่อง", "received"),
     ("awaiting_execution", "รอดำเนินการ", "received"),
     ("in_progress", "กำลังดำเนินการ", "working"),
     ("on_hold", "พักเรื่อง", "working"),
@@ -645,6 +665,11 @@ def get(key):
     option = OPTIONS[key]
     value = SystemOption.objects.filter(key=key).values_list("value", flat=True).first()
     return value if value in {v for v, _, _ in option.choices} else option.default
+
+
+def old_stock():
+    """ADR 0032: the stock work of M07, M08 and M11 shows only when an admin turned it on."""
+    return get(OLD_STOCK) == "on"
 
 
 @transaction.atomic

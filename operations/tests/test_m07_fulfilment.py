@@ -27,6 +27,7 @@ from operations import (
     inventory,
     line_api,
     notifications,
+    options,
     orchestration,
     policy,
     receipts,
@@ -54,6 +55,7 @@ from operations.models import (
     Receipt,
     Role,
     StockMovement,
+    SystemOption,
 )
 from operations.tests.test_m02_cases import key, make_staff, setup_world, withdrawal
 from operations.tests.test_m03_line import ALICE, BOB, LineTestCase, texts
@@ -94,6 +96,8 @@ class Staffing:
     """Staff, grants and helpers shared by TestCase and TransactionTestCase classes."""
 
     def staff_up(self):
+        # ADR 0032: these tests cover the stock work kept behind ตัวเลือกระบบ old_stock_work.
+        SystemOption.objects.update_or_create(key=options.OLD_STOCK, defaults={"value": "on"})
         call_command("seed_demo_policy", stdout=StringIO())
         call_command("seed_fake_inventory", stdout=StringIO())
         self.issuer = make_staff("mtrissuer", (Role.ISSUER, "SIM-MTR"))

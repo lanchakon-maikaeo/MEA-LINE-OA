@@ -125,11 +125,12 @@ Example: message "เบิกมิเตอร์ 15(45)A 1 เครื่อ
 
 
 def ready(version):
-    """Whether this extraction version passed dialogue-v1 with the menu gate (Q11, Q18)."""
+    """Whether this extraction version passed dialogue-v1 with the menu gate (Q11, Q18), or
+    dialogue-v2 when it knows DED Center follows slips (ADR 0032)."""
     return bool(
         getattr(version, "eval_passed", False)
         and ai.reads_menu(version)
-        and version.eval_result.get("gate") == ai.MENU_EVAL_GATE
+        and version.eval_result.get("gate") == ai.eval_gate_for(version)
     )
 
 

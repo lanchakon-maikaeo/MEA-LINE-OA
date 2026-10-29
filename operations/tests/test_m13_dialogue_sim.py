@@ -120,6 +120,7 @@ class GraphTests(TestCase):
             self.assertIn(part, text)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class SimulationTests(SimTestCase):
     def test_seeded_dialogues_pass_keep_nothing_and_send_nothing(self):
         before = (
@@ -235,6 +236,7 @@ class SimulationTests(SimTestCase):
             self.run_sim(count=1)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class MutationTests(SimTestCase):
     """Break the bot on purpose: the rule meant for that fault must fail."""
 
@@ -302,6 +304,7 @@ class MutationTests(SimTestCase):
         self.assertIn("isolation", self.failed(records))
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class RetryTests(SimTestCase):
     def test_a_text_that_names_another_category_is_drawn_again(self):
         graph = only(dialogue_sim.load_graph(), "problem_equipment", topics=["meter"], hazard=0)

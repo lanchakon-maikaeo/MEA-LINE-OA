@@ -100,7 +100,7 @@ class AssignTests(UnitTestCase):
         self.assertEqual((case.section, case.unit_work), (self.repair, work))
         decision = case.decisions.get(action="assign")
         self.assertIsNone(decision.actor)
-        self.assertIn("แจ้งปัญหา · หม้อแปลง", decision.reason)
+        self.assertIn("ปัญหา/ข้อเสนอแนะ · หม้อแปลง", decision.reason)
         client = Client()
         client.force_login(self.kae)
         page = client.get(f"/cases/{case.number}/").content.decode()
@@ -259,7 +259,7 @@ class PageTests(UnitTestCase):
         client.force_login(self.admin)
         page = client.get("/console/admin/org/").content.decode()
         self.assertIn("ผังหน่วยงาน", page)
-        self.assertIn("แจ้งปัญหา · หม้อแปลง", page)
+        self.assertIn("ปัญหา/ข้อเสนอแนะ · หม้อแปลง", page)
         self.assertIn("ยังไม่ได้จัดหน่วย", page)
         page = client.get(
             "/console/admin/org/",

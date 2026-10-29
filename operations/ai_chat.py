@@ -798,6 +798,20 @@ def expire_waiting(now=None):
 
 def apply(turn, draft, extraction, run):
     proposals = [p for p in extraction.requests if p.intent in ai.KIND_FOR_INTENT]
+    # ADR 0032: a เบิก or ส่งคืน read from typed text only fills the slip draft already open
+    # (from its equipment's tile); it never opens one, whatever the AI decided.
+    slips = (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
+    refused = [
+        p
+        for p in proposals
+        if not settings.LINE_TYPED_SLIPS
+        and ai.KIND_FOR_INTENT[p.intent] in slips
+        and (draft is None or draft.kind != ai.KIND_FOR_INTENT[p.intent])
+    ]
+    proposals = [p for p in proposals if p not in refused]
+    if refused and not proposals:
+        source = _message(run) if isinstance(run, AIRun) else None  # evaluation: no run
+        return conversation.slip_refusal(turn, source.text if source else "")
     if not proposals:
         turn.say("ยังไม่เข้าใจข้อความ กรุณาเลือกจากปุ่ม หรือพิมพ์รายละเอียดเพิ่ม")
         return _reprompt(turn, draft)
@@ -825,6 +839,8 @@ def apply(turn, draft, extraction, run):
     lines += notes
     if extra:
         lines.append(f"พบอีก {len(extra)} เรื่องในข้อความ บันทึกเป็นร่างไว้แล้ว ส่งเรื่องนี้ก่อน แล้วทำเรื่องถัดไปต่อ")
+    if refused:
+        lines.append(f"{conversation.SLIP_REFUSAL} ส่วนที่ขอเบิกหรือคืนจึงไม่ได้บันทึก")
     turn.say("\n".join(lines))
     conversation._ask(turn, draft)
 

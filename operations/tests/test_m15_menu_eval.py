@@ -4,6 +4,8 @@ real structure; the set is locked; the gate of a menu version requires it."""
 import hashlib
 import json
 
+from django.test import override_settings
+
 from operations import ai, ai_eval, line_menu_catalog
 from operations.models import Division, Role
 from operations.tests.test_m02_cases import make_staff
@@ -138,6 +140,7 @@ def ideal(case_id):
     return {"requests": [request]}
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class MenuSetTests(OrgTestCase):
     def setUp(self):
         super().setUp()

@@ -464,6 +464,7 @@ class AdapterTests(AITestCase):
 # --- Chat integration ------------------------------------------------------------------------
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class ChatTests(AITestCase):
     def free_text(self, value):
         before = len(self.sent)
@@ -889,6 +890,7 @@ class RetrievalTests(AITestCase):
 # --- Harness pipeline ---------------------------------------------------------------------------
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class HarnessTests(AITestCase):
     free_text = ChatTests.free_text
 

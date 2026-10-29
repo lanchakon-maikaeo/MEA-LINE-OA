@@ -32,10 +32,10 @@ from operations.models import (
 
 User = get_user_model()
 NA = "N/A"  # Q13: a level a person does not have, shown in every place
-KIND_SHORT = {
+KIND_SHORT = {  # ADR 0032: the short names LINE uses
     Case.Kind.WITHDRAWAL: "เบิก",
-    Case.Kind.RETURN: "คืน",
-    Case.Kind.PROBLEM: "แจ้งปัญหา",
+    Case.Kind.RETURN: "ส่งคืน",
+    Case.Kind.PROBLEM: "ปัญหา/ข้อเสนอแนะ",
 }
 
 

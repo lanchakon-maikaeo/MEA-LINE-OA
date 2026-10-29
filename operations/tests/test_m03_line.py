@@ -365,6 +365,7 @@ class RegistrationTests(LineTestCase):
 # --- Guided drafts -----------------------------------------------------------------------------
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class DraftConversationTests(LineTestCase):
     def setUp(self):
         super().setUp()
@@ -682,6 +683,7 @@ class CatchUpTests(LineTestCase):
 # --- Attachments ------------------------------------------------------------------------------
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class AttachmentTests(LineTestCase):
     def setUp(self):
         super().setUp()
@@ -868,6 +870,7 @@ class InfoCase(LineTestCase):
         return Case.objects.get(pk=case.pk)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class InfoReplyTests(InfoCase):
     """The push says "ตอบกลับในแชตนี้ได้เลย": the answer must reach the case and its staff,
     not start a new draft or go to AI as a new request."""

@@ -69,7 +69,7 @@ def start_emergency(case):
             case,
             "start_work",
             S.AWAITING_APPROVAL,
-            "เรื่องฉุกเฉินเริ่มงานทันทีโดยไม่รออนุมัติ",
+            "เรื่องฉุกเฉินเริ่มงานทันทีโดยไม่รอกองรับเรื่อง",
             {},
             services.EVENT_DECISION_RECORDED,
             None,
@@ -126,8 +126,9 @@ def may_approve(user, case):
 
 
 def whole(case):
-    """Approved as one: any kind but a withdrawal that lists item rows."""
-    return case.kind != Case.Kind.WITHDRAWAL or not case.lines.exists()
+    """Approved as one: any kind but a withdrawal that lists item rows, and every case while the
+    stock work is hidden (ADR 0032: the division takes the case, SAP approves the slip)."""
+    return case.kind != Case.Kind.WITHDRAWAL or not options.old_stock() or not case.lines.exists()
 
 
 NEXT = {
@@ -146,16 +147,16 @@ def approve_case(ctx, case, payload, reason, target):
 def deny_case(ctx, case, payload, reason, target):
     _check(ctx, case)
     if not reason:
-        fail(ErrorCode.VALIDATION_ERROR, "บอกเหตุผลที่ไม่อนุมัติ")
+        fail(ErrorCode.VALIDATION_ERROR, "บอกเหตุผลที่ไม่รับเรื่อง")
     case.status = S.REJECTED
     return {"whole": True}
 
 
 def _check(ctx, case):
     if ctx.requester is not None or not may_approve(ctx.user, case):
-        fail(ErrorCode.FORBIDDEN, "ไม่มีอำนาจอนุมัติของกองนี้")
+        fail(ErrorCode.FORBIDDEN, "ไม่มีอำนาจรับเรื่องของกองนี้")
     if ctx.user is not None and identity.separated(ctx) and case.submitted_by_id == ctx.user.pk:
-        fail(ErrorCode.FORBIDDEN, "ผู้บันทึกเรื่องแทนผู้แจ้งไม่อนุมัติเรื่องนั้นเอง")
+        fail(ErrorCode.FORBIDDEN, "ผู้บันทึกเรื่องแทนผู้แจ้งรับเรื่องนั้นเองไม่ได้")
 
 
 def bulk_approve(actor, cases):
@@ -166,7 +167,7 @@ def bulk_approve(actor, cases):
     done, skipped = [], []
     for case in cases:
         if case.status != S.AWAITING_APPROVAL or not whole(case):
-            skipped.append((case, "อนุมัติจากคิวได้เฉพาะเรื่องที่รออนุมัติทั้งเรื่อง"))
+            skipped.append((case, "รับเรื่องจากคิวได้เฉพาะเรื่องที่รอกองรับเรื่องทั้งเรื่อง"))
             continue
         payload = {}
         state = policy.state_for(case)
@@ -182,7 +183,7 @@ def bulk_approve(actor, cases):
                 payload=payload,
             )
         except CommandFailed as exc:
-            skipped.append((case, exc.message or f"อนุมัติไม่ได้ ({exc.code})"))
+            skipped.append((case, exc.message or f"รับเรื่องไม่ได้ ({exc.code})"))
         else:
             done.append(case)
     return done, skipped

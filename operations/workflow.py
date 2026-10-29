@@ -239,7 +239,7 @@ ACTIONS = {
         # Lines are decided one by one; the case waits until every line is decided (Q3).
         ActionSpec(
             "approve",
-            "อนุมัติ",
+            "รับเรื่อง",
             "M07",
             {
                 K.WITHDRAWAL: {
@@ -253,7 +253,7 @@ ACTIONS = {
         ),
         ActionSpec(
             "deny_approval",
-            "ไม่อนุมัติ",
+            "ไม่รับเรื่อง",
             "M07",
             _per_kind(lambda k, st: {S.AWAITING_APPROVAL: {S.REJECTED}}),
         ),
@@ -261,7 +261,7 @@ ACTIONS = {
         # emergency problem report without waiting (Q24). No person performs these.
         ActionSpec(
             "skip_screening",
-            "ข้ามขั้นคัดกรอง เข้ารออนุมัติ",
+            "ข้ามขั้นคัดกรอง เข้ารอกองรับเรื่อง",
             "M06",
             _per_kind(
                 lambda k, _: {S.SUBMITTED: {S.AWAITING_APPROVAL}, S.TRIAGE: {S.AWAITING_APPROVAL}}

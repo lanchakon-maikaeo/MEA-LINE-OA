@@ -9,6 +9,7 @@ import re
 from datetime import timedelta
 
 from asgiref.sync import async_to_sync, sync_to_async
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from mcp import types
@@ -131,7 +132,11 @@ class Tools:
                 getattr(requester, flag, False)
                 for flag in ("is_internal", "is_external", "is_anonymous")
             ):
-                commands += ["เบิกอุปกรณ์", "ส่งคืนอุปกรณ์"]
+                commands += (  # ADR 0032: follow slips; the earlier typed intake in tests only
+                    ["เบิกอุปกรณ์", "ส่งคืนอุปกรณ์"]
+                    if settings.LINE_TYPED_SLIPS
+                    else ["ติดตามใบเบิก", "ติดตามใบส่งคืน"]
+                )
             if staff:
                 commands += ["งานของกอง", "เมนูเพิ่มเติม"]
                 if work_orders.may_issue(staff):
@@ -274,7 +279,7 @@ class Tools:
         if command in conv.reply_choices.get("actions", {}):
             return True
         if requester and command in conversation.MENU_WORDS:
-            if command in {"เบิกอุปกรณ์", "ส่งคืนอุปกรณ์"} and any(
+            if command in {"ติดตามใบเบิก", "ติดตามใบส่งคืน", "เบิกอุปกรณ์", "ส่งคืนอุปกรณ์"} and any(
                 getattr(requester, flag, False)
                 for flag in ("is_internal", "is_external", "is_anonymous")
             ):

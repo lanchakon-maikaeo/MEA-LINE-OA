@@ -74,11 +74,11 @@
 
     <section class="section" aria-labelledby="s-lines" data-tour="lines">
       <div class="section-head">
-        <h2 id="s-lines">รายการอุปกรณ์</h2>
+        <h2 id="s-lines">{% if case.kind != "problem" and not page.lines.stock %}รายละเอียดตามใบ{% else %}รายการอุปกรณ์{% endif %}</h2>
         {% if page.lines.partially_issued %}<span class="tag">จ่ายบางส่วน</span>{% elif page.lines.partially_returned %}<span class="tag">คืนบางส่วน</span>{% endif %}
       </div>
       <div class="table-wrap">
-        {% if case.kind == "withdrawal" %}
+        {% if case.kind == "withdrawal" and page.lines.stock %}
         <table>
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอ</th><th scope="col" class="num">อนุมัติ</th><th scope="col" class="num">จ่ายแล้ว</th><th scope="col" class="num">หน่วยงาน (เขต/ฝ่าย)รับแล้ว</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างจ่าย</th></tr></thead>
           <tbody data-more>
@@ -96,7 +96,7 @@
           {% endfor %}
           </tbody>
         </table>
-        {% elif case.kind == "return" %}
+        {% elif case.kind == "return" and page.lines.stock %}
         <table>
           <thead><tr><th scope="col">#</th><th scope="col">รายการ</th><th scope="col" class="num">ขอคืน</th><th scope="col" class="num">มาถึง</th><th scope="col" class="num">พร้อมใช้</th><th scope="col" class="num">ซ่อม</th><th scope="col" class="num">อื่น ๆ</th><th scope="col" class="num">รอตรวจ</th><th scope="col" class="num">ยุติ</th><th scope="col" class="num">ค้างส่งคืน</th></tr></thead>
           <tbody data-more>
@@ -140,11 +140,12 @@
     </section>
     {% endif %}
 
-    {% if case.kind == "return" %}
+    {% if case.kind == "return" %}{% if page.lines.stock or page.lines.instructions %}
     <section class="section" aria-labelledby="s-units" data-tour="units">
-      <div class="section-head"><h2 id="s-units">ของที่รับคืนและการตรวจ</h2>{% if page.lines.no_source_document %}<span class="flag flag--info">ไม่มีเอกสารอ้างอิงการจ่าย</span>{% endif %}</div>
+      <div class="section-head"><h2 id="s-units">{% if page.lines.stock %}ของที่รับคืนและการตรวจ{% else %}วิธีส่งคืน{% endif %}</h2>{% if page.lines.no_source_document %}<span class="flag flag--info">ไม่มีเอกสารอ้างอิงการจ่าย</span>{% endif %}</div>
       {% if page.lines.instructions %}<div class="notice notice--info mb-24">{% icon "info" %}<div class="notice__body"><strong>วิธีส่งคืนที่แจ้งหน่วยงาน (เขต/ฝ่าย)</strong>{{ page.lines.instructions }}</div></div>{% endif %}
-      {% if page.lines.units %}
+      {% if not page.lines.stock %}
+      {% elif page.lines.units %}
       <div class="table-wrap"><table>
         <thead><tr><th scope="col">หน่วย</th><th scope="col">รายการ</th><th scope="col">เลขเครื่อง/จำนวน</th><th scope="col">สถานะ</th><th scope="col">หมายเหตุ</th></tr></thead>
         <tbody data-more>
@@ -156,7 +157,7 @@
       </table></div>
       {% else %}<div class="empty"><strong>ยังไม่มีของมาถึง</strong>ผู้รับคืนบันทึกเมื่อของมาถึงจริง</div>{% endif %}
     </section>
-    {% endif %}
+    {% endif %}{% endif %}
 
     {% if page.children %}
     <section class="section" aria-labelledby="s-children" data-tour="children">

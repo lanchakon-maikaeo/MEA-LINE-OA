@@ -13,6 +13,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.test import override_settings
 from django.utils import timezone
 
 from operations import ai, ai_chat, ai_eval, ai_harness
@@ -288,6 +289,7 @@ class ValidationTests(TypedTestCase):
         self.assertEqual([(i.code, i.quantity) for i in got.items], [("TYPED_OTHER", 5)])
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class ChatTests(TypedTestCase):
     def test_free_text_fills_a_typed_draft_and_asks_only_what_is_missing(self):
         self.typed_version()
@@ -380,6 +382,7 @@ class ChatTests(TypedTestCase):
         self.assertEqual(draft.data["lines"][0]["details"][0]["size"], "100/5A")
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class NameTests(TypedTestCase):
     def test_a_name_that_only_repeats_the_group_is_asked_again(self):
         self.typed_version()
@@ -395,6 +398,7 @@ class NameTests(TypedTestCase):
         self.assertIn("พิมพ์ชื่ออุปกรณ์", texts(self.sent[-1]))
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class TypedSetTests(TypedTestCase):
     def test_the_typed_sets_are_locked(self):
         for name, label, count in (("typed1", "typed-v1", 22), ("typed2", "typed-v2", 12)):

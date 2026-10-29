@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from operations import employees, options, staff_work
 from operations.models import Case, ConversationDraft, LineMenuItem, WorkOrder
@@ -161,6 +161,7 @@ class RegistrationRedesignTests(StaffChatTestCase):
         self.assertIsNone(row.staff_user_id)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class ServiceMenuFlowTests(MenuTestCase):
     def setUp(self):
         super().setUp()

@@ -17,6 +17,7 @@ class Page:
     also: tuple = ()  # url names of the page's detail and action views
     badge: str = ""  # key of badges(): how many things wait on this page
     developer: bool = False  # แอดมินผู้พัฒนา only
+    stock: bool = False  # ADR 0032: only while ตัวเลือกระบบ old_stock_work is on
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ GROUPS = (
     ),
     Group(
         "กองและการส่งงาน",
-        "เรื่องไปถึงกองไหน แต่ละกองดูแลอะไร และใครอนุมัติได้",
+        "เรื่องไปถึงกองไหน แต่ละกองดูแลอะไร และใครรับเรื่องได้",
         (
             Page(
                 "admin-org",
@@ -68,12 +69,18 @@ GROUPS = (
             Page(
                 "admin-policy",
                 "กติกาและอำนาจ",
-                "ความด่วน เวลาตอบรับ และผู้มีอำนาจอนุมัติ",
+                "ความด่วน เวลาตอบรับ และผู้มีอำนาจรับเรื่อง",
                 ("admin-policy-action",),
             ),
             Page("admin-holidays", "วันหยุด", "วันที่ไม่นับเป็นวันทำการ และขึ้นในปฏิทินนัด"),
             Page("admin-districts", "เขต", "ชื่อย่อ ฟข. ของแต่ละเขต ใช้จับคู่ตารางรถของกอง"),
-            Page("admin-inventory", "คลังของ", "รายการของและยอดคลัง", ("admin-inventory-action",)),
+            Page(
+                "admin-inventory",
+                "คลังของ",
+                "รายการของและยอดคลัง",
+                ("admin-inventory-action",),
+                stock=True,
+            ),
             Page("admin-items", "รายการอุปกรณ์", "หมวดเมนู LINE และรหัสพัสดุ SAP ของแต่ละรายการ"),
             Page(
                 "koj-sources",
@@ -163,12 +170,15 @@ def badges():
 
 def menu(scope, url_name, waiting=None):
     """The groups this admin sees, each page with its link, badge and whether it is open now."""
+    from operations import options
+
     waiting = badges() if waiting is None else waiting
+    stock = options.old_stock()
     groups, current = [], None
     for group in GROUPS:
         pages = []
         for page in group.pages:
-            if page.developer and not scope.is_developer_admin:
+            if (page.developer and not scope.is_developer_admin) or (page.stock and not stock):
                 continue
             is_current = url_name == page.url_name or url_name in page.also
             item = {

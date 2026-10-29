@@ -12,7 +12,7 @@ number, and admins change the fields, units and the division switch (StaffAndAdm
 
 import uuid
 
-from django.test import Client
+from django.test import Client, override_settings
 
 from operations import line_menu_catalog, options, services
 from operations.contracts import Actor, CommandFailed
@@ -487,6 +487,7 @@ class RepairTests(KcwTestCase):
             )
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class OtherPathTests(KcwTestCase):
     def withdraw_by_command(self):
         self.say(self.postback(ALICE, "m=equipment&kind=withdrawal"))

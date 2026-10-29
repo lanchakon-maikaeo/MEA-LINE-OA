@@ -4,6 +4,8 @@ and the number on a piece of other equipment. Versions without it are unchanged.
 
 import json
 
+from django.test import override_settings
+
 from operations import ai
 from operations.management.commands.run_worker import run_once
 from operations.models import (
@@ -247,6 +249,7 @@ class ChatTests(MenuTestCase):
         )
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class SplitTests(MenuTestCase):
     """Q19: one message about equipment of two divisions becomes one case per division."""
 

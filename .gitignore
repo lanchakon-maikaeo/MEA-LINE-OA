@@ -47,6 +47,12 @@ archive/
 !Docs/adr/0024-staff-messages-from-the-web-wait-for-a-free-reply.md
 !Docs/adr/0025-new-cases-wait-for-the-owner-divisions-approval-without-screening.md
 !Docs/adr/0026-koj-tracks-external-documents-and-status-changes.md
+!Docs/adr/0027-smg-status-lookup-reads-two-sheet-columns.md
+!Docs/adr/0028-requesters-see-four-steps-and-one-way-status-notices.md
+!Docs/adr/0029-kko-repair-tracking-answers-from-the-km-sheet.md
+!Docs/adr/0030-problem-tile-requester-picks-the-division.md
+!Docs/adr/0031-org-chart-decides-unit-owner-and-line-alerts.md
+!Docs/adr/0032-the-system-tracks-slips-and-hides-the-old-stock-work.md
 !Docs/koj-tracking-setup.md
 
 !operations/line_assets/*.jpg

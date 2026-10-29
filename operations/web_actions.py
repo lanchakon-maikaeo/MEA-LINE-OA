@@ -15,9 +15,11 @@ from django.utils import timezone
 from operations import (
     ai_keywords,
     ai_routing,
+    approvals,
     coordination,
     identity,
     inventory,
+    options,
     policy,
     problems,
     queues,
@@ -70,10 +72,10 @@ BUTTON_LABELS = {
     "set_section": "ระบุแผนก",
     "set_sap_number": "แก้เลข SAP ของคำขอ",
     "record_facts": "แก้ข้อเท็จจริง",
-    "approve": "อนุมัติ",
+    "approve": "รับเรื่อง",
     "start_work": "เริ่มงานทันที (เรื่องฉุกเฉิน)",
-    "skip_screening": "ข้ามขั้นคัดกรอง เข้ารออนุมัติ",
-    "deny_approval": "ไม่อนุมัติ",
+    "skip_screening": "ข้ามขั้นคัดกรอง เข้ารอกองรับเรื่อง",
+    "deny_approval": "ไม่รับเรื่อง",
     "allocate": "จัดสรรของที่มีไม่พอ",
     "issue": "บันทึกการจ่ายของ",
     "terminate_outstanding": "ยุติส่วนที่ค้างจ่าย",
@@ -99,6 +101,21 @@ BUTTON_LABELS = {
     "cancel_child_work": "ยกเลิกงานย่อย",
     "pause_deadlines": "พักกรอบเวลา",
 }
+
+# ADR 0032: the stock work of M07, M08 and M11, offered only when ตัวเลือกระบบ old_stock_work is on.
+STOCK = frozenset(
+    {
+        "allocate",
+        "issue",
+        "terminate_outstanding",
+        "resolve_discrepancy",
+        "receive",
+        "inspect",
+        "decide_inspection",
+        "resolve_return_discrepancy",
+        "terminate_return",
+    }
+)
 
 # Hard to undo: the form asks for an explicit tick before saving (round 1 Q9).
 IRREVERSIBLE = frozenset(
@@ -332,15 +349,12 @@ RULES = {
     "decide_routing": lambda st: st.routes and (st.review_open or st.handoff is not None),
     "set_priority": lambda st: st.member(st.owner),
     "record_facts": lambda st: st.member(st.owner),
-    # ADR 0025: every kind; a case without item rows (or not a withdrawal) is approved whole.
+    # ADR 0025: every kind; a case without item rows (or not a withdrawal) is approved whole,
+    # and so is every case while the stock work is hidden (ADR 0032).
     "approve": lambda st: (
         st.other(st.case.submitted_by_id)
         and st.grant(A.WITHDRAWAL_APPROVAL)
-        and (
-            st.case.kind != K.WITHDRAWAL
-            or not st.lines
-            or any(line.approved_quantity is None for line in st.lines)
-        )
+        and (approvals.whole(st.case) or any(line.approved_quantity is None for line in st.lines))
     ),
     "deny_approval": lambda st: RULES["approve"](st),
     "start_work": lambda st: False,  # the system starts an emergency itself (ADR 0025)
@@ -456,7 +470,10 @@ def available(user, case, st=None):
     """Actions this viewer may start now, the primary one first (empty for read-only viewers)."""
     st = st or situation(user, case)
     names = []
+    hidden = set() if options.old_stock() else STOCK
     for name, rule in RULES.items():
+        if name in hidden:
+            continue
         spec = workflow.ACTIONS.get(name)
         if (
             spec is None
@@ -773,11 +790,11 @@ def build_form(action, st, params, demo=False):
         for name, title in FACT_FIELDS:
             add(Field(f"fact-{name}", title, "select", False, FACT_CHOICES))
         add(_reason(True, help_text="บอกว่ารู้ข้อเท็จจริงนี้จากไหน เช่น หน่วยงาน (เขต/ฝ่าย)แจ้งทางโทรศัพท์"))
-    elif action == "approve" and (case.kind != K.WITHDRAWAL or not st.lines):
+    elif action == "approve" and approvals.whole(case):
         # ADR 0025 Q25: one button for the whole case, the level in the same form.
         if not st.priority_confirmed:
             level = _priority_field(case)
-            form.intro = "อนุมัติทั้งเรื่องและตั้งระดับความเร่งด่วนไปพร้อมกัน " + (
+            form.intro = "รับเรื่องและตั้งระดับความเร่งด่วนไปพร้อมกัน " + (
                 "ระบบเลือกระดับที่เสนอไว้ให้แล้ว" if level.initial else "เลือกระดับแล้วบอกเหตุผล"
             )
             add(level)

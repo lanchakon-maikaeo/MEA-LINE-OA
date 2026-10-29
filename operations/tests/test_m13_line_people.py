@@ -11,7 +11,7 @@ the important alerts without the requester's details, and lose the link when sus
 import uuid
 from decimal import Decimal
 
-from django.test import Client
+from django.test import Client, override_settings
 
 from operations import employees, identity, options, services, staff_line
 from operations.models import (
@@ -195,6 +195,7 @@ class AnonymousTests(PeopleTestCase):
             services.submit_case(actor, idempotency_key="anon-report-over", payload=located)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class StaffLineTests(PeopleTestCase):
     def head(self):
         user = make_staff("kaehead", (Role.SUPERVISOR, "กองอุปกรณ์ฯ"), (Role.STAFF, "กองอุปกรณ์ฯ"))

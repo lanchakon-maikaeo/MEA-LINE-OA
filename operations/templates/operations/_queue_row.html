@@ -20,7 +20,7 @@
 </li>
 {% endwith %}{% else %}
 <li class="qrow{% if row.level == 'P0' %} qrow--hazard{% endif %}" data-kind="{{ row.case.kind }}">
-  <div class="qrow__prio">{% if may_approve and row.case.status == "awaiting_approval" %}<label class="qrow__pick"><input type="checkbox" name="case" value="{{ row.case.number }}" form="bulk-approve" aria-label="เลือก {{ row.case.number }} เพื่ออนุมัติ"></label>{% endif %}{% prio row.level %}</div>
+  <div class="qrow__prio">{% if may_approve and row.case.status == "awaiting_approval" %}<label class="qrow__pick"><input type="checkbox" name="case" value="{{ row.case.number }}" form="bulk-approve" aria-label="เลือก {{ row.case.number }} เพื่อรับเรื่อง"></label>{% endif %}{% prio row.level %}</div>
   <div class="qrow__main">
     <div class="qrow__title">
       <a class="qrow__link" href="{% url 'case-detail' row.case.number %}">{{ row.case.number }}</a>

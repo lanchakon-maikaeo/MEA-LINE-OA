@@ -22,9 +22,9 @@
   {% if may_approve and tab != "closed" %}
   <form method="post" action="{% url 'division-approve' division.code %}" id="bulk-approve" class="bulk-bar mb-18" data-bulk>
     {% csrf_token %}
-    <label class="check-pill js-only"><input type="checkbox" data-bulk-all> เลือกทั้งหมดที่รออนุมัติในหน้านี้</label>
-    <button class="btn btn--sm" type="submit" data-bulk-submit data-label="อนุมัติ {n} เรื่องที่เลือก" data-empty="เลือกเรื่องที่จะอนุมัติก่อน">อนุมัติเรื่องที่ติ๊ก</button>
-    <span class="muted">ใช้ระดับที่ระบบเสนอ ถ้าจะไม่อนุมัติ ให้เปิดเรื่องนั้นเพื่อใส่เหตุผล</span>
+    <label class="check-pill js-only"><input type="checkbox" data-bulk-all> เลือกทั้งหมดที่รอกองรับเรื่องในหน้านี้</label>
+    <button class="btn btn--sm" type="submit" data-bulk-submit data-label="รับ {n} เรื่องที่เลือก" data-empty="เลือกเรื่องที่จะรับก่อน">รับเรื่องที่ติ๊ก</button>
+    <span class="muted">ใช้ระดับที่ระบบเสนอ ถ้าจะไม่รับเรื่อง ให้เปิดเรื่องนั้นเพื่อใส่เหตุผล</span>
   </form>
   {% endif %}
 

@@ -11,7 +11,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from operations import agent_intake, agent_mcp, ai, ai_answer, answers, conversation, staff_line
-from operations.models import AIRun, ConversationMessage, RoleGrant
+from operations.models import AIRun, ConversationMessage, DivisionSchedule, RoleGrant
 
 
 def state(turn):
@@ -91,10 +91,57 @@ def recent_dialogue(run):
     return list(reversed(dialogue))
 
 
+# ADR 0032 Q21, Q22: what a version with slip_facts knows about DED Center (it changes only with
+# a new version, which plays dialogue-v2 before it is used).
+SLIP_FACTS = (
+    "DED Center ติดตามใบเบิก ใบส่งคืน และงานซ่อมด้วยเลข ผ่านปุ่มเมนูของแต่ละกอง "
+    "รับแจ้งปัญหาและข้อเสนอแนะ และให้ดูเรื่องของฉัน\n"
+    "DED Center เบิกของ ส่งคืนของ และอนุมัติใบเบิกไม่ได้ และไม่มีข้อมูลยอดหรือจำนวนของในคลัง\n"
+    "การเบิกและการส่งคืนทำใน SAP แล้วส่งใบที่เซ็นแล้วให้คลังของกอง\n"
+    "ถามสถานะด้วยเลขใบเบิกหรือใบส่งคืน ให้ค้นในเรื่องของผู้ถาม ถ้าไม่พบ ให้บอกว่าติดตามได้ที่ปุ่ม "
+    "ติดตามใบเบิก หรือ ติดตามใบส่งคืน ในเมนูของกองที่ดูแลอุปกรณ์นั้น"
+)
+
+
+# Read only by a version with slip_facts, before its tools (ADR 0032 Q21, Q22).
+SLIP_RULES = """The DED Center knowledge entry is the truth about this service and overrides any \
+other knowledge entry: DED Center follows slips issued in SAP; it cannot withdraw, return, \
+approve a slip or show stock. A question about stock, or whether an item is in a warehouse, gets \
+action "reply": say ไม่มีข้อมูลจำนวนของในคลัง and give the division contact the knowledge lists; \
+never call list_equipment for it. A question whether withdrawing or returning works here gets \
+action "reply": it cannot; it is done in SAP and the signed slip goes to the division's \
+warehouse. A slip's status by its number: call get_case; when nothing is found, reply ไม่พบ and \
+name the ติดตามใบเบิก or ติดตามใบส่งคืน button on the division's menu.
+"""
+
+
+def slip_facts():
+    """SLIP_FACTS, with the contacts the divisions set in their schedules (Q22)."""
+    contacts = [
+        f"{code} {contact}"
+        for code, contact in DivisionSchedule.objects.exclude(contact="")
+        .order_by("division__code")
+        .values_list("division__code", "contact")
+    ]
+    if not contacts:
+        return SLIP_FACTS
+    return f"{SLIP_FACTS}\nถามเรื่องของในคลัง ให้ติดต่อกองโดยตรง: {'; '.join(contacts)}"
+
+
+def system_prompt(version):
+    """SYSTEM_PROMPT, with SLIP_RULES before the tools for a version with slip_facts."""
+    if not ai.reads_slips(version):
+        return SYSTEM_PROMPT
+    tools = "Tools (OpenAI function format):\n"
+    return SYSTEM_PROMPT.replace(tools, SLIP_RULES + tools)
+
+
 def capabilities(context):
     commands = context["commands"]
     services = ["แจ้งปัญหาและข้อเสนอแนะ", "ติดตามเรื่องของตนเอง"]
-    if "เบิกอุปกรณ์" in commands:
+    if "ติดตามใบเบิก" in commands:
+        services.insert(0, "ติดตามใบเบิกและใบส่งคืนที่ออกใน SAP แล้ว")
+    elif "เบิกอุปกรณ์" in commands:  # LINE_TYPED_SLIPS (tests of the earlier intake)
         services.insert(0, "เบิกและส่งคืนอุปกรณ์")
     if "งานของกอง" in commands:
         services.append("ดูงานของกอง")
@@ -313,6 +360,8 @@ def plan(run, source, budget, trace=None, max_steps=MAX_STEPS):
         word in source for word in ("ทำอะไรได้บ้าง", "ช่วยอะไรได้บ้าง", "มีบริการอะไรบ้าง")
     )
     knowledge = [guide]
+    if ai.reads_slips(run.config_version):
+        knowledge.append(slip_facts())
     if not capability_question:
         for row in answers.approved().filter(short_only=False):
             # Older answers name menus that are gone (25 Oct 2569 Q2): the rich menu is the menu.
@@ -324,7 +373,10 @@ def plan(run, source, budget, trace=None, max_steps=MAX_STEPS):
     schema = decision_schema(offered)
     messages = [
         # Instructions and tools first and unchanged, what this message brings after them.
-        {"role": "system", "content": SYSTEM_PROMPT + json.dumps(offered, ensure_ascii=False)},
+        {
+            "role": "system",
+            "content": system_prompt(run.config_version) + json.dumps(offered, ensure_ascii=False),
+        },
         {
             "role": "user",
             "content": json.dumps(

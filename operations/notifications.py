@@ -339,7 +339,7 @@ def _plan_fulfilment(event, decision, case):
             event, "receipt_request", N.Level.CRITICAL, identity, text, case, message=message
         )
     if decision.to_status == "rejected" and decision.action in {"approve", "deny_approval"}:
-        text = f"เรื่อง {case.number} ไม่ได้รับอนุมัติ"
+        text = f"กองไม่รับเรื่อง {case.number}"
         if decision.reason:
             text += f"\nเหตุผล: {decision.reason}"
         return _create(event, "case_not_approved", N.Level.NORMAL, identity, text, case)

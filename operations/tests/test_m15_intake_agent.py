@@ -7,6 +7,8 @@ step got an off-topic answer, and the first reply did not say what was read."""
 import json
 from unittest.mock import patch
 
+from django.test import override_settings
+
 from operations import agent_chat, agent_intake, ai, ai_dialogue, options
 from operations.management.commands.run_worker import run_once
 from operations.models import AIRun, Case, ConversationDraft, LineMenuItem
@@ -68,6 +70,7 @@ class IntakeTestCase(MenuTestCase):
         return ConversationDraft.objects.get(status="open")
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class FoundCasesTests(IntakeTestCase):
     def test_no_number_yet_is_explained_not_asked_again(self):
         self.script.word = [{"reply": "ได้ข้อมูลเบิกมิเตอร์ 15(45)A 1 เครื่อง ต่อไปพิมพ์หมายเลขเครื่องวัด"}]
@@ -114,6 +117,7 @@ class FoundCasesTests(IntakeTestCase):
         self.assertEqual(run.result["intake"]["said"], lead)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class ValueTests(IntakeTestCase):
     def test_an_answer_goes_through_the_steps_checks(self):
         self.message(ORDER, "applied")
@@ -144,6 +148,7 @@ class ValueTests(IntakeTestCase):
         self.assertEqual(draft.data["entry"]["row"], {"size": "15(45)A", "quantity": "2"})
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class ConfirmTests(IntakeTestCase):
     def reach_summary(self):
         self.script.extraction = [
@@ -201,6 +206,7 @@ class ConfirmTests(IntakeTestCase):
         self.assertEqual(self.draft().status, "open")
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class GuardTests(IntakeTestCase):
     def test_confirmation_deadline_is_not_a_required_wait(self):
         for text in ("รออีก 30 นาทีเพื่อยืนยันส่งเรื่อง", "รอให้ครบ ๓๐ นาทีแล้วค่อยยืนยัน"):
@@ -255,6 +261,7 @@ class GuardTests(IntakeTestCase):
         self.assertEqual(agent_intake.off_question("ต้องการเพิ่มรายการหรือไม่", "more", ("เพิ่ม",)), "")
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class SwitchTests(IntakeTestCase):
     def test_the_mode_counts_only_with_a_version_that_passed_dialogue_v1(self):
         with patch.object(agent_intake, "ready", return_value=False):
@@ -289,6 +296,7 @@ class SwitchTests(IntakeTestCase):
         self.assertLessEqual(len(self.llm.calls) - calls, agent_intake.MAX_CALLS)
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class MenuTapTests(IntakeTestCase):
     def test_a_menu_tap_with_an_ai_draft_open_asks_first(self):
         self.message(ORDER, "applied")
@@ -301,6 +309,7 @@ class MenuTapTests(IntakeTestCase):
         self.assertEqual(ConversationDraft.objects.filter(status="open").count(), 1)  # kept
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class FoundByDialoguesTests(IntakeTestCase):
     """Program faults dialogue-v1 found on the real API (25 Oct 2569)."""
 

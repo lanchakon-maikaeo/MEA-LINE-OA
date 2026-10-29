@@ -130,7 +130,7 @@ class ApprovalTests(NoScreeningTestCase):
         client = Client()
         client.force_login(self.approver)
         page = client.get("/divisions/กคว./").content.decode()
-        self.assertIn("อนุมัติเรื่องที่ติ๊ก", page)
+        self.assertIn("รับเรื่องที่ติ๊ก", page)
         self.assertLess(page.index(second.number), page.index(first.number))  # newest first
         client.post("/divisions/กคว./approve/", {"case": [first.number, second.number]})
         for case in (first, second):

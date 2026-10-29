@@ -960,6 +960,8 @@ def admin_policy_action(request, action, pk):
 @require_safe
 def admin_inventory(request):
     """Ready figures per item, who waits for them, allocations, and the fake store's history."""
+    if not options.old_stock():
+        raise Http404  # ADR 0032
     now = timezone.now()
     rows = []
     for item in EquipmentType.objects.filter(is_active=True).order_by("code"):
@@ -996,6 +998,8 @@ def admin_inventory(request):
 @admin_required
 @require_POST
 def admin_inventory_action(request, action):
+    if not options.old_stock():
+        raise Http404  # ADR 0032
     if action == "adjust":
         form = forms.InventoryAdjustForm(request.POST)
         if form.is_valid():
@@ -1237,6 +1241,10 @@ def admin_ai_action(request, action, pk=None):
                     d["menu_fields"]
                     and d["typed_fields"]
                     and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
+                    d["slip_facts"]
+                    and d["menu_fields"]
+                    and d["typed_fields"]
+                    and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
                 ),
                 "สร้างรุ่นการตั้งค่าแล้ว (รอทดสอบและประเมิน)",
             )
@@ -1257,6 +1265,7 @@ def admin_ai_action(request, action, pk=None):
                     d["task"] or AIConfigVersion.Task.EXTRACT,
                     d["typed_fields"],
                     d["menu_fields"],
+                    d["slip_facts"],
                 ),
                 "สร้างรุ่นใหม่จากโมเดลสำเร็จรูปแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อ → ประเมิน → เปลี่ยน",
             )

@@ -51,6 +51,8 @@ TYPED_SCHEMA_VERSION = "extraction-v6-sap-typed"
 TYPED_EVAL_GATE = f"{EVAL_GATE}+typed-v1+typed-v2"  # typed-v2: the กอจ. and กคอ. groups
 # dialogue-v1 (ADR 0022 Q11): whole dialogues through the intake agent join the menu gate.
 MENU_EVAL_GATE = f"{TYPED_EVAL_GATE}+menu-v1+dialogue-v1"
+# ADR 0032 Q18, Q21: a version that knows DED Center follows slips plays dialogue-v2 instead.
+SLIP_EVAL_GATE = f"{TYPED_EVAL_GATE}+menu-v1+dialogue-v2"
 MAX_CHAIN = 4  # primary + 3 fallbacks
 MAX_REQUESTS = 3
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/-]{1,100}$")
@@ -214,6 +216,7 @@ def create_preset_version(
     task=AIConfigVersion.Task.EXTRACT,
     typed_fields=False,
     menu_fields=False,
+    slip_facts=False,
 ):
     """A candidate with the preset model as primary and that task's active chain as fallbacks.
     Extraction keeps the chosen pipeline and few-shot count; the other tasks run single."""
@@ -257,6 +260,7 @@ def create_preset_version(
         task=task,
         typed_fields=extract and bool(typed_fields),
         menu_fields=extract and bool(typed_fields) and bool(menu_fields),
+        slip_facts=extract and bool(typed_fields) and bool(menu_fields) and bool(slip_facts),
     )
 
 
@@ -271,6 +275,7 @@ def create_version(
     task=AIConfigVersion.Task.EXTRACT,
     typed_fields=False,
     menu_fields=False,
+    slip_facts=False,
 ):
     """A candidate: primary first, then up to three fallbacks in order."""
     identity.require_ai_editor(actor)
@@ -280,6 +285,8 @@ def create_version(
         raise ValidationError("Only an extraction version reads SAP numbers and typed rows.")
     if menu_fields and not typed_fields:
         raise ValidationError("The menu path is read by a version that also reads typed rows.")
+    if slip_facts and not menu_fields:
+        raise ValidationError("The DED Center facts go with a version that reads the menu path.")
     profiles = list(profiles)
     if not 1 <= len(profiles) <= MAX_CHAIN or len({p.pk for p in profiles}) != len(profiles):
         raise ValidationError("Choose 1-4 different profiles (primary first).")
@@ -300,6 +307,7 @@ def create_version(
         screen_profile=screen_profile,
         typed_fields=bool(typed_fields),
         menu_fields=bool(menu_fields),
+        slip_facts=bool(slip_facts),
     )
     for position, profile in enumerate(profiles):
         AIConfigEntry.objects.create(version=version, position=position, profile=profile)
@@ -315,6 +323,7 @@ def create_version(
         screen=screen_profile.model_id if screen_profile else None,
         typed_fields=bool(typed_fields),
         menu_fields=bool(menu_fields),
+        slip_facts=bool(slip_facts),
     )
     return version
 
@@ -664,7 +673,14 @@ def schema_version_for(version):
     return TYPED_SCHEMA_VERSION if reads_typed(version) else SCHEMA_VERSION
 
 
+def reads_slips(version):
+    """Whether this extraction version's agent also knows DED Center follows slips (ADR 0032)."""
+    return reads_menu(version) and bool(getattr(version, "slip_facts", False))
+
+
 def eval_gate_for(version):
+    if reads_slips(version):
+        return SLIP_EVAL_GATE
     if reads_menu(version):
         return MENU_EVAL_GATE
     return TYPED_EVAL_GATE if reads_typed(version) else EVAL_GATE

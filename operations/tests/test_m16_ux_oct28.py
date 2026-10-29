@@ -59,13 +59,14 @@ class WarehousePageTests(WorkTestCase):
         self.assertEqual(dict((k, n) for k, _, n in page.context["tabs"])["approval"], 1)
         tab = self.client.get("/divisions/กคว./warehouse/?tab=approval")
         self.assertContains(tab, waiting.number)
-        self.assertContains(tab, "ไปอนุมัติที่หน้าคิว")
+        self.assertContains(tab, "ไปรับเรื่องที่หน้าคิว")
         done, skipped = warehouse.record(self.kcw, [waiting], S.RECEIVED, timezone.localdate())
         self.assertEqual(
-            (done, [why for _, why in skipped]), ([], ["ยังรออนุมัติ บันทึกขั้นงานคลังได้หลังกองอนุมัติ"])
+            (done, [why for _, why in skipped]),
+            ([], ["ยังรอกองรับเรื่อง บันทึกขั้นงานคลังได้หลังกองรับเรื่องแล้ว"]),
         )
         card = self.client.get(f"/cases/{waiting.number}/")
-        self.assertContains(card, "บันทึกขั้นงานคลังได้หลังกองอนุมัติ")
+        self.assertContains(card, "บันทึกขั้นงานคลังได้หลังกองรับเรื่องแล้ว")
 
     def test_the_row_button_records_the_next_stage_and_comes_back(self):
         case = self.withdraw("4500100003")

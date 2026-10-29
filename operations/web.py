@@ -27,6 +27,7 @@ from operations import (
     casepage,
     charts,
     identity,
+    options,
     policy,
     queues,
     registry,
@@ -279,7 +280,7 @@ def _queue(request, division, admin_all=False):
         "pager": pager,
         "shown": shown,
         "now": now,
-        "kinds": Case.Kind.choices,
+        "kinds": list(units.KIND_SHORT.items()),
         "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "ยังไม่ตั้งระดับ")],
         "sort": sort,
         "sorts": queues.SORTS.items(),
@@ -525,6 +526,8 @@ def case_action(request, number, action):
     scope = _scope(request)
     if not scope.has_any_access or action not in web_actions.RULES:
         raise Http404
+    if action in web_actions.STOCK and not options.old_stock():
+        raise Http404  # ADR 0032
     case = _visible_case(request, number)
     st = web_actions.situation(request.user, case)
     offered = {o.name for o in web_actions.available(request.user, case, st)}

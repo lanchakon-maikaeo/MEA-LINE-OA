@@ -543,6 +543,7 @@ class RenameTests(OrgTestCase):
 # --- LINE ---------------------------------------------------------------------------------------
 
 
+@override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class LineTopicTests(LineTestCase):
     @classmethod
     def setUpTestData(cls):

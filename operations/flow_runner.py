@@ -487,7 +487,7 @@ def on_button(turn, draft, value):
         if values.get("case_kind") in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN) and (
             conversation._problems_only(turn) or draft.data.get("anonymous")
         ):
-            return _finish(turn, draft, "ต้องยืนยันตัวตนพนักงานก่อนเบิกหรือส่งคืนอุปกรณ์")
+            return _finish(turn, draft, "ต้องยืนยันตัวตนพนักงานก่อนติดตามใบเบิกหรือใบส่งคืน")
         if box["kind"] == "ask":  # ข้าม on a question that may be skipped
             values.pop(box["config"].get("field", ""), None)
             _answered(state, box)
