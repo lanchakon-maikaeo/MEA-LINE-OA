@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operations", "0065_kcw_flow_fields"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
@@ -346,9 +345,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="casemessage",
-            index=models.Index(
-                fields=["case", "status"], name="operations__case_id_c27828_idx"
-            ),
+            index=models.Index(fields=["case", "status"], name="operations__case_id_c27828_idx"),
         ),
         migrations.AddConstraint(
             model_name="casemilestone",

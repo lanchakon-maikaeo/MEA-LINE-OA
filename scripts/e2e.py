@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import secrets
@@ -32,6 +33,40 @@ REAL_SETUP = (
     "    if not WorkOrder.objects.filter(issued_by=actor, title=title).exists():\n"
     "        work_orders.create(actor, title, division, actor, urgent=True, channel=channel)\n"
 )
+# The SIM-* journeys walk screening and the stock work, which ADR 0025 and ADR 0032 keep in the
+# code behind options (default off); the real-structure journeys run with the defaults. The
+# values found before the run are put back at the end, so a local demo database keeps its own.
+OPTIONS = ("screening", "old_stock_work")
+OPTIONS_READ = (
+    "import json\n"
+    "from operations.models import SystemOption\n"
+    f"keys = {OPTIONS!r}\n"
+    "values = dict(SystemOption.objects.filter(key__in=keys).values_list('key', 'value'))\n"
+    "print(json.dumps({k: values.get(k) for k in keys}))\n"
+)
+
+
+def options_write(values):
+    """Code for `manage.py shell -c`: None removes the row (the option's default applies)."""
+    return (
+        "from operations.models import SystemOption\n"
+        f"for key, value in {values!r}.items():\n"
+        "    if value is None:\n"
+        "        SystemOption.objects.filter(key=key).delete()\n"
+        "    else:\n"
+        "        SystemOption.objects.update_or_create(key=key, defaults={'value': value})\n"
+    )
+
+
+def manage(env, *command):
+    completed = subprocess.run(
+        [sys.executable, "manage.py", *command], env=env, capture_output=True, text=True
+    )
+    if completed.returncode:
+        raise RuntimeError(
+            f"Demo setup command {command[0]!r} failed:\n{completed.stdout}{completed.stderr}"
+        )
+    return completed.stdout
 
 
 def sign_in(browser, base_url, username, password, phone=False):
@@ -49,8 +84,12 @@ def sign_in(browser, base_url, username, password, phone=False):
 def act(page, label, fill=None, submit=None):
     """Open an action from the case page (HTMX form), fill it and save; the page reloads."""
     link = page.locator("#actions").get_by_role("link", name=label, exact=True).first
-    if not link.is_visible():  # irreversible actions sit behind the "ย้อนกลับไม่ได้" toggle
-        page.locator("#actions details.more > summary").click()
+    more = page.locator("#actions details.more > summary")
+    if not link.is_visible() and more.count():  # irreversible actions sit behind this toggle
+        more.click()
+    if not link.count():
+        offered = page.locator("#actions a").all_inner_texts()
+        raise AssertionError(f"{label!r} is not offered on {page.url}: {offered}")
     link.click()
     form = page.locator("#action-slot form")
     expect(form).to_be_visible()
@@ -119,7 +158,7 @@ def triage_to(browser, base_url, password, number, division, staff):
     owner = sign_in(browser, base_url, staff, password)
     open_case(owner, base_url, number)
     act(owner, "รับงานนี้")
-    act(owner, "ยืนยันระดับความเร่งด่วน", [lambda f: f.locator("[name=priority]").select_option("P3")])
+    act(owner, "ตั้งระดับความเร่งด่วน", [lambda f: f.locator("[name=priority]").select_option("P3")])
     act(owner, "คัดกรองเสร็จ ส่งดำเนินการ")
     owner.context.close()
 
@@ -134,7 +173,7 @@ def journeys(browser, base_url, password):
     triage_to(browser, base_url, password, number, "SIM-EQP", "e2e-eqp")
     approver = sign_in(browser, base_url, "e2e-approver", password)
     open_case(approver, base_url, number)
-    act(approver, "อนุมัติ", [lambda f: f.locator("[name=line-1-quantity]").fill("10")])
+    act(approver, "รับเรื่อง", [lambda f: f.locator("[name=line-1-quantity]").fill("10")])
     issuer = sign_in(browser, base_url, "e2e-issuer", password)
     open_case(issuer, base_url, number)
     act(
@@ -237,15 +276,14 @@ def journeys(browser, base_url, password):
     intake.context.close()
 
 
-def finish_triage(page, section=None):
-    """Owner division without an intake desk: start, optionally name the แผนก, confirm P3."""
-    act(page, "เริ่มคัดกรอง")
+def take_case(page, section=None):
+    """Owner division (ADR 0025, ADR 0032): optionally name the แผนก, take the case at P3."""
     if section:
         act(page, "ระบุแผนก", [lambda f: f.locator("[name=section]").select_option(label=section)])
         expect(page.locator("dl.facts dd").first).to_contain_text(section)
     act(
         page,
-        "คัดกรองเสร็จ ส่งดำเนินการ",
+        "รับเรื่อง",
         [
             lambda f: f.locator("[name=priority]").select_option("P3"),
             lambda f: f.locator("[name=reason]").fill(f"e2e {RUN}: ระดับที่ตกลงในการทดสอบ"),
@@ -282,26 +320,17 @@ def real_structure(browser, base_url, password):
     expect(notice).to_contain_text("แยกเป็น 2 เรื่องตามกอง")
     fuses = next(n for n in re.findall(r"W\d{2}-\d{6}", notice.inner_text()) if n != meter)
     expect(kcw.locator("dl.facts dd").first).to_contain_text("กคว. กองเครื่องวัดหน่วยไฟฟ้า")
-    finish_triage(kcw)
-    act(kcw, "อนุมัติ", [lambda f: f.locator("[name=line-1-quantity]").fill("1")])
+    take_case(kcw)
     assert kcw.goto(f"{base_url}/cases/{fuses}/").status == 404
     kcw.context.close()
     kae = sign_in(browser, base_url, "e2e-kae", password)
     expect(kae.get_by_role("link", name=fuses)).to_be_visible()
     open_case(kae, base_url, fuses)
-    finish_triage(kae, section="แผนกซ่อมสร้างอุปกรณ์ไฟฟ้า")
-    act(kae, "อนุมัติ", [lambda f: f.locator("[name=line-1-quantity]").fill("6")])
-    act(
-        kae,
-        "บันทึกการจ่ายของ",
-        [
-            lambda f: f.locator("[name=recipient_name]").fill("ผู้รับทดสอบ"),
-            lambda f: f.locator("[name=line-1-quantity]").fill("6"),
-        ],
-    )
-    expect(kae.locator("[data-tour=deliveries]")).to_contain_text("รอยืนยันรับ")
+    take_case(kae, section="แผนกซ่อมสร้างอุปกรณ์ไฟฟ้า")
+    # ADR 0032: the slip is issued in SAP, so no issue step shows; the case waits for the slip.
+    expect(kae.locator(".case-head__title")).to_contain_text("รอดำเนินการ")
+    expect(kae.locator("#actions")).not_to_contain_text("บันทึกการจ่ายของ")
     kae.screenshot(path="reports/e2e-real-withdrawal.png", full_page=True)
-    answer_for_district(kae)
     kae.context.close()
 
     # 5. Electricity use (การใช้ไฟฟ้า): straight to กตฟ., a แผนก, resolved; other queues closed.
@@ -317,7 +346,7 @@ def real_structure(browser, base_url, password):
     expect(ktf.locator("dl.facts dd").first).to_contain_text("กตฟ. กองตรวจสอบการใช้ไฟฟ้า")
     # ADR 0021 (25 Oct 2569): such a case may reach the AI after masking unless kept away.
     expect(ktf.locator("dl.facts")).to_contain_text("การใช้ไฟฟ้า")
-    finish_triage(ktf, section="แผนกตรวจสอบการใช้ไฟฟ้า 1")
+    take_case(ktf, section="แผนกตรวจสอบการใช้ไฟฟ้า 1")
     act(
         ktf,
         "บันทึกผลการแก้ปัญหา",
@@ -372,6 +401,7 @@ with socket.socket() as sock:
     port = sock.getsockname()[1]
 base_url = f"http://127.0.0.1:{port}"
 Path("reports").mkdir(exist_ok=True)
+saved = None
 env = os.environ | {"E2E_PASSWORD": secrets.token_urlsafe(24)}
 subprocess.run(
     [sys.executable, "manage.py", "prepare_e2e_user"], env=env, check=True, capture_output=True
@@ -430,32 +460,25 @@ with Path("reports/e2e-server.log").open("w") as log:
             assert page.goto(base_url + "/divisions/SIM-MTR/").url.startswith(
                 base_url + "/accounts/login/"
             )
+            saved = json.loads(manage(env, "shell", "-c", OPTIONS_READ).splitlines()[-1])
+            manage(env, "shell", "-c", options_write(dict.fromkeys(OPTIONS, "on")))
             journeys(browser, base_url, env["E2E_PASSWORD"])
             # The SIM-* journeys are done; switch the same database to the real structure.
             demo = {k: v for k, v in env.items() if k != "DEMO_STAFF_PASSWORD"}
-            for command in (["seed_org_demo"], ["shell", "-c", REAL_SETUP]):
-                completed = subprocess.run(
-                    [sys.executable, "manage.py", *command],
-                    env=demo,
-                    capture_output=True,
-                    text=True,
-                )
-                if completed.returncode:
-                    raise RuntimeError(
-                        f"Demo setup command {command[0]!r} failed:\n"
-                        f"{completed.stdout}{completed.stderr}"
-                    )
+            manage(demo, "seed_org_demo")
+            manage(demo, "shell", "-c", REAL_SETUP)
+            manage(demo, "shell", "-c", options_write(dict.fromkeys(OPTIONS, "off")))
             real_structure(browser, base_url, env["E2E_PASSWORD"])
             mixed_queue(browser, base_url, env["E2E_PASSWORD"])
             browser.close()
         print("PASS Chromium: Thai landing, keyboard link, database readiness")
         print("PASS Chromium: keyboard login, own-division scope, admin denied, logout")
-        print("PASS Chromium: M10 withdrawal partly issued (filed for requester, approve, issue)")
+        print("PASS Chromium: M10 withdrawal partly issued (old stock on: approve, issue)")
         print("PASS Chromium: M10 return waiting for inspection (receive on the case page)")
         print(
             "PASS Chromium: M10 hazard problem, route chosen against the proposal (phone, keyboard)"
         )
-        print("PASS Chromium: real structure, one request split per division, issued in its แผนก")
+        print("PASS Chromium: real structure, one request split per division, taken in its แผนก")
         print(
             "PASS Chromium: LINE/web orders in normal queue, issuer/source/arrival, desktop/phone"
         )
@@ -464,6 +487,8 @@ with Path("reports/e2e-server.log").open("w") as log:
             "filing a case for another division"
         )
     finally:
+        if saved is not None:
+            manage(env, "shell", "-c", options_write(saved))
         process.terminate()
         try:
             process.wait(timeout=5)

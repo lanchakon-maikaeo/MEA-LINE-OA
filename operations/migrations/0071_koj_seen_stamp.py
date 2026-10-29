@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("operations", "0070_holidays_and_emergency_contacts"),
     ]
