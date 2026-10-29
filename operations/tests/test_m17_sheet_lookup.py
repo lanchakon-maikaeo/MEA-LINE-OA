@@ -49,6 +49,10 @@ class NumberTests(TestCase):
 
 
 class SourceTestCase(TestCase):
+    def setUp(self):
+        # Migration 0082 adds ซจ.'s sheet (ADR 0034); these tests read sheets of their own.
+        SheetSource.objects.filter(key="koj-switch-repairs").delete()
+
     def source(self, **extra):
         values = {
             "key": "smg-problems",
@@ -203,7 +207,7 @@ class OwnReportTests(LookupChatTestCase):
 class LookupChatTests(LookupChatTestCase):
     def test_typed_numbers_get_their_status_and_the_user_may_ask_again(self):
         reply = self.ask_status()
-        self.assertIn("พิมพ์เลข UI", texts(reply))
+        self.assertIn("พิมพ์หมายเลขเครื่องวัดฯ หรือ UI", texts(reply))
         reply = self.type(ALICE, "90000001 90000002 99999999")
         said = texts(reply)
         self.assertIn("เลข UI 90000001 กำลังดำเนินการ", said)
@@ -215,7 +219,7 @@ class LookupChatTests(LookupChatTestCase):
         reply = self.type(ALICE, "90000004")  # still waiting for numbers
         self.assertIn("เลข UI 90000004 สถานะจาก ฝอจ.: ออนไลน์", texts(reply))
         reply = self.press(ALICE, "ถามเลข UI อื่น")
-        self.assertIn("พิมพ์เลข UI", texts(reply))
+        self.assertIn("พิมพ์หมายเลขเครื่องวัดฯ หรือ UI", texts(reply))
         reply = self.type(ALICE, "90000003")
         self.press(ALICE, "จบ")
         self.assertFalse(ConversationDraft.objects.filter(status="open").exists())
@@ -235,7 +239,8 @@ class LookupChatTests(LookupChatTestCase):
         )
         self.assertNotIn("คู่มือระบบ AMR และ SMG", texts(reply))
         reply = self.ask_status("FAQ", "ขอเข้าใช้งานระบบ SMG")
-        self.assertTrue(texts(reply).startswith("โปรดติดต่อที่อยู่อีเมล: thitirat.si@mea.or.th"))
+        self.assertTrue(texts(reply).startswith("โปรดติดต่อ:\nคุณธิติรัตน์ ศิริมณีบุญ"), texts(reply))
+        self.assertIn("อีเมล: thitirat.si@mea.or.th", texts(reply))
 
     def test_a_ui_reported_twice_in_one_row_is_one_report(self):
         sheet_lookup.apply_columns(self.source, ["90000020 90000020"], ["แจ้ง บษ"])

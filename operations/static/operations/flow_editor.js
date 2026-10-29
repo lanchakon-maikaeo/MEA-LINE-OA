@@ -277,8 +277,10 @@
   // The same moves as flow_runner: boxes that wait for nothing run at once, a branch takes its
   // first button whose condition holds, typed text is read by the server with the real rules.
   var play = null;
-  var SAP_CHOICES = { "เลขที่ใบเบิก": ["slip", "withdrawal"], "เลขที่ใบส่งคืน": ["return_slip", "return"], "ใบสั่งงานจาก SAP": ["work_order", ""], "ใบสั่งงาน SAP": ["work_order", ""], "หมายเลขเครื่องวัดฯ": ["meter", ""], "โครงการ": ["project", ""] };
-  var KIND_LABELS = { slip: "เลขที่ใบเบิก", return_slip: "เลขที่ใบส่งคืน", work_order: "ใบสั่งงานจาก SAP", meter: "หมายเลขเครื่องวัดฯ", project: "โครงการ" };
+  var SAP_CHOICES = { "เลขที่ใบเบิก": ["slip", "withdrawal"], "เลขที่ใบส่งคืน": ["return_slip", "return"], "เลขใบสั่งงานจาก SAP": ["work_order", ""], "ใบสั่งงานจาก SAP": ["work_order", ""], "ใบสั่งงาน SAP": ["work_order", ""], "หมายเลขเครื่องวัดฯ": ["meter", ""], "โครงการ": ["project", ""], "เลขที่ M/N": ["memo", "withdrawal"], "ใบโอนขอคืน": ["return_transfer", "return"], "เลขอื่น เช่น M/N": ["other_number", ""] };
+  var KIND_LABELS = { slip: "เลขที่ใบเบิก", return_slip: "เลขที่ใบส่งคืน", work_order: "เลขใบสั่งงานจาก SAP", meter: "หมายเลขเครื่องวัดฯ", project: "โครงการ", memo: "เลขที่ M/N", return_transfer: "ใบโอนขอคืน", other_number: "เลขอื่น" };
+  // flow_runner.TRACKING_PROMPTS: once a kind is chosen the bot asks for that kind only.
+  var KIND_PROMPTS = { slip: "กรุณาพิมพ์เลขที่ใบเบิก", return_slip: "พิมพ์เลขที่ใบส่งคืน เช่น 4500020001", work_order: "กรุณาพิมพ์เลขใบสั่งงานจาก SAP", meter: "กรุณาพิมพ์หมายเลขเครื่องวัดฯ เช่น 12345678", project: "กรุณาพิมพ์ชื่อโครงการ", memo: "พิมพ์เลขที่ M/N เช่น คม. 123/2569", return_transfer: "กรุณาพิมพ์เลขใบโอนขอคืน", other_number: "กรุณาพิมพ์เลขที่ใช้ติดตาม เช่น M/N 123/2569" };
   var EDIT_LABELS = { tracking: "เลขติดตาม", sap_document: "เลข SAP งานซ่อม", details: "รายละเอียด", description: "รายละเอียด", "rows.meter": "มิเตอร์", ct_size: "ขนาด CT", vt_size: "ขนาด VT", multiplier: "ตัวคูณ", mea_numbers: "MEA No." };
   function does(b, what) { var v = {}; assign(v, b.set); return v["do"] ? v["do"] === what : b.label.indexOf(what === "edit" ? "แก้ไข" : "กรอกใหม่") >= 0; }
   function follow(id, port) { var e = graph.edges.find(function (x) { return x.from === id && (x.port || null) === (port || null); }); return e ? e.to : null; }
@@ -314,8 +316,9 @@
       if (n.kind === "web" && n.config.url) { say("bot", [n.text, n.config.url].filter(Boolean).join("\n")); play.done = true; return; }
       if (n.kind === "result" || n.kind === "limit" || n.kind === "web" || n.kind === "handoff") { say("bot", [n.title, n.text].filter(Boolean).join("\n")); play.done = true; return; }
       if (n.kind === "summary") { play.summary = n.id; say("bot", playSummary(n)); return; }
-      if (n.kind === "ask" && n.config.choices && !play.choice[n.id]) { say("bot", n.title + "\nเลือกก่อนว่าจะติดตามด้วยอะไร"); return; }
-      say("bot", [n.kind === "ask" && play.choice[n.id] ? n.title + " (" + play.choice[n.id] + ")" : n.title, n.text].filter(Boolean).join("\n"));
+      if (n.kind === "ask" && n.config.choices && !play.choice[n.id]) { say("bot", [n.title, "กรุณาเลือกช่องทางการติดตาม", n.text].filter(Boolean).join("\n")); return; }
+      var prompt = n.kind === "ask" && play.choice[n.id] && KIND_PROMPTS[play.values.sap_kind];
+      say("bot", prompt || [n.title, n.text].filter(Boolean).join("\n"));
       return;
     }
     say("bot", "flow วนไม่จบ"); play.done = true;

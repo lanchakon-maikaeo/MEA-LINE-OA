@@ -58,8 +58,9 @@ def read_columns(spreadsheet_id, sheet_name, columns, first_row=1):
     from google.oauth2 import service_account
 
     credentials = _credentials(service_account)
-    tab = "'" + sheet_name.replace("'", "''") + "'"
-    ranges = [f"{tab}!{c}{first_row}:{c}" for c in columns]
+    # No tab name reads the first tab (ADR 0034: the sheet ซจ. shared names none).
+    tab = "'" + sheet_name.replace("'", "''") + "'!" if sheet_name else ""
+    ranges = [f"{tab}{c}{first_row}:{c}" for c in columns]
     url = (
         "https://sheets.googleapis.com/v4/spreadsheets/"
         + quote(spreadsheet_id, safe="")

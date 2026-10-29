@@ -35,8 +35,8 @@
    {
     "id": "c1",
     "kind": "message",
-    "title": "ระบบ SMG, AMR",
-    "text": "เลือกเรื่องที่ต้องการ",
+    "title": "กรุณาเลือกเรื่องที่ต้องการติดต่อ",
+    "text": "",
     "buttons": [
      {
       "id": "c1.b0",
@@ -107,7 +107,7 @@
     "id": "faq",
     "kind": "message",
     "title": "FAQ",
-    "text": "เลือกเรื่องที่ต้องการทราบ",
+    "text": "เลือกเรื่องที่ต้องการตรวจสอบ",
     "buttons": [
      {
       "id": "faq.b0",
@@ -136,6 +136,13 @@
       "full": "",
       "note": "",
       "set": ""
+     },
+     {
+      "id": "faq.b4",
+      "label": "ติดต่อเจ้าหน้าที่",
+      "full": "",
+      "note": "",
+      "set": ""
      }
     ],
     "config": {},
@@ -147,7 +154,7 @@
     "id": "ui",
     "kind": "sheet_lookup",
     "title": "ค้นหาใน Excel / Google Sheets (แมพด้วย UI)",
-    "text": "พิมพ์เลข UI ที่ต้องการตรวจสอบได้เลย ถ้ามีหลายเลขให้เว้นวรรคหรือขึ้นบรรทัดใหม่ ได้ครั้งละไม่เกิน 10 เลข",
+    "text": "พิมพ์หมายเลขเครื่องวัดฯ หรือ UI ที่ต้องการตรวจสอบ",
     "buttons": [],
     "config": {
      "source": "smg-problems"
@@ -181,8 +188,8 @@
    {
     "id": "access",
     "kind": "result",
-    "title": "โปรดติดต่อที่อยู่อีเมล: thitirat.si@mea.or.th",
-    "text": "",
+    "title": "โปรดติดต่อ:",
+    "text": "คุณธิติรัตน์ ศิริมณีบุญ\nโทรติดต่อ: 702-5711\nอีเมล: thitirat.si@mea.or.th\n\nคุณเลิศวริทธิ์ รอดโพธิ์ทอง\nโทรติดต่อ: 702-4919\nอีเมล: lerdwarid.ro@mea.or.th\n\nคุณสหัสวรรษ อ่อนศรี\nโทรติดต่อ: 702-4945\nอีเมล: sahatsawat.on@mea.or.th\n\nคุณณภัทร โยชพนัส\nโทรติดต่อ: 702-5712\nอีเมล: naphat.yo@mea.or.th\n\nคุณเจษฎา อิ่มจิตร\nโทรติดต่อ: 702-5711\nอีเมล: jedsada.ai@mea.or.th",
     "buttons": [],
     "config": {},
     "x": 1400,
@@ -279,6 +286,13 @@
     "from": "note_ui",
     "port": null,
     "to": "ui",
+    "label": ""
+   },
+   {
+    "id": "e12",
+    "from": "faq",
+    "port": "faq.b4",
+    "to": "access",
     "label": ""
    }
   ]

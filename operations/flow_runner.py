@@ -20,6 +20,7 @@ ADR 0029: a button of the box (ส่งให้ คม. ตรวจ) is offer
 taken at once while the box's sheet is not set up; what was typed goes on to the case.
 """
 
+import re
 from datetime import timedelta
 
 from django.utils import timezone
@@ -33,6 +34,7 @@ from operations.models import (
     CaseLine,
     ConversationDraft,
     LineFlowVersion,
+    LineMenuItem,
 )
 
 D = ConversationDraft.Status
@@ -41,21 +43,53 @@ STEP = "flow"
 TRACKING_CHOICES = {
     "เลขที่ใบเบิก": ("slip", Case.Kind.WITHDRAWAL),
     "เลขที่ใบส่งคืน": ("return_slip", Case.Kind.RETURN),
-    "ใบสั่งงานจาก SAP": ("work_order", ""),
+    "เลขใบสั่งงานจาก SAP": ("work_order", ""),
+    "ใบสั่งงานจาก SAP": ("work_order", ""),  # drafts before 29 Oct 2569
     "ใบสั่งงาน SAP": ("work_order", ""),  # drafts of the first version
     "หมายเลขเครื่องวัดฯ": ("meter", ""),
     "โครงการ": ("project", ""),
     "เลขที่ M/N": ("memo", Case.Kind.WITHDRAWAL),  # grill กคอ. Q20
+    # grill กอจ. 29 Oct 2569 (ADR 0034 Q11, Q20): the case kind comes from the service button.
+    "ใบโอนขอคืน": ("return_transfer", Case.Kind.RETURN),
+    "เลขอื่น เช่น M/N": ("other_number", ""),
 }
 TRACKING_LABELS = {
     "slip": "เลขที่ใบเบิก",
     "return_slip": "เลขที่ใบส่งคืน",
-    "work_order": "ใบสั่งงานจาก SAP",
+    "work_order": "เลขใบสั่งงานจาก SAP",
     "meter": "หมายเลขเครื่องวัดฯ",
     "project": "โครงการ",
     "memo": "เลขที่ M/N",
+    "return_transfer": "ใบโอนขอคืน",
+    "other_number": "เลขอื่น",
 }
-GROUP_LABELS = {"meter": "มิเตอร์", "ct": "CT", "vt": "VT", "other": "อุปกรณ์อื่น"}
+# What a เลขติดตาม box asks once its kind is chosen: only that kind, so โครงการ never hears of
+# ใบเบิก or SAP (user, 29 Oct 2569). The box's own text leads the choice instead.
+TRACKING_PROMPTS = {
+    "slip": "กรุณาพิมพ์เลขที่ใบเบิก",
+    "return_slip": "พิมพ์เลขที่ใบส่งคืน เช่น 4500020001",
+    "work_order": "กรุณาพิมพ์เลขใบสั่งงานจาก SAP",
+    "meter": "กรุณาพิมพ์หมายเลขเครื่องวัดฯ เช่น 12345678",
+    "project": "กรุณาพิมพ์ชื่อโครงการ",
+    "memo": "พิมพ์เลขที่ M/N เช่น คม. 123/2569",
+    "return_transfer": "กรุณาพิมพ์เลขใบโอนขอคืน",
+    "other_number": "กรุณาพิมพ์เลขที่ใช้ติดตาม เช่น M/N 123/2569",
+}
+PICK_KIND = "กรุณาเลือกช่องทางการติดตาม"
+GROUP_LABELS = {
+    "meter": "มิเตอร์",
+    "ct": "CT",
+    "vt": "VT",
+    "other": "อุปกรณ์อื่น",
+    # The กอจ. buttons (ADR 0034 Q13): one group each, so a unit can take each one.
+    "transformer": "หม้อแปลง",
+    "lbs": "LBS",
+    "rmu": "RMU",
+    "metering": "ตู้ metering",
+    "bushing": "bushing box",
+    "vt_lbs": "VT ประกอบ LBS",
+    "lv_cap": "LV Cap.",
+}
 VALUE_LABELS = {
     "equipment_name": "อุปกรณ์",
     "meter_numbers": "หมายเลขเครื่องวัดฯ",
@@ -106,6 +140,7 @@ EXTRA = (
     "staff_notes",
     "appointment",
     "no_number",
+    "equipment_name",  # a กอจ. tracking case has no lines to carry the typed name
 )
 HOLD = timedelta(minutes=30)  # Q8: a chosen slot is kept this long for the summary
 MAX_HOPS = 40
@@ -121,6 +156,17 @@ def published_for(label):
     return (
         LineFlowVersion.objects.filter(status=LineFlowVersion.Status.PUBLISHED, flow__tile=label)
         .select_related("flow")
+        .first()
+    )
+
+
+def _tile(flow):
+    """The rich menu tile that starts this flow; its division scopes ติดตามเรื่อง."""
+    return (
+        LineMenuItem.objects.filter(
+            place=LineMenuItem.Place.TILE, tab=LineMenuItem.Tab.REPORT, label=flow.tile
+        )
+        .filter(is_active=True, division__isnull=False)
         .first()
     )
 
@@ -246,7 +292,7 @@ def _go(turn, draft, nid, said=""):
     for _ in range(MAX_HOPS):
         box = node(graph, nid) if nid else None
         if box is None:
-            return _finish(turn, draft, "flow นี้ยังไม่มีขั้นถัดไป กรุณาติดต่อ ฝอจ.")
+            return _finish(turn, draft, "เมนูนี้ยังทำต่อไม่ได้ กรุณาติดต่อ ฝอจ.")
         kind = box["kind"]
         if kind == "branch":
             nid = branch_target(graph, box, state["values"])
@@ -260,6 +306,14 @@ def _go(turn, draft, nid, said=""):
             return _finish(turn, draft, "ต้องยืนยันตัวตนพนักงานก่อนตรวจสอบสถานะ")
         if kind == "sheet_lookup" and box["config"].get("by") == "employee":
             return _finish(turn, draft, _own_reports(turn, box))
+        if (
+            kind == "ask"
+            and box["config"].get("only_missing")
+            and state["values"].get(box["config"].get("field", ""))
+        ):
+            _answered(state, box)  # given in an earlier message (ADR 0035), still editable
+            nid = follow(graph, box["id"])
+            continue
         state["node"] = box["id"]
         if kind == "summary":
             state["summary"] = box["id"]
@@ -271,7 +325,7 @@ def _go(turn, draft, nid, said=""):
             return _create(turn, draft, graph, box)
         if kind == "find_case":
             _finish(turn, draft)
-            return conversation._my_cases(turn)
+            return conversation._case_list(turn, item=_tile(_version(draft).flow))
         if kind == "koj_tracking":
             from operations import koj_chat
 
@@ -287,7 +341,7 @@ def _go(turn, draft, nid, said=""):
             text = "\n".join(x for x in (box["title"], box["text"]) if x)
             return _finish(turn, draft, text)
         return conversation._ask(turn, draft)
-    return _finish(turn, draft, "flow นี้วนไม่จบ กรุณาติดต่อ ฝอจ.")
+    return _finish(turn, draft, "เมนูนี้ทำงานผิดพลาด กรุณาติดต่อ ฝอจ.")
 
 
 def _choices(box):
@@ -299,7 +353,7 @@ def render(turn, draft):
     graph, state = _version(draft).graph, _state(draft)
     box = node(graph, state.get("node"))
     if box is None:
-        return turn.say("flow นี้เปลี่ยนไปแล้ว กรุณาเริ่มใหม่จากเมนู")
+        return turn.say("เมนูนี้เปลี่ยนไปแล้ว กรุณาเริ่มใหม่จากเมนู")
     b, kind, quick = turn.button, box["kind"], []
     ttl = conversation.CONFIRM_TTL if kind == "summary" else conversation.BUTTON_TTL
     if kind == "ask":
@@ -312,11 +366,18 @@ def render(turn, draft):
             for button in box["buttons"]:
                 value = {"node": box["id"], "button": button["id"]}
                 quick.append((*b(button["label"], "flow", value, draft), button["label"]))
-            return turn.say(f"{box['title']}\nเลือกก่อนว่าจะติดตามด้วยอะไร", quick)
-        title = f"{box['title']} ({picked})" if picked else box["title"]
-        text = "\n".join(x for x in (title, box["text"]) if x)
-        if state.get("editing"):
+            text = "\n".join(x for x in (box["title"], PICK_KIND, box["text"]) if x)
+            return turn.say(("แก้" if state.get("editing") else "") + text, quick)
+        prompt = TRACKING_PROMPTS.get(state["values"].get("sap_kind")) if picked else None
+        text = prompt or "\n".join(x for x in (box["title"], box["text"]) if x)
+        if state.get("editing") and not prompt:
             text = "แก้ " + text
+        mine = _own_district(turn) if box["config"].get("rule") == "district" else None
+        if mine is not None:  # ADR 0035 Q17: the requester's own district, one tap
+            value = {"node": box["id"], "mine": 1}
+            quick.append(
+                (*b(usage_short(mine.name)[:20], "flow", value, draft), usage_short(mine.name))
+            )
     elif kind == "summary":
         text = summary(draft, graph, box)
     elif kind == "sheet_lookup":
@@ -326,10 +387,10 @@ def render(turn, draft):
 
         slots = calendars.free_slots(box["config"].get("calendar", ""))
         if not slots:
-            text = f"{box['title']}\nตอนนี้ยังไม่มีช่วงเวลาว่าง เจ้าหน้าที่จะติดต่อกลับเพื่อนัด"
+            text = f"{box['title']}\nขณะนี้ยังไม่มีช่วงเวลาว่าง เจ้าหน้าที่จะติดต่อกลับเพื่อนัดหมายอีกครั้ง"
             quick = [(*b("ไปต่อ", "flow", {"node": box["id"], "slot": ""}, draft), "ไปต่อ")]
         else:
-            text = "\n".join(x for x in (box["title"], box["text"], "เลือกช่วงที่ต้องการ") if x)
+            text = "\n".join(x for x in (box["title"], box["text"], "กรุณาเลือกช่วงเวลาที่ต้องการ") if x)
             quick = [
                 (
                     *b(calendars.short(s), "flow", {"node": box["id"], "slot": s.pk}, draft),
@@ -361,6 +422,10 @@ def render(turn, draft):
     else:
         text = "\n".join(x for x in (box["title"], box["text"]) if x)
     for button in box["buttons"]:
+        if kind == "sheet_lookup" or (
+            kind == "summary" and _does(button, "edit") and not _editable(graph, state)
+        ):
+            continue
         value = {"node": box["id"], "button": button["id"]}
         label, data = b(button["label"], "flow", value, draft, ttl)
         quick.append((label, data, button.get("full") or button["label"]))
@@ -376,14 +441,19 @@ def summary(draft, graph, box):
     if values.get("division"):  # ADR 0030: the division the requester picked
         lines.append(f"ส่งถึง: {problem_pick.target(values['division'])}")
     elif target and target["config"].get("division"):
-        lines.append(f"ส่งถึง: {target['config']['division']}")
+        # "to" names the unit when the box knows it (ADR 0034: ซจ.'s repairs)
+        lines.append(f"ส่งถึง: {target['config'].get('to') or target['config']['division']}")
+    if values.get("subject"):
+        lines.append(f"เรื่อง: {values['subject']}")
     if values.get("set_kind"):
         lines.append(f"ชุด: {SET_LABELS.get(values['set_kind'], values['set_kind'])}")
+    elif values.get("group") in GROUP_LABELS and not values.get("equipment_name"):
+        lines.append(f"อุปกรณ์: {GROUP_LABELS[values['group']]}")
     if values.get("tracking"):
         label = TRACKING_LABELS.get(values.get("sap_kind"), "เลขติดตาม")
         lines.append(f"{label}: {values['tracking']}")
     elif values.get("no_number"):
-        lines.append("เลขติดตาม: ไม่มีเลข เจ้าหน้าที่หาเอกสารจากรายละเอียด")
+        lines.append("เลขติดตาม: ไม่มี เจ้าหน้าที่จะหาเอกสารจากรายละเอียด")
     if values.get("sap_document"):
         lines.append(f"เลข SAP งานซ่อม: {values['sap_document']}")
     for row in state.get("rows", []):
@@ -401,29 +471,40 @@ def summary(draft, graph, box):
     for key in ("equipment_name", "meter_numbers", "district_name"):
         if values.get(key):
             value = values[key]
-            lines.append(
-                f"{VALUE_LABELS[key]}: {', '.join(value) if isinstance(value, list) else value}"
-            )
+            label = _label(graph, state, key)
+            lines.append(f"{label}: {', '.join(value) if isinstance(value, list) else value}")
     for key in (
+        "mea_numbers",
         "tools",
         "details",
         "description",
         "purpose",
         "condition_reason",
         "impact",
-        "mea_numbers",
     ):
         value = values.get(key)
         if value:
-            lines.append(
-                f"{VALUE_LABELS[key]}: {', '.join(value) if isinstance(value, list) else value}"
-            )
+            label = values.get("tools_label") if key == "tools" else None
+            label = label or _label(graph, state, key)
+            lines.append(f"{label}: {', '.join(value) if isinstance(value, list) else value}")
     if values.get("appointment"):
         lines.append(f"ขอนัด: {values['appointment']['label']} (รอเจ้าหน้าที่ยืนยัน)")
     for warning in values.get("warnings", []):
         lines.append(f"หมายเหตุ: {warning}")
-    lines.append("ข้อมูลถูกต้องกดยืนยันภายใน 30 นาที ถ้าพิมพ์ผิดกดแก้ไข")
+    lines.append("กรุณาตรวจสอบข้อมูล และกดยืนยันส่งเรื่องภายใน 30 นาที สามารถแก้ไขได้")
     return "\n".join(lines)
+
+
+def _label(graph, state, key):
+    """What a summary line calls an answer: the label of the step that asked it, if it has
+    one (กตฟ.: การไฟฟ้าเขต, ลักษณะที่พบ), else the usual name."""
+    field = {"district_name": "district"}.get(key, key)
+    for nid in state.get("answered", []):
+        asked = node(graph, nid) or {}
+        if asked.get("kind") == "ask" and asked["config"].get("field") == field:
+            if asked["config"].get("label"):
+                return asked["config"]["label"]
+    return VALUE_LABELS[key]
 
 
 def row_text(row):
@@ -439,7 +520,7 @@ def on_button(turn, draft, value):
     graph, state = _version(draft).graph, _state(draft)
     box = node(graph, value.get("node"))
     if box is None or box["id"] != state.get("node"):
-        turn.say("ปุ่มนี้เป็นของขั้นก่อนหน้า ใช้คำถามล่าสุดแทน")
+        turn.say("ปุ่มนี้ใช้ไม่ได้แล้ว ตอบคำถามล่าสุดแทน")
         return conversation._ask(turn, draft)
     values = state["values"] = dict(state["values"])
     if "choice" in value:
@@ -468,9 +549,19 @@ def on_button(turn, draft, value):
         return _go(turn, draft, follow(graph, box["id"]))
     if "edit" in value or "back" in value:
         return _edit(turn, draft, graph, state, value)
+    if "mine" in value:
+        mine = _own_district(turn)
+        if mine is None or box["kind"] != "ask":
+            return conversation._ask(turn, draft)
+        values["district"], values["district_name"] = mine.code, usage_short(mine.name)
+        _answered(state, box)
+        _save(turn, draft, state)
+        if state.get("editing"):
+            return _back_to_summary(turn, draft, state)
+        return _go(turn, draft, follow(graph, box["id"]))
     if "lookup" in value:  # ถามเครื่องอื่น / จบ after an answer (ADR 0027)
         if value["lookup"] == "end":
-            return _finish(turn, draft, "จบการตรวจสอบแล้ว เลือกเมนูด้านล่างได้เลย")
+            return _finish(turn, draft, "ตรวจสอบแล้ว เลือกเมนูด้านล่างได้เลย")
         _save(turn, draft, state)
         return conversation._ask(turn, draft)
     button = next((b for b in box["buttons"] if b["id"] == value.get("button")), None)
@@ -504,6 +595,26 @@ def on_button(turn, draft, value):
     return _go(turn, draft, target)
 
 
+def _own_district(turn):
+    """The district the requester belongs to, when the system knows it."""
+    from operations import identity  # local: identity builds on the models
+
+    district = getattr(turn.requester, "district", None) if turn.requester else None
+    if district is None or not district.is_active or district.code == identity.UNKNOWN_DISTRICT:
+        return None
+    return district
+
+
+def usage_short(name):
+    from operations import usage_meters  # local: usage_meters reads the districts
+
+    return usage_meters.short(name)
+
+
+def _editable(graph, state):
+    return any((node(graph, n) or {}).get("kind") == "ask" for n in state.get("answered", []))
+
+
 def _answered(state, box):
     state["answered"] = [n for n in state.get("answered", []) if n != box["id"]] + [box["id"]]
 
@@ -515,8 +626,10 @@ def _edit_menu(turn, draft, graph, state, box):
         asked = node(graph, nid)
         if asked is None or asked["kind"] != "ask":
             continue
+        if asked["config"].get("no_edit"):
+            continue  # the กตฟ. report: its three answers are edited one by one
         field = asked["config"].get("field", "")
-        label = EDIT_LABELS.get(field) or asked["title"][:20]
+        label = asked["config"].get("label") or EDIT_LABELS.get(field) or asked["title"][:20]
         if any(q[0] == label for q in quick):
             continue
         quick.append(
@@ -528,7 +641,7 @@ def _edit_menu(turn, draft, graph, state, box):
     quick.append(
         (*turn.button("กลับไปที่สรุป", "flow", {"node": box["id"], "back": 1}, draft), "กลับไปที่สรุป")
     )
-    turn.say("ต้องการแก้ข้อไหน", quick[: conversation.MAX_QUICK])
+    turn.say("กรุณาเลือกหัวข้อที่จะแก้ไข", quick[: conversation.MAX_QUICK])
 
 
 def _edit(turn, draft, graph, state, value):
@@ -567,7 +680,7 @@ def on_text(turn, draft, text):
         return conversation._ask(turn, draft)
     config = box["config"]
     if _choices(box) and not state.get("choice", {}).get(box["id"]):
-        turn.say("กดเลือกก่อนว่าจะติดตามด้วยอะไร")
+        turn.say(PICK_KIND)
         return conversation._ask(turn, draft)
     values = state["values"] = dict(state["values"])
     field, rule = config.get("field", ""), config.get("rule", "text")
@@ -576,11 +689,11 @@ def on_text(turn, draft, text):
         problem = typed_lines.sap_in_use(value, turn.requester)
     if not problem and config.get("max_rows") and isinstance(value, list):
         if len(value) > int(config["max_rows"]):
-            problem = f"ขั้นนี้พิมพ์ได้ไม่เกิน {config['max_rows']} บรรทัด"
+            problem = f"กรุณาพิมพ์ไม่เกิน {config['max_rows']} บรรทัด"
     if problem:
         turn.say(problem)
         return conversation._ask(turn, draft)
-    notes = [f"อ่านเป็น: {shown}"] if shown and shown != text.strip() else []
+    notes = [shown] if shown and shown != text.strip() else []  # what was read, as is
     if field.startswith("rows."):
         group = field.split(".", 1)[1]
         kept = state.get("rows", [])
@@ -593,6 +706,8 @@ def on_text(turn, draft, text):
             notes += warnings
     elif rule == "multiplier":
         values["multiplier"] = value
+    elif rule == "usage_report":  # ADR 0035: what it read; the steps after ask for the rest
+        values.update(value)
     else:
         values[field] = value
         if rule == "district":
@@ -634,30 +749,34 @@ def _lookup(turn, draft, state, box, text):
         # Quiet too long: this text is a new message, not a number for the old question.
         _finish(turn, draft)
         return conversation._free_text(turn, None, text)
-    source = sheet_lookup.source_for(box["config"].get("source", ""))
+    config = box["config"]
+    source = sheet_lookup.source_for(config.get("source", ""))
     handoff = next(
         (b for b in box["buttons"] if follow(_version(draft).graph, box["id"], b["id"])), None
     )
+    # A box may name what is typed (ADR 0034: เลขงานซ่อม of ซจ.); คม.'s box keeps its words.
+    missing = config.get("missing") or (
+        "ยังไม่เห็นหมายเลขอุปกรณ์ในข้อความ พิมพ์ ชื่อเครื่องมือ, หมายเลข เช่น SAFETY BELT, NC801"
+    )
+    typed = {"tools": " ".join(text.split())[:1000]}
+    if config.get("label"):
+        typed["tools_label"] = config["label"]
     if source is None and handoff is not None:
         # ADR 0029: no sheet yet, so what was typed goes to the division as a case.
         if not sheet_lookup.codes_in(text):
-            turn.say("ยังไม่เห็นหมายเลขอุปกรณ์ในข้อความ พิมพ์ ชื่อเครื่องมือ, หมายเลข เช่น SAFETY BELT, NC801")
+            turn.say(missing)
             _save(turn, draft, state)
             return None
-        state["values"] = {**state["values"], "tools": " ".join(text.split())[:1000]}
+        state["values"] = {**state["values"], **typed}
         _save(turn, draft, state)
         target = follow(_version(draft).graph, box["id"], handoff["id"])
-        return _go(turn, draft, target, "ตอนนี้ยังค้นจากชีตไม่ได้ ส่งให้เจ้าหน้าที่ตรวจแทน")
+        return _go(turn, draft, target, "ตอนนี้ยังค้นจากชีทไม่ได้ ส่งให้เจ้าหน้าที่ตรวจแทน")
     if source is None:
         return _finish(turn, draft, "ตอนนี้ยังตรวจสอบสถานะจากชีทไม่ได้ กรุณาติดต่อ ศอค.")
     code = source.match == source.Match.CODE
     numbers = sheet_lookup.keys_in(source, text)
     if not numbers:
-        turn.say(
-            "ยังไม่เห็นหมายเลขอุปกรณ์ในข้อความ พิมพ์ ชื่อเครื่องมือ, หมายเลข เช่น SAFETY BELT, NC801"
-            if code
-            else "ยังไม่เห็นเลข UI ในข้อความ พิมพ์เป็นตัวเลข เช่น 12345678"
-        )
+        turn.say(missing if code else "ยังไม่เห็นเลข UI ในข้อความ พิมพ์เป็นตัวเลข เช่น 12345678")
         _save(turn, draft, state)
         return None
     extra = len(numbers) > sheet_lookup.MAX_NUMBERS
@@ -665,9 +784,9 @@ def _lookup(turn, draft, state, box, text):
     names = {n: name for name, n in sheet_lookup.codes_in(text)} if code else {}
     items = sheet_lookup.lookup(source, numbers[: sheet_lookup.MAX_NUMBERS], district, names)
     note = sheet_lookup.stale_note(source, turn.now)
-    state["values"] = {**state["values"], "tools": " ".join(text.split())[:1000]}
+    state["values"] = {**state["values"], **typed}
     _save(turn, draft, state)
-    again = "ถามชิ้นอื่น" if code else "ถามเลข UI อื่น"
+    again = config.get("again") or ("ถามชิ้นอื่น" if code else "ถามเลข UI อื่น")
     quick = [
         (*turn.button(label, "flow", {"node": box["id"], "lookup": key}, draft), label)
         for key, label in (("again", again), ("end", "จบ"))
@@ -677,7 +796,10 @@ def _lookup(turn, draft, state, box, text):
         value = {"node": box["id"], "button": handoff["id"]}
         quick.insert(0, (*turn.button(handoff["label"], "flow", value, draft), handoff["label"]))
         hint = f"ตรวจหมายเลขอีกครั้ง หรือกด {handoff['label']}"
-    turn.say(sheet_lookup.answer(items, extra, note, hint=hint), quick)
+        if source.contact:  # ADR 0034 Q25: the unit's phone, once its sheet editor sets it
+            hint += f"\nหรือโทร {source.contact}"
+    follow_up = config.get("follow_up") or sheet_lookup.FOLLOW_UP
+    turn.say(sheet_lookup.answer(items, extra, note, follow_up=follow_up, hint=hint), quick)
     if source.ai_words:
         ai_sheet_status.queue(turn, items, extra, note, hint)
     return None
@@ -735,7 +857,7 @@ def _tracking_notes(turn, values, number):
     own = [n for n, requester in found if turn.requester and requester == turn.requester.pk]
     if not own:
         return []
-    warning = f"เลขนี้อยู่ในเรื่อง {', '.join(own)} ของคุณแล้ว ส่งต่อได้ถ้าเป็นคนละรายการ"
+    warning = f"เลขนี้กำลังดำเนินการอยู่ในเรื่อง {', '.join(own)}"
     values["warnings"] = [*values.get("warnings", []), warning]
     return [warning]
 
@@ -753,12 +875,15 @@ def _check_multiplier(values):
     }
     if ok:
         return ""
-    found = (
-        f"ตัวคูณที่พิมพ์ ({given}) ไม่ตรงกับที่คำนวณจาก CT และ VT ({_number(computed)})"
-        if computed is not None
-        else "คำนวณตัวคูณจากขนาด CT และ VT ไม่ได้"
+    sizes = "CT และ VT" if vt else "CT"  # a set without VT never hears of one
+    if computed is None:
+        return (
+            f"คำนวณตัวคูณจากขนาด {sizes} ไม่ได้ ยังสามารถดำเนินการส่งเรื่องได้ ระบบจะแจ้งเจ้าหน้าที่ให้ตรวจสอบอีกครั้ง"
+        )
+    return (
+        f"ตัวคูณที่พิมพ์ ({given}) ไม่ตรงกับที่คำนวณจากขนาด {sizes} ({_number(computed)})"
+        " ยังส่งเรื่องได้ ระบบจะแจ้งเจ้าหน้าที่ให้ตรวจสอบ"
     )
-    return found + " ส่งต่อได้ ระบบจะบอกเจ้าหน้าที่ให้ตรวจ"
 
 
 def _number(value):
@@ -771,7 +896,20 @@ def read(rule, field, text, kind=""):
     if rule == "tracking":
         return typed_input.tracking_rule(text, kind)
     if rule == "size":
-        return typed_input.size_rule(text)
+        return typed_input.size_rule(text, "vt" if field == "vt_size" else "ct")
+    if rule == "usage_report":
+        from operations import usage_meters  # local: usage_meters reads the districts
+
+        value, shown, problem = typed_input.usage_report(text, usage_meters.match_district)
+        district = (value or {}).pop("district", None)
+        if district is not None:  # the code is kept, the name is shown
+            value["district"], value["district_name"] = (
+                district.code,
+                usage_meters.short(district.name),
+            )
+        return value, shown, problem
+    if rule == "meters_8":
+        return typed_input.meters_8_rule(text)
     if rule == "meter_row":
         return typed_input.meter_rows(text, group or "meter")
     if rule == "size_quantity":
@@ -812,7 +950,7 @@ def meter_warnings(rows):
                 .first()
             )
             if line is not None:
-                found.append(f"หมายเลข {number} อยู่ในเรื่องอื่นที่ยังไม่จบ ระบบรับไว้และแจ้งเจ้าหน้าที่")
+                found.append(f"หมายเลข {number} อยู่ในเรื่องอื่นที่กำลังดำเนินการ กรุณาติดต่อหน่วยงานที่เกี่ยวข้อง")
     return found
 
 
@@ -833,7 +971,11 @@ def payload(draft, config, flow):
             if row["group"] == "other" and values.get("equipment_name"):
                 entry.setdefault("name", values["equipment_name"])  # กคอ.: the name came first
             lines = typed_lines.add(lines, row["group"], entry, kind)
-    if topic_of(values, config) == Case.Topic.REPAIR and values.get("tools"):
+    if (
+        topic_of(values, config) == Case.Topic.REPAIR
+        and values.get("tools")
+        and not values.get("tools_label")
+    ):
         # ADR 0029: each typed piece is a row with its หมายเลขอุปกรณ์ (25 Oct 2569 Q7).
         from operations import sheet_lookup  # local: sheet_lookup reads the database
 
@@ -858,13 +1000,20 @@ def payload(draft, config, flow):
         )
     elif values.get("sap_document"):
         data["sap_number"] = values["sap_document"]
+    elif topic == Case.Topic.REPAIR and values.get("tools_label") and values.get("tools"):
+        # ADR 0034: what was typed for ซจ. (a letter, WO, WBS, ...) is the case's number.
+        number = " ".join(re.sub(r"[^\w\u0E00-\u0E7F ./()-]", " ", values["tools"]).split())
+        data["sap_number"], data["sap_kind"] = number[:60], "other_number"
     details = values.get("details", "")
     if kind == Case.Kind.WITHDRAWAL:
         data["purpose"] = details or values.get("purpose") or "-"
     elif kind == Case.Kind.RETURN:
         data["condition"] = data["reason"] = details or values.get("condition_reason") or "-"
     else:
-        bits = [values.get("tools", ""), details or values.get("description", "")]
+        tools = values.get("tools", "")
+        if tools and values.get("tools_label"):
+            tools = f"{values['tools_label']}: {tools}"
+        bits = [tools, details or values.get("description", "")]
         if values.get("mea_numbers"):
             bits.append("MEA No.: " + ", ".join(values["mea_numbers"]))
         if values.get("appointment"):
@@ -910,7 +1059,7 @@ def _keep_slot(turn, draft, graph, state):
     state["values"].pop("appointment", None)
     state["node"] = chosen.get("node") or state["node"]
     _save(turn, draft, state)
-    turn.say("ช่วงเวลาที่เลือกไว้มีคนขอแล้วระหว่างรอยืนยัน เลือกช่วงใหม่")
+    turn.say("ช่วงเวลาอยู่ระหว่างดำเนินการ กรุณาเลือกช่วงใหม่")
     conversation._ask(turn, draft)
     return False
 
@@ -927,7 +1076,7 @@ def _create(turn, draft, graph, box):
             payload=payload(draft, box["config"], flow),
         )
     except CommandFailed as exc:
-        turn.say(f"ส่งเรื่องไม่ได้: {exc.message or 'ข้อมูลยังไม่ครบหรือไม่ถูกต้อง'}")
+        turn.say(f"ไม่สามารถส่งเรื่องได้: {exc.message or 'ข้อมูลยังไม่ครบหรือไม่ถูกต้อง'}")
         state = _state(draft)
         state["node"] = _summary_before(graph, box["id"]) or state["node"]
         _save(turn, draft, state)
@@ -936,8 +1085,12 @@ def _create(turn, draft, graph, box):
     from operations import calendars  # local: calendars builds on this module
 
     calendars.attach(draft, case)
-    after = node(graph, follow(graph, box["id"]))
     state = _state(draft)
+    after = node(graph, follow(graph, box["id"]))
+    for _ in range(MAX_HOPS):  # a branch may pick the result (no slot chosen, no นัด)
+        if after is None or after["kind"] != "branch":
+            break
+        after = node(graph, branch_target(graph, after, state["values"]))
     state["case"] = case.number
     conversation._touch(
         draft, turn.now, status=D.SUBMITTED, case=case, data=dict(draft.data, flow=state)
@@ -963,7 +1116,7 @@ def _create(turn, draft, graph, box):
     if base:
         value = {"version": _version(draft).pk, "node": base["node"], "values": base["values"]}
         items = turn.replies[-1].setdefault("quickReply", {}).setdefault("items", [])
-        items.insert(0, conversation._postback(*turn.button("ส่งใบถัดไป", "flow_again", value)))
+        items.insert(0, conversation._postback(*turn.button("ส่งเรื่องเพิ่มเติม", "flow_again", value)))
         del items[conversation.MAX_QUICK :]
 
 

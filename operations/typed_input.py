@@ -61,7 +61,7 @@ def _fail(problem):
 def text_rule(text):
     value = " ".join(str(text or "").split()) if "\n" not in str(text or "") else str(text).strip()
     if not value:
-        return _fail("กรุณาพิมพ์ข้อความ")
+        return _fail("กรุณาระบุรายละเอียด")
     if len(value) > MAX_TEXT:
         return _fail(f"พิมพ์ไม่เกิน {MAX_TEXT} ตัวอักษร")
     return value, value, ""
@@ -84,6 +84,13 @@ def sap_rule(text):
 
 PROJECT = re.compile(r"^[\w\u0E00-\u0E7F ./()-]{2,60}$")  # Thai marks are not \w
 MEMO = PROJECT  # เลขที่ M/N may carry the writer's abbreviation, e.g. ฝอจ.คม. 123/2569
+# A slip of กอจ. may carry dots (I/69.01.01.001.69.01.001, ADR 0034); kept as typed.
+SLIP = re.compile(r"^[A-Za-z0-9./-]{4,30}$")
+SLIP_KINDS = {"slip", "return_slip", "work_order", "return_transfer"}
+CHECK_AGAIN = "กรุณาตรวจสอบอีกครั้ง"
+# หมายเลขเครื่องวัดฯ is eight digits (ADR 0035), here and in the กตฟ. report.
+METER_8 = re.compile(r"^\d{8}$")
+METER_8_PROBLEM = "กรุณาตรวจสอบเลขเครื่องวัดฯอีกครั้ง เป็นตัวเลข 8 หลัก"
 
 
 def tracking_rule(text, kind):
@@ -91,29 +98,37 @@ def tracking_rule(text, kind):
     code, a project is a name that may hold Thai and spaces."""
     if kind == "meter":
         value = code(tidy(text))
-        if not typed_lines.METER_NUMBER.match(value):
-            return _fail("หมายเลขเครื่องวัดฯ ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว")
+        if not METER_8.match(value):
+            return _fail(METER_8_PROBLEM)
         return value, value, ""
     if kind == "project":
         value = " ".join(tidy(text).split())
         if not PROJECT.match(value):
-            return _fail("พิมพ์ชื่อหรือรหัสโครงการ 2 ถึง 60 ตัว")
+            return _fail(CHECK_AGAIN)
         return value, value, ""
-    if kind == "memo":  # grill กคอ. Q20: M/N, the memo for an item with no SAP code
+    if kind in ("memo", "other_number"):  # M/N, the memo for an item with no SAP code
         value = " ".join(tidy(text).split()).upper()
         if not MEMO.match(value):
-            return _fail("พิมพ์เลขที่ M/N 2 ถึง 60 ตัว เช่น คม. 123/2569")
+            return _fail(
+                "พิมพ์เลขที่ M/N 2 ถึง 60 ตัว เช่น คม. 123/2569" if kind == "memo" else CHECK_AGAIN
+            )
+        return value, value, ""
+    if kind in SLIP_KINDS:
+        value = code(tidy(text)).replace(" ", "")
+        if not SLIP.match(value):
+            return _fail(CHECK_AGAIN)
         return value, value, ""
     return sap_rule(text)
 
 
-def size_rule(text):
-    """One size such as 100/5A or 11000/110V (a CT or VT of a set)."""
+SIZE_PROBLEMS = {"ct": "พิมพ์ขนาด CT เช่น 100/5A", "vt": "พิมพ์ขนาด VT เช่น 11000/110V"}
+
+
+def size_rule(text, kind="ct"):
+    """One size such as 100/5A or 11000/110V (a CT or VT of a set); the problem names it."""
     value = size(tidy(text))
-    if not value or len(value) > typed_lines.LIMITS["size"]:
-        return _fail("พิมพ์ขนาด เช่น 100/5A")
-    if ratio(value) is None:
-        return _fail("พิมพ์ขนาดแบบ ตัวเลข/ตัวเลข เช่น 100/5A หรือ 11000/110V")
+    if not value or len(value) > typed_lines.LIMITS["size"] or ratio(value) is None:
+        return _fail(SIZE_PROBLEMS.get(kind, SIZE_PROBLEMS["ct"]))
     return value, value, ""
 
 
@@ -133,7 +148,7 @@ def meter_rows(text, group="meter"):
     rows, shown = [], []
     for parts in rows_of(text):
         if len(parts) != 2:
-            return _fail("พิมพ์บรรทัดละเครื่อง แบบ หมายเลขเครื่องวัดฯ, ขนาด เช่น 12345678, 5(100)A")
+            return _fail("พิมพ์หมายเลขเครื่องวัดฯ, ขนาด เช่น 12345678, 5(100)A")
         number, value = code(parts[0]), size(parts[1])
         if not typed_lines.METER_NUMBER.match(number):
             return _fail(f"หมายเลขเครื่องวัดฯ '{parts[0]}' ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว")
@@ -215,3 +230,59 @@ def multiplier_of(rows):
             return None
         found = (found or 1) * ratio(next(iter(sizes)))
     return found
+
+
+def meters_8_rule(text):
+    """หมายเลขเครื่องวัดฯ of the กตฟ. report: eight digits each, split by "," or spaces."""
+    values = [v for v in re.split(r"[,\s]+", tidy(text)) if v]
+    if not values:
+        return _fail("กรุณาพิมพ์หมายเลขเครื่องวัดฯ เช่น 12345678")
+    if any(not METER_8.match(v) for v in values):
+        return _fail(METER_8_PROBLEM)
+    if len(set(values)) != len(values):
+        return _fail("หมายเลขเครื่องวัดฯ ซ้ำกัน")
+    return values, ", ".join(values), ""
+
+
+def usage_report(text, district_of):
+    """หมายเลขเครื่องวัดฯ, การไฟฟ้าเขต, ลักษณะที่พบ in one message (ADR 0035). Each part between
+    commas is read alone: digits only are the meters, a district's name is the district, the
+    rest is what was found. Typed without commas, the eight-digit numbers and a word naming a
+    district are taken out and the words left are what was found. What is missing is asked
+    after; nothing is guessed. district_of(text) is the district a text names, or None."""
+    tidied = tidy(text)
+    if not tidied:
+        return _fail("กรุณาระบุรายละเอียด")
+    parts = [p for p in re.split(r", |\n", tidied) if p.strip()]
+    meters, district, found = [], None, []
+    for part in parts:
+        words = part.split()
+        if all(w.replace("-", "").isdigit() for w in words):
+            numbers = [w.replace("-", "") for w in words]
+            if any(not METER_8.match(n) for n in numbers):
+                return _fail(METER_8_PROBLEM)
+            meters += [n for n in numbers if n not in meters]
+            continue
+        if district is None and (named := district_of(part)) is not None:
+            district = named
+            continue
+        if len(parts) == 1:  # no commas: pick the numbers and a district out of the words
+            kept = []
+            for w in words:
+                if METER_8.match(w):
+                    meters += [w] if w not in meters else []
+                elif district is None and (named := district_of(w)) is not None:
+                    district = named
+                else:
+                    kept.append(w)
+            words = kept
+        if words:
+            found.append(" ".join(words))
+    value = {}
+    if meters:
+        value["meter_numbers"] = meters
+    if district is not None:
+        value["district"] = district
+    if found:
+        value["description"] = ", ".join(found)[:MAX_TEXT]
+    return value, "", ""

@@ -41,7 +41,11 @@ KIND_SHORT = {  # ADR 0032: the short names LINE uses
 
 def group_choices():
     """What a งานที่หน่วยรับ names: the LINE groups of goods, then the topics of a case."""
+    from operations import flow_runner  # local: the flow runner builds on the cases
+
     out = dict(EquipmentType.LineGroup.choices)
+    for value, label in flow_runner.GROUP_LABELS.items():  # ADR 0034: one per กอจ. button
+        out.setdefault(value, label)
     for value, label in Case.Topic.choices:
         out.setdefault(value, label)
     return list(out.items())
@@ -195,6 +199,8 @@ def case_groups(case):
         groups.update({line.item.line_group, line.item.category})
     if case.topic:
         groups.add(case.topic)
+    # A tracking case has no lines: the group its button set says it (ADR 0034).
+    groups.add(str((case.intake_data or {}).get("group", "")))
     return groups - {""}
 
 

@@ -13,7 +13,8 @@ class SheetSource(models.Model):
     enabled = models.BooleanField(default=False)
     spreadsheet_id = models.CharField(max_length=200)
     sheet_name = models.CharField(max_length=100)
-    key_column = models.CharField(max_length=3, default="J")
+    # The number columns, comma separated: ซจ. finds a repair by its letter or its WO (ADR 0034).
+    key_column = models.CharField(max_length=20, default="J")
     status_column = models.CharField(max_length=3, default="R")
     # รหัสพนักงาน of the reporter, comma separated (เจษ: "ใช้ Employee_ID แมพ"); a form whose
     # questions moved over the years keeps the ID in more than one column ("B,M").
@@ -43,6 +44,7 @@ class SheetSource(models.Model):
     # [{"column": "F", "label": "วันที่รับ"}]: up to four more cells shown beside the status.
     extra_columns = models.JSONField(default=list, blank=True)
     ai_words = models.BooleanField(default=True)  # AI may word the answer (ADR 0027)
+    contact = models.CharField(max_length=100, blank=True)  # said when a number is not found
     last_synced_at = models.DateTimeField(null=True, blank=True)
     next_sync_at = models.DateTimeField(default=timezone.now)
     refresh_requested = models.BooleanField(default=False)

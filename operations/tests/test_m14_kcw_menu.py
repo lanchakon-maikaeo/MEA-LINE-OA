@@ -127,7 +127,7 @@ class TypedRowTests(KcwTestCase):
     def test_a_withdrawal_follows_its_sap_slip_with_typed_rows(self):
         reply = self.start()
         self.assertIn("เลขใบเบิก SAP", texts(reply))
-        self.assertIn("4 ถึง 30 ตัว", texts(self.type(ALICE, "ab")))
+        self.assertIn("กรุณาตรวจสอบอีกครั้ง", texts(self.type(ALICE, "ab")))  # 29 ต.ค. 2569
         reply = self.type(ALICE, "4500012345")
         self.assertIn("หมายเลขเครื่องวัด / ขนาด / จำนวน", texts(reply))
         reply = self.type(ALICE, "M-1001 M-1002 / 5(100)A / 2")
@@ -200,7 +200,7 @@ class TypedRowTests(KcwTestCase):
         reply = self.type(ALICE, "4500077777")
         self.assertIn(f"เลขนี้อยู่ในเรื่อง {mine.number}", texts(reply))
         reply = self.type(ALICE, "4500088888")
-        self.assertIn("เลขนี้มีเรื่องที่ยังไม่จบอยู่แล้ว", texts(reply))
+        self.assertIn("กำลังดำเนินการ กรุณาตรวจสอบเลขอีกครั้ง", texts(reply))
         self.assertNotIn(other.number, texts(reply))
         Case.objects.filter(pk=other.pk).update(status=Case.Status.CLOSED)
         self.assertIn("หมายเลขเครื่องวัด", texts(self.type(ALICE, "4500088888")))
@@ -405,7 +405,7 @@ class RepairTests(KcwTestCase):
     def test_repair_tracking_starts_with_the_sap_number(self):
         reply = self.start(action="ติดตามสถานะการซ่อม")
         self.assertIn("เลข SAP งานซ่อม", texts(reply))
-        self.assertIn("4 ถึง 30 ตัว", texts(self.type(ALICE, "ab")))
+        self.assertIn("กรุณาตรวจสอบอีกครั้ง", texts(self.type(ALICE, "ab")))  # 29 ต.ค. 2569
         reply = self.type(ALICE, "6000012345")
         self.assertIn("หมายเลขเครื่องวัด / ขนาด", texts(reply))
         self.assertNotIn("จำนวน", texts(reply))

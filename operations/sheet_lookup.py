@@ -187,6 +187,11 @@ def owner_columns(source):
     return [c.strip().upper() for c in (source.owner_columns or "").split(",") if c.strip()]
 
 
+def key_columns(source):
+    """The columns a typed number is looked for in (ADR 0034: ซจ. uses E and K)."""
+    return [c.strip().upper() for c in (source.key_column or "").split(",") if c.strip()]
+
+
 def owner_key(value):
     """An employee ID as compared: its digits without leading zeros ("0012345" = "12345")."""
     return re.sub(r"\D", "", str(value or "").translate(THAI_DIGITS)).lstrip("0")[:32]
@@ -200,9 +205,11 @@ def extra_columns(source):
 
 
 def check_source(source):
-    for name, value in (("คอลัมน์เลข", source.key_column), ("คอลัมน์สถานะ", source.status_column)):
-        if not COLUMN.fullmatch(value or ""):
-            raise ValidationError(f"{name} ต้องเป็นตัวอักษรคอลัมน์ เช่น J")
+    keys = key_columns(source)
+    if not keys or len(keys) > 3 or not all(COLUMN.fullmatch(c) for c in keys):
+        raise ValidationError("คอลัมน์เลขต้องเป็นตัวอักษรคอลัมน์ เช่น J หรือหลายคอลัมน์คั่นด้วย , เช่น E,K")
+    if not COLUMN.fullmatch(source.status_column or ""):
+        raise ValidationError("คอลัมน์สถานะ ต้องเป็นตัวอักษรคอลัมน์ เช่น J")
     owners = owner_columns(source)
     if len(owners) > 3 or not all(COLUMN.fullmatch(c) for c in owners):
         raise ValidationError("คอลัมน์รหัสพนักงานใส่ได้ไม่เกิน 3 คอลัมน์ คั่นด้วย , เช่น B,M")
@@ -215,20 +222,16 @@ def check_source(source):
     ):
         if value and not COLUMN.fullmatch(value):
             raise ValidationError(f"{name} ต้องเป็นตัวอักษรคอลัมน์ เช่น D")
-    if source.match == source.Match.CODE and not source.district_column:
-        # ADR 0029: a repair sheet holds every ฟข.'s pieces; each sees only its own.
-        raise ValidationError("ชีตที่ค้นด้วยหมายเลขอุปกรณ์ต้องมีคอลัมน์ ฟข.")
+    # ADR 0034: a ฟข. column is the sheet owner's choice (คม. keeps one, ซจ. shows every area).
     extras = extra_columns(source)
     if not all(COLUMN.fullmatch(c) and label for c, label in extras):
         raise ValidationError("คอลัมน์ที่แสดงเพิ่มต้องเป็น ตัวอักษรคอลัมน์=ชื่อ เช่น F=วันที่รับ")
-    columns = [source.key_column, source.status_column, *owners]
+    columns = [*keys, source.status_column, *owners]
     columns += [c for c in [source.district_column, source.name_column] if c]
     if len(set(columns)) != len(columns):
         raise ValidationError("คอลัมน์ที่อ่านต้องไม่ซ้ำกัน")
     if not re.fullmatch(r"[A-Za-z0-9_-]{20,100}", source.spreadsheet_id or ""):
         raise ValidationError("รหัสชีทไม่ถูกต้อง คัดลอกจากลิงก์ระหว่าง /d/ กับ /edit")
-    if not (source.sheet_name or "").strip():
-        raise ValidationError("ใส่ชื่อแท็บของชีท")
 
 
 def _cell(column, offset):
@@ -243,14 +246,23 @@ def _row_numbers(source, cell):
 
 
 def apply_columns(
-    source, keys, statuses, owners=(), districts=(), extras=(), names=(), orders=(), dones=()
+    source,
+    keys,
+    statuses,
+    owners=(),
+    districts=(),
+    extras=(),
+    names=(),
+    orders=(),
+    dones=(),
+    more_keys=(),
 ):
     """Replace the source's entries with this read: one entry per number per row, each with
     the row's status, the first employee ID found in the owner columns, its ฟข. and the extra
-    cells to show."""
+    cells to show. more_keys are the other number columns of a row."""
     entries = []
     labels = [label for _, label in extra_columns(source)]
-    size = max([len(keys), *(len(c) for c in owners)])
+    size = max([len(keys), *(len(c) for c in owners), *(len(c) for c in more_keys)])
     for offset in range(size):
         status = " ".join(str(_cell(statuses, offset)).split())[:500]
         owner = next((k for k in (owner_key(_cell(c, offset)) for c in owners) if k), "")
@@ -263,7 +275,10 @@ def apply_columns(
             [label, " ".join(str(_cell(column, offset)).split())[:120]]
             for label, column in zip(labels, extras, strict=False)
         ]
-        numbers = _row_numbers(source, _cell(keys, offset)) or ([""] if owner else [])
+        numbers = []
+        for column in (keys, *more_keys):
+            numbers += [n for n in _row_numbers(source, _cell(column, offset)) if n not in numbers]
+        numbers = numbers or ([""] if owner else [])
         entries += [
             SheetEntry(
                 source=source,
@@ -300,17 +315,22 @@ def sync(source):
         "dones": source.done_column,
     }
     wanted = [c for c in optional.values() if c]
-    keys, statuses, *rest = read_columns(
+    numbers = key_columns(source)
+    keys, *rest = read_columns(
         source.spreadsheet_id,
         source.sheet_name,
-        [source.key_column, source.status_column, *owners, *wanted, *extras],
+        [*numbers, source.status_column, *owners, *wanted, *extras],
         source.first_row,
     )
+    more_keys, rest = rest[: len(numbers) - 1], rest[len(numbers) - 1 :]
+    statuses, *rest = rest
     read_owners, rest = rest[: len(owners)], rest[len(owners) :]
     named = {}
     for field, column in optional.items():
         named[field] = rest.pop(0) if column else ()
-    return apply_columns(source, keys, statuses, read_owners, extras=rest, **named)
+    return apply_columns(
+        source, keys, statuses, read_owners, extras=rest, more_keys=more_keys, **named
+    )
 
 
 def sync_due(now=None):
@@ -372,8 +392,9 @@ def word(source, status, done=False):
     """A status cell as ฟข. may read it (ADR 0029): its word once the piece is back with ฟข.,
     else its word, the blank word, or as written."""
     status = (status or "").strip()
-    if done and status in (source.done_words or {}):
-        return source.done_words[status]
+    done_words = source.done_words or {}
+    if done and (status in done_words or "*" in done_words):  # "*": whatever the status says
+        return done_words.get(status) or done_words["*"]
     words = source.status_words or {}
     if not status:
         return source.blank_word or ""
@@ -451,7 +472,7 @@ def lookup(source, numbers, district=None, names=None):
         status = entry.status
         if source.match == source.Match.DIGITS:
             status = segment(entry.number, status)  # only this meter's part of the note
-        rows.setdefault(entry.number, []).append(word(source, status))
+        rows.setdefault(entry.number, []).append(word(source, status, entry.done))
         extras[entry.number] = entry.extra
     return [
         {
@@ -499,7 +520,7 @@ def _code_line(item):
     label = item.get("label") or "หมายเลขอุปกรณ์"
     name = f" ({item['name']})" if item.get("name") else ""
     if not item["found"]:
-        where = "ในรายการของเขตคุณ" if item.get("scoped") else "ในชีต"
+        where = "ในรายการของเขตคุณ" if item.get("scoped") else "ในชีท"
         return f"ไม่พบ{label} {item['number']}{name} {where}"
     status = item["statuses"][-1] or PENDING
     shown = " · ".join(f"{k} {v}" for k, v in item.get("extras", []))
@@ -619,6 +640,7 @@ FIELDS = (
     "order_column",
     "done_column",
     "blank_word",
+    "contact",
 )
 
 
@@ -673,7 +695,8 @@ def save_source(actor, source, data, reason):
     if "done_words" in data:
         # "ว่าง=ส่งคืน ฟข. แล้ว" stands for a blank status cell
         pairs = _pairs(data.get("done_words"), 40)
-        source.done_words = {("" if k == "ว่าง" else k): v for k, v in pairs.items()}
+        aliases = {"ว่าง": "", "ทุกสถานะ": "*"}  # ADR 0034: ซจ.'s ยกเลิก whatever the status
+        source.done_words = {aliases.get(k, k): v for k, v in pairs.items()}
     if "extra_columns" in data:
         source.extra_columns = [
             {"column": k.upper(), "label": v}
@@ -686,6 +709,7 @@ def save_source(actor, source, data, reason):
     except (TypeError, ValueError) as exc:
         raise ValidationError("แถวแรกของข้อมูลต้องเป็นตัวเลข") from exc
     source.name = source.name[:120]
+    source.contact = source.contact[:100]
     if not source.name:
         raise ValidationError("ตั้งชื่อแหล่งข้อมูล")
     check_source(source)

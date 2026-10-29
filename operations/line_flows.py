@@ -53,7 +53,9 @@ RULES = {
     "text": "ข้อความ",
     "number": "ตัวเลข",
     "date": "วันที่ (ไม่ใช่วันที่ผ่านมาแล้ว)",
-    "tracking": "เลขติดตามตามชนิดที่เลือก (ใบเบิก ใบส่งคืน ใบสั่งงาน หมายเลขเครื่องวัดฯ โครงการ M/N)",
+    "tracking": (
+        "เลขติดตามตามชนิดที่เลือก (ใบเบิก ใบส่งคืน ใบสั่งงาน หมายเลขเครื่องวัดฯ โครงการ M/N ใบโอนขอคืน เลขอื่น)"
+    ),
     "sap_document": "เลข SAP (ไม่เกิน 30 ตัว ใช้ / ได้)",
     "size": "ขนาดหนึ่งค่า เช่น 100/5A",
     "meter_row": "หมายเลขเครื่องวัดฯ, ขนาด (บรรทัดละเครื่อง)",
@@ -63,6 +65,9 @@ RULES = {
     "mea_numbers": "MEA No. หลายเครื่องคั่นด้วย ,",
     "multiplier": "ตัวคูณ (เทียบกับ CT และ VT)",
     "district": "ชื่อเขต (18 เขต)",
+    # กตฟ. (ADR 0035): the whole report in one message, and meters of eight digits.
+    "usage_report": "หมายเลขเครื่องวัดฯ, การไฟฟ้าเขต, ลักษณะที่พบ ในข้อความเดียว",
+    "meters_8": "หมายเลขเครื่องวัดฯ ตัวเลข 8 หลัก หลายเครื่องคั่นด้วย , หรือเว้นวรรค",
 }
 ACTIONS = {"create_case", "find_case", "book", "ai_read", "handoff", "koj_tracking", "sheet_lookup"}
 SETTING = re.compile(r"[a-z_]{1,30}\s*=\s*[^=;|]{1,40}(?:\|[^=;|]{1,40})*")
@@ -300,11 +305,7 @@ def publish_as(actor, version, reason):
     version = LineFlowVersion.objects.select_for_update().get(pk=version.pk)
     if version.status != V.DRAFT:
         raise ValidationError("เผยแพร่ได้เฉพาะร่าง")
-    is_koj = version.flow.tile == "หม้อแปลง LBS RMU" or (
-        version.flow.division_id and version.flow.division.code in {"กอจ.", "กองอุปกรณ์ฯ"}
-    )
-    if is_koj and any(n["kind"] == "create_case" for n in version.graph["nodes"]):
-        raise ValidationError("กอจ. ติดตามงานต้นทาง ใช้กล่องติดตามงาน กอจ. แทนการสร้างเรื่องใหม่")
+    # ADR 0034: กอจ. files cases like every division, so its flow may have a case box.
     issues = check(clean_graph(version.graph))
     if blocked(issues):
         raise ValidationError("ยังมีจุดที่ต้องแก้ก่อนเผยแพร่")
