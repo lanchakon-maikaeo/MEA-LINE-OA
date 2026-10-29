@@ -114,7 +114,7 @@ def _text(kind, case, detail=""):
     if detail:
         rows.append(detail)
     rows.append(f"เปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}/cases/{case.number}/")
-    rows.append("อีเมลนี้ส่งอัตโนมัติจากระบบรับเรื่อง ฝอจ. (ข้อมูลกองและกติกาเป็นข้อมูลจำลอง)")
+    rows.append("อีเมลนี้ส่งอัตโนมัติจาก DED Center (ข้อมูลกองและกติกาเป็นข้อมูลจำลอง)")
     return "\n".join(rows)
 
 

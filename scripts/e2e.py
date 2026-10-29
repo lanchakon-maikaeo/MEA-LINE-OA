@@ -399,7 +399,7 @@ with Path("reports/e2e-server.log").open("w") as log:
             browser = playwright.chromium.launch()
             page = browser.new_page(viewport={"width": 390, "height": 844})
             page.goto(base_url)
-            assert page.get_by_role("heading", name="ระบบรับเรื่อง ฝอจ.").count() == 1
+            assert page.get_by_role("heading", name="DED Center").count() == 1
             # M10: skip link first, then the brand, then the staff sign-in button.
             page.keyboard.press("Tab")
             assert page.locator(":focus").get_attribute("href") == "#main"

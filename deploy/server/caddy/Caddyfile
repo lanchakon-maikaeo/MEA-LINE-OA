@@ -13,7 +13,7 @@
 	header Cache-Control no-store
 	# POSTs (LINE webhooks, forms) get a plain 503 too; the file server would answer 405.
 	@write not method GET HEAD
-	respond @write "ระบบรับเรื่อง ฝอจ. ปิดปรับปรุงชั่วคราว" 503
+	respond @write "DED Center ปิดปรับปรุงชั่วคราว" 503
 	templates
 	rewrite * /index.html
 	file_server {
@@ -62,7 +62,7 @@ http://:8081 {
 		try_files /maintenance
 	}
 	handle @maintenance {
-		respond "ระบบรับเรื่อง ฝอจ. ปิดปรับปรุงชั่วคราว" 503
+		respond "DED Center ปิดปรับปรุงชั่วคราว" 503
 	}
 
 	handle /webhooks/line {

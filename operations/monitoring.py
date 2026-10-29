@@ -598,7 +598,7 @@ def _mail(row):
         [f"Monitoring วันที่ {row.day:%d/%m/%Y} มีเรื่องที่ควรดู", "", *row.alerts, ""]
         + [f"ดูที่ {settings.STAFF_WEB_BASE_URL}/console/admin/monitoring/"]
     )
-    send_mail("Monitoring ระบบรับเรื่อง ฝอจ.", body, settings.DEFAULT_FROM_EMAIL, list(admins))
+    send_mail("Monitoring DED Center", body, settings.DEFAULT_FROM_EMAIL, list(admins))
 
 
 def latest_alerts():
