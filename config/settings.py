@@ -147,7 +147,8 @@ LINE_PUSH_DEBOUNCE_MINUTES = int(os.environ.get("LINE_PUSH_DEBOUNCE_MINUTES") or
 AI_MCP_ENABLED = os.environ.get("AI_MCP_ENABLED", "true").lower() == "true"
 AI_ENABLED = os.environ.get("AI_ENABLED", "false").lower() == "true"
 # ADR 0032: typed text never opens a เบิก or ส่งคืน draft. The earlier typed intake stays in the
-# code; only its tests turn it back on (override_settings). No environment variable reads it.
+# code; only its tests and ai_eval's draft replay turn it on (override_settings). No environment
+# variable reads it.
 LINE_TYPED_SLIPS = False
 # Fernet key for API keys stored in the DB; kept outside the database.
 AI_SECRET_KEY = os.environ.get("AI_SECRET_KEY", "")

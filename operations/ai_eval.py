@@ -24,6 +24,7 @@ from types import SimpleNamespace
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, transaction
+from django.test import override_settings
 from django.utils import timezone
 
 from config.environment import require_demo_database
@@ -294,7 +295,10 @@ def application_projection(extraction, case, catalog, actor):
                 "fields": dict(context.get("fields", {})),
             }
             draft.save()
-        ai_chat.apply(turn, draft, extraction, SimpleNamespace(pk=0))
+        # ADR 0032: these sets measure what the AI reads into a draft; whether typed text may
+        # open a เบิก or ส่งคืน draft at all is the program's rule, played on dialogue-v2.
+        with override_settings(LINE_TYPED_SLIPS=True):
+            ai_chat.apply(turn, draft, extraction, SimpleNamespace(pk=0))
         requests = []
         for draft in ConversationDraft.objects.filter(identity=channel):
             if not draft.kind:
