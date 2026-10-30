@@ -25,7 +25,15 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from operations import conversation, problem_pick, services, typed_input, typed_lines, workflow
+from operations import (
+    conversation,
+    problem_pick,
+    requester_steps,
+    services,
+    typed_input,
+    typed_lines,
+    workflow,
+)
 from operations.contracts import CommandFailed
 from operations.models import (
     Appointment,
@@ -33,6 +41,7 @@ from operations.models import (
     Case,
     CaseLine,
     ConversationDraft,
+    Division,
     LineFlowVersion,
     LineMenuItem,
 )
@@ -305,7 +314,12 @@ def _go(turn, draft, nid, said=""):
         ):
             return _finish(turn, draft, "ต้องยืนยันตัวตนพนักงานก่อนตรวจสอบสถานะ")
         if kind == "sheet_lookup" and box["config"].get("by") == "employee":
-            return _finish(turn, draft, _own_reports(turn, box))
+            # 30 ต.ค. 2569 Q4: the rows reported with the employee ID, then เลข UI in this box.
+            mine = _own_reports(turn, box)
+            if mine is None:
+                return _finish(turn, draft, "ตอนนี้ยังตรวจสอบสถานะจากชีทไม่ได้ กรุณาติดต่อ ศอค.")
+            if mine:
+                turn.say(mine)
         if (
             kind == "ask"
             and box["config"].get("only_missing")
@@ -317,6 +331,7 @@ def _go(turn, draft, nid, said=""):
         state["node"] = box["id"]
         if kind == "summary":
             state["summary"] = box["id"]
+            _tracking_notes(turn, state["values"], _target(graph, box))
         if kind == "ask" and box["config"].get("choices") and "base" not in state:
             # Where ส่งใบถัดไป starts again, with what the taps before it set.
             state["base"] = {"node": box["id"], "values": dict(state["values"])}
@@ -381,7 +396,8 @@ def render(turn, draft):
     elif kind == "summary":
         text = summary(draft, graph, box)
     elif kind == "sheet_lookup":
-        text = box["text"] or box["title"]  # the box's name is for the editor (เจษ's flow)
+        # The box's name is for the editor (เจษ's flow); the employee box asks for เลข UI.
+        text = box["text"] or (ASK_UI if box["config"].get("by") == "employee" else box["title"])
     elif kind == "book":
         from operations import calendars  # local: calendars builds on this module
 
@@ -436,8 +452,7 @@ def summary(draft, graph, box):
     state = _state(draft)
     values = state["values"]
     lines = [box["title"]]
-    confirm = next((b for b in box["buttons"] if follow(graph, box["id"], b["id"])), None)
-    target = node(graph, follow(graph, box["id"], confirm["id"])) if confirm else None
+    target = _target(graph, box)
     if values.get("division"):  # ADR 0030: the division the requester picked
         lines.append(f"ส่งถึง: {problem_pick.target(values['division'])}")
     elif target and target["config"].get("division"):
@@ -493,6 +508,12 @@ def summary(draft, graph, box):
         lines.append(f"หมายเหตุ: {warning}")
     lines.append("กรุณาตรวจสอบข้อมูล และกดยืนยันส่งเรื่องภายใน 30 นาที สามารถแก้ไขได้")
     return "\n".join(lines)
+
+
+def _target(graph, box):
+    """The box the summary's confirm button files with (create_case), if any."""
+    confirm = next((b for b in box["buttons"] if follow(graph, box["id"], b["id"])), None)
+    return node(graph, follow(graph, box["id"], confirm["id"])) if confirm else None
 
 
 def _label(graph, state, key):
@@ -714,7 +735,6 @@ def on_text(turn, draft, text):
             values[f"{field}_name"] = shown  # the code is kept, the name is shown
     if rule == "tracking":
         values.pop("no_number", None)  # a number typed after all
-        notes += _tracking_notes(turn, values, value)
     if rule in ("multiplier", "size") and values.get("multiplier"):
         mismatch = _check_multiplier(values)
         if mismatch and (rule == "multiplier" or state.get("editing")):
@@ -726,18 +746,25 @@ def on_text(turn, draft, text):
     return _go(turn, draft, follow(graph, box["id"]), "\n".join(notes))
 
 
+ASK_UI = "พิมพ์เลข UI ที่ต้องการตรวจสอบ เช่น 12345678"
+
+
 def _own_reports(turn, box):
-    """ค้นในชีทด้วยรหัสพนักงาน (เจษ): the rows this verified employee reported, no typing."""
+    """ค้นในชีทด้วยรหัสพนักงาน (เจษ): the rows this verified employee reported, no typing.
+    None without the sheet; '' when no row carries their employee ID (or it is not verified),
+    so the box asks for เลข UI at once (30 ต.ค. 2569 Q4)."""
     from operations import employees, sheet_lookup
 
     source = sheet_lookup.source_for(box["config"].get("source", ""))
     if source is None:
-        return "ตอนนี้ยังตรวจสอบสถานะจากชีทไม่ได้ กรุณาติดต่อ ศอค."
+        return None
     requester = turn.requester
     if requester is None or employees.identity_state(requester) != "verified":
-        return "ต้องยืนยันรหัสพนักงานก่อน จึงจะดูรายการที่แจ้งไว้ได้"
+        return ""
     employee_id = requester.employee.employee_id
     reports = sheet_lookup.own_reports(source, employee_id)
+    if not reports:
+        return ""
     return sheet_lookup.own_answer(reports, employee_id, sheet_lookup.stale_note(source, turn.now))
 
 
@@ -841,25 +868,35 @@ def sheet_hit(turn, text):
     return False
 
 
-def _tracking_notes(turn, values, number):
-    """Q17: a repeated เลขติดตาม is taken; the requester hears of their own open case with it,
-    staff see every repeat."""
-    values["warnings"] = [w for w in values.get("warnings", []) if not w.startswith("เลขนี้")]
+REPEATED = "คุณเคยส่งเลขนี้ในเรื่อง"
+
+
+def _tracking_notes(turn, values, target):
+    """Q17: a repeated เลขติดตาม is taken. It counts only in open cases of the same division
+    and the same kind (30 ต.ค. 2569 Q1: a กอจ. slip was warned of a กคว. case). The summary
+    tells the requester of their own case once (Q2); staff see every repeat."""
+    values["warnings"] = [w for w in values.get("warnings", []) if not w.startswith(REPEATED)]
     values.pop("staff_notes", None)
-    found = list(
-        Case.objects.filter(sap_number__iexact=number)
-        .exclude(status__in=workflow.TERMINAL)
-        .values_list("number", "requester_id")[:5]
-    )
+    number = values.get("tracking")
+    if not number:
+        return
+    config = target["config"] if target else {}
+    found = Case.objects.filter(sap_number__iexact=number).exclude(status__in=workflow.TERMINAL)
+    kind = values.get("case_kind") or config.get("case_kind")
+    if kind:
+        found = found.filter(kind=kind)
+    code = values.get("division") or config.get("division")
+    owner = Division.objects.filter(code=code, is_active=True).first() if code else None
+    if owner is not None:  # as services.submit_case picks it
+        found = found.filter(owner_division=owner)
+    found = list(found.values_list("number", "requester_id")[:5])
     if not found:
-        return []
+        return
     values["staff_notes"] = [f"เลขซ้ำกับเรื่อง {n}" for n, _ in found]
     own = [n for n, requester in found if turn.requester and requester == turn.requester.pk]
-    if not own:
-        return []
-    warning = f"เลขนี้กำลังดำเนินการอยู่ในเรื่อง {', '.join(own)}"
-    values["warnings"] = [*values.get("warnings", []), warning]
-    return [warning]
+    if own:
+        warning = f"{REPEATED} {', '.join(own)} ซึ่งยังไม่ปิด"
+        values["warnings"] = [*values.get("warnings", []), warning]
 
 
 def _check_multiplier(values):
@@ -1106,7 +1143,7 @@ def _create(turn, draft, graph, box):
         if not line.startswith(("เลขเรื่อง", "ขั้น:"))
     ]
     title = result_box["title"] if result_box else "ยื่นเรื่องแล้ว"
-    status = f"สถานะ: {case.get_status_display()}"
+    status = f"สถานะ: {requester_steps.status_word(case)}"
     if state["values"].get("division"):
         conversation._menu(turn, problem_pick.done_text(case))  # ADR 0030 Q26
     else:

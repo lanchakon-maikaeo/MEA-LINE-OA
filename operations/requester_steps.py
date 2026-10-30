@@ -55,6 +55,14 @@ def label(case):
     return LABEL[step] if step else case.get_status_display()
 
 
+def status_word(case):
+    """The status the LINE user reads: รอกองรับเรื่อง reads กำลังดำเนินการ unless an admin set it
+    back (options.LINE_AWAITING, 30 ต.ค. 2569). Staff pages show the real status."""
+    if case.status == S.AWAITING_APPROVAL and options.get(options.LINE_AWAITING) == "working":
+        return S.IN_PROGRESS.label
+    return case.get_status_display()
+
+
 def bar(status):
     step = key(status)
     if step is None:

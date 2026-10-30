@@ -112,6 +112,7 @@ class WithdrawalTests(FlowTestCase):
         reply = self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
         self.assertIn(f"เลขเรื่อง: {case.number}", texts(reply))
+        self.assertIn("สถานะ: กำลังดำเนินการ", texts(reply))  # 30 ต.ค. 2569: what LINE reads
         self.assertEqual(
             (case.kind, case.owner_division.code, case.sap_number, case.sap_kind, case.purpose),
             ("withdrawal", "กคว.", "4500012345/10", "slip", "มิเตอร์ 5(100)A 3 เครื่อง"),
@@ -151,7 +152,10 @@ class WithdrawalTests(FlowTestCase):
         first = Case.objects.get()
         self.assertEqual((first.sap_kind, first.sap_number), ("project", project))
         reply = self.track("CT", "ติดตามใบเบิก", kind="โครงการ", number=project)
-        self.assertIn(f"เลขนี้กำลังดำเนินการอยู่ในเรื่อง {first.number}", texts(reply))
+        # 30 ต.ค. 2569 Q2: said once, in the summary
+        note = f"หมายเหตุ: คุณเคยส่งเลขนี้ในเรื่อง {first.number} ซึ่งยังไม่ปิด"
+        self.assertIn(note, texts(reply))
+        self.assertEqual(texts(reply).count("คุณเคยส่งเลขนี้"), 1)
         self.type(ALICE, "CT 100/5A 3 ตัว")
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         second = Case.objects.exclude(pk=first.pk).get()
@@ -160,6 +164,18 @@ class WithdrawalTests(FlowTestCase):
         self.assertIn("เป็นตัวเลข 8 หลัก", texts(reply))  # ADR 0035
         reply = self.type(ALICE, "หมายเลข 1234 5678")
         self.assertEqual(texts(reply).splitlines()[0], "12345678")
+
+    def test_a_number_repeats_only_in_the_same_kind(self):
+        # 30 ต.ค. 2569 Q1: a ใบส่งคืน is not warned of a ใบเบิก with the same number.
+        self.track("มิเตอร์", "ติดตามใบเบิก", number="12345678")
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        first = Case.objects.get()
+        reply = self.track("มิเตอร์", "ติดตามใบส่งคืน", kind="เลขที่ใบส่งคืน", number="12345678")
+        self.assertIn("สรุปเรื่อง: การส่งคืน", texts(reply))
+        self.assertNotIn("คุณเคยส่งเลขนี้", texts(reply))
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        second = Case.objects.exclude(pk=first.pk).get()
+        self.assertNotIn("staff_notes", second.intake_data)
 
     def test_a_return_takes_its_details_from_the_summary(self):
         self.open_tile()

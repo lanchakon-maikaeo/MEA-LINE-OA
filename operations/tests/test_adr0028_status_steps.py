@@ -81,6 +81,19 @@ class LineTests(StatusTestCase):
         self.assertIn(f"{self.case.number} · ", listing)
         self.assertIn("กำลังดำเนินการ", listing)
 
+    def test_a_case_waiting_for_its_division_reads_in_progress(self):
+        # 30 ต.ค. 2569 Q3, Q5: the LINE user reads กำลังดำเนินการ; staff pages keep รอกองรับเรื่อง.
+        Case.objects.filter(pk=self.case.pk).update(status=S.AWAITING_APPROVAL)
+        text = texts(self.type(ALICE, self.case.number))
+        self.assertIn("●●○○ กำลังดำเนินการ", text)
+        self.assertNotIn("สถานะในระบบ", text)  # it would say the same again
+        self.assertNotIn("รอกองรับเรื่อง", text)
+        self.assertContains(self.client.get(f"/cases/{self.case.number}/"), "รอกองรับเรื่อง")
+        options.change(None, options.LINE_AWAITING, "real", "ทดสอบ")
+        options.change(None, options.STEP_PREFIX + "awaiting_approval", "received", "ทดสอบ")
+        text = texts(self.type(ALICE, self.case.number))
+        self.assertIn("●○○○ รับเรื่องแล้ว\nสถานะในระบบ: รอกองรับเรื่อง", text)
+
     def test_the_next_message_says_the_new_step_and_notice(self):
         self.type(ALICE, "เรื่องของฉัน")  # marks what the requester has seen
         self.act("hold", reason="รอของ", notice="ของเข้าคลังแล้ว")

@@ -2209,7 +2209,7 @@ def _when(moment):
 
 
 def _status_label(case, label=None):
-    label = label or case.get_status_display()
+    label = label or requester_steps.status_word(case)
     if case.kind == K.WITHDRAWAL:
         from operations import fulfilment
 
@@ -2327,12 +2327,10 @@ def _case_detail(turn, number):
     )
     if case.meters:
         sap += f"\nเครื่องวัดฯ: {usage_meters.describe(case.meters)}"
-    bar = requester_steps.bar(case.status)
-    step = (
-        f"{bar} {requester_steps.label(case)}\nสถานะในระบบ: {_status_label(case)}"
-        if bar
-        else f"สถานะ: {_status_label(case)}"
-    )
+    bar, status = requester_steps.bar(case.status), _status_label(case)
+    step = f"{bar} {requester_steps.label(case)}" if bar else f"สถานะ: {status}"
+    if bar and status != requester_steps.label(case):  # Q5 30 ต.ค. 2569: no line said twice
+        step += f"\nสถานะในระบบ: {status}"
     owner = problem_pick.ADMIN_TARGET if case.held_by_admin else case.owner_division.name
     text = (
         f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}{sap}\n"
@@ -3646,12 +3644,12 @@ def _confirm(turn, draft):
         # ADR 0008: one request with items of several divisions becomes one case per division.
         text = (
             f"ยื่นเรื่องแล้ว แยกเป็น {len(numbers)} เรื่องตามกองที่ดูแลของ\n"
-            f"เลขเรื่อง: {', '.join(numbers)}\nสถานะ: {case.get_status_display()}\n"
+            f"เลขเรื่อง: {', '.join(numbers)}\nสถานะ: {requester_steps.status_word(case)}\n"
             "ยืนยันรับของแยกตามเรื่อง ติดตามได้จากเมนู 'ติดตามเรื่อง'"
         )
     else:
         text = (
-            f"ยื่นเรื่องแล้ว\nเลขเรื่อง: {case.number}\nสถานะ: {case.get_status_display()}\n"
+            f"ยื่นเรื่องแล้ว\nเลขเรื่อง: {case.number}\nสถานะ: {requester_steps.status_word(case)}\n"
             "ติดตามได้จากเมนู 'ติดตามเรื่อง'"
         )
     if remaining:

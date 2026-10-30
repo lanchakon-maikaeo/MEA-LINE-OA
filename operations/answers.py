@@ -25,7 +25,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from operations import identity, options, policy
+from operations import identity, options, policy, requester_steps
 from operations.models import Case, ChatAnswer
 
 A = ChatAnswer.Action
@@ -241,8 +241,8 @@ def facts(requester):
     for case in cases:
         when = timezone.localtime(case.updated_at)
         rows.append(
-            f"เรื่อง {case.number}: {case.get_kind_display()} สถานะ {case.get_status_display()} "
-            f"กองที่ดูแล {case.owner_division.code} "
+            f"เรื่อง {case.number}: {case.get_kind_display()} "
+            f"สถานะ {requester_steps.status_word(case)} กองที่ดูแล {case.owner_division.code} "
             f"อัปเดตล่าสุด {when.day:02d}/{when.month:02d}/{when.year + 543}"
         )
     return rows

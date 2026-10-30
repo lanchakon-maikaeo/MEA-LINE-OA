@@ -640,24 +640,36 @@ STEP_CHOICES = {
     "done_confirm": ("เสร็จแล้ว รอคุณยืนยัน", "แถบขั้น ●●●● พร้อมปุ่มยืนยัน"),
 }
 STEP_DEFAULTS = (
-    ("submitted", "รอคัดกรอง", "received"),
-    ("triage", "กำลังคัดกรอง", "received"),
-    ("awaiting_approval", "รอกองรับเรื่อง", "received"),
-    ("awaiting_execution", "รอดำเนินการ", "received"),
-    ("in_progress", "กำลังดำเนินการ", "working"),
-    ("on_hold", "พักเรื่อง", "working"),
-    ("awaiting_info", "รอข้อมูลเพิ่ม", "need_you"),
-    ("awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย) ยืนยัน", "done_confirm"),
+    ("submitted", "รอคัดกรอง", "received", "ADR 0028"),
+    ("triage", "กำลังคัดกรอง", "received", "ADR 0028"),
+    ("awaiting_approval", "รอกองรับเรื่อง", "working", "30 ต.ค. 2569"),
+    ("awaiting_execution", "รอดำเนินการ", "received", "ADR 0028"),
+    ("in_progress", "กำลังดำเนินการ", "working", "ADR 0028"),
+    ("on_hold", "พักเรื่อง", "working", "ADR 0028"),
+    ("awaiting_info", "รอข้อมูลเพิ่ม", "need_you", "ADR 0028"),
+    ("awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย) ยืนยัน", "done_confirm", "ADR 0028"),
 )
-for _status, _label, _default in STEP_DEFAULTS:
+for _status, _label, _default, _agreed in STEP_DEFAULTS:
     OPTIONS[STEP_PREFIX + _status] = Option(
         f"ขั้นที่ผู้แจ้งเห็นใน LINE: สถานะ{_label}",
         (
-            (_default, STEP_CHOICES[_default][0], "ค่าที่ตกลงไว้ (ADR 0028)"),
+            (_default, STEP_CHOICES[_default][0], f"ค่าที่ตกลงไว้ ({_agreed})"),
             *((v, title, bar) for v, (title, bar) in STEP_CHOICES.items() if v != _default),
         ),
         "ผู้แจ้งเห็นขั้นนี้ใน เรื่องของฉัน พร้อมสถานะจริงเป็นบรรทัดรอง",
     )
+
+# 30 ต.ค. 2569: a case waiting for its division reads กำลังดำเนินการ to the LINE user; staff
+# pages keep รอกองรับเรื่อง and its queue.
+LINE_AWAITING = "line_awaiting_approval"
+OPTIONS[LINE_AWAITING] = Option(
+    "สถานะที่ผู้ใช้ LINE เห็นเมื่อเรื่องรอกองรับเรื่อง",
+    (
+        ("working", "กำลังดำเนินการ", "ค่าที่ตกลงไว้ (30 ต.ค. 2569)"),
+        ("real", "รอกองรับเรื่อง", "คำเดียวกับหน้าเว็บเจ้าหน้าที่"),
+    ),
+    "ใช้ในข้อความหลังส่งเรื่อง ใน เรื่องของฉัน และในผลค้นเรื่อง หน้าเว็บเจ้าหน้าที่ยังเห็นรอกองรับเรื่อง",
+)
 
 
 def get(key):
