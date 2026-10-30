@@ -1,3 +1,4 @@
+import argparse
 import json
 import re
 import subprocess
@@ -7,12 +8,20 @@ from pathlib import Path
 from detect_secrets import SecretsCollection
 from detect_secrets.settings import default_settings
 
+# --secrets-only skips pip-audit; --staged scans only the files staged for commit, which is what
+# the .githooks/pre-commit hook runs so a flagged string stops the commit, not CI 30 minutes later.
+parser = argparse.ArgumentParser()
+parser.add_argument("--secrets-only", action="store_true")
+parser.add_argument("--staged", action="store_true")
+args = parser.parse_args()
+
 Path("reports").mkdir(exist_ok=True)
-files = (
-    subprocess.check_output(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"])
-    .decode()
-    .split("\0")
+listing = (
+    ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"]
+    if args.staged
+    else ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"]
 )
+files = subprocess.check_output(listing).decode().split("\0")
 with default_settings():
     collection = SecretsCollection()
     for filename in files:
@@ -38,10 +47,20 @@ report = {
         ]
     )
 }
-Path("reports/secrets.json").write_text(json.dumps(report, indent=2))
+if not args.staged:
+    Path("reports/secrets.json").write_text(json.dumps(report, indent=2))
 if report:
-    print("Secret scanner found candidates; inspect reports/secrets.json (values are hashed).")
+    print("Secret scanner found candidates:")
+    for path, found in report.items():
+        for f in found:
+            print(f"  {path}:{f['line_number']}  {f['type']}")
+    print(
+        "A real secret goes in .env, never in the repo. A value that is not one (a Google Sheets"
+        " ID, a public digest) gets `# pragma: allowlist secret` at the end of its line."
+    )
     sys.exit(1)
+if args.secrets_only:
+    sys.exit(0)
 result = subprocess.run(
     [
         sys.executable,

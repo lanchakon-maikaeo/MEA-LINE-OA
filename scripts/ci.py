@@ -4,7 +4,8 @@ import sys
 from pathlib import Path
 
 Path("reports").mkdir(exist_ok=True)
-stages = ["migrate", "check", "test", "test-e2e", "security"]
+# security runs before the long test stages so a secret-scan hit shows within a minute.
+stages = ["migrate", "check", "security", "test", "test-e2e"]
 results = {}
 for stage in stages:
     with Path(f"reports/{stage}.log").open("w") as log:

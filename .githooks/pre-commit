@@ -1,0 +1,9 @@
+#!/bin/sh
+# Secret scan of the staged files (scripts/security.py --staged), so a string detect-secrets
+# flags stops the commit instead of failing CI's security stage. `make bootstrap` turns it on;
+# skip it once with `git commit --no-verify`.
+if ! python3 -m uv --version >/dev/null 2>&1; then
+	echo "pre-commit: uv is not installed for python3; secret scan skipped (CI still runs it)." >&2
+	exit 0
+fi
+exec python3 -m uv run --locked python scripts/security.py --secrets-only --staged

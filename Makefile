@@ -3,11 +3,12 @@ UV = $(PYTHON) -m uv
 ENV_FILE = $(if $(wildcard .env),--env-file .env,)
 RUN = $(UV) run --locked $(ENV_FILE)
 
-.PHONY: bootstrap guard db migrate seed-demo dev line-worker clamav n8n n8n-import eval-ai simulate-line tunnel check test test-module test-e2e security ci build smoke down \
+.PHONY: bootstrap guard db migrate seed-demo dev line-worker clamav n8n n8n-import eval-ai simulate-line tunnel check test test-module test-e2e security secrets ci build smoke down \
 	deploy rollback restore-drill oci-quota-check oci-stack backup-pull backup-pull-schedule health-schedule standby-schedule image-scan rehearsal-up rehearsal-release rehearsal-down \
 	load-test acceptance-tests release-candidate
 bootstrap:
 	$(PYTHON) scripts/bootstrap_env.py
+	git config core.hooksPath .githooks
 	$(UV) sync --locked
 	$(MAKE) guard
 	$(RUN) playwright install chromium
@@ -75,6 +76,9 @@ test-e2e:
 
 security:
 	$(RUN) python scripts/security.py
+
+secrets:
+	$(RUN) python scripts/security.py --secrets-only
 
 ci:
 	$(PYTHON) scripts/ci.py
