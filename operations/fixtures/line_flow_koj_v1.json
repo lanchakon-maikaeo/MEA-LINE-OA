@@ -1,6 +1,6 @@
 {
- "version": "line-flow-koj-v1",
- "note": "กอจ. grill Q1–Q20 ยืนยัน 27 ต.ค. 2569: ติดตามเอกสารเดิมจากระบบต้นทาง ไม่สร้างเรื่องเบิก/คืนใหม่",
+ "version": "line-flow-koj-v2",
+ "note": "ADR 0034 (grill กอจ. 29 ต.ค. 2569): เบิกและส่งคืนส่งเรื่องแบบ กคว. งานซ่อมสวิตช์ตัดตอนค้นชีทของ ซจ.",
  "flow": {
   "key": "koj-tracking",
   "name": "ติดตามงาน กอจ.",
@@ -13,17 +13,17 @@
     "id": "start",
     "kind": "entry",
     "title": "หม้อแปลง LBS RMU",
-    "text": "",
+    "text": "ปุ่มบน rich menu ของ กอจ.",
     "buttons": [],
     "config": {},
     "x": 40,
     "y": 60,
-    "w": 300
+    "w": 280
    },
    {
     "id": "tracking",
     "kind": "message",
-    "title": "กอจ. · เลือกอุปกรณ์ที่ต้องการติดตาม",
+    "title": "กรุณาเลือกอุปกรณ์ที่ต้องการติดตาม",
     "text": "",
     "buttons": [
      {
@@ -31,569 +31,296 @@
       "label": "หม้อแปลง",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "group=transformer"
      },
      {
       "id": "tracking.b1",
       "label": "LBS",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "group=lbs"
      },
      {
       "id": "tracking.b2",
       "label": "RMU",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "group=rmu"
      },
      {
       "id": "tracking.b3",
       "label": "ตู้ metering",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "group=metering"
      },
      {
       "id": "tracking.b4",
-      "label": "LBS FRTU",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "tracking.b5",
       "label": "อุปกรณ์อื่น",
       "full": "",
       "note": "",
       "set": ""
      },
      {
-      "id": "tracking.b6",
-      "label": "รายการติดตาม กอจ.",
-      "full": "",
+      "id": "tracking.b5",
+      "label": "งานซ่อมสวิตช์ตัดตอน",
+      "full": "ติดตามสถานะงานซ่อมสวิตช์ตัดตอน",
       "note": "",
-      "set": ""
+      "set": "case_kind=problem"
      }
     ],
     "config": {},
-    "x": 400,
+    "x": 380,
     "y": 60,
-    "w": 300
+    "w": 280
    },
    {
     "id": "service-transformer",
     "kind": "message",
-    "title": "กอจ. · หม้อแปลง",
-    "text": "เลือกบริการติดตาม",
+    "title": "หม้อแปลง",
+    "text": "กรุณาเลือกเรื่องในการติดตาม",
     "buttons": [
      {
       "id": "service-transformer.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "service-transformer.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=return"
      }
     ],
     "config": {},
-    "x": 800,
+    "x": 720,
     "y": 60,
-    "w": 300
-   },
-   {
-    "id": "transformer-withdrawal",
-    "kind": "koj_tracking",
-    "title": "หม้อแปลง · ติดตามใบเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "transformer",
-     "service": "withdrawal"
-    },
-    "x": 1180,
-    "y": 60,
-    "w": 300
-   },
-   {
-    "id": "transformer-return",
-    "kind": "koj_tracking",
-    "title": "หม้อแปลง · ติดตามใบส่งคืน",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "transformer",
-     "service": "return"
-    },
-    "x": 1180,
-    "y": 200,
-    "w": 300
+    "w": 280
    },
    {
     "id": "service-lbs",
     "kind": "message",
-    "title": "กอจ. · LBS",
-    "text": "เลือกบริการติดตาม",
+    "title": "LBS",
+    "text": "กรุณาเลือกช่องทางการติดตาม",
     "buttons": [
      {
       "id": "service-lbs.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "service-lbs.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
       "note": "",
-      "set": ""
-     },
-     {
-      "id": "service-lbs.b2",
-      "label": "ติดตามสถานะการซ่อม",
-      "full": "",
-      "note": "",
-      "set": ""
+      "set": "case_kind=return"
      }
     ],
     "config": {},
-    "x": 800,
-    "y": 360,
-    "w": 300
-   },
-   {
-    "id": "lbs-withdrawal",
-    "kind": "koj_tracking",
-    "title": "LBS · ติดตามใบเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "lbs",
-     "service": "withdrawal"
-    },
-    "x": 1180,
-    "y": 360,
-    "w": 300
-   },
-   {
-    "id": "lbs-return",
-    "kind": "koj_tracking",
-    "title": "LBS · ติดตามใบส่งคืน",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "lbs",
-     "service": "return"
-    },
-    "x": 1180,
-    "y": 500,
-    "w": 300
-   },
-   {
-    "id": "lbs-repair",
-    "kind": "koj_tracking",
-    "title": "LBS · ติดตามสถานะการซ่อม",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "lbs",
-     "service": "repair"
-    },
-    "x": 1180,
-    "y": 640,
-    "w": 300
+    "x": 720,
+    "y": 220,
+    "w": 280
    },
    {
     "id": "service-rmu",
     "kind": "message",
-    "title": "กอจ. · RMU",
-    "text": "เลือกบริการติดตาม",
+    "title": "RMU",
+    "text": "กรุณาเลือกช่องทางการติดตาม",
     "buttons": [
      {
       "id": "service-rmu.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "service-rmu.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
       "note": "",
-      "set": ""
-     },
-     {
-      "id": "service-rmu.b2",
-      "label": "ติดตามสถานะการซ่อม",
-      "full": "",
-      "note": "",
-      "set": ""
+      "set": "case_kind=return"
      }
     ],
     "config": {},
-    "x": 800,
-    "y": 800,
-    "w": 300
-   },
-   {
-    "id": "rmu-withdrawal",
-    "kind": "koj_tracking",
-    "title": "RMU · ติดตามใบเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "rmu",
-     "service": "withdrawal"
-    },
-    "x": 1180,
-    "y": 800,
-    "w": 300
-   },
-   {
-    "id": "rmu-return",
-    "kind": "koj_tracking",
-    "title": "RMU · ติดตามใบส่งคืน",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "rmu",
-     "service": "return"
-    },
-    "x": 1180,
-    "y": 940,
-    "w": 300
-   },
-   {
-    "id": "rmu-repair",
-    "kind": "koj_tracking",
-    "title": "RMU · ติดตามสถานะการซ่อม",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "rmu",
-     "service": "repair"
-    },
-    "x": 1180,
-    "y": 1080,
-    "w": 300
+    "x": 720,
+    "y": 380,
+    "w": 280
    },
    {
     "id": "service-metering",
     "kind": "message",
-    "title": "กอจ. · ตู้ metering",
-    "text": "เลือกบริการติดตาม",
+    "title": "ตู้ metering",
+    "text": "กรุณาเลือกเรื่องในการติดตาม",
     "buttons": [
      {
       "id": "service-metering.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "service-metering.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=return"
      }
     ],
     "config": {},
-    "x": 800,
-    "y": 1240,
-    "w": 300
-   },
-   {
-    "id": "metering-withdrawal",
-    "kind": "koj_tracking",
-    "title": "ตู้ metering · ติดตามใบเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "metering",
-     "service": "withdrawal"
-    },
-    "x": 1180,
-    "y": 1240,
-    "w": 300
-   },
-   {
-    "id": "metering-return",
-    "kind": "koj_tracking",
-    "title": "ตู้ metering · ติดตามใบส่งคืน",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "metering",
-     "service": "return"
-    },
-    "x": 1180,
-    "y": 1380,
-    "w": 300
-   },
-   {
-    "id": "service-frtu",
-    "kind": "message",
-    "title": "กอจ. · LBS FRTU",
-    "text": "เลือกบริการติดตาม",
-    "buttons": [
-     {
-      "id": "service-frtu.b0",
-      "label": "ติดตามใบเบิก",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "service-frtu.b1",
-      "label": "ติดตามใบส่งคืน",
-      "full": "",
-      "note": "",
-      "set": ""
-     }
-    ],
-    "config": {},
-    "x": 800,
-    "y": 1540,
-    "w": 300
-   },
-   {
-    "id": "frtu-withdrawal",
-    "kind": "koj_tracking",
-    "title": "LBS FRTU · ติดตามใบเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "frtu",
-     "service": "withdrawal"
-    },
-    "x": 1180,
-    "y": 1540,
-    "w": 300
-   },
-   {
-    "id": "frtu-return",
-    "kind": "koj_tracking",
-    "title": "LBS FRTU · ติดตามใบส่งคืน",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "frtu",
-     "service": "return"
-    },
-    "x": 1180,
-    "y": 1680,
-    "w": 300
-   },
-   {
-    "id": "other",
-    "kind": "message",
-    "title": "กอจ. · อุปกรณ์อื่น",
-    "text": "เลือกอุปกรณ์",
-    "buttons": [
-     {
-      "id": "other.b0",
-      "label": "bushing box",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "other.b1",
-      "label": "VT ประกอบ LBS",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "other.b2",
-      "label": "LV Cap.",
-      "full": "",
-      "note": "",
-      "set": ""
-     },
-     {
-      "id": "other.b3",
-      "label": "พิมพ์ชื่ออุปกรณ์",
-      "full": "",
-      "note": "",
-      "set": ""
-     }
-    ],
-    "config": {},
-    "x": 800,
-    "y": 1860,
-    "w": 300
+    "x": 720,
+    "y": 540,
+    "w": 280
    },
    {
     "id": "service-bushing",
     "kind": "message",
-    "title": "กอจ. · bushing box",
-    "text": "เลือกบริการติดตาม",
+    "title": "bushing box",
+    "text": "กรุณาเลือกช่องทางการติดตาม",
     "buttons": [
      {
       "id": "service-bushing.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "service-bushing.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=return"
      }
     ],
     "config": {},
-    "x": 1180,
-    "y": 1860,
-    "w": 300
-   },
-   {
-    "id": "bushing-withdrawal",
-    "kind": "koj_tracking",
-    "title": "bushing box · ติดตามใบเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "bushing",
-     "service": "withdrawal"
-    },
-    "x": 1560,
-    "y": 1860,
-    "w": 300
-   },
-   {
-    "id": "bushing-return",
-    "kind": "koj_tracking",
-    "title": "bushing box · ติดตามใบส่งคืน",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "bushing",
-     "service": "return"
-    },
-    "x": 1560,
-    "y": 2000,
-    "w": 300
+    "x": 720,
+    "y": 860,
+    "w": 280
    },
    {
     "id": "service-vt_lbs",
     "kind": "message",
-    "title": "กอจ. · VT ประกอบ LBS",
-    "text": "เลือกบริการติดตาม",
+    "title": "VT ประกอบ LBS",
+    "text": "กรุณาเลือกช่องทางการติดตาม",
     "buttons": [
      {
       "id": "service-vt_lbs.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "service-vt_lbs.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=return"
      }
     ],
     "config": {},
-    "x": 1180,
-    "y": 2160,
-    "w": 300
-   },
-   {
-    "id": "vt_lbs-withdrawal",
-    "kind": "koj_tracking",
-    "title": "VT ประกอบ LBS · ติดตามใบเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "vt_lbs",
-     "service": "withdrawal"
-    },
-    "x": 1560,
-    "y": 2160,
-    "w": 300
-   },
-   {
-    "id": "vt_lbs-return",
-    "kind": "koj_tracking",
-    "title": "VT ประกอบ LBS · ติดตามใบส่งคืน",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "vt_lbs",
-     "service": "return"
-    },
-    "x": 1560,
-    "y": 2300,
-    "w": 300
+    "x": 720,
+    "y": 1020,
+    "w": 280
    },
    {
     "id": "service-lv_cap",
     "kind": "message",
-    "title": "กอจ. · LV Cap.",
-    "text": "เลือกบริการติดตาม",
+    "title": "LV Cap.",
+    "text": "กรุณาเลือกช่องทางการติดตาม",
     "buttons": [
      {
       "id": "service-lv_cap.b0",
       "label": "ติดตามใบเบิก",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=withdrawal"
      },
      {
       "id": "service-lv_cap.b1",
       "label": "ติดตามใบส่งคืน",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "case_kind=return"
      }
     ],
     "config": {},
-    "x": 1180,
-    "y": 2460,
-    "w": 300
+    "x": 720,
+    "y": 1180,
+    "w": 280
    },
    {
-    "id": "lv_cap-withdrawal",
-    "kind": "koj_tracking",
-    "title": "LV Cap. · ติดตามใบเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "lv_cap",
-     "service": "withdrawal"
-    },
-    "x": 1560,
-    "y": 2460,
-    "w": 300
+    "id": "service-other",
+    "kind": "message",
+    "title": "อุปกรณ์ที่พิมพ์ชื่อ",
+    "text": "กรุณาเลือกช่องทางการติดตาม",
+    "buttons": [
+     {
+      "id": "service-other.b0",
+      "label": "ติดตามใบเบิก",
+      "full": "",
+      "note": "",
+      "set": "case_kind=withdrawal"
+     },
+     {
+      "id": "service-other.b1",
+      "label": "ติดตามใบส่งคืน",
+      "full": "",
+      "note": "",
+      "set": "case_kind=return"
+     }
+    ],
+    "config": {},
+    "x": 720,
+    "y": 1340,
+    "w": 280
    },
    {
-    "id": "lv_cap-return",
-    "kind": "koj_tracking",
-    "title": "LV Cap. · ติดตามใบส่งคืน",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "equipment": "lv_cap",
-     "service": "return"
-    },
-    "x": 1560,
-    "y": 2600,
-    "w": 300
+    "id": "other",
+    "kind": "message",
+    "title": "อุปกรณ์อื่น",
+    "text": "กรุณาเลือกอุปกรณ์",
+    "buttons": [
+     {
+      "id": "other.b0",
+      "label": "bushing box",
+      "full": "",
+      "note": "",
+      "set": "group=bushing"
+     },
+     {
+      "id": "other.b1",
+      "label": "VT ประกอบ LBS",
+      "full": "",
+      "note": "",
+      "set": "group=vt_lbs"
+     },
+     {
+      "id": "other.b2",
+      "label": "LV Cap.",
+      "full": "",
+      "note": "",
+      "set": "group=lv_cap"
+     },
+     {
+      "id": "other.b3",
+      "label": "พิมพ์ชื่ออุปกรณ์",
+      "full": "",
+      "note": "",
+      "set": "group=other"
+     }
+    ],
+    "config": {},
+    "x": 380,
+    "y": 860,
+    "w": 280
    },
    {
     "id": "name",
@@ -602,79 +329,316 @@
     "text": "พิมพ์ชื่ออุปกรณ์ที่ต้องการติดตาม",
     "buttons": [],
     "config": {
-     "field": "name",
+     "field": "equipment_name",
      "rule": "text"
     },
-    "x": 1180,
-    "y": 2760,
-    "w": 300
+    "x": 380,
+    "y": 1340,
+    "w": 280
    },
    {
-    "id": "service-other",
-    "kind": "message",
-    "title": "กอจ. · อุปกรณ์ที่พิมพ์ชื่อ",
-    "text": "เลือกบริการติดตาม",
+    "id": "tw",
+    "kind": "ask",
+    "title": "ติดตามใบเบิก",
+    "text": "ถ้าไม่มีหมายเลข กดปุ่ม ไม่มีหมายเลข ได้เลย",
     "buttons": [
      {
-      "id": "service-other.b0",
-      "label": "ติดตามใบเบิก",
+      "id": "tw.b0",
+      "label": "ไม่มีหมายเลข",
+      "full": "",
+      "note": "",
+      "set": "no_number=1"
+     }
+    ],
+    "config": {
+     "field": "tracking",
+     "rule": "tracking",
+     "choices": "เลขที่ใบเบิก|เลขใบสั่งงานจาก SAP|เลขอื่น เช่น M/N"
+    },
+    "x": 1080,
+    "y": 60,
+    "w": 280
+   },
+   {
+    "id": "dw",
+    "kind": "ask",
+    "title": "รายละเอียดอุปกรณ์ที่เบิก",
+    "text": "พิมพ์ขนาด จำนวน และเหตุผลความจำเป็น เช่น 3 เฟส 500 kVA 1 ลูก ใช้ติดตั้งงานใหม่",
+    "buttons": [],
+    "config": {
+     "field": "details",
+     "rule": "text"
+    },
+    "x": 1440,
+    "y": 60,
+    "w": 280
+   },
+   {
+    "id": "twn",
+    "kind": "ask",
+    "title": "กรุณาระบุรายละเอียดอื่นๆ",
+    "text": "เช่น ขนาด จำนวน และวันที่ส่งใบ",
+    "buttons": [],
+    "config": {
+     "field": "details",
+     "rule": "text"
+    },
+    "x": 1440,
+    "y": 260,
+    "w": 280
+   },
+   {
+    "id": "sumw",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: การเบิก",
+    "text": "ส่งถึง: กอจ.\nอุปกรณ์: หม้อแปลง\nเลขที่ใบเบิก: 4500012345/10\nรายละเอียด: 3 เฟส 500 kVA 1 ลูก",
+    "buttons": [
+     {
+      "id": "sumw.b0",
+      "label": "ยืนยันส่งเรื่อง",
       "full": "",
       "note": "",
       "set": ""
      },
      {
-      "id": "service-other.b1",
-      "label": "ติดตามใบส่งคืน",
+      "id": "sumw.b1",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
+    "config": {},
+    "x": 1800,
+    "y": 60,
+    "w": 280
+   },
+   {
+    "id": "casew",
+    "kind": "create_case",
+    "title": "สร้างเรื่องเบิก",
+    "text": "ส่งถึง กอจ. แผนกที่รับกลุ่มของนี้ตามหน้าผังหน่วยงาน",
+    "buttons": [],
+    "config": {
+     "case_kind": "withdrawal",
+     "division": "กอจ."
+    },
+    "x": 2160,
+    "y": 60,
+    "w": 280
+   },
+   {
+    "id": "donew",
+    "kind": "result",
+    "title": "ยื่นเรื่องแล้ว",
+    "text": "ติดตามความคืบหน้าได้ที่เรื่องของฉัน",
+    "buttons": [],
+    "config": {},
+    "x": 2520,
+    "y": 60,
+    "w": 280
+   },
+   {
+    "id": "tr",
+    "kind": "ask",
+    "title": "ติดตามใบส่งคืน",
+    "text": "ถ้าไม่มีหมายเลข กดปุ่ม ไม่มีหมายเลข ได้เลย",
+    "buttons": [
+     {
+      "id": "tr.b0",
+      "label": "ไม่มีหมายเลข",
+      "full": "",
+      "note": "",
+      "set": "no_number=1"
+     }
+    ],
+    "config": {
+     "field": "tracking",
+     "rule": "tracking",
+     "choices": "เลขที่ใบส่งคืน|ใบโอนขอคืน|เลขอื่น เช่น M/N"
+    },
+    "x": 1080,
+    "y": 540,
+    "w": 280
+   },
+   {
+    "id": "dr",
+    "kind": "ask",
+    "title": "รายละเอียดอุปกรณ์ที่ส่งคืน",
+    "text": "พิมพ์ขนาด จำนวน สภาพ และเหตุผลที่ส่งคืน เช่น 3 เฟส 500 kVA 1 ลูก ชำรุด",
+    "buttons": [],
+    "config": {
+     "field": "details",
+     "rule": "text"
+    },
+    "x": 1440,
+    "y": 540,
+    "w": 280
+   },
+   {
+    "id": "trn",
+    "kind": "ask",
+    "title": "กรุณาระบุรายละเอียดอื่นๆ",
+    "text": "เช่น ขนาด จำนวน และวันที่ส่งใบ",
+    "buttons": [],
+    "config": {
+     "field": "details",
+     "rule": "text"
+    },
+    "x": 1440,
+    "y": 740,
+    "w": 280
+   },
+   {
+    "id": "sumr",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: การส่งคืน",
+    "text": "ส่งถึง: กอจ.\nอุปกรณ์: หม้อแปลง\nเลขที่ใบเบิก: 4500012345/10\nรายละเอียด: 3 เฟส 500 kVA 1 ลูก",
+    "buttons": [
+     {
+      "id": "sumr.b0",
+      "label": "ยืนยันส่งเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sumr.b1",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
+    "config": {},
+    "x": 1800,
+    "y": 540,
+    "w": 280
+   },
+   {
+    "id": "caser",
+    "kind": "create_case",
+    "title": "สร้างเรื่องส่งคืน",
+    "text": "ส่งถึง กอจ. แผนกที่รับกลุ่มของนี้ตามหน้าผังหน่วยงาน",
+    "buttons": [],
+    "config": {
+     "case_kind": "return",
+     "division": "กอจ."
+    },
+    "x": 2160,
+    "y": 540,
+    "w": 280
+   },
+   {
+    "id": "doner",
+    "kind": "result",
+    "title": "ยื่นเรื่องแล้ว",
+    "text": "ติดตามความคืบหน้าได้ที่เรื่องของฉัน",
+    "buttons": [],
+    "config": {},
+    "x": 2520,
+    "y": 540,
+    "w": 280
+   },
+   {
+    "id": "repair",
+    "kind": "sheet_lookup",
+    "title": "ติดตามสถานะงานซ่อมสวิตช์ตัดตอน",
+    "text": "กรุณาพิมพ์เลขหนังสือแจ้ง หรือเลข WO, WBS, เลขรับ, ใบแจ้งซ่อม",
+    "buttons": [
+     {
+      "id": "repair.b0",
+      "label": "ส่งให้ ซจ. ตรวจ",
       "full": "",
       "note": "",
       "set": ""
      }
     ],
+    "config": {
+     "source": "koj-switch-repairs",
+     "label": "เลขงานซ่อม",
+     "again": "ถามเลขอื่น",
+     "missing": "ยังไม่เห็นเลขในข้อความ กรุณาพิมพ์เลขหนังสือแจ้ง หรือเลข WO, WBS, เลขรับ, ใบแจ้งซ่อม",
+     "follow_up": "อยากทราบเลขงานซ่อมอื่นอีกไหม พิมพ์มาได้เลย"
+    },
+    "x": 380,
+    "y": 1600,
+    "w": 280
+   },
+   {
+    "id": "sumrep",
+    "kind": "summary",
+    "title": "สรุปเรื่อง: งานซ่อมสวิตช์ตัดตอน",
+    "text": "ส่งถึง: กอจ. แผนกซ่อมบำรุงสวิตช์ตัดตอนระบบจำหน่าย\nเลขงานซ่อม: 4100012345",
+    "buttons": [
+     {
+      "id": "sumrep.b0",
+      "label": "ยืนยันส่งเรื่อง",
+      "full": "",
+      "note": "",
+      "set": ""
+     },
+     {
+      "id": "sumrep.b1",
+      "label": "แก้ไข",
+      "full": "",
+      "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
+      "set": "do=edit"
+     }
+    ],
     "config": {},
-    "x": 1560,
-    "y": 2760,
-    "w": 300
+    "x": 720,
+    "y": 1600,
+    "w": 280
    },
    {
-    "id": "other-withdrawal",
-    "kind": "koj_tracking",
-    "title": "อุปกรณ์ที่พิมพ์ชื่อ · ติดตามใบเบิก",
-    "text": "",
+    "id": "caserep",
+    "kind": "create_case",
+    "title": "สร้างเรื่องงานซ่อม",
+    "text": "ส่งถึง ซจ. เมื่อแอดมินติ๊กให้ ซจ. รับงานซ่อมบนหน้าผังหน่วยงาน",
     "buttons": [],
     "config": {
-     "equipment": "other",
-     "service": "withdrawal"
+     "case_kind": "problem",
+     "topic": "repair",
+     "division": "กอจ.",
+     "to": "กอจ. แผนกซ่อมบำรุงสวิตช์ตัดตอนระบบจำหน่าย"
     },
-    "x": 1940,
-    "y": 2760,
-    "w": 300
+    "x": 1080,
+    "y": 1600,
+    "w": 280
    },
    {
-    "id": "other-return",
-    "kind": "koj_tracking",
-    "title": "อุปกรณ์ที่พิมพ์ชื่อ · ติดตามใบส่งคืน",
-    "text": "",
+    "id": "donerep",
+    "kind": "result",
+    "title": "ส่งให้ ซจ. ตรวจแล้ว",
+    "text": "ติดตามความคืบหน้าได้ที่เรื่องของฉัน",
     "buttons": [],
-    "config": {
-     "equipment": "other",
-     "service": "return"
-    },
-    "x": 1940,
-    "y": 2900,
-    "w": 300
+    "config": {},
+    "x": 1440,
+    "y": 1600,
+    "w": 280
    },
    {
-    "id": "watches",
-    "kind": "koj_tracking",
-    "title": "รายการติดตาม กอจ.",
-    "text": "",
+    "id": "n_adr",
+    "kind": "note",
+    "title": "ADR 0034",
+    "text": "เบิกและส่งคืนเป็นเรื่องของ กอจ. แบบ กคว. ไม่ค้นชีทเบิกคืน\nแต่ละปุ่มอุปกรณ์ตั้งกลุ่มของ แอดมินติ๊กบนหน้าผังหน่วยงานว่าแผนกไหนรับ",
     "buttons": [],
-    "config": {
-     "service": "watches"
-    },
-    "x": 400,
-    "y": 600,
-    "w": 300
+    "config": {},
+    "x": 40,
+    "y": 2000,
+    "w": 280
+   },
+   {
+    "id": "n_sheet",
+    "kind": "note",
+    "title": "ชีทงานซ่อมของ ซจ.",
+    "text": "ค้นคอลัมน์ E และ K ตอบสถานะจาก AF กับ R G M Z, AE มีค่าคือยกเลิกงานแล้ว\nไม่อ่าน H I J AA AG ไม่ใช้ AI ทุกเขตเห็นได้\nเบอร์ติดต่อตั้งที่หน้าชีทที่ระบบอ่าน",
+    "buttons": [],
+    "config": {},
+    "x": 40,
+    "y": 1800,
+    "w": 280
    }
   ],
   "edges": [
@@ -687,163 +651,163 @@
    },
    {
     "id": "e2",
-    "from": "service-transformer",
-    "port": "service-transformer.b0",
-    "to": "transformer-withdrawal",
-    "label": ""
-   },
-   {
-    "id": "e3",
-    "from": "service-transformer",
-    "port": "service-transformer.b1",
-    "to": "transformer-return",
-    "label": ""
-   },
-   {
-    "id": "e4",
     "from": "tracking",
     "port": "tracking.b0",
     "to": "service-transformer",
     "label": ""
    },
    {
-    "id": "e5",
-    "from": "service-lbs",
-    "port": "service-lbs.b0",
-    "to": "lbs-withdrawal",
-    "label": ""
-   },
-   {
-    "id": "e6",
-    "from": "service-lbs",
-    "port": "service-lbs.b1",
-    "to": "lbs-return",
-    "label": ""
-   },
-   {
-    "id": "e7",
-    "from": "service-lbs",
-    "port": "service-lbs.b2",
-    "to": "lbs-repair",
-    "label": ""
-   },
-   {
-    "id": "e8",
+    "id": "e3",
     "from": "tracking",
     "port": "tracking.b1",
     "to": "service-lbs",
     "label": ""
    },
    {
-    "id": "e9",
-    "from": "service-rmu",
-    "port": "service-rmu.b0",
-    "to": "rmu-withdrawal",
-    "label": ""
-   },
-   {
-    "id": "e10",
-    "from": "service-rmu",
-    "port": "service-rmu.b1",
-    "to": "rmu-return",
-    "label": ""
-   },
-   {
-    "id": "e11",
-    "from": "service-rmu",
-    "port": "service-rmu.b2",
-    "to": "rmu-repair",
-    "label": ""
-   },
-   {
-    "id": "e12",
+    "id": "e4",
     "from": "tracking",
     "port": "tracking.b2",
     "to": "service-rmu",
     "label": ""
    },
    {
-    "id": "e13",
-    "from": "service-metering",
-    "port": "service-metering.b0",
-    "to": "metering-withdrawal",
-    "label": ""
-   },
-   {
-    "id": "e14",
-    "from": "service-metering",
-    "port": "service-metering.b1",
-    "to": "metering-return",
-    "label": ""
-   },
-   {
-    "id": "e15",
+    "id": "e5",
     "from": "tracking",
     "port": "tracking.b3",
     "to": "service-metering",
     "label": ""
    },
    {
-    "id": "e16",
-    "from": "service-frtu",
-    "port": "service-frtu.b0",
-    "to": "frtu-withdrawal",
-    "label": ""
-   },
-   {
-    "id": "e17",
-    "from": "service-frtu",
-    "port": "service-frtu.b1",
-    "to": "frtu-return",
-    "label": ""
-   },
-   {
-    "id": "e18",
+    "id": "e6",
     "from": "tracking",
     "port": "tracking.b4",
-    "to": "service-frtu",
-    "label": ""
-   },
-   {
-    "id": "e19",
-    "from": "tracking",
-    "port": "tracking.b5",
     "to": "other",
     "label": ""
    },
    {
-    "id": "e20",
+    "id": "e7",
+    "from": "tracking",
+    "port": "tracking.b5",
+    "to": "repair",
+    "label": ""
+   },
+   {
+    "id": "e8",
+    "from": "service-transformer",
+    "port": "service-transformer.b0",
+    "to": "tw",
+    "label": ""
+   },
+   {
+    "id": "e9",
+    "from": "service-transformer",
+    "port": "service-transformer.b1",
+    "to": "tr",
+    "label": ""
+   },
+   {
+    "id": "e10",
+    "from": "service-lbs",
+    "port": "service-lbs.b0",
+    "to": "tw",
+    "label": ""
+   },
+   {
+    "id": "e11",
+    "from": "service-lbs",
+    "port": "service-lbs.b1",
+    "to": "tr",
+    "label": ""
+   },
+   {
+    "id": "e12",
+    "from": "service-rmu",
+    "port": "service-rmu.b0",
+    "to": "tw",
+    "label": ""
+   },
+   {
+    "id": "e13",
+    "from": "service-rmu",
+    "port": "service-rmu.b1",
+    "to": "tr",
+    "label": ""
+   },
+   {
+    "id": "e14",
+    "from": "service-metering",
+    "port": "service-metering.b0",
+    "to": "tw",
+    "label": ""
+   },
+   {
+    "id": "e15",
+    "from": "service-metering",
+    "port": "service-metering.b1",
+    "to": "tr",
+    "label": ""
+   },
+   {
+    "id": "e16",
     "from": "service-bushing",
     "port": "service-bushing.b0",
-    "to": "bushing-withdrawal",
+    "to": "tw",
+    "label": ""
+   },
+   {
+    "id": "e17",
+    "from": "service-bushing",
+    "port": "service-bushing.b1",
+    "to": "tr",
+    "label": ""
+   },
+   {
+    "id": "e18",
+    "from": "service-vt_lbs",
+    "port": "service-vt_lbs.b0",
+    "to": "tw",
+    "label": ""
+   },
+   {
+    "id": "e19",
+    "from": "service-vt_lbs",
+    "port": "service-vt_lbs.b1",
+    "to": "tr",
+    "label": ""
+   },
+   {
+    "id": "e20",
+    "from": "service-lv_cap",
+    "port": "service-lv_cap.b0",
+    "to": "tw",
     "label": ""
    },
    {
     "id": "e21",
-    "from": "service-bushing",
-    "port": "service-bushing.b1",
-    "to": "bushing-return",
+    "from": "service-lv_cap",
+    "port": "service-lv_cap.b1",
+    "to": "tr",
     "label": ""
    },
    {
     "id": "e22",
-    "from": "other",
-    "port": "other.b0",
-    "to": "service-bushing",
+    "from": "service-other",
+    "port": "service-other.b0",
+    "to": "tw",
     "label": ""
    },
    {
     "id": "e23",
-    "from": "service-vt_lbs",
-    "port": "service-vt_lbs.b0",
-    "to": "vt_lbs-withdrawal",
+    "from": "service-other",
+    "port": "service-other.b1",
+    "to": "tr",
     "label": ""
    },
    {
     "id": "e24",
-    "from": "service-vt_lbs",
-    "port": "service-vt_lbs.b1",
-    "to": "vt_lbs-return",
+    "from": "other",
+    "port": "other.b0",
+    "to": "service-bushing",
     "label": ""
    },
    {
@@ -855,58 +819,142 @@
    },
    {
     "id": "e26",
-    "from": "service-lv_cap",
-    "port": "service-lv_cap.b0",
-    "to": "lv_cap-withdrawal",
-    "label": ""
-   },
-   {
-    "id": "e27",
-    "from": "service-lv_cap",
-    "port": "service-lv_cap.b1",
-    "to": "lv_cap-return",
-    "label": ""
-   },
-   {
-    "id": "e28",
     "from": "other",
     "port": "other.b2",
     "to": "service-lv_cap",
     "label": ""
    },
    {
-    "id": "e29",
+    "id": "e27",
     "from": "other",
     "port": "other.b3",
     "to": "name",
     "label": ""
    },
    {
-    "id": "e30",
-    "from": "service-other",
-    "port": "service-other.b0",
-    "to": "other-withdrawal",
-    "label": ""
-   },
-   {
-    "id": "e31",
-    "from": "service-other",
-    "port": "service-other.b1",
-    "to": "other-return",
-    "label": ""
-   },
-   {
-    "id": "e32",
+    "id": "e28",
     "from": "name",
     "port": null,
     "to": "service-other",
     "label": ""
    },
    {
+    "id": "e29",
+    "from": "tw",
+    "port": "tw.b0",
+    "to": "twn",
+    "label": ""
+   },
+   {
+    "id": "e30",
+    "from": "tw",
+    "port": null,
+    "to": "dw",
+    "label": ""
+   },
+   {
+    "id": "e31",
+    "from": "dw",
+    "port": null,
+    "to": "sumw",
+    "label": ""
+   },
+   {
+    "id": "e32",
+    "from": "twn",
+    "port": null,
+    "to": "sumw",
+    "label": ""
+   },
+   {
     "id": "e33",
-    "from": "tracking",
-    "port": "tracking.b6",
-    "to": "watches",
+    "from": "sumw",
+    "port": "sumw.b0",
+    "to": "casew",
+    "label": ""
+   },
+   {
+    "id": "e34",
+    "from": "casew",
+    "port": null,
+    "to": "donew",
+    "label": ""
+   },
+   {
+    "id": "e35",
+    "from": "tr",
+    "port": "tr.b0",
+    "to": "trn",
+    "label": ""
+   },
+   {
+    "id": "e36",
+    "from": "tr",
+    "port": null,
+    "to": "dr",
+    "label": ""
+   },
+   {
+    "id": "e37",
+    "from": "dr",
+    "port": null,
+    "to": "sumr",
+    "label": ""
+   },
+   {
+    "id": "e38",
+    "from": "trn",
+    "port": null,
+    "to": "sumr",
+    "label": ""
+   },
+   {
+    "id": "e39",
+    "from": "sumr",
+    "port": "sumr.b0",
+    "to": "caser",
+    "label": ""
+   },
+   {
+    "id": "e40",
+    "from": "caser",
+    "port": null,
+    "to": "doner",
+    "label": ""
+   },
+   {
+    "id": "e41",
+    "from": "repair",
+    "port": "repair.b0",
+    "to": "sumrep",
+    "label": ""
+   },
+   {
+    "id": "e42",
+    "from": "sumrep",
+    "port": "sumrep.b0",
+    "to": "caserep",
+    "label": ""
+   },
+   {
+    "id": "e43",
+    "from": "caserep",
+    "port": null,
+    "to": "donerep",
+    "label": ""
+   },
+   {
+    "id": "e44",
+    "from": "n_adr",
+    "port": null,
+    "to": "tracking",
+    "label": ""
+   },
+   {
+    "id": "e45",
+    "from": "n_sheet",
+    "port": null,
+    "to": "repair",
     "label": ""
    }
   ]

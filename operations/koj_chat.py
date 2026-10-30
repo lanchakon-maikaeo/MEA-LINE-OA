@@ -59,9 +59,9 @@ def is_item(item):
 
 
 def live(item):
-    """Whether the กอจ. menu is on for this button: an admin published its flow with a
-    tracking box and no case box (ADR 0023; owner, 28 Oct 2569: until then the button keeps
-    its earlier card)."""
+    """Whether this button answers with the กอจ. tracking of ADR 0026: an admin published its
+    flow with a tracking box and no case box. Since ADR 0034 the button opens whatever flow is
+    published, like every button; a flow that files cases leaves this off."""
     from operations import flow_runner
 
     tile = item.parent if item.parent_id else item  # a choice belongs to its tile
@@ -162,16 +162,14 @@ def ask(turn, equipment, service, name=""):
     tracking.group_for(equipment, service)
     turn.set_prompt("koj_reference", equipment=equipment, service=service, name=name)
     label = (
-        "WO/WBS/เลขรับ/ใบแจ้งซ่อม"
+        "เลข WO, WBS, เลขรับ หรือใบแจ้งซ่อม"
         if service == "repair"
-        else "เลขที่ใบเบิก หรือใบสั่งงาน SAP"
+        else "เลขที่ใบเบิก หรือ ใบสั่งงานจาก SAP"
         if service == "withdrawal"
         else "เลขที่ใบส่งคืน หรือใบโอนขอคืน"
     )
     turn.say(
-        f"{name or tracking.EQUIPMENT[equipment]} · {tracking.SERVICES[service]}\n"
-        f"พิมพ์{label}\nค้นเลขเต็มก่อน หรือพิมพ์ต้นเลขเพื่อเลือกรายการ\n"
-        "ตัวอย่าง I/69.01.01.001.69.01.001, 120000000001 หรือ 1AB690X0001",
+        f"{name or tracking.EQUIPMENT[equipment]} · {tracking.SERVICES[service]}\nพิมพ์{label}",
         [
             turn.button("ย้อนกลับ", "koj_services", {"equipment": equipment, "name": name}),
             ("ยกเลิก", "m=koj&do=home"),

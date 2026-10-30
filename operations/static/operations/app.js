@@ -31,6 +31,23 @@
     }
   });
 
+  // A part of a form that belongs to one choice (29 ต.ค. 2569, ชีทที่ระบบอ่าน), e.g.
+  // data-when="match=code": shown only while that choice is picked, and disabled while hidden,
+  // so it is neither checked nor sent. The server renders the first state.
+  function applyWhen(form) {
+    form.querySelectorAll("[data-when]").forEach(function (part) {
+      var rule = part.getAttribute("data-when").split("=");
+      var control = form.elements[rule[0]];
+      var on = !!control && control.value === rule[1];
+      part.hidden = !on;
+      part.disabled = !on;
+    });
+  }
+  document.addEventListener("change", function (event) {
+    var form = event.target.form;
+    if (form && form.querySelector("[data-when]")) applyWhen(form);
+  });
+
   // One open menu at a time; click outside or Escape closes it.
   function closeMenus(except) {
     document.querySelectorAll("details.menu[open], details.drawer[open]").forEach(function (d) {

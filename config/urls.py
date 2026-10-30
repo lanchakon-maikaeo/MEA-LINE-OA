@@ -1,5 +1,6 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
+from django.views.generic import RedirectView
 
 from operations import (
     duties_web,
@@ -13,6 +14,7 @@ from operations import (
     problems_web,
     registry_web,
     routing_web,
+    sheets_web,
     units_web,
     views,
     warehouse_web,
@@ -20,7 +22,9 @@ from operations import (
 )
 
 urlpatterns = [
-    path("koj/", koj_web.sources, name="koj-sources"),
+    # ADR 0033: both kinds of sheet sit on one page; the old addresses lead there.
+    path("koj/", RedirectView.as_view(pattern_name="sheets"), name="koj-sources"),
+    path("console/sheets/", sheets_web.page, name="sheets"),
     path("koj/sources/<int:pk>/", koj_web.history, name="koj-history"),
     path("", views.index, name="index"),
     path("health/live/", views.live, name="health-live"),
@@ -145,7 +149,11 @@ urlpatterns = [
         flows_web.admin_flow_publish,
         name="admin-flow-publish",
     ),
-    path("console/admin/sheets/", flows_web.admin_sheets, name="admin-sheets"),
+    path(
+        "console/admin/sheets/",
+        RedirectView.as_view(pattern_name="sheets"),
+        name="admin-sheets",
+    ),
     path("console/admin/holidays/", warehouse_web.admin_holidays, name="admin-holidays"),
     path("console/admin/districts/", warehouse_web.admin_districts, name="admin-districts"),
     path("console/admin/policy/", views.admin_policy, name="admin-policy"),

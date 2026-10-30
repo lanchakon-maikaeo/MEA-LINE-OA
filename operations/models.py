@@ -20,6 +20,7 @@ from operations.koj_models import (  # noqa: F401 - register and re-export ก�
     KojWatch,
 )
 from operations.sheet_models import (  # noqa: F401 - register and re-export ค้นในชีท models
+    SheetEditor,
     SheetEntry,
     SheetSource,
     SheetStatusRun,

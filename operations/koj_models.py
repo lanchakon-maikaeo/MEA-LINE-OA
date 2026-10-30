@@ -20,6 +20,16 @@ class KojSource(models.Model):
     district_map = models.JSONField(default=dict, blank=True)
     completed_statuses = models.JSONField(default=list, blank=True)
     contact = models.CharField(max_length=300, blank=True)
+    # หน่วยเจ้าของชีท (ADR 0033), as on SheetSource.
+    division = models.ForeignKey(
+        "operations.Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    section = models.ForeignKey(
+        "operations.Section", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    work_group = models.ForeignKey(
+        "operations.WorkGroup", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     last_synced_at = models.DateTimeField(null=True, blank=True)
     last_attempt_at = models.DateTimeField(null=True, blank=True)
     next_sync_at = models.DateTimeField(default=timezone.now)

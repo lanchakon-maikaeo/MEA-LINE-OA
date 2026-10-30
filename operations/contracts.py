@@ -141,14 +141,18 @@ KIND_FIELDS = {
 }
 LINE_FIELDS = {"item_code", "quantity", "serials", "details"}
 SAP_PATTERN = (r"[A-Za-z0-9/-]{4,30}", "เลข SAP ใช้ตัวอักษร ตัวเลข ขีด หรือ / ได้ 4 ถึง 30 ตัว")
+# A slip of กอจ. may carry dots (ADR 0034): I/69.01.01.001.69.01.001.
+SLIP_PATTERN = (r"[A-Za-z0-9./-]{4,30}", SAP_PATTERN[1])
 TRACKING_PATTERNS = {
     "": SAP_PATTERN,
-    "slip": SAP_PATTERN,
-    "return_slip": SAP_PATTERN,
-    "work_order": SAP_PATTERN,
+    "slip": SLIP_PATTERN,
+    "return_slip": SLIP_PATTERN,
+    "work_order": SLIP_PATTERN,
     "meter": (r"[A-Za-z0-9-]{4,20}", "หมายเลขเครื่องวัดฯ ใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว"),
     "project": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "ชื่อโครงการยาว 2 ถึง 60 ตัว"),
     "memo": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "เลขที่ M/N ยาว 2 ถึง 60 ตัว"),
+    "return_transfer": (r"[A-Za-z0-9./-]{4,30}", "เลขใบโอนขอคืนยาว 4 ถึง 30 ตัว"),  # กอจ.
+    "other_number": (r"[\w\u0E00-\u0E7F ./()-]{2,60}", "เลขที่ใช้ติดตามยาว 2 ถึง 60 ตัว"),
 }
 NO_ITEM_TOPICS = {
     Case.Topic.USAGE,
@@ -341,7 +345,8 @@ def parse_submission(payload, on_behalf):
         if fields["sap_kind"] not in TRACKING_PATTERNS:
             fail(
                 ErrorCode.VALIDATION_ERROR,
-                "sap_kind must be slip, return_slip, work_order, meter, project or memo.",
+                "sap_kind must be slip, return_slip, work_order, meter, project, memo,"
+                " return_transfer or other_number.",
             )
         fields["sap_number"] = _text(payload, "sap_number", False, 60)
         pattern, problem = TRACKING_PATTERNS[fields["sap_kind"]]

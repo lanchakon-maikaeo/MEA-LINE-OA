@@ -792,6 +792,12 @@ form p:has(> input[type="checkbox"]) label { display: inline; margin: 0 0 0 var(
 
 fieldset { border: 1px solid var(--hairline-soft); border-radius: 18px; padding: var(--s-18) var(--s-24) var(--s-24); margin: 0 0 var(--s-24); min-width: 0; }
 legend { padding: 0 var(--s-8); margin-left: calc(var(--s-8) * -1); font-weight: 600; font-size: 16px; }
+/* A part of a form for one choice only (data-when, app.js): no frame of its own. */
+fieldset.when { border: 0; padding: 0; margin: 0; }
+.choice .helptext { margin-top: 2px; }
+/* ทดสอบอ่าน: the line the chat would answer, set apart like a chat message. */
+.sample-answer { margin: var(--s-8) 0; padding: var(--s-12) var(--s-18); border-radius: 18px 18px 18px 4px;
+  background: var(--canvas); color: var(--ink); font-size: 15px; line-height: 1.6; max-width: 60ch; }
 
 form.inline { display: inline-flex; flex-wrap: wrap; gap: var(--s-8); align-items: center; margin: var(--s-2) 0; }
 form.inline label { display: inline-flex; align-items: center; gap: var(--s-8); font-weight: 400; color: var(--mute); }

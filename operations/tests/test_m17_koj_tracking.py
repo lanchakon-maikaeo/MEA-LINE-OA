@@ -7,6 +7,7 @@ import json
 from copy import deepcopy
 from datetime import timedelta
 from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -37,6 +38,18 @@ from operations.models import (
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import ALICE, BOB, CAROL, buttons, texts
 from operations.tests.test_m14_kcw_menu import KcwTestCase
+
+# ADR 0034 made the กอจ. button file cases; the tracking boxes of ADR 0026 stay in the program,
+# so these tests publish their own copy of that flow.
+ADR_0026_FLOW = Path(__file__).parent / "data" / "koj_tracking_adr0026.json"
+
+
+def put_adr_0026_flow(draft):
+    graph = json.loads(ADR_0026_FLOW.read_text(encoding="utf-8"))["graph"]
+    draft.graph = line_flows.clean_graph(graph)
+    draft.save(update_fields=["graph"])
+    return draft
+
 
 NUMBER = "120000000001"
 DOTS = "I/69.01.01.001.69.01.001"
@@ -89,6 +102,7 @@ class KojTestCase(KcwTestCase):
         call_command("seed_line_flows", division="กอจ.", replace_draft=True, stdout=StringIO())
         flow = LineFlow.objects.get(key="koj-tracking")
         draft = line_flows.draft_of(flow) or line_flows.start_draft(self.admin_koj, flow)
+        put_adr_0026_flow(draft)
         line_flows.publish(self.admin_koj, draft, "เปิดเมนู กอจ. ในการทดสอบ")
 
     def track(self, number=NUMBER, equipment="RMU", user=ALICE):
@@ -114,7 +128,7 @@ class CanvasFlowTests(KojTestCase):
         if line_flows.draft_of(flow) is None:  # already published by open_menu()
             line_flows.start_draft(self.admin_koj, flow)
             call_command("seed_line_flows", division="กอจ.", replace_draft=True, stdout=StringIO())
-        draft = line_flows.draft_of(flow)
+        draft = put_adr_0026_flow(line_flows.draft_of(flow))
         if edit:
             edit(draft.graph)
             draft.save(update_fields=["graph"])
@@ -614,7 +628,7 @@ class SourceTests(KojTestCase):
     def test_web_grants_sources_history_and_refresh_are_scoped(self):
         client = Client()
         client.force_login(self.admin_koj)
-        self.assertContains(client.get("/koj/"), self.source.name)
+        self.assertContains(client.get("/console/sheets/"), self.source.name)
         self.assertContains(client.get(f"/koj/sources/{self.source.pk}/"), NUMBER)
         # ADR 0031 Q12, Q25: the recipient sets sit on the กอจ. cards of ผังหน่วยงาน.
         page = client.get("/console/admin/org/").content.decode()
@@ -630,21 +644,25 @@ class SourceTests(KojTestCase):
         )
         foreign = make_staff("foreign-clerk", (Role.STAFF, "กคว."))
         client.force_login(foreign)
-        self.assertEqual(client.get("/koj/").status_code, 403)
+        self.assertEqual(client.get("/console/sheets/").status_code, 403)
         self.assertEqual(
             client.post("/console/admin/org/", {"action": "koj", "group": "sj"}).status_code, 403
         )
-        # 28 ต.ค. 2569: กอจ. staff wait for the hourly round; the page is admin only.
+        # 28 ต.ค. 2569: กอจ. staff wait for the hourly round; ADR 0033: only an admin or the
+        # sheet's ผู้ดูแลชีท opens the page.
         client.force_login(self.staff)
-        self.assertEqual(client.get("/koj/").status_code, 403)
+        self.assertEqual(client.get("/console/sheets/").status_code, 403)
         self.assertEqual(client.get(f"/koj/sources/{self.source.pk}/").status_code, 403)
-        self.assertEqual(client.post("/koj/", {"action": "save"}).status_code, 403)
+        save = {"do": "save", "kind": "koj"}
+        self.assertEqual(client.post("/console/sheets/", save).status_code, 403)
 
     def test_admin_configures_columns_without_disclosing_source_data(self):
         client = Client()
         client.force_login(self.admin_koj)
         payload = {
-            "action": "save",
+            "do": "save",
+            "kind": "koj",
+            "reason": "เพิ่มแหล่งทดสอบ",
             "name": "มค. จำลอง",
             "enabled": "on",
             "provider": "csv",
@@ -657,7 +675,7 @@ class SourceTests(KojTestCase):
             "column_district": "เขต",
             "completed": "จ่ายแล้ว\nส่งมอบแล้ว",
         }
-        self.assertEqual(client.post("/koj/", payload).status_code, 302)
+        self.assertEqual(client.post("/console/sheets/", payload).status_code, 302)
         source = KojSource.objects.get(name="มค. จำลอง")
         self.assertEqual(source.columns["reference"], "ใบเบิก")
         self.assertEqual(source.completed_statuses, ["จ่ายแล้ว", "ส่งมอบแล้ว"])
@@ -671,20 +689,17 @@ class SourceTests(KojTestCase):
         draft.refresh_from_db()
         self.assertEqual((draft.graph, draft.revision), (graph, revision))
         flow = LineFlow.objects.get(key="koj-tracking")
-        self.assertFalse(line_flows.blocked(line_flows.check(line_flows.draft_of(flow).graph)))
         koj_draft = line_flows.draft_of(flow)
-        original = deepcopy(koj_draft.graph)
-        invalid = deepcopy(original)
+        self.assertFalse(line_flows.blocked(line_flows.check(koj_draft.graph)))
+        # ADR 0034: the seeded flow files cases, and กอจ. may publish it like any division.
+        self.assertIn("create_case", {n["kind"] for n in koj_draft.graph["nodes"]})
+        line_flows.publish(self.admin_koj, koj_draft, "กอจ. ส่งเรื่องได้")
+        koj_draft = put_adr_0026_flow(line_flows.start_draft(self.admin_koj, flow))
+        invalid = deepcopy(koj_draft.graph)
         end = next(n for n in invalid["nodes"] if n["id"] == "transformer-withdrawal")
         end["config"] = {"equipment": "transformer", "service": "repair"}
         self.assertTrue(line_flows.blocked(line_flows.check(invalid)))
-        koj_draft.graph["nodes"][1]["kind"] = "create_case"
-        koj_draft.save(update_fields=["graph"])
-        with self.assertRaisesMessage(ValidationError, "กอจ. ติดตามงานต้นทาง"):
-            line_flows.publish(self.admin_koj, koj_draft, "ห้ามสร้างเรื่องซ้ำ")
-        koj_draft.graph = original
-        koj_draft.save(update_fields=["graph"])
-        line_flows.publish(self.admin_koj, line_flows.draft_of(flow), "ทดสอบ กอจ.")
+        line_flows.publish(self.admin_koj, koj_draft, "ทดสอบ กอจ.")
         self.assertIn("รายการจำลองหนึ่ง", texts(self.track()))
         self.assertFalse(ConversationDraft.objects.filter(status="open").exists())
         self.assertFalse(Case.objects.exists())

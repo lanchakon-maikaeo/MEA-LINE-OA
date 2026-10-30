@@ -66,7 +66,7 @@ class KkoTestCase(FlowTestCase):
         self.open_kko(user)
         self.press(user, job)
         if kind is None:
-            self.press(user, "ไม่มีเลข")
+            self.press(user, "ไม่มีหมายเลข")
             self.type(user, details or "คีมตัดสาย 2 อัน ส่งใบเบิก 27 ต.ค.")
         else:
             self.press(user, kind)
@@ -83,7 +83,7 @@ class KkoTestCase(FlowTestCase):
 class TileTests(KkoTestCase):
     def test_the_tile_asks_what_to_follow(self):
         reply = self.open_kko()
-        self.assertIn("ต้องการติดตามเรื่องไหนครับ", texts(reply))
+        self.assertIn("กรุณาเลือกเครื่องมือเครื่องใช้ที่ต้องการติดตาม", texts(reply))
         self.assertEqual(
             list(buttons(reply)), ["ติดตามใบเบิก", "ติดตามใบส่งคืน", "ติดตามงานซ่อม", "ยกเลิกร่าง"]
         )
@@ -92,7 +92,8 @@ class TileTests(KkoTestCase):
         reply = self.open_kko()
         reply = self.press(ALICE, "ติดตามใบเบิก")
         self.assertEqual(
-            list(buttons(reply))[:4], ["เลขที่ใบเบิก", "ใบสั่งงานจาก SAP", "เลขที่ M/N", "ไม่มีเลข"]
+            list(buttons(reply))[:4],
+            ["เลขที่ใบเบิก", "เลขใบสั่งงานจาก SAP", "เลขที่ M/N", "ไม่มีหมายเลข"],
         )
         self.press(ALICE, "เลขที่ M/N")
         self.type(ALICE, "คม. 123/2569")
@@ -109,10 +110,10 @@ class TileTests(KkoTestCase):
     def test_a_slip_without_a_number_says_what_and_when(self):
         reply = self.open_kko()
         self.press(ALICE, "ติดตามใบเบิก")
-        reply = self.press(ALICE, "ไม่มีเลข")
-        self.assertIn("เบิกอะไร ส่งใบเบิกวันไหน", texts(reply))
+        reply = self.press(ALICE, "ไม่มีหมายเลข")
+        self.assertEqual(texts(reply), "กรุณาพิมพ์รายละเอียด")  # the page's words (29 ต.ค. 2569)
         reply = self.type(ALICE, "คีมตัดสาย 2 อัน ส่งใบเบิก 27 ต.ค.")
-        self.assertIn("เลขติดตาม: ไม่มีเลข", texts(reply))
+        self.assertIn("เลขติดตาม: ไม่มี เจ้าหน้าที่จะหาเอกสารจากรายละเอียด", texts(reply))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
         self.assertEqual((case.sap_kind, case.sap_number), ("slip", ""))
@@ -182,6 +183,8 @@ class TruckTests(KkoTestCase):
 
     def test_a_return_is_received_and_closes_with_its_own_stage_names(self):
         case = self.file("ติดตามใบส่งคืน", "เลขที่ใบส่งคืน", "4500020001")
+        filed = [m for m in self.sent if "ยื่นเรื่องแล้ว" in texts(m)][-1]
+        self.assertNotIn("TE-Delivery", texts(filed))  # no one ฟข.'s truck day for everyone
         today = timezone.localdate()
         for stage in CaseMilestone.ORDER:
             done, skipped = warehouse.record(self.kko, [case], stage, today)
@@ -234,6 +237,9 @@ class RepairSheetTests(KkoTestCase):
         self.assertEqual(sheet_lookup.codes_in("NC801 ซ่อมเสร็จยัง"), [("", "NC801")])
 
     def test_without_a_sheet_what_was_typed_goes_to_คม(self):
+        self.open_kko()
+        reply = self.press(ALICE, "ติดตามงานซ่อม")
+        self.assertNotIn("ส่งให้ คม. ตรวจ", buttons(reply))  # offered once a number is typed
         reply = self.ask("SAFETY BELT, NC801")
         said = texts(reply)
         self.assertIn("ส่งให้เจ้าหน้าที่ตรวจแทน", said)
@@ -307,11 +313,12 @@ class RepairSheetTests(KkoTestCase):
         self.assertTrue(sheet_lookup.name_matches("คีม", "คีมตัดชนิดมีเฟืองทด"))
         self.assertFalse(sheet_lookup.name_matches("คีม", "HV.DETECTOR (NOISY TESTER)"))
 
-    def test_a_code_sheet_needs_its_ฟข_column(self):
-        sheet_lookup.check_source(self.source)  # คม.'s sheet as the fixture sets it up
+    def test_a_code_sheet_may_show_every_district(self):
+        # ADR 0034: the ฟข. column is the sheet owner's choice; คม.'s sheet keeps one.
+        sheet_lookup.check_source(self.source)
+        self.assertTrue(self.source.district_column)
         self.source.district_column = ""
-        with self.assertRaises(ValidationError):
-            sheet_lookup.check_source(self.source)
+        sheet_lookup.check_source(self.source)
 
 
 class RepairWordingTests(KkoTestCase):

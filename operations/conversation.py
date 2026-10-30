@@ -1870,8 +1870,6 @@ def _menu_item(turn, pk, go=False):
         koj = koj_chat.is_item(item)
         if koj and koj_chat.live(item) and not koj_chat.allowed(turn):
             return koj_chat.home(turn)  # says who may follow กอจ. work
-        if koj and not koj_chat.live(item):
-            published = None  # owner, 28 Oct 2569: the earlier card until a valid publish
         if published is not None:  # ADR 0023: the flow an admin published for this tile
             turn.set_prompt()
             return flow_runner.start(turn, published)

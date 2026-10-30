@@ -94,7 +94,7 @@ def clean_sap(text):
     """(number, "") or ("", why not)."""
     value = re.sub(r"\s", "", str(text or "").translate(THAI_DIGITS))
     if not SAP_NUMBER.match(value):
-        return "", "เลข SAP ใช้ตัวอักษร ตัวเลข ขีด หรือ / ได้ 4 ถึง 30 ตัว"
+        return "", "กรุณาตรวจสอบอีกครั้ง"
     return value, ""
 
 
@@ -108,7 +108,7 @@ def sap_in_use(number, requester, exclude=None):
     if own is not None:
         return f"เลขนี้อยู่ในเรื่อง {own.number} ที่ยังไม่จบ ติดตามเรื่องนั้นได้"
     if found.exists():
-        return "เลขนี้มีเรื่องที่ยังไม่จบอยู่แล้ว ตรวจเลขอีกครั้ง หรือติดต่อกองที่ดูแล"
+        return "กำลังดำเนินการ กรุณาตรวจสอบเลขอีกครั้ง หรือติดต่อหน่วยงานที่ดูแล"
     return ""
 
 

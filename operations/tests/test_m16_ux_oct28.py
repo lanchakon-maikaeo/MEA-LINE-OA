@@ -37,11 +37,12 @@ class HeaderTests(WorkTestCase):
             self.assertNotIn("fajo-plus.webp", page)
             self.assertIn("· DED Center</title>", page)
             self.assertNotIn('href="/koj/"', page)
+        # ADR 0033: /koj/ leads to ชีทที่ระบบอ่าน, which a กอจ. member without the right cannot open.
         client = Client()
         client.force_login(koj)
-        self.assertEqual(client.get("/koj/").status_code, 403)
+        self.assertEqual(client.get("/console/sheets/").status_code, 403)
         client.force_login(admin)
-        self.assertEqual(client.get("/koj/").status_code, 200)
+        self.assertEqual(client.get("/koj/", follow=True).status_code, 200)
 
 
 class WarehousePageTests(WorkTestCase):

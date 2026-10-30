@@ -1,0 +1,160 @@
+{% extends "operations/admin_base.html" %}
+{% load ui %}
+{% block title %}ชีทที่ระบบอ่าน · DED Center{% endblock %}
+{% block content %}
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">ข้อมูลที่แชตใช้ตอบ</span><h1>ชีทที่ระบบอ่าน</h1>
+<p class="lede">แชตตอบสถานะจากชีทในหน้านี้ ระบบอ่านอย่างเดียว ไม่เขียนอะไรลงชีท ชีทค้นสถานะอ่านใหม่ทุก {{ every }} นาที ชีทงานติดตาม กอจ. อ่านใหม่ทุกชั่วโมง กดอ่านใหม่ตอนนี้ได้ที่การ์ดของชีท</p></div></div>
+<p class="notice notice--info">{% if reader %}ก่อนเพิ่มชีท ให้แชร์ชีทแบบผู้มีสิทธิ์ดูให้ <strong>{{ reader }}</strong> ระบบจึงจะอ่านได้{% else %}เซิร์ฟเวอร์ยังไม่มีบัญชีอ่านชีท ผู้ดูแลเซิร์ฟเวอร์ต้องติดตั้งกุญแจ Google ก่อน ระบบจึงจะอ่านชีทได้{% endif %}</p>
+{% if unmapped %}<p class="notice notice--error">งานติดตาม กอจ. มี {{ unmapped }} แถวที่ยังจับคู่เขตไม่ได้ ผู้แจ้งจะค้นแถวเหล่านี้ไม่พบ ให้แก้ตารางจับคู่เขตของชีทนั้น</p>{% endif %}
+
+{% if form %}
+<section class="card mb-24" id="sheet-form">
+  <h2>{% if form.source %}แก้ชีท {{ form.source.name }}{% else %}เพิ่มชีท{% endif %} <span class="tag tag--outline">{{ form.kind_label }}</span></h2>
+  {% if form.preview %}
+  <div class="notice {% if form.preview.error %}notice--error{% else %}notice--success{% endif %}">
+    {% if form.preview.error %}
+      <p>{{ form.preview.error }}</p>
+      {% if form.preview.tabs %}<p>แท็บที่มีในชีทนี้: {% for t in form.preview.tabs %}<strong>{{ t }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+    {% else %}
+      <p>ระบบอ่านชีทนี้ได้ ยังไม่ได้บันทึกอะไร</p>
+      {% if form.kind == "lookup" %}
+        {% if form.preview.answer %}
+        <p>ถ้าผู้ใช้พิมพ์เลขของแถวแรก แชตจะตอบว่า</p>
+        <blockquote class="sample-answer">{{ form.preview.answer|linebreaksbr }}</blockquote>
+        {% if form.draft.ai_words %}<p class="helptext">ถ้าเปิดให้ AI เรียบเรียง ถ้อยคำอาจต่างไปเล็กน้อย แต่ข้อมูลเหมือนกัน</p>{% endif %}
+        {% else %}
+        <p>ยังไม่เจอเลขในแถวที่อ่านมา ลองตรวจคอลัมน์เลขกับแถวแรกของข้อมูลอีกครั้ง</p>
+        {% endif %}
+      {% endif %}
+      {% if form.preview.missing %}<p>ไม่พบหัวคอลัมน์: {{ form.preview.missing|join:", " }}</p>{% endif %}
+      <p class="helptext">แถวแรก ๆ ของคอลัมน์ที่ตั้งไว้ ใช้เทียบกับหัวตารางในชีทว่าตรงกันไหม</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th scope="col">แถว</th>{% for c in form.preview.columns %}<th scope="col">{{ c }}</th>{% endfor %}</tr></thead>
+        <tbody>{% for r in form.preview.rows %}<tr><td>{{ r.number }}{% if r.number < form.preview.first_row %} (หัวตาราง){% endif %}</td>{% for v in r.cells %}<td>{{ v }}</td>{% endfor %}</tr>{% empty %}<tr><td colspan="9">คอลัมน์ที่ตั้งไว้ยังไม่มีข้อมูลในแท็บนี้</td></tr>{% endfor %}</tbody>
+      </table></div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <form method="post" class="stack" enctype="multipart/form-data">{% csrf_token %}
+    <input type="hidden" name="kind" value="{{ form.kind }}">
+    {% if form.kind == "lookup" %}{% with s=form.draft %}
+    <input type="hidden" name="source" value="{{ form.source.key|default:'' }}">
+    <fieldset class="choice-field">
+      <legend>ผู้ใช้พิมพ์อะไรมาค้นในแชต</legend>
+      {% for value, title, hint in types %}<label class="choice"><input type="radio" name="match" value="{{ value }}"{% if s.match == value %} checked{% endif %}> <span><strong>{{ title }}</strong><span class="helptext">{{ hint }}</span></span></label>
+      {% endfor %}
+    </fieldset>
+    <label>ชื่อชีท<input name="name" required maxlength="120" value="{{ s.name|default:'' }}"></label>
+    <label>หน่วยเจ้าของชีท<select name="unit">{% for key, label in form.units %}<option value="{{ key }}"{% if key == form.unit %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>ลิงก์ชีท (คัดลอกจากแถบที่อยู่ของเบราว์เซอร์มาวางได้ทั้งลิงก์)<input name="link" required value="{{ s.spreadsheet_id|default:'' }}" placeholder="https://docs.google.com/spreadsheets/d/..."></label>
+    <label>ชื่อแท็บ (ชื่อที่อยู่ด้านล่างของชีท ว่างไว้ ระบบอ่านแท็บแรก)<input name="sheet_name" value="{{ s.sheet_name|default:'' }}"></label>
+    <label>แถวแรกของข้อมูล (แถวถัดจากหัวตาราง)<input name="first_row" type="number" min="1" max="1000" value="{{ s.first_row|default:2 }}"></label>
+    <p class="helptext">ช่องคอลัมน์ใส่ตัวอักษรหัวคอลัมน์ในชีท เช่น J</p>
+    <label>คอลัมน์ที่มีเลขที่ผู้ใช้พิมพ์ (หลายคอลัมน์คั่นด้วย , เช่น E,K)<input name="key_column" required maxlength="20" value="{{ s.key_column|default:'J' }}"></label>
+    <label>คอลัมน์สถานะ<input name="status_column" required maxlength="3" value="{{ s.status_column|default:'R' }}"></label>
+    <fieldset class="when stack" data-when="match=digits"{% if s.match != "digits" %} hidden disabled{% endif %}>
+      <div class="field"><label for="owner-columns">คอลัมน์รหัสพนักงานของผู้แจ้ง (ว่างได้)</label><input id="owner-columns" name="owner_columns" maxlength="20" value="{{ s.owner_columns|default:'' }}"><p class="helptext">ใส่เมื่ออยากให้ผู้ใช้ดูรายการที่ตัวเองแจ้งไว้ได้ ถ้ารหัสอยู่หลายคอลัมน์ ให้คั่นด้วยจุลภาค เช่น B,M</p></div>
+    </fieldset>
+    <fieldset class="when stack" data-when="match=code"{% if s.match != "code" %} hidden disabled{% endif %}>
+      <div class="field"><label for="district-column">คอลัมน์ ฟข. (ว่างได้)</label><input id="district-column" name="district_column" maxlength="3" value="{{ s.district_column|default:'' }}"><p class="helptext">ใส่เมื่ออยากให้ผู้ใช้เห็นเฉพาะแถวของ ฟข. ตัวเอง ว่างไว้ ทุกเขตเห็นได้</p></div>
+      <div class="field"><label for="name-column">คอลัมน์ชื่อเครื่องมือ (ว่างได้)</label><input id="name-column" name="name_column" maxlength="3" value="{{ s.name_column|default:'' }}"><p class="helptext">ใส่เมื่อหมายเลขเดียวกันใช้กับเครื่องมือหลายชนิด</p></div>
+      <div class="field"><label for="order-column">คอลัมน์วันที่ (ว่างได้)</label><input id="order-column" name="order_column" maxlength="3" value="{{ s.order_column|default:'' }}"><p class="helptext">ถ้าเครื่องมือชิ้นเดียวเข้าซ่อมหลายครั้ง แชตตอบเฉพาะแถวที่วันที่ล่าสุด</p></div>
+      <div class="field"><label for="done-column">คอลัมน์ที่บอกว่างานจบแล้ว (ว่างได้)</label><input id="done-column" name="done_column" maxlength="3" value="{{ s.done_column|default:'' }}"><p class="helptext">แถวที่ช่องนี้มีค่า ถือว่างานจบแล้ว เช่น ส่งคืน ฟข. แล้ว หรือยกเลิกงาน</p></div>
+    </fieldset>
+    <label><input type="checkbox" name="enabled" value="1"{% if s.enabled %} checked{% endif %}> เปิดให้แชตใช้</label>
+    <details class="disclosure"{% if not form.source %} open{% endif %}>
+      <summary>คำที่ผู้ใช้เห็นในคำตอบ</summary>
+      <div class="disclosure__body stack">
+        <label>ชื่อเลขที่ผู้ใช้เห็น<input name="number_label" maxlength="40" value="{{ s.number_label|default:'' }}" placeholder="ว่างไว้ได้ ระบบใช้ เลข UI หรือ หมายเลขอุปกรณ์ ตามที่ผู้ใช้พิมพ์"></label>
+        <div class="field"><label for="status-words">คำที่ผู้ใช้เห็นแทนค่าในคอลัมน์สถานะ (ว่างได้)</label><textarea id="status-words" name="status_words" rows="3" placeholder="11=ซ่อมเสร็จ รอส่งคืน">{% for k, v in s.status_words.items %}{{ k }}={{ v }}
+{% endfor %}</textarea><p class="helptext">บรรทัดละคู่ ค่าทางซ้ายของเครื่องหมาย = จะไม่ขึ้นในคำตอบ</p></div>
+        <div class="field"><label for="blank-word">คำเมื่อช่องสถานะว่าง (ว่างได้)</label><input id="blank-word" name="blank_word" maxlength="60" value="{{ s.blank_word|default:'' }}"><p class="helptext">ถ้าเว้นว่าง แชตตอบว่า กำลังดำเนินการ</p></div>
+        <fieldset class="when stack" data-when="match=code"{% if s.match != "code" %} hidden disabled{% endif %}>
+          <div class="field"><label for="done-words">คำเมื่องานจบแล้ว (ว่างได้)</label><textarea id="done-words" name="done_words" rows="2" placeholder="ว่าง=ส่งคืน ฟข. แล้ว">{% for k, v in s.done_words.items %}{% if k == "*" %}ทุกสถานะ{% elif k %}{{ k }}{% else %}ว่าง{% endif %}={{ v }}
+{% endfor %}</textarea><p class="helptext">บรรทัดละคู่เหมือนคำแทนสถานะ ใช้คำว่า ว่าง แทนช่องสถานะที่ว่าง และ ทุกสถานะ เมื่อใช้คำเดียวกันทุกสถานะ</p></div>
+        </fieldset>
+        <div class="field"><label for="extra-columns">คอลัมน์ที่แสดงเพิ่มข้างสถานะ (ว่างได้ ไม่เกิน 4 คอลัมน์)</label><textarea id="extra-columns" name="extra_columns" rows="2" placeholder="F=วันที่รับ">{% for c in s.extra_columns %}{{ c.column }}={{ c.label }}
+{% endfor %}</textarea><p class="helptext">บรรทัดละคู่ ตัวอักษรคอลัมน์=ชื่อที่ผู้ใช้เห็น</p></div>
+        <div class="field"><label for="contact">เบอร์ติดต่อเมื่อค้นไม่พบ (ว่างได้)</label><input id="contact" name="contact" maxlength="100" value="{{ s.contact|default:'' }}"><p class="helptext">แชตแสดงต่อท้ายว่า หรือโทร ตามด้วยเบอร์นี้</p></div>
+        <input type="hidden" name="ai_words_shown" value="1"><label><input type="checkbox" name="ai_words" value="1"{% if not form.source or s.ai_words %} checked{% endif %}> ให้ AI เรียบเรียงคำตอบให้อ่านง่าย</label>
+      </div>
+    </details>
+    {% endwith %}{% else %}{% with f=form.koj_form %}
+    <input type="hidden" name="source" value="{{ form.source.pk|default:'' }}">
+    {% if f.non_field_errors %}<div class="notice notice--error">{{ f.non_field_errors }}</div>{% endif %}
+    {% for field in form.basic %}{% include "operations/_sheet_field.html" %}{% endfor %}
+    <label>หน่วยเจ้าของชีท<select name="unit">{% for key, label in form.units %}<option value="{{ key }}"{% if key == form.unit %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <fieldset class="when" data-when="provider=google"{% if form.provider != "google" %} hidden disabled{% endif %}>
+      {% for field in form.google %}{% include "operations/_sheet_field.html" %}{% endfor %}
+    </fieldset>
+    <fieldset class="when" data-when="provider=csv"{% if form.provider != "csv" %} hidden disabled{% endif %}>
+      <div class="field"><label for="koj-file">ไฟล์ CSV (ว่างได้)</label><input id="koj-file" type="file" name="file" accept=".csv"><p class="helptext">ระบบนำเข้าไฟล์ตอนกดบันทึก ไฟล์ใหม่ครั้งต่อไปนำเข้าได้ที่การ์ดของชีท</p></div>
+    </fieldset>
+    {% for field in form.end %}{% include "operations/_sheet_field.html" %}{% endfor %}
+    <details class="disclosure"{% if not form.source or f.errors %} open{% endif %}>
+      <summary>ตั้งค่าคอลัมน์และการจับคู่</summary>
+      <div class="disclosure__body">{% for field in form.advanced %}{% include "operations/_sheet_field.html" %}{% endfor %}</div>
+    </details>
+    {% endwith %}{% endif %}
+    <label>บอกสั้น ๆ ว่าเพิ่มหรือแก้อะไร (เก็บไว้ในประวัติ ต้องใส่ตอนบันทึก)<input name="reason" maxlength="300"></label>
+    <div class="cluster">
+      <button class="btn" type="submit" name="do" value="save">บันทึก</button>
+      <button class="btn btn--secondary" type="submit" name="do" value="test" formnovalidate{% if form.kind == "koj" %} data-when="provider=google"{% if form.provider != "google" %} hidden disabled{% endif %}{% endif %}>ทดสอบอ่าน</button>
+      <a href="{% url 'sheets' %}">ยกเลิก</a>
+    </div>
+  </form>
+</section>
+{% else %}
+<div class="cluster mb-24">
+  <a class="btn" href="?new=lookup#sheet-form">เพิ่มชีทค้นสถานะในแชต</a>
+  <a class="btn btn--secondary" href="?new=koj#sheet-form">เพิ่มชีทงานติดตาม กอจ.</a>
+</div>
+{% endif %}
+
+{% for group in groups %}
+<section class="section">
+  <h2>{{ group.label }}</h2>
+  {% for item in group.sheets %}{% with s=item.source %}
+  <article class="card mb-24">
+    <h3>{% if item.kind == "koj" %}<a href="{% url 'koj-history' s.pk %}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %} <span class="tag">{{ s.enabled|yesno:"เปิด,ปิด" }}</span> <span class="tag tag--outline">{{ item.kind_label }}</span></h3>
+    <dl class="facts">
+      <div><dt>ใช้ทำอะไร</dt><dd>{{ item.what }}</dd></div>
+      {% if item.searched_by %}<div><dt>ผู้ใช้ค้นด้วย</dt><dd>{{ item.searched_by }}</dd></div>{% endif %}
+      <div><dt>แท็บ</dt><dd>{{ s.sheet_name|default:"ไม่ระบุ" }}</dd></div>
+      <div><dt>อ่านได้ล่าสุด</dt><dd>{% if s.last_synced_at %}{{ s.last_synced_at|thai_datetime }}{% if item.kind == "lookup" %} · {{ s.rows_read }} แถว{% endif %}{% else %}ยังไม่เคยอ่านได้{% endif %}</dd></div>
+      <div><dt>ผลการอ่าน</dt><dd>{% if s.last_error %}{{ s.last_error }}{% elif s.last_synced_at %}อ่านได้ปกติ{% elif not s.enabled %}ปิดอยู่ ระบบยังไม่อ่าน{% else %}รออ่านรอบแรก{% endif %}{% if s.refresh_requested and s.enabled %} · รออ่านใหม่{% endif %}</dd></div>
+    </dl>
+    <div class="cluster">
+      {% if item.kind == "lookup" or s.provider == "google" %}<form method="post" class="inline">{% csrf_token %}<input type="hidden" name="kind" value="{{ item.kind }}"><input type="hidden" name="source" value="{% if item.kind == 'lookup' %}{{ s.key }}{% else %}{{ s.pk }}{% endif %}"><button class="btn btn--secondary" type="submit" name="do" value="refresh">อ่านใหม่ตอนนี้</button></form>
+      {% else %}<form method="post" class="inline" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="kind" value="koj"><input type="hidden" name="source" value="{{ s.pk }}"><label>ไฟล์ CSV <input type="file" name="file" accept=".csv" required></label><button class="btn btn--secondary" type="submit" name="do" value="import">นำเข้า CSV</button></form>{% endif %}
+      <a class="btn btn--secondary" href="{{ item.edit }}#sheet-form">แก้</a>
+    </div>
+  </article>
+  {% endwith %}{% endfor %}
+</section>
+{% empty %}<p>ยังไม่มีชีท</p>{% endfor %}
+
+{% if admin %}
+<section class="section" id="editors">
+  <h2>ผู้ดูแลชีท</h2>
+  <p class="muted">ผู้ดูแลชีทของหน่วยไหน แก้ เพิ่ม และเปิดปิดชีทของหน่วยนั้นและหน่วยย่อยข้างใต้ได้เอง การเลือกว่ากล่องไหนใน flow LINE อ่านชีทไหนยังเป็นงานของแอดมิน</p>
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">ชื่อ</th><th scope="col">หน่วย</th><th scope="col">ให้สิทธิ์โดย</th><th scope="col">ถอนสิทธิ์</th></tr></thead>
+    <tbody>{% for e in editors %}<tr>
+      <td class="cell--title">{{ e.row.user.staff_profile.display_name }}</td>
+      <td data-label="หน่วย">{{ e.unit }}</td>
+      <td data-label="ให้สิทธิ์โดย">{{ e.row.added_by.staff_profile.display_name|default:"ไม่ระบุ" }} · {{ e.row.added_at|thai_datetime }}</td>
+      <td data-label="ถอนสิทธิ์"><form method="post" class="cluster">{% csrf_token %}<input type="hidden" name="editor" value="{{ e.row.pk }}"><input name="reason" required maxlength="300" placeholder="เหตุผล" aria-label="เหตุผลที่ถอนสิทธิ์"><button class="btn btn--secondary" type="submit" name="do" value="revoke">ถอนสิทธิ์</button></form></td>
+    </tr>{% empty %}<tr><td colspan="4">ยังไม่มี ตอนนี้แอดมินแก้ชีทได้คนเดียว</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <form method="post" class="stack">{% csrf_token %}
+    <h3>เพิ่มผู้ดูแลชีท</h3>
+    <label>เจ้าหน้าที่<select name="person" required>{% for p in people %}<option value="{{ p.pk }}">{{ p.staff_profile.display_name }}</option>{% endfor %}</select></label>
+    <label>หน่วย<select name="unit" required>{% for key, label in all_units %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+    <label>เหตุผล<input name="reason" required maxlength="300"></label>
+    <div class="cluster"><button class="btn" type="submit" name="do" value="grant">เพิ่มผู้ดูแลชีท</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

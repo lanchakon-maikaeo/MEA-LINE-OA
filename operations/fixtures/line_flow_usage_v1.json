@@ -1,6 +1,6 @@
 {
- "version": "line-flow-usage-v1",
- "note": "ร่างตามขั้นที่แชตถามอยู่ตอนนี้ (28 ต.ค. 2569) ยังไม่เผยแพร่ ใช้ปรับหลัง grill ของกองนี้",
+ "version": "line-flow-usage-v2",
+ "note": "ADR 0035 (29 ต.ค. 2569): กดปุ่มแล้วกรอกรายละเอียดในข้อความเดียว ขาดส่วนไหนถามแค่ส่วนนั้น",
  "flow": {
   "key": "usage",
   "name": "ตรวจสอบการใช้ไฟฟ้า",
@@ -31,42 +31,35 @@
       "label": "เครื่องวัดฯ ผิดปกติ",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "subject=เครื่องวัดฯ ผิดปกติ"
      },
      {
       "id": "c1.b1",
       "label": "เครื่องวัดฯ ชำรุด",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "subject=เครื่องวัดฯ ชำรุด"
      },
      {
       "id": "c1.b2",
       "label": "เครื่องวัดฯ ถูกกระทำ",
       "full": "เครื่องวัดฯ มีการกระทำ",
       "note": "",
-      "set": ""
+      "set": "subject=เครื่องวัดฯ มีการกระทำ"
      },
      {
       "id": "c1.b3",
       "label": "ร้องเรียนไฟแพง",
       "full": "",
       "note": "",
-      "set": ""
+      "set": "subject=ร้องเรียนไฟแพง"
      },
      {
       "id": "c1.b4",
       "label": "ทบทวนหน่วยไฟฟ้า",
       "full": "ทบทวนหน่วยไฟฟ้าจากการร้องเรียน",
       "note": "",
-      "set": ""
-     },
-     {
-      "id": "c1.b5",
-      "label": "ติดตามเรื่อง",
-      "full": "",
-      "note": "",
-      "set": ""
+      "set": "subject=ทบทวนหน่วยไฟฟ้าจากการร้องเรียน"
      }
     ],
     "config": {},
@@ -75,61 +68,72 @@
     "w": 260
    },
    {
-    "id": "meters",
+    "id": "report",
     "kind": "ask",
-    "title": "หมายเลขเครื่องวัดฯ",
-    "text": "พิมพ์หมายเลขเครื่องวัดฯ หลายเครื่องคั่นด้วย ,\nเช่น 12345678, 12345679",
+    "title": "กรุณาพิมพ์รายละเอียด",
+    "text": "หมายเลขเครื่องวัดฯ, การไฟฟ้าเขต, ลักษณะที่พบ\nเช่น 12345678, วัดเลียบ, PLS ถูกแกะ",
     "buttons": [],
     "config": {
-     "field": "meter_numbers",
-     "rule": "numbers"
+     "field": "report",
+     "rule": "usage_report",
+     "no_edit": "1"
     },
     "x": 680,
     "y": 40,
     "w": 260
    },
    {
-    "id": "district",
+    "id": "meters",
     "kind": "ask",
-    "title": "เขตของเครื่องวัดฯ",
-    "text": "พิมพ์ชื่อเขต เช่น เขตวัดเลียบ",
+    "title": "หมายเลขเครื่องวัดฯ",
+    "text": "กรุณาพิมพ์หมายเลขเครื่องวัดฯ หากมีหลายเครื่องคั่นด้วย ,\nเช่น 12345678, 12345679",
     "buttons": [],
     "config": {
-     "field": "district",
-     "rule": "district"
+     "field": "meter_numbers",
+     "rule": "meters_8",
+     "only_missing": "1"
     },
-    "x": 1000,
+    "x": 1020,
     "y": 40,
     "w": 260
    },
    {
-    "id": "more",
+    "id": "district",
     "kind": "ask",
-    "title": "รายละเอียดเพิ่มเติม",
-    "text": "เช่น สิ่งที่พบ ช่วงเวลา หรือเลขผู้ใช้ไฟ (CA) หรือกดข้าม",
-    "buttons": [
-     {
-      "id": "more.b0",
-      "label": "ข้าม",
-      "full": "",
-      "note": "",
-      "set": ""
-     }
-    ],
+    "title": "กรุณาพิมพ์การไฟฟ้าเขต",
+    "text": "เช่น วัดเลียบ",
+    "buttons": [],
+    "config": {
+     "field": "district",
+     "rule": "district",
+     "only_missing": "1",
+     "label": "การไฟฟ้าเขต"
+    },
+    "x": 1020,
+    "y": 220,
+    "w": 260
+   },
+   {
+    "id": "found",
+    "kind": "ask",
+    "title": "กรุณาพิมพ์ลักษณะที่พบ",
+    "text": "เช่น PLS ถูกแกะ",
+    "buttons": [],
     "config": {
      "field": "description",
      "rule": "text",
-     "optional": "1"
+     "only_missing": "1",
+     "label": "ลักษณะที่พบ"
     },
-    "x": 1320,
-    "y": 40,
+    "x": 1020,
+    "y": 400,
     "w": 260
    },
    {
     "id": "sum",
     "kind": "summary",
     "title": "สรุปเรื่อง: ตรวจสอบการใช้ไฟฟ้า",
-    "text": "",
+    "text": "เรื่อง: เครื่องวัดฯ ผิดปกติ\nหมายเลขเครื่องวัดฯ: 12345678\nการไฟฟ้าเขต: เขตวัดเลียบ\nลักษณะที่พบ: PLS ถูกแกะ",
     "buttons": [
      {
       "id": "sum.b0",
@@ -170,22 +174,11 @@
     "id": "done",
     "kind": "result",
     "title": "ยื่นเรื่องแล้ว",
-    "text": "ติดตามได้ที่ เรื่องของฉัน",
+    "text": "ติดตามความคืบหน้าได้ที่เรื่องของฉัน",
     "buttons": [],
     "config": {},
     "x": 2280,
     "y": 40,
-    "w": 260
-   },
-   {
-    "id": "track",
-    "kind": "find_case",
-    "title": "เรื่องของฉัน",
-    "text": "แสดงเรื่องของผู้แจ้งในกองนี้",
-    "buttons": [],
-    "config": {},
-    "x": 680,
-    "y": 270,
     "w": 260
    }
   ],
@@ -201,70 +194,35 @@
     "id": "e2",
     "from": "c1",
     "port": "c1.b0",
-    "to": "meters",
+    "to": "report",
     "label": ""
    },
    {
     "id": "e3",
     "from": "c1",
     "port": "c1.b1",
-    "to": "meters",
+    "to": "report",
     "label": ""
    },
    {
     "id": "e4",
     "from": "c1",
     "port": "c1.b2",
-    "to": "meters",
+    "to": "report",
     "label": ""
    },
    {
     "id": "e5",
     "from": "c1",
     "port": "c1.b3",
-    "to": "meters",
+    "to": "report",
     "label": ""
    },
    {
     "id": "e6",
     "from": "c1",
     "port": "c1.b4",
-    "to": "meters",
-    "label": ""
-   },
-   {
-    "id": "e7",
-    "from": "c1",
-    "port": "c1.b5",
-    "to": "track",
-    "label": ""
-   },
-   {
-    "id": "e8",
-    "from": "meters",
-    "port": null,
-    "to": "district",
-    "label": ""
-   },
-   {
-    "id": "e9",
-    "from": "district",
-    "port": null,
-    "to": "more",
-    "label": ""
-   },
-   {
-    "id": "e10",
-    "from": "more",
-    "port": "more.b0",
-    "to": "sum",
-    "label": ""
-   },
-   {
-    "id": "e11",
-    "from": "more",
-    "port": null,
-    "to": "sum",
+    "to": "report",
     "label": ""
    },
    {
@@ -279,6 +237,34 @@
     "from": "case",
     "port": null,
     "to": "done",
+    "label": ""
+   },
+   {
+    "id": "e14",
+    "from": "report",
+    "port": null,
+    "to": "meters",
+    "label": ""
+   },
+   {
+    "id": "e15",
+    "from": "meters",
+    "port": null,
+    "to": "district",
+    "label": ""
+   },
+   {
+    "id": "e16",
+    "from": "district",
+    "port": null,
+    "to": "found",
+    "label": ""
+   },
+   {
+    "id": "e17",
+    "from": "found",
+    "port": null,
+    "to": "sum",
     "label": ""
    }
   ]

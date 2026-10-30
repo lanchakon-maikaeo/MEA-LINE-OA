@@ -13,7 +13,8 @@ class SheetSource(models.Model):
     enabled = models.BooleanField(default=False)
     spreadsheet_id = models.CharField(max_length=200)
     sheet_name = models.CharField(max_length=100)
-    key_column = models.CharField(max_length=3, default="J")
+    # The number columns, comma separated: ซจ. finds a repair by its letter or its WO (ADR 0034).
+    key_column = models.CharField(max_length=20, default="J")
     status_column = models.CharField(max_length=3, default="R")
     # รหัสพนักงาน of the reporter, comma separated (เจษ: "ใช้ Employee_ID แมพ"); a form whose
     # questions moved over the years keeps the ID in more than one column ("B,M").
@@ -43,6 +44,18 @@ class SheetSource(models.Model):
     # [{"column": "F", "label": "วันที่รับ"}]: up to four more cells shown beside the status.
     extra_columns = models.JSONField(default=list, blank=True)
     ai_words = models.BooleanField(default=True)  # AI may word the answer (ADR 0027)
+    contact = models.CharField(max_length=100, blank=True)  # said when a number is not found
+    # หน่วยเจ้าของชีท (ADR 0033): its ผู้ดูแลชีท and those of the units above change it; a sheet
+    # of no unit is the admins' only.
+    division = models.ForeignKey(
+        "operations.Division", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    section = models.ForeignKey(
+        "operations.Section", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    work_group = models.ForeignKey(
+        "operations.WorkGroup", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     last_synced_at = models.DateTimeField(null=True, blank=True)
     next_sync_at = models.DateTimeField(default=timezone.now)
     refresh_requested = models.BooleanField(default=False)
@@ -59,6 +72,27 @@ class SheetSource(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class SheetEditor(models.Model):
+    """ผู้ดูแลชีท (ADR 0033): one person an admin lets change the sheets of one กอง, แผนก or
+    กลุ่มงาน and of the units below it, both kinds of sheet; one row each, taken back alone."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+")
+    division = models.ForeignKey("operations.Division", on_delete=models.CASCADE, related_name="+")
+    section = models.ForeignKey(
+        "operations.Section", null=True, blank=True, on_delete=models.CASCADE, related_name="+"
+    )
+    work_group = models.ForeignKey(
+        "operations.WorkGroup", null=True, blank=True, on_delete=models.CASCADE, related_name="+"
+    )
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["pk"]
 
 
 class SheetEntry(models.Model):
