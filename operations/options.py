@@ -643,7 +643,7 @@ STEP_DEFAULTS = (
     ("submitted", "รอคัดกรอง", "received", "ADR 0028"),
     ("triage", "กำลังคัดกรอง", "received", "ADR 0028"),
     ("awaiting_approval", "รอกองรับเรื่อง", "working", "30 ต.ค. 2569"),
-    ("awaiting_execution", "รอดำเนินการ", "received", "ADR 0028"),
+    ("awaiting_execution", "รอดำเนินการ", "working", "30 ต.ค. 2569"),
     ("in_progress", "กำลังดำเนินการ", "working", "ADR 0028"),
     ("on_hold", "พักเรื่อง", "working", "ADR 0028"),
     ("awaiting_info", "รอข้อมูลเพิ่ม", "need_you", "ADR 0028"),
@@ -660,7 +660,8 @@ for _status, _label, _default, _agreed in STEP_DEFAULTS:
     )
 
 # 30 ต.ค. 2569: a case waiting for its division reads กำลังดำเนินการ to the LINE user; staff
-# pages keep รอกองรับเรื่อง and its queue.
+# pages keep รอกองรับเรื่อง and its queue. รอดำเนินการ is then at the same step, so the bar
+# never goes back once the division takes the case.
 LINE_AWAITING = "line_awaiting_approval"
 OPTIONS[LINE_AWAITING] = Option(
     "สถานะที่ผู้ใช้ LINE เห็นเมื่อเรื่องรอกองรับเรื่อง",

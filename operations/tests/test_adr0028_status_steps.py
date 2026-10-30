@@ -82,7 +82,10 @@ class LineTests(StatusTestCase):
         self.assertIn("กำลังดำเนินการ", listing)
 
     def test_a_case_waiting_for_its_division_reads_in_progress(self):
-        # 30 ต.ค. 2569 Q3, Q5: the LINE user reads กำลังดำเนินการ; staff pages keep รอกองรับเรื่อง.
+        # 30 ต.ค. 2569: once the division takes it, รอดำเนินการ stays at the same step.
+        text = texts(self.type(ALICE, self.case.number))
+        self.assertIn("●●○○ กำลังดำเนินการ\nสถานะในระบบ: รอดำเนินการ", text)
+        # Q3, Q5: the LINE user reads กำลังดำเนินการ; staff pages keep รอกองรับเรื่อง.
         Case.objects.filter(pk=self.case.pk).update(status=S.AWAITING_APPROVAL)
         text = texts(self.type(ALICE, self.case.number))
         self.assertIn("●●○○ กำลังดำเนินการ", text)
