@@ -9,7 +9,7 @@ from datetime import timedelta
 from django.test import Client
 from django.utils import timezone
 
-from operations import case_chat, warehouse
+from operations import calendars, case_chat, warehouse
 from operations.models import (
     Appointment,
     AuthorityGrant,
@@ -207,6 +207,10 @@ class WarehouseTests(WorkTestCase):
 
 
 class CalendarTests(WorkTestCase):
+    def setUp(self):
+        super().setUp()
+        Calendar.objects.filter(key="notebook").update(default_times=[])  # staff open, as before
+
     def test_staff_open_slots_and_a_confirmation_reaches_the_requester(self):
         client = Client()
         client.force_login(self.kcw)
@@ -220,7 +224,8 @@ class CalendarTests(WorkTestCase):
         self.open_tile()
         self.press(ALICE, "โน้ตบุ๊กและหัวอ่าน")
         reply = self.type(ALICE, "ขอติดตั้งโปรแกรมอ่านมิเตอร์")
-        self.press(ALICE, next(iter(buttons(reply))))
+        first = CalendarSlot.objects.order_by("starts_at").first()
+        self.press(ALICE, calendars.short(first), reply)  # ADR 0036: a time on its day's card
         self.press(ALICE, "ยืนยันส่งเรื่อง")  # รอบใหม่ Q8: the slot is confirmed at the summary
         appointment = Appointment.objects.get()
         page = client.get("/divisions/กคว./calendar/?cal=notebook")

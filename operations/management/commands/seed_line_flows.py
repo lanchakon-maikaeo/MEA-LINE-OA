@@ -74,7 +74,12 @@ class Command(BaseCommand):
                 if division is None:
                     continue
                 Calendar.objects.get_or_create(
-                    key=spec["key"], defaults={"name": spec["name"], "division": division}
+                    key=spec["key"],
+                    defaults={
+                        "name": spec["name"],
+                        "division": division,
+                        "default_times": spec.get("default_times", []),  # ADR 0036
+                    },
                 )
                 # กำหนดจ่ายและวันส่งรถ start empty; กคว. fills them in (Q17, Q30).
                 DivisionSchedule.objects.get_or_create(

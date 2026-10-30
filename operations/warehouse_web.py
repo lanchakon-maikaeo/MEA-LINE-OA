@@ -315,6 +315,7 @@ def calendar_page(request, code):
             "waiting": waiting,
             "methods": [m for m in Appointment.Method.choices if m[0]],
             "today": today,
+            "now": timezone.now(),
         },
     )
 
@@ -352,6 +353,21 @@ def _calendar_post(request, code, choices, picked_cal, start):
             )
             calendars.close_slot(request.user, slot)
             messages.success(request, "ปิดช่วงนี้แล้ว คนที่ขอไว้ยังอยู่")
+        elif action == "reopen":
+            slot = get_object_or_404(
+                CalendarSlot, pk=request.POST.get("slot"), calendar__in=choices
+            )
+            calendars.reopen_slot(request.user, slot)
+            messages.success(request, "เปิดช่วงนี้อีกครั้งแล้ว")
+        elif action == "close_day":
+            # ADR 0036 Q23: a day off for one calendar; requests already made stay.
+            if day is None:
+                raise ValidationError("เลือกวันก่อน")
+            calendar = next((c for c in choices if c.key == request.POST.get("calendar")), None)
+            if calendar is None:
+                raise ValidationError("เลือกว่าเป็นนัดเรื่องไหน")
+            closed = calendars.close_day(request.user, calendar, day)
+            messages.success(request, f"ปิด {closed} ช่วงของ{calendar.name}วันนี้แล้ว คนที่ขอไว้ยังอยู่")
         elif action in ("confirm", "move", "reject", "done"):
             appointment = get_object_or_404(
                 Appointment, pk=request.POST.get("appointment"), calendar__in=choices

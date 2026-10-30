@@ -51,6 +51,7 @@ class CaseCardTests(WorkTestCase):
         )
 
     def test_an_appointment_is_confirmed_from_the_card(self):
+        Calendar.objects.filter(key="notebook").update(default_times=[])  # staff open, as before
         start = timezone.now() + timedelta(days=2)
         CalendarSlot.objects.create(
             calendar=Calendar.objects.get(key="notebook"),
@@ -106,12 +107,14 @@ class CalendarTests(WorkTestCase):
         page = clerk.get(url).content.decode()
         self.assertIn("วันหยุดพิเศษ", page)
         self.assertIn("mcal__day", page)
+        on_day = CalendarSlot.objects.filter(starts_at__date=day)
+        self.assertFalse(on_day.exists())  # ADR 0036: the default times skip a holiday
         clerk.post(url, {"action": "add", "day": day.isoformat(), "times": "09:00"})
-        self.assertFalse(CalendarSlot.objects.exists())  # asked first on a holiday
+        self.assertFalse(on_day.exists())  # asked first on a holiday
         clerk.post(
             url, {"action": "add", "day": day.isoformat(), "times": "09:00", "on_holiday": "1"}
         )
-        self.assertEqual(CalendarSlot.objects.count(), 1)
+        self.assertEqual(on_day.count(), 1)
 
     def test_working_days_skip_holidays(self):
         monday = date(2026, 11, 2)

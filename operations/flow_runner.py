@@ -383,22 +383,7 @@ def render(turn, draft):
     elif kind == "sheet_lookup":
         text = box["text"] or box["title"]  # the box's name is for the editor (เจษ's flow)
     elif kind == "book":
-        from operations import calendars  # local: calendars builds on this module
-
-        slots = calendars.free_slots(box["config"].get("calendar", ""))
-        if not slots:
-            text = f"{box['title']}\nขณะนี้ยังไม่มีช่วงเวลาว่าง เจ้าหน้าที่จะติดต่อกลับเพื่อนัดหมายอีกครั้ง"
-            quick = [(*b("ไปต่อ", "flow", {"node": box["id"], "slot": ""}, draft), "ไปต่อ")]
-        else:
-            text = "\n".join(x for x in (box["title"], box["text"], "กรุณาเลือกช่วงเวลาที่ต้องการ") if x)
-            quick = [
-                (
-                    *b(calendars.short(s), "flow", {"node": box["id"], "slot": s.pk}, draft),
-                    calendars.label(s),
-                )
-                for s in slots[: conversation.MAX_QUICK - 1]
-            ]
-        return turn.say(text, quick)
+        return _book(turn, draft, box, state)
     elif kind == "message" and box["config"].get("style") == "carousel":
         # ADR 0030: one bubble per button with its full name (the division carousel).
         turn.say(box["text"] or box["title"])
@@ -430,6 +415,128 @@ def render(turn, draft):
         label, data = b(button["label"], "flow", value, draft, ttl)
         quick.append((label, data, button.get("full") or button["label"]))
     turn.say(text, quick or None)
+
+
+SLOT_BUSY = "ช่วงเวลาอยู่ระหว่างดำเนินการ กรุณาเลือกช่วงใหม่"  # ADR 0036 Q20
+CALL_BACK = ("ขอให้ติดต่อกลับ", "ให้เจ้าหน้าที่ติดต่อกลับ")  # LINE: a label of 20 characters
+ANY_DAY = "วันไหนก็ได้"
+
+
+def _book(turn, draft, box, state):
+    """ADR 0036: a card per bookable day with its times, a full time shown as เต็ม (Q16 to
+    Q18); ให้เจ้าหน้าที่ติดต่อกลับ asks only the day that suits (Q19, Q25)."""
+    from operations import calendars  # local: calendars builds on this module
+
+    b = turn.button
+    if state.get("pick_day") == box["id"]:
+        quick = [
+            (*b(calendars.day_short(day), "flow", value, draft), calendars.day_full(day))
+            for day, value in (
+                (day, {"node": box["id"], "day": day.isoformat()})
+                for day in calendars.bookable_days(turn.now)
+            )
+        ]
+        quick.append((*b(ANY_DAY, "flow", {"node": box["id"], "day": ""}, draft), ANY_DAY))
+        return turn.say("สะดวกวันไหน\nเจ้าหน้าที่จะติดต่อกลับเพื่อนัดเวลา", quick)
+    cards = calendars.day_cards(box["config"].get("calendar", ""), turn.now)
+    if not any(free for _, times in cards for _, free in times):
+        text = f"{box['title']}\nขณะนี้ยังไม่มีช่วงเวลาว่าง เจ้าหน้าที่จะติดต่อกลับเพื่อนัดหมายอีกครั้ง"
+        return turn.say(
+            text, [(*b("ไปต่อ", "flow", {"node": box["id"], "slot": ""}, draft), "ไปต่อ")]
+        )
+    turn.say("\n".join(x for x in (box["title"], box["text"]) if x))
+    message = _day_cards(turn, draft, box, cards)
+    value = {"node": box["id"], "callback": 1}
+    label, data = b(CALL_BACK[0], "flow", value, draft)
+    message["quickReply"] = {"items": [conversation._postback(label, data, CALL_BACK[1])]}
+    turn.replies.append(message)
+    return None
+
+
+def _day_cards(turn, draft, box, cards):
+    """The Flex carousel of _book: the day on top, its times two to a row."""
+    from operations import calendars  # local: calendars builds on this module
+
+    bubbles = []
+    for day, times in cards:
+        cells = []
+        for slot, free in times:
+            if free:
+                value = {"node": box["id"], "slot": slot.pk}
+                label, data = turn.button(calendars.clock(slot), "flow", value, draft)
+                action = {
+                    "type": "postback",
+                    "label": label,
+                    "data": data,
+                    "displayText": calendars.short(slot),
+                }
+                cells.append(
+                    {"type": "button", "style": "secondary", "height": "sm", "action": action}
+                )
+            else:
+                cells.append(
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "height": "40px",
+                        "justifyContent": "center",
+                        "cornerRadius": "md",
+                        "backgroundColor": "#F2F2F2",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": f"{calendars.clock(slot)} เต็ม",
+                                "size": "sm",
+                                "color": "#AAAAAA",
+                                "align": "center",
+                            }
+                        ],
+                    }
+                )
+        rows = []
+        for start in range(0, len(cells), 2):
+            pair = cells[start : start + 2]
+            rows.append(
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "spacing": "sm",
+                    "contents": pair + ([{"type": "filler"}] if len(pair) == 1 else []),
+                }
+            )
+        bubbles.append(
+            {
+                "type": "bubble",
+                "size": "kilo",
+                "header": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "paddingAll": "12px",
+                    "backgroundColor": "#E8F5E9",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": calendars.day_full(day),
+                            "weight": "bold",
+                            "size": "sm",
+                            "color": "#1B5E20",
+                        }
+                    ],
+                },
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "spacing": "sm",
+                    "paddingAll": "12px",
+                    "contents": rows,
+                },
+            }
+        )
+    return {
+        "type": "flex",
+        "altText": box["title"] or "นัดวันเวลา",
+        "contents": {"type": "carousel", "contents": bubbles},
+    }
 
 
 def summary(draft, graph, box):
@@ -489,6 +596,8 @@ def summary(draft, graph, box):
             lines.append(f"{label}: {', '.join(value) if isinstance(value, list) else value}")
     if values.get("appointment"):
         lines.append(f"ขอนัด: {values['appointment']['label']} (รอเจ้าหน้าที่ยืนยัน)")
+    if values.get("preferred_day"):
+        lines.append(f"วันที่สะดวก: {values['preferred_day']} (เจ้าหน้าที่จะติดต่อกลับเพื่อนัดเวลา)")
     for warning in values.get("warnings", []):
         lines.append(f"หมายเหตุ: {warning}")
     lines.append("กรุณาตรวจสอบข้อมูล และกดยืนยันส่งเรื่องภายใน 30 นาที สามารถแก้ไขได้")
@@ -538,13 +647,30 @@ def on_button(turn, draft, value):
         if value["slot"]:
             slot, problem = calendars.hold(value["slot"], draft)
             if problem:
-                turn.say(problem)
+                turn.say(SLOT_BUSY)
                 return conversation._ask(turn, draft)
             values["appointment"] = {
                 "slot": slot.pk,
                 "label": calendars.label(slot),
                 "node": box["id"],
             }
+            values.pop("preferred_day", None)
+        _save(turn, draft, state)
+        return _go(turn, draft, follow(graph, box["id"]))
+    if "callback" in value and box["kind"] == "book":
+        state["pick_day"] = box["id"]  # ADR 0036 Q19: the day that suits, no time
+        _save(turn, draft, state)
+        return conversation._ask(turn, draft)
+    if "day" in value and box["kind"] == "book":
+        from datetime import date
+
+        from operations import calendars  # local: calendars builds on this module
+
+        state.pop("pick_day", None)
+        values.pop("appointment", None)
+        calendars.drop_request(draft)
+        day = date.fromisoformat(value["day"]) if value["day"] else None
+        values["preferred_day"] = calendars.day_full(day) if day else ANY_DAY
         _save(turn, draft, state)
         return _go(turn, draft, follow(graph, box["id"]))
     if "edit" in value or "back" in value:
@@ -1018,6 +1144,8 @@ def payload(draft, config, flow):
             bits.append("MEA No.: " + ", ".join(values["mea_numbers"]))
         if values.get("appointment"):
             bits.append(f"ขอนัด: {values['appointment']['label']}")
+        if values.get("preferred_day"):
+            bits.append(f"วันที่สะดวก: {values['preferred_day']} (ให้เจ้าหน้าที่ติดต่อกลับเพื่อนัดเวลา)")
         data["description"] = "\n".join(b for b in bits if b) or dict(Case.Topic.choices).get(
             topic, "แจ้งปัญหา"
         )
@@ -1059,7 +1187,7 @@ def _keep_slot(turn, draft, graph, state):
     state["values"].pop("appointment", None)
     state["node"] = chosen.get("node") or state["node"]
     _save(turn, draft, state)
-    turn.say("ช่วงเวลาอยู่ระหว่างดำเนินการ กรุณาเลือกช่วงใหม่")
+    turn.say(SLOT_BUSY)
     conversation._ask(turn, draft)
     return False
 

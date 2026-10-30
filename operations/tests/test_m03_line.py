@@ -90,6 +90,9 @@ def buttons(messages):
                 for button in body["contents"]:
                     if "action" in button:
                         found[button["action"]["label"]] = button["action"]["data"]
+                    for inner in button.get("contents", []):  # ADR 0036: a card's row of times
+                        if "action" in inner:
+                            found[inner["action"]["displayText"]] = inner["action"]["data"]
     return found
 
 
