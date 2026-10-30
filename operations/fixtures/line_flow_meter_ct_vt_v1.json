@@ -1,6 +1,6 @@
 {
- "version": "line-flow-meter-ct-vt-v2",
- "note": "ข้อสรุป grill กคว. 27 ต.ค. 2569 รอบใหม่ (เลขติดตามสี่ชนิด รายละเอียดแทนแถว ปุ่มแก้ไข) ตัวอย่างเลขเป็นข้อมูลสมมุติ",
+ "version": "line-flow-meter-ct-vt-v3",
+ "note": "ข้อสรุป grill กคว. 27 ต.ค. 2569 รอบใหม่ ปรับ 30 ต.ค. 2569 ตามคอมเมนต์ผู้ใช้: ติดตามใบเบิกและใบส่งคืนจบที่เลข แล้วถามรายละเอียดเพิ่มเติมที่กดข้ามได้ ตัวอย่างเลขเป็นข้อมูลสมมุติ",
  "flow": {
   "key": "meter-ct-vt",
   "name": "Meter, CT, VT",
@@ -190,233 +190,6 @@
     "w": 260
    },
    {
-    "id": "isset",
-    "kind": "branch",
-    "title": "เป็นชุดไหม",
-    "text": "ระบบดูจากปุ่มแรกที่ผู้ใช้กด",
-    "buttons": [
-     {
-      "id": "isset.b0",
-      "label": "ชุด",
-      "full": "",
-      "note": "",
-      "set": "group=set"
-     }
-    ],
-    "config": {},
-    "x": 1320,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "kind",
-    "kind": "message",
-    "title": "กรุณาเลือกชุดมิเตอร์และอุปกรณ์ประกอบ",
-    "text": "หนึ่งใบเป็นหนึ่งชุด",
-    "buttons": [
-     {
-      "id": "kind.b0",
-      "label": "มิเตอร์ + CT",
-      "full": "",
-      "note": "",
-      "set": "set_kind=meter_ct"
-     },
-     {
-      "id": "kind.b1",
-      "label": "มิเตอร์ + CT + VT",
-      "full": "",
-      "note": "",
-      "set": "set_kind=meter_ct_vt"
-     },
-     {
-      "id": "kind.b2",
-      "label": "CT อย่างเดียว",
-      "full": "",
-      "note": "",
-      "set": "set_kind=ct"
-     },
-     {
-      "id": "kind.b3",
-      "label": "CT + VT",
-      "full": "",
-      "note": "",
-      "set": "set_kind=ct_vt"
-     }
-    ],
-    "config": {},
-    "x": 1640,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "hasm",
-    "kind": "branch",
-    "title": "ชุดนี้มีมิเตอร์ไหม",
-    "text": "ระบบดูจากชุดที่เลือก",
-    "buttons": [
-     {
-      "id": "hasm.b0",
-      "label": "มีมิเตอร์",
-      "full": "",
-      "note": "",
-      "set": "set_kind=meter_ct|meter_ct_vt"
-     }
-    ],
-    "config": {},
-    "x": 1960,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "setm",
-    "kind": "ask",
-    "title": "ชุดประกอบมิเตอร์",
-    "text": "พิมพ์หมายเลขเครื่องวัดฯ กับขนาด คั่นด้วย ,\nเช่น 12345678, 5(100)A",
-    "buttons": [],
-    "config": {
-     "field": "rows.meter",
-     "rule": "meter_row",
-     "max_rows": "1"
-    },
-    "x": 2280,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "setct",
-    "kind": "ask",
-    "title": "ขนาด CT",
-    "text": "พิมพ์ขนาด CT เช่น 100/5A",
-    "buttons": [],
-    "config": {
-     "field": "ct_size",
-     "rule": "size"
-    },
-    "x": 2280,
-    "y": 270,
-    "w": 260
-   },
-   {
-    "id": "hasvt",
-    "kind": "branch",
-    "title": "ชุดนี้มี VT ไหม",
-    "text": "ระบบดูจากชุดที่เลือก",
-    "buttons": [
-     {
-      "id": "hasvt.b0",
-      "label": "มี VT",
-      "full": "",
-      "note": "",
-      "set": "set_kind=meter_ct_vt|ct_vt"
-     }
-    ],
-    "config": {},
-    "x": 2600,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "setvt",
-    "kind": "ask",
-    "title": "ขนาด VT",
-    "text": "พิมพ์ขนาด VT เช่น 11000/110V",
-    "buttons": [],
-    "config": {
-     "field": "vt_size",
-     "rule": "size"
-    },
-    "x": 2920,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "wrd",
-    "kind": "branch",
-    "title": "เบิกหรือส่งคืน",
-    "text": "ระบบดูจากปุ่มที่ผู้ใช้กด",
-    "buttons": [
-     {
-      "id": "wrd.b0",
-      "label": "เบิก",
-      "full": "",
-      "note": "",
-      "set": "case_kind=withdrawal"
-     },
-     {
-      "id": "wrd.b1",
-      "label": "ส่งคืน",
-      "full": "",
-      "note": "",
-      "set": "case_kind=return"
-     }
-    ],
-    "config": {},
-    "x": 1640,
-    "y": 270,
-    "w": 260
-   },
-   {
-    "id": "dw",
-    "kind": "ask",
-    "title": "รายละเอียดอุปกรณ์ที่เบิก",
-    "text": "พิมพ์อุปกรณ์ ขนาด จำนวน และเหตุผลความจำเป็น เช่น มิเตอร์ 5(100)A 2 เครื่อง ใช้เพื่อติดตั้งให้ผู้ใช้ไฟฟ้ารายใหม่",
-    "buttons": [],
-    "config": {
-     "field": "details",
-     "rule": "text"
-    },
-    "x": 1960,
-    "y": 270,
-    "w": 260
-   },
-   {
-    "id": "dr",
-    "kind": "ask",
-    "title": "รายละเอียดของที่ส่งคืน",
-    "text": "พิมพ์อุปกรณ์ ขนาด จำนวน สภาพ และเหตุผลที่ส่งคืน\nเช่น มิเตอร์ 5(15)A 1 เครื่อง ชำรุด หน้าจอไม่ติด",
-    "buttons": [],
-    "config": {
-     "field": "details",
-     "rule": "text"
-    },
-    "x": 1960,
-    "y": 500,
-    "w": 260
-   },
-   {
-    "id": "setq",
-    "kind": "branch",
-    "title": "ต้องถามตัวคูณไหม",
-    "text": "ถามเฉพาะชุด",
-    "buttons": [
-     {
-      "id": "setq.b0",
-      "label": "ชุด",
-      "full": "",
-      "note": "",
-      "set": "group=set"
-     }
-    ],
-    "config": {},
-    "x": 2280,
-    "y": 500,
-    "w": 260
-   },
-   {
-    "id": "mult",
-    "kind": "ask",
-    "title": "ตัวคูณ",
-    "text": "พิมพ์ตัวคูณที่เขียนในเอกสาร เช่น 2000\nระบบจะเทียบกับขนาดที่พิมพ์ไว้",
-    "buttons": [],
-    "config": {
-     "field": "multiplier",
-     "rule": "multiplier"
-    },
-    "x": 2600,
-    "y": 270,
-    "w": 260
-   },
-   {
     "id": "wrs",
     "kind": "branch",
     "title": "สรุปเบิกหรือส่งคืน",
@@ -446,7 +219,7 @@
     "id": "sumw",
     "kind": "summary",
     "title": "สรุปเรื่อง: การเบิก",
-    "text": "ส่งถึง: กคว.\nเลขที่ใบเบิก: 4500012345/10\nรายละเอียด: มิเตอร์ 5(100)A 2 เครื่อง ใช้ติดตั้งผู้ใช้ไฟรายใหม่",
+    "text": "ส่งถึง: กคว.\nเลขที่ใบเบิก: 4500012345\nรายละเอียด: มิเตอร์ 5(100)A 2 เครื่อง",
     "buttons": [
      {
       "id": "sumw.b0",
@@ -834,60 +607,6 @@
     "w": 260
    },
    {
-    "id": "wrds",
-    "kind": "branch",
-    "title": "ชุดนี้เบิกหรือส่งคืน",
-    "text": "ระบบดูจากปุ่มที่ผู้ใช้กด",
-    "buttons": [
-     {
-      "id": "wrds.b0",
-      "label": "เบิก",
-      "full": "",
-      "note": "",
-      "set": "case_kind=withdrawal"
-     },
-     {
-      "id": "wrds.b1",
-      "label": "ส่งคืน",
-      "full": "",
-      "note": "",
-      "set": "case_kind=return"
-     }
-    ],
-    "config": {},
-    "x": 3240,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "dws",
-    "kind": "ask",
-    "title": "กรุณาระบุเหตุผลในการขอเบิก",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "field": "details",
-     "rule": "text"
-    },
-    "x": 3560,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "drs",
-    "kind": "ask",
-    "title": "กรุณาระบุเหตุผลในการขอส่งคืนชุดนี้",
-    "text": "",
-    "buttons": [],
-    "config": {
-     "field": "details",
-     "rule": "text"
-    },
-    "x": 3560,
-    "y": 270,
-    "w": 260
-   },
-   {
     "id": "nbappt",
     "kind": "branch",
     "title": "เลือกช่วงเวลาไว้ไหม",
@@ -915,6 +634,29 @@
     "config": {},
     "x": 1960,
     "y": 1190,
+    "w": 260
+   },
+   {
+    "id": "tdet",
+    "kind": "ask",
+    "title": "รายละเอียดเพิ่มเติม",
+    "text": "กรุณาพิมพ์อุปกรณ์ ขนาด จำนวน หรือข้อมูลอื่น ถ้าไม่มีกดข้าม",
+    "buttons": [
+     {
+      "id": "tdet.b0",
+      "label": "ข้าม",
+      "full": "",
+      "note": "",
+      "set": ""
+     }
+    ],
+    "config": {
+     "field": "details",
+     "rule": "text",
+     "optional": "1"
+    },
+    "x": 1320,
+    "y": 160,
     "w": 260
    }
   ],
@@ -1015,160 +757,6 @@
     "from": "c2ct",
     "port": "c2ct.b2",
     "to": "repair",
-    "label": ""
-   },
-   {
-    "id": "e15",
-    "from": "tw",
-    "port": null,
-    "to": "isset",
-    "label": ""
-   },
-   {
-    "id": "e16",
-    "from": "tr",
-    "port": null,
-    "to": "isset",
-    "label": ""
-   },
-   {
-    "id": "e17",
-    "from": "isset",
-    "port": "isset.b0",
-    "to": "kind",
-    "label": ""
-   },
-   {
-    "id": "e18",
-    "from": "isset",
-    "port": null,
-    "to": "wrd",
-    "label": ""
-   },
-   {
-    "id": "e19",
-    "from": "kind",
-    "port": "kind.b0",
-    "to": "hasm",
-    "label": ""
-   },
-   {
-    "id": "e20",
-    "from": "kind",
-    "port": "kind.b1",
-    "to": "hasm",
-    "label": ""
-   },
-   {
-    "id": "e21",
-    "from": "kind",
-    "port": "kind.b2",
-    "to": "hasm",
-    "label": ""
-   },
-   {
-    "id": "e22",
-    "from": "kind",
-    "port": "kind.b3",
-    "to": "hasm",
-    "label": ""
-   },
-   {
-    "id": "e23",
-    "from": "hasm",
-    "port": "hasm.b0",
-    "to": "setm",
-    "label": ""
-   },
-   {
-    "id": "e24",
-    "from": "hasm",
-    "port": null,
-    "to": "setct",
-    "label": ""
-   },
-   {
-    "id": "e25",
-    "from": "setm",
-    "port": null,
-    "to": "setct",
-    "label": ""
-   },
-   {
-    "id": "e26",
-    "from": "setct",
-    "port": null,
-    "to": "hasvt",
-    "label": ""
-   },
-   {
-    "id": "e27",
-    "from": "hasvt",
-    "port": "hasvt.b0",
-    "to": "setvt",
-    "label": ""
-   },
-   {
-    "id": "e28",
-    "from": "hasvt",
-    "port": null,
-    "to": "wrds",
-    "label": ""
-   },
-   {
-    "id": "e29",
-    "from": "setvt",
-    "port": null,
-    "to": "wrds",
-    "label": ""
-   },
-   {
-    "id": "e30",
-    "from": "wrd",
-    "port": "wrd.b0",
-    "to": "dw",
-    "label": ""
-   },
-   {
-    "id": "e31",
-    "from": "wrd",
-    "port": "wrd.b1",
-    "to": "dr",
-    "label": ""
-   },
-   {
-    "id": "e32",
-    "from": "dw",
-    "port": null,
-    "to": "setq",
-    "label": ""
-   },
-   {
-    "id": "e33",
-    "from": "dr",
-    "port": null,
-    "to": "setq",
-    "label": ""
-   },
-   {
-    "id": "e34",
-    "from": "setq",
-    "port": "setq.b0",
-    "to": "mult",
-    "label": ""
-   },
-   {
-    "id": "e35",
-    "from": "setq",
-    "port": null,
-    "to": "wrs",
-    "label": ""
-   },
-   {
-    "id": "e36",
-    "from": "mult",
-    "port": null,
-    "to": "wrs",
     "label": ""
    },
    {
@@ -1333,34 +921,6 @@
     "label": ""
    },
    {
-    "id": "e60",
-    "from": "wrds",
-    "port": "wrds.b0",
-    "to": "dws",
-    "label": ""
-   },
-   {
-    "id": "e61",
-    "from": "wrds",
-    "port": "wrds.b1",
-    "to": "drs",
-    "label": ""
-   },
-   {
-    "id": "e62",
-    "from": "dws",
-    "port": null,
-    "to": "setq",
-    "label": ""
-   },
-   {
-    "id": "e63",
-    "from": "drs",
-    "port": null,
-    "to": "setq",
-    "label": ""
-   },
-   {
     "id": "e64",
     "from": "nbappt",
     "port": "nbappt.b0",
@@ -1372,6 +932,34 @@
     "from": "nbappt",
     "port": null,
     "to": "nbcall",
+    "label": ""
+   },
+   {
+    "id": "e66",
+    "from": "tw",
+    "port": null,
+    "to": "tdet",
+    "label": ""
+   },
+   {
+    "id": "e67",
+    "from": "tr",
+    "port": null,
+    "to": "tdet",
+    "label": ""
+   },
+   {
+    "id": "e68",
+    "from": "tdet",
+    "port": null,
+    "to": "wrs",
+    "label": ""
+   },
+   {
+    "id": "e69",
+    "from": "tdet",
+    "port": "tdet.b0",
+    "to": "wrs",
     "label": ""
    }
   ]
