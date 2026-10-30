@@ -1,14 +1,16 @@
 """ตัวรัน flow (ADR 0023) กับ flow กคว. รอบใหม่ (27 ต.ค. 2569): once an admin publishes the
 Meter, CT, VT flow, a tap on the tile follows it. A เลขติดตาม has one of four kinds chosen
-before typing and may repeat; withdrawals and returns take รายละเอียด instead of item rows and
-list no items; sets ask the meter, CT and VT sizes and compare the multiplier; the summary
-offers แก้ไข and a filed case offers ส่งใบถัดไป; โน้ตบุ๊กและหัวอ่าน holds a slot 30 minutes
+before typing and may repeat; withdrawals and returns go from the number to the summary, which
+offers เพิ่มรายละเอียด (users' comments, 30 ต.ค. 2569), and list no items; a flow may still ask a
+set's meter, CT and VT sizes and compare the multiplier (SetTests keep the 27 ต.ค. graph); the
+summary offers แก้ไข and a filed case offers ส่งใบถัดไป; โน้ตบุ๊กและหัวอ่าน holds a slot 30 minutes
 until its summary is confirmed. A draft keeps the version it started with, and the editor's
 ลองคุย reads typed text with the same rules without saving anything."""
 
 import json
 from datetime import timedelta
 from io import StringIO
+from pathlib import Path
 
 from django.core.management import call_command
 from django.test import Client
@@ -31,6 +33,8 @@ from operations.tests.test_m03_line import ALICE, BOB, buttons, texts
 from operations.tests.test_m14_kcw_menu import TILE, KcwTestCase
 
 WITHDRAWAL_KINDS = ["เลขที่ใบเบิก", "เลขใบสั่งงานจาก SAP", "หมายเลขเครื่องวัดฯ", "โครงการ"]
+# The 27 ต.ค. 2569 graph that asked a set's sizes and multiplier after the number.
+SETS_FLOW = Path(__file__).parent / "data" / "meter_ct_vt_sets_oct30.json"
 
 
 class FlowTestCase(KcwTestCase):
@@ -83,7 +87,11 @@ class WithdrawalTests(FlowTestCase):
         self.press(ALICE, "เลขที่ใบเบิก")
         reply = self.type(ALICE, "๔๕๐๐๐๑๒๓๔๕ /10")
         self.assertEqual(texts(reply).splitlines()[0], "4500012345/10")  # what it read
-        self.assertIn("รายละเอียดอุปกรณ์ที่เบิก", texts(reply))
+        # 30 ต.ค. 2569 (P69-000036, P69-000040 and a later comment): the number, then the summary.
+        self.assertIn("สรุปเรื่อง: การเบิก", texts(reply))
+        self.assertEqual(list(buttons(reply))[:3], ["ยืนยันส่งเรื่อง", "แก้ไข", "เพิ่มรายละเอียด"])
+        reply = self.press(ALICE, "เพิ่มรายละเอียด")
+        self.assertIn("รายละเอียดเพิ่มเติม", texts(reply))
         reply = self.type(ALICE, "มิเตอร์ 5(100)A 2 เครื่อง ใช้ติดตั้งผู้ใช้ไฟรายใหม่")
         summary = texts(reply)
         for line in (
@@ -98,7 +106,7 @@ class WithdrawalTests(FlowTestCase):
         reply = self.press(ALICE, "แก้ไข")
         self.assertEqual(list(buttons(reply)), ["เลขติดตาม", "รายละเอียด", "กลับไปที่สรุป"])
         reply = self.press(ALICE, "รายละเอียด")
-        self.assertIn("แก้ รายละเอียดอุปกรณ์ที่เบิก", texts(reply))
+        self.assertIn("แก้ รายละเอียดเพิ่มเติม", texts(reply))
         reply = self.type(ALICE, "มิเตอร์ 5(100)A 3 เครื่อง")
         self.assertIn("รายละเอียด: มิเตอร์ 5(100)A 3 เครื่อง", texts(reply))  # back at the summary
         reply = self.press(ALICE, "ยืนยันส่งเรื่อง")
@@ -153,14 +161,15 @@ class WithdrawalTests(FlowTestCase):
         reply = self.type(ALICE, "หมายเลข 1234 5678")
         self.assertEqual(texts(reply).splitlines()[0], "12345678")
 
-    def test_a_return_asks_its_own_details(self):
+    def test_a_return_takes_its_details_from_the_summary(self):
         self.open_tile()
         self.press(ALICE, "มิเตอร์")
         reply = self.press(ALICE, "ติดตามใบส่งคืน")
         self.assertEqual(list(buttons(reply))[0], "เลขที่ใบส่งคืน")
         self.press(ALICE, "เลขที่ใบส่งคืน")
         reply = self.type(ALICE, "4500020001")
-        self.assertIn("รายละเอียดของที่ส่งคืน", texts(reply))
+        self.assertIn("สรุปเรื่อง: การส่งคืน", texts(reply))
+        self.press(ALICE, "เพิ่มรายละเอียด")
         self.type(ALICE, "มิเตอร์ 5(15)A 1 เครื่อง ชำรุด หน้าจอไม่ติด")
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
@@ -169,8 +178,28 @@ class WithdrawalTests(FlowTestCase):
         )
         self.assertEqual(case.return_reason, "มิเตอร์ 5(15)A 1 เครื่อง ชำรุด หน้าจอไม่ติด")
 
+    def test_the_number_goes_straight_to_the_summary(self):
+        reply = self.track("ชุดมิเตอร์, CT, VT", "ติดตามใบเบิก", number="4500033333")
+        self.assertNotIn("มิเตอร์ + CT + VT", buttons(reply))  # P69-000040: no set questions
+        self.assertIn("สรุปเรื่อง: การเบิก", texts(reply))
+        self.assertNotIn("รายละเอียด:", texts(reply))
+        self.press(ALICE, "เพิ่มรายละเอียด")
+        reply = self.press(ALICE, "กลับไปที่สรุป")  # tapped by mistake: back, nothing added
+        self.assertIn("สรุปเรื่อง: การเบิก", texts(reply))
+        self.assertNotIn("รายละเอียด:", texts(reply))
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        case = Case.objects.get()
+        self.assertEqual((case.sap_number, case.purpose), ("4500033333", "-"))  # a case needs one
+
 
 class SetTests(FlowTestCase):
+    def setUp(self):
+        super().setUp()
+        draft = line_flows.start_draft(self.flow_admin, self.flow)
+        draft.graph = json.loads(SETS_FLOW.read_text(encoding="utf-8"))["graph"]
+        draft.save(update_fields=["graph"])
+        line_flows.publish(self.flow_admin, draft, "ชุดแบบ 27 ต.ค. 2569")
+
     def fill_set(self, multiplier):
         self.track("ชุดมิเตอร์, CT, VT", "ติดตามใบเบิก", number="4500022222")
         reply = self.press(ALICE, "มิเตอร์ + CT + VT")

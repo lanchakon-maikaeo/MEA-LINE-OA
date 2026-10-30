@@ -27,6 +27,7 @@ from operations.models import (
     DivisionSchedule,
     LineFlow,
     Role,
+    SheetEntry,
     SheetSource,
 )
 from operations.tests.test_m02_cases import make_staff
@@ -313,6 +314,22 @@ class RepairSheetTests(KkoTestCase):
         self.assertTrue(sheet_lookup.name_matches("คีม", "คีมตัดชนิดมีเฟืองทด"))
         self.assertFalse(sheet_lookup.name_matches("คีม", "HV.DETECTOR (NOISY TESTER)"))
 
+    def test_bare_date_numbers_become_dates(self):
+        # ซจ.'s date cells are formula results with no date format (30 ต.ค. 2569).
+        self.assertEqual(sheet_lookup.serial_date("46027"), "05/01/2569")
+        self.assertEqual(sheet_lookup.serial_date("244389"), "09/02/2569")  # 2569 typed as AD
+        for kept in ("12345", "999999", "-600374", "20-21/02/2569", "", None):
+            self.assertEqual(sheet_lookup.serial_date(kept), kept)
+        self.source.extra_columns = [
+            {"column": "G", "label": "วันที่ ซจ. รับงาน"},
+            {"column": "H", "label": "จำนวน"},
+        ]
+        sheet_lookup.apply_columns(
+            self.source, ["NC801"], ["11"], districts=["x"], extras=[["46027"], ["46027"]]
+        )
+        entry = SheetEntry.objects.get(source=self.source, number="NC801")
+        self.assertEqual(entry.extra, [["วันที่ ซจ. รับงาน", "05/01/2569"], ["จำนวน", "46027"]])
+
     def test_a_code_sheet_may_show_every_district(self):
         # ADR 0034: the ฟข. column is the sheet owner's choice; คม.'s sheet keeps one.
         sheet_lookup.check_source(self.source)
@@ -407,3 +424,30 @@ class RepairWordingTests(KkoTestCase):
         self.assertIn("ซ่อมเสร็จ รอส่งคืน", sent)
         self.assertNotIn('"11"', sent)
         self.assertNotIn("hidden", sent)
+
+    def test_another_code_sheet_is_worded_with_its_own_label(self):
+        # 30 ต.ค. 2569: ซจ.'s jobs, whose numbers mix letters and digits.
+        import json
+
+        from operations import ai_sheet_status
+
+        item = {
+            "number": "MSฟขต604217735",
+            "found": True,
+            "count": 1,
+            "statuses": ["กำลังดำเนินการ"],
+            "extras": [["วันที่นัดหมาย", "04/11/2569"]],
+            "kind": "code",
+            "label": "เลขงานซ่อม",
+            "name": "",
+        }
+        sent = json.loads(ai_sheet_status._messages([item])[-1]["content"])["items"][0]
+        self.assertEqual(sent["label"], "เลขงานซ่อม")
+
+        def reply(text):
+            return json.dumps({"reply": text, "follow_up": "ถามเลขอื่นไหม"})
+
+        good = "เลขงานซ่อม MSฟขต604217735 กำลังดำเนินการ นัดหมาย 04/11/2569"
+        self.assertEqual(ai_sheet_status.validate(reply(good), [item])[2], [])
+        other = good.replace("กำลัง", "และ 999888777 กำลัง")
+        self.assertIn("other_number", ai_sheet_status.validate(reply(other), [item])[2])

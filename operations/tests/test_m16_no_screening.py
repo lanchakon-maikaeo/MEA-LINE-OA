@@ -34,6 +34,7 @@ class NoScreeningTestCase(FlowTestCase):
 
     def withdraw(self, number):
         self.track("มิเตอร์", "ติดตามใบเบิก", number=number)
+        self.press(ALICE, "เพิ่มรายละเอียด")  # 30 ต.ค. 2569: the summary comes right after the number
         self.type(ALICE, "มิเตอร์ 5(100)A 1 เครื่อง")
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         return Case.objects.get(sap_number=number)

@@ -50,6 +50,7 @@ class WorkTestCase(FlowTestCase):
 
     def withdraw(self, slip, meter="12345678", size="5(100)A", user=ALICE, approve=True):
         self.track("มิเตอร์", "ติดตามใบเบิก", number=slip, user=user)
+        self.press(user, "เพิ่มรายละเอียด")  # 30 ต.ค. 2569: the summary comes right after the number
         self.type(user, f"มิเตอร์ {meter} ขนาด {size} 1 เครื่อง ใช้ติดตั้ง")
         self.press(user, "ยืนยันส่งเรื่อง")
         case = Case.objects.order_by("-submitted_at").first()
