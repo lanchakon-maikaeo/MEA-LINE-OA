@@ -48,7 +48,10 @@ class FilingTests(KojCaseTestCase):
         )
         self.press(ALICE, "เลขที่ใบเบิก")
         reply = self.type(ALICE, "I/69.01.01.001.69.01.001")  # a กอจ. number keeps its dots
-        self.assertIn("รายละเอียดอุปกรณ์ที่เบิก", texts(reply))
+        # 30 ต.ค. 2569: the summary comes right after the number, as in กคว.
+        self.assertIn("เพิ่มรายละเอียด", buttons(reply))
+        reply = self.press(ALICE, "เพิ่มรายละเอียด")
+        self.assertIn("รายละเอียดเพิ่มเติม", texts(reply))
         reply = self.type(ALICE, "3 เฟส 500 kVA 1 ลูก ใช้ติดตั้งงานใหม่")
         for line in (
             "สรุปเรื่อง: การเบิก",
@@ -76,8 +79,7 @@ class FilingTests(KojCaseTestCase):
         self.press(ALICE, "ติดตามใบส่งคืน")
         reply = self.press(ALICE, "ใบโอนขอคืน")
         self.assertEqual(texts(reply), "กรุณาพิมพ์เลขใบโอนขอคืน")
-        self.type(ALICE, "TR-2569-0042")
-        reply = self.type(ALICE, "50 kVAR 2 ชุด ชำรุด")
+        reply = self.type(ALICE, "TR-2569-0042")
         self.assertIn("ใบโอนขอคืน: TR-2569-0042", texts(reply))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
