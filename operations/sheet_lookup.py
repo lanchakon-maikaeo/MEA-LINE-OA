@@ -15,7 +15,7 @@ each), answer only rows of the asker's ฟข. (district_column), show a status 
 
 import logging
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -120,6 +120,28 @@ def iso_date(value):
     if not (1 <= month <= 12 and 1 <= day <= 31):
         return ""
     return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+SERIAL = re.compile(r"^\s*(\d{5,6})(?:\.0+)?\s*$")
+SERIAL_EPOCH = date(1899, 12, 30)  # day 0 of a Google Sheets date number
+
+
+def serial_date(value):
+    """A date the sheet keeps as a bare day count as dd/mm/yyyy in Buddhist years; any other
+    value as it is. ซจ.'s date cells are formula results with no date format, so the sheet
+    gives 46027 for 05/01/2569 (30 ต.ค. 2569); a date typed with its Buddhist year as if it
+    were AD gives 244389, which is that year already."""
+    found = SERIAL.match(str(value or ""))
+    if not found:
+        return value
+    day = SERIAL_EPOCH + timedelta(days=int(found[1]))
+    if 1990 <= day.year <= 2100:
+        year = day.year + 543
+    elif 2533 <= day.year <= 2643:
+        year = day.year
+    else:
+        return value
+    return f"{day:%d/%m}/{year}"
 
 
 def is_date(value):
@@ -238,6 +260,10 @@ def _cell(column, offset):
     return column[offset] if offset < len(column) else ""
 
 
+def _date_cell(label, value):
+    return serial_date(value) if "วัน" in label else value
+
+
 def _row_numbers(source, cell):
     if source.match == source.Match.CODE:
         key = code_key(cell)
@@ -269,10 +295,11 @@ def apply_columns(
         row = source.first_row + offset
         district = " ".join(str(_cell(districts, offset)).split())[:120]
         tool = " ".join(str(_cell(names, offset)).split())[:200]
-        order = iso_date(_cell(orders, offset))
+        order = iso_date(serial_date(_cell(orders, offset)))
         done = bool(str(_cell(dones, offset)).strip())
+        # A column named for a day (วันที่…, วันเข้า) may hold Google's bare date numbers.
         shown = [
-            [label, " ".join(str(_cell(column, offset)).split())[:120]]
+            [label, " ".join(str(_date_cell(label, _cell(column, offset))).split())[:120]]
             for label, column in zip(labels, extras, strict=False)
         ]
         numbers = []
@@ -697,7 +724,9 @@ def sample(source, row):
             "found": True,
             "count": 1,
             "statuses": [word(source, status, bool(cell(source.done_column)))],
-            "extras": [[label, cell(c)] for c, label in extra_columns(source) if cell(c)],
+            "extras": [
+                [label, _date_cell(label, cell(c))] for c, label in extra_columns(source) if cell(c)
+            ],
             "kind": source.match,
             "label": source.number_label,
             "name": cell(source.name_column),

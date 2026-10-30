@@ -292,7 +292,7 @@ class FakeWording:
             lines = []
             for i in items:
                 cells = " ".join(f"{c['label']} {self.note(c['value'])}" for c in i["cells"])
-                lines.append(f"หมายเลขอุปกรณ์ {i['number']} {self.note(i['status'])} {cells}")
+                lines.append(f"{i['label']} {i['number']} {self.note(i['status'])} {cells}")
             if self.careless:
                 lines.append("ดูเพิ่มที่ https://example.com")
             answer = {"reply": "\n".join(lines), "follow_up": follow_up}
