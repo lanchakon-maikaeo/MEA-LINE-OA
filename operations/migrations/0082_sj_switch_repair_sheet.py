@@ -3,7 +3,7 @@ repair sheet is there from the start (grill กอจ. 29 Oct 2569 Q22 to Q26)."
 
 from django.db import migrations, models
 
-SJ_SHEET = "1gc79oBgvqq_ZJ4oB5NajkeT9f8294Dg2WtK75kCTLqM"
+SJ_SHEET = "1gc79oBgvqq_ZJ4oB5NajkeT9f8294Dg2WtK75kCTLqM"  # pragma: allowlist secret
 
 
 def add_sj_sheet(apps, schema_editor):
