@@ -1,9 +1,9 @@
 """ตัวรัน flow (ADR 0023) กับ flow กคว. รอบใหม่ (27 ต.ค. 2569): once an admin publishes the
 Meter, CT, VT flow, a tap on the tile follows it. A เลขติดตาม has one of four kinds chosen
-before typing and may repeat; withdrawals and returns end at the number with a รายละเอียด
-the user may skip (30 ต.ค. 2569) and list no items; a flow may still ask a set's meter, CT and
-VT sizes and compare the multiplier (SetTests keep the 27 ต.ค. graph); the summary
-offers แก้ไข and a filed case offers ส่งใบถัดไป; โน้ตบุ๊กและหัวอ่าน holds a slot 30 minutes
+before typing and may repeat; withdrawals and returns go from the number to the summary, which
+offers เพิ่มรายละเอียด (users' comments, 30 ต.ค. 2569), and list no items; a flow may still ask a
+set's meter, CT and VT sizes and compare the multiplier (SetTests keep the 27 ต.ค. graph); the
+summary offers แก้ไข and a filed case offers ส่งใบถัดไป; โน้ตบุ๊กและหัวอ่าน holds a slot 30 minutes
 until its summary is confirmed. A draft keeps the version it started with, and the editor's
 ลองคุย reads typed text with the same rules without saving anything."""
 
@@ -87,9 +87,11 @@ class WithdrawalTests(FlowTestCase):
         self.press(ALICE, "เลขที่ใบเบิก")
         reply = self.type(ALICE, "๔๕๐๐๐๑๒๓๔๕ /10")
         self.assertEqual(texts(reply).splitlines()[0], "4500012345/10")  # what it read
-        # 30 ต.ค. 2569 (P69-000036, P69-000040): no set, size or multiplier after the number.
+        # 30 ต.ค. 2569 (P69-000036, P69-000040 and a later comment): the number, then the summary.
+        self.assertIn("สรุปเรื่อง: การเบิก", texts(reply))
+        self.assertEqual(list(buttons(reply))[:3], ["ยืนยันส่งเรื่อง", "แก้ไข", "เพิ่มรายละเอียด"])
+        reply = self.press(ALICE, "เพิ่มรายละเอียด")
         self.assertIn("รายละเอียดเพิ่มเติม", texts(reply))
-        self.assertEqual(list(buttons(reply))[0], "ข้าม")
         reply = self.type(ALICE, "มิเตอร์ 5(100)A 2 เครื่อง ใช้ติดตั้งผู้ใช้ไฟรายใหม่")
         summary = texts(reply)
         for line in (
@@ -159,14 +161,15 @@ class WithdrawalTests(FlowTestCase):
         reply = self.type(ALICE, "หมายเลข 1234 5678")
         self.assertEqual(texts(reply).splitlines()[0], "12345678")
 
-    def test_a_return_asks_its_own_details(self):
+    def test_a_return_takes_its_details_from_the_summary(self):
         self.open_tile()
         self.press(ALICE, "มิเตอร์")
         reply = self.press(ALICE, "ติดตามใบส่งคืน")
         self.assertEqual(list(buttons(reply))[0], "เลขที่ใบส่งคืน")
         self.press(ALICE, "เลขที่ใบส่งคืน")
         reply = self.type(ALICE, "4500020001")
-        self.assertIn("รายละเอียดเพิ่มเติม", texts(reply))
+        self.assertIn("สรุปเรื่อง: การส่งคืน", texts(reply))
+        self.press(ALICE, "เพิ่มรายละเอียด")
         self.type(ALICE, "มิเตอร์ 5(15)A 1 เครื่อง ชำรุด หน้าจอไม่ติด")
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
@@ -175,10 +178,13 @@ class WithdrawalTests(FlowTestCase):
         )
         self.assertEqual(case.return_reason, "มิเตอร์ 5(15)A 1 เครื่อง ชำรุด หน้าจอไม่ติด")
 
-    def test_the_details_may_be_skipped(self):
+    def test_the_number_goes_straight_to_the_summary(self):
         reply = self.track("ชุดมิเตอร์, CT, VT", "ติดตามใบเบิก", number="4500033333")
         self.assertNotIn("มิเตอร์ + CT + VT", buttons(reply))  # P69-000040: no set questions
-        reply = self.press(ALICE, "ข้าม")
+        self.assertIn("สรุปเรื่อง: การเบิก", texts(reply))
+        self.assertNotIn("รายละเอียด:", texts(reply))
+        self.press(ALICE, "เพิ่มรายละเอียด")
+        reply = self.press(ALICE, "กลับไปที่สรุป")  # tapped by mistake: back, nothing added
         self.assertIn("สรุปเรื่อง: การเบิก", texts(reply))
         self.assertNotIn("รายละเอียด:", texts(reply))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
