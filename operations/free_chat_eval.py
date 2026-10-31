@@ -68,6 +68,12 @@ class CaseTools(free_chat.Tools):
     def requester(self):
         return None if self.anonymous else object()
 
+    def owns(self, numbers):
+        if self.anonymous:
+            return set()
+        cases = self.results.get("my_cases", DEFAULTS["my_cases"]).get("cases", [])
+        return {c["number"] for c in cases} & set(numbers)
+
     def invoke(self, name, query=""):
         if name not in DEFAULTS:
             raise PermissionDenied("ไม่พบเครื่องมือนี้")

@@ -47,6 +47,13 @@ MAX_QUERY = 200
 HISTORY_PAIRS, HISTORY_MINUTES = 3, 30  # Q19
 PER_MINUTE = 40  # Q28: 4 calls each stay under Typhoon's 200 a minute
 GENERAL_NOTE = "เป็นความรู้ทั่วไป ไม่ใช่ระเบียบของ กฟน."
+# Under every reply the AI wrote, in small grey text (the owner, 31 Oct 2569).
+AI_NOTICE = "คำตอบนี้สร้างโดย AI อาจไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง"
+# A question about a case number that is not the asker's (live eval r06, 31 Oct 2569: the model
+# answered with the asker's own case instead), said without any AI call.
+NOT_OWN = (
+    "ในแชตนี้ดูได้เฉพาะเรื่องที่คุณแจ้งเอง เลขเรื่องนี้ไม่อยู่ในเรื่องของคุณ ถ้าเป็นเรื่องของคนอื่น ให้เจ้าของเรื่องสอบถามเอง"
+)
 SYSTEM_TOOLS = {"my_cases", "org_units", "menus"}
 BASES = ("system", "docs", "general")
 # "อะไร" and "ทำไม" are not questions in conversation.QUESTION, because problem descriptions end
@@ -246,6 +253,17 @@ class Tools:
         ):
             return None
         return requester
+
+    def owns(self, numbers):
+        """Which of these case numbers are the asker's own (none for anonymous askers)."""
+        from operations import services
+        from operations.contracts import Actor
+
+        requester = self.requester()
+        if requester is None:
+            return set()
+        rows = services.visible_cases(Actor.for_requester(requester)).filter(number__in=numbers)
+        return set(rows.values_list("number", flat=True))
 
     def invoke(self, name, query=""):
         query = " ".join(str(query or "").split())[:MAX_QUERY]
@@ -468,12 +486,16 @@ def system_prompt(guides):
 
 def run(text, tools, current, budget, history=(), guides=None, max_calls=MAX_TOOL_CALLS + 1):
     """The agent on one question: {"reply", "basis", "sent", "refused", "outcome", "tools",
-    "attempts"}. `sent` is None when the approved out-of-scope answer must go instead."""
+    "attempts"}. `sent` is None when the approved out-of-scope answer must go instead, or the
+    program's own `fixed` text when the question names someone else's case."""
     from operations import chat_guides
 
     result = {"reply": "", "basis": None, "sent": None, "refused": "", "tools": [], "attempts": []}
     if OVERRIDE.search(text or ""):
         return {**result, "outcome": "override"}
+    asked = set(ai_answer.CASE_NUMBER.findall((text or "").upper()))
+    if asked and asked - tools.owns(asked):
+        return {**result, "outcome": "not own", "fixed": NOT_OWN}
     if current is None or budget < 2:
         return {**result, "outcome": "unavailable"}
     guides = chat_guides.active_texts() if guides is None else guides
@@ -617,6 +639,33 @@ def _inbox_text(model, inbox_id):
 # --- In the chat --------------------------------------------------------------------------------
 
 
+def with_notice(text):
+    """The AI's reply as a LINE bubble with AI_NOTICE under it in small grey text."""
+    return {
+        "type": "flex",
+        "altText": text[:400],
+        "contents": {
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "contents": [
+                    {"type": "text", "text": text[:2000], "wrap": True},
+                    {"type": "separator"},
+                    {
+                        "type": "text",
+                        "text": AI_NOTICE,
+                        "size": "xxs",
+                        "color": "#8C8C8C",
+                        "wrap": True,
+                    },
+                ],
+            },
+        },
+    }
+
+
 def respond(turn, draft, result):
     """Say the checked reply, or the approved out-of-scope answer with buttons (Q4), then carry
     on where the asker was. Returns what is kept on the run for review."""
@@ -630,10 +679,15 @@ def respond(turn, draft, result):
         "written": result["reply"],
     }
     if result["sent"]:
-        turn.say(result["sent"])
+        turn.replies.append(with_notice(result["sent"]))
         if draft is not None:
             conversation._ask(turn, draft)
         return {**kept, "by": "model"}
+    if result.get("fixed"):
+        turn.say(result["fixed"])
+        if draft is not None:
+            conversation._ask(turn, draft)
+        return {**kept, "by": "program"}
     answer = answers.approved().filter(key=answers.OUT_OF_SCOPE).first()
     text = answer.text if answer else "เรื่องนี้ตอบในแชตนี้ไม่ได้ เลือกเมนูด้านล่างได้เลย"
     if draft is not None:

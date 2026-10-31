@@ -426,7 +426,9 @@ def process(run_id):
         wording = False
         if status:
             extraction = None
-        elif free is not None and (free["sent"] or draft is None or not (act or typed)):
+        elif free is not None and (
+            free["sent"] or free.get("fixed") or draft is None or not (act or typed)
+        ):
             status = R.ANSWERED
             run.result = {
                 **run.result,
@@ -434,7 +436,7 @@ def process(run_id):
             }
             if free["sent"]:
                 run.result["free_chat_reply"] = free["reply"]  # what the next question sees
-            elif draft is None:
+            elif draft is None and not free.get("fixed"):
                 questions.record(turn, source_text)  # คำถามที่บอทตอบไม่ได้ (Q18)
         elif free is not None and act is None:
             # No answer at a step that takes typed answers: the step takes the text (ADR 0012).
