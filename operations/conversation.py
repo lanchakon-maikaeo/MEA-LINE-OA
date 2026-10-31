@@ -692,6 +692,22 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
         if not revision or revision != turn.conversation.prompt_data.get("prompt_revision"):
             turn.say("ปุ่มนี้เป็นขั้นตอนเก่า ใช้ข้อความหรือปุ่มล่าสุดแทน")
             return True
+    if action in {"staff_inbox", "staff_inbox_divisions"}:
+        from operations import staff_inbox
+
+        if action == "staff_inbox_divisions":
+            staff_inbox.choose_division(
+                turn, user, value.get("status", "waiting"), value.get("page", 1)
+            )
+        else:
+            staff_inbox.show(
+                turn,
+                user,
+                value.get("status", "waiting"),
+                value.get("division"),
+                value.get("page", 1),
+            )
+        return True
     if action == "staff_list":
         staff_work.list_page(turn, user, value.get("kind", "group"), value.get("page", 1))
         return True

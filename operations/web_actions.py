@@ -356,10 +356,10 @@ RULES = {
     # and so is every case while the stock work is hidden (ADR 0032).
     "approve": lambda st: (
         st.other(st.case.submitted_by_id)
-        and st.grant(A.WITHDRAWAL_APPROVAL)
+        and (st.grant(A.WITHDRAWAL_APPROVAL) or (st.department and approvals.whole(st.case)))
         and (approvals.whole(st.case) or any(line.approved_quantity is None for line in st.lines))
     ),
-    "deny_approval": lambda st: RULES["approve"](st),
+    "deny_approval": lambda st: RULES["approve"](st) and st.grant(A.WITHDRAWAL_APPROVAL),
     "start_work": lambda st: False,  # the system starts an emergency itself (ADR 0025)
     "skip_screening": lambda st: False,
     "allocate": lambda st: (
@@ -432,7 +432,11 @@ RULES = {
         and any(line.return_outstanding > 0 for line in st.lines)
     ),
     # The case page offers it for the admins' own cases; any case moves from the tab (Q11).
-    "admin_send": lambda st: (st.admin or st.department) and st.case.held_by_admin,
+    "admin_send": lambda st: (
+        (st.department or (st.admin and st.case.held_by_admin))
+        and st.handoff is None
+        and not st.review_open
+    ),
     "admin_answer": lambda st: st.admin and st.case.held_by_admin and st.case.kind == K.PROBLEM,
     "resolve": lambda st: (
         st.case.kind == K.PROBLEM

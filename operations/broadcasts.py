@@ -1,0 +1,307 @@
+"""Shared draft, audience and confirmation rules for web and Mini App (ADR 0040)."""
+
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.validators import URLValidator
+from django.db import transaction
+from django.utils import timezone
+
+from operations import identity
+from operations.models import (
+    BroadcastCampaign,
+    BroadcastSegment,
+    ChannelIdentity,
+    District,
+    Division,
+    Role,
+    RoleGrant,
+)
+
+S = BroadcastCampaign.Status
+EDITABLE = {S.DRAFT, S.PAUSED, S.SCHEDULED, S.QUEUED, S.HELD}
+
+
+def require_supervisor(user):
+    scope = identity.staff_scope(user)
+    if not scope.overseen and not scope.is_department_supervisor:
+        raise PermissionDenied("การประกาศสงวนสิทธิ์สำหรับ Supervisor เท่านั้น")
+    return scope
+
+
+def may_edit(user, row):
+    scope = require_supervisor(user)
+    return row.created_by_id == user.pk or scope.is_department_supervisor
+
+
+def require_editor(user, row):
+    if not may_edit(user, row):
+        raise PermissionDenied("ท่านสามารถดูประวัติได้ แต่ไม่มีสิทธิ์แก้ไขรายการนี้")
+
+
+def _revision(row, revision):
+    if row.revision != revision:
+        raise ValidationError("ข้อมูลมีการเปลี่ยนแปลง กรุณาเปิดรายการล่าสุดอีกครั้ง")
+
+
+def validate_criteria(criteria):
+    if (
+        not isinstance(criteria, dict)
+        or not criteria
+        or set(criteria) - {"districts", "divisions", "roles", "people"}
+    ):
+        raise ValidationError("กรุณาระบุเงื่อนไขกลุ่มผู้รับ")
+    clean = {}
+    for key, values in criteria.items():
+        if not isinstance(values, list) or not values or len(values) > 1000:
+            raise ValidationError("เงื่อนไขกลุ่มผู้รับไม่ถูกต้อง")
+        if key == "roles":
+            if any(v not in Role.values for v in values):
+                raise ValidationError("บทบาทผู้รับไม่ถูกต้อง")
+        else:
+            if any(type(v) is not int or v < 1 for v in values):
+                raise ValidationError("รายการผู้รับไม่ถูกต้อง")
+            model = {"districts": District, "divisions": Division, "people": ChannelIdentity}[key]
+            if model.objects.filter(pk__in=values).count() != len(set(values)):
+                raise ValidationError("ไม่พบรายการผู้รับที่เลือก")
+        clean[key] = sorted(set(values))
+    return clean
+
+
+@transaction.atomic
+def save_segment(user, name, criteria, *, segment_id=None, revision=None):
+    require_supervisor(user)
+    name = str(name).strip()
+    if not name or len(name) > 100:
+        raise ValidationError("กรุณาระบุชื่อกลุ่มไม่เกิน 100 ตัวอักษร")
+    criteria = validate_criteria(criteria)
+    if segment_id:
+        row = BroadcastSegment.objects.select_for_update().get(pk=segment_id)
+        require_editor(user, row)
+        _revision(row, revision)
+        row.revision += 1
+    else:
+        row = BroadcastSegment(created_by=user)
+    row.name, row.criteria = name, criteria
+    row.save()
+    identity.audit(user, "broadcast.segment_saved", row, revision=row.revision)
+    return row
+
+
+def segment_members(segment):
+    criteria = validate_criteria(segment.criteria)
+    rows = ChannelIdentity.objects.filter(channel="line", is_following=True).exclude(
+        status=ChannelIdentity.Status.REVOKED
+    )
+    if "districts" in criteria:
+        rows = rows.filter(
+            requester__district_id__in=criteria["districts"], requester__status="active"
+        )
+    grants = RoleGrant.objects.filter(revoked_at__isnull=True, user__is_active=True)
+    if "divisions" in criteria:
+        grants = grants.filter(division_id__in=criteria["divisions"], division__is_active=True)
+    if "roles" in criteria:
+        grants = grants.filter(role__in=criteria["roles"])
+    if "divisions" in criteria or "roles" in criteria:
+        rows = rows.filter(staff_user_id__in=grants.values("user_id"))
+    if "people" in criteria:
+        rows = rows.filter(pk__in=criteria["people"])
+    return rows.order_by("external_id")
+
+
+def sender_identity(user):
+    row = (
+        ChannelIdentity.objects.filter(channel="line", staff_user=user, is_following=True)
+        .exclude(status=ChannelIdentity.Status.REVOKED)
+        .first()
+    )
+    if row is None:
+        raise ValidationError("กรุณาเชื่อมบัญชี LINE และเพิ่มบัญชีทางการเป็นเพื่อนก่อนส่งประกาศ")
+    return row
+
+
+def recipients(campaign):
+    """Resolve at send time. The creator receives one copy even outside the segment."""
+    sender = sender_identity(campaign.created_by)
+    if campaign.audience == "all":
+        return None  # Only the LINE broadcast endpoint knows every OA friend.
+    return sorted(
+        set(segment_members(campaign.segment).values_list("external_id", flat=True))
+        | {sender.external_id}
+    )
+
+
+def _url(value):
+    if not isinstance(value, str) or len(value) > 2000:
+        raise ValidationError("ลิงก์ไม่ถูกต้อง")
+    URLValidator(schemes=["https"])(value)
+    return value
+
+
+def build_messages(content):
+    if not isinstance(content, dict):
+        raise ValidationError("เนื้อหาประกาศไม่ถูกต้อง")
+    kind = content.get("kind")
+    text = content.get("text", "")
+    if not isinstance(text, str) or len(text) > 5000:
+        raise ValidationError("ข้อความต้องไม่เกิน 5,000 ตัวอักษร")
+    if kind == "text":
+        if not text.strip():
+            raise ValidationError("กรุณาระบุข้อความประกาศ")
+        return [{"type": "text", "text": text}]
+    if kind in {"image", "video"}:
+        media = _url(content.get("url"))
+        preview = _url(content.get("preview") or (media if kind == "image" else None))
+        messages = [{"type": kind, "originalContentUrl": media, "previewImageUrl": preview}]
+        return ([{"type": "text", "text": text}] if text.strip() else []) + messages
+    if kind in {"click_image", "card"}:
+        title = content.get("title", "")
+        if not isinstance(title, str) or not title.strip() or len(title) > 100:
+            raise ValidationError("กรุณาระบุหัวข้อการ์ดไม่เกิน 100 ตัวอักษร")
+        bubble = {
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [{"type": "text", "text": title, "weight": "bold", "wrap": True}],
+            },
+        }
+        if len(text) > 2000:
+            raise ValidationError("ข้อความในการ์ดต้องไม่เกิน 2,000 ตัวอักษร")
+        if text.strip():
+            bubble["body"]["contents"].append({"type": "text", "text": text, "wrap": True})
+        if content.get("url"):
+            bubble["hero"] = {
+                "type": "image",
+                "url": _url(content["url"]),
+                "size": "full",
+                "aspectMode": "cover",
+                "aspectRatio": "20:13",
+            }
+        if kind == "click_image":
+            if "hero" not in bubble:
+                raise ValidationError("กรุณาเลือกรูปภาพ")
+            bubble["hero"]["action"] = {"type": "uri", "uri": _url(content.get("link"))}
+        else:
+            buttons = content.get("buttons", [])
+            if not isinstance(buttons, list) or not 1 <= len(buttons) <= 3:
+                raise ValidationError("กรุณาระบุปุ่มการ์ด 1 ถึง 3 ปุ่ม")
+            actions = []
+            for button in buttons:
+                if (
+                    not isinstance(button, dict)
+                    or not isinstance(button.get("label"), str)
+                    or not 1 <= len(button["label"].strip()) <= 40
+                ):
+                    raise ValidationError("ชื่อปุ่มต้องมี 1 ถึง 40 ตัวอักษร")
+                actions.append(
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "color": "#16804A",
+                        "action": {
+                            "type": "uri",
+                            "label": button["label"],
+                            "uri": _url(button.get("url")),
+                        },
+                    }
+                )
+            bubble["footer"] = {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "contents": actions,
+            }
+        return [{"type": "flex", "altText": title, "contents": bubble}]
+    raise ValidationError("กรุณาเลือกรูปแบบข้อความ")
+
+
+@transaction.atomic
+def save_draft(
+    user, *, title, content, audience="all", segment_id=None, campaign_id=None, revision=None
+):
+    require_supervisor(user)
+    if not isinstance(title, str) or not title.strip() or len(title) > 100:
+        raise ValidationError("กรุณาระบุชื่อประกาศไม่เกิน 100 ตัวอักษร")
+    if not isinstance(content, dict):
+        raise ValidationError("เนื้อหาประกาศไม่ถูกต้อง")
+    if audience not in {"all", "segment"}:
+        raise ValidationError("กรุณาเลือกกลุ่มผู้รับ")
+    segment = BroadcastSegment.objects.get(pk=segment_id) if audience == "segment" else None
+    if campaign_id:
+        row = BroadcastCampaign.objects.select_for_update().get(pk=campaign_id)
+        require_editor(user, row)
+        _revision(row, revision)
+        if row.status not in {S.DRAFT, S.PAUSED, S.HELD} or row.batches.exists():
+            raise ValidationError("กรุณาเริ่มแก้ไขเพื่อพักการส่งก่อนบันทึก")
+        row.revision += 1
+    else:
+        row = BroadcastCampaign(created_by=user)
+    row.title, row.content, row.audience, row.segment = title.strip(), content, audience, segment
+    row.messages = []
+    row.save()
+    identity.audit(user, "broadcast.draft_saved", row, revision=row.revision)
+    return row
+
+
+@transaction.atomic
+def begin_edit(user, campaign_id, revision):
+    row = BroadcastCampaign.objects.select_for_update().get(pk=campaign_id)
+    require_editor(user, row)
+    _revision(row, revision)
+    if row.status not in EDITABLE or row.batches.exists():
+        raise ValidationError("ประกาศนี้เริ่มส่งแล้ว ไม่สามารถแก้ไขได้")
+    row.status = S.PAUSED
+    row.revision += 1
+    row.save(update_fields=["status", "revision", "updated_at"])
+    identity.audit(user, "broadcast.paused_for_edit", row)
+    return row
+
+
+@transaction.atomic
+def confirm(user, campaign_id, revision, scheduled_at=None):
+    row = (
+        BroadcastCampaign.objects.select_for_update(of=("self",))
+        .select_related("created_by", "segment")
+        .get(pk=campaign_id)
+    )
+    require_editor(user, row)
+    if row.status in {S.QUEUED, S.SCHEDULED} and revision in {row.revision, row.revision - 1}:
+        return row
+    _revision(row, revision)
+    if row.status not in {S.DRAFT, S.PAUSED, S.HELD} or row.batches.exists():
+        raise ValidationError("ประกาศนี้ไม่อยู่ในสถานะที่ยืนยันส่งได้")
+    if scheduled_at is not None and (
+        timezone.is_naive(scheduled_at) or scheduled_at <= timezone.now()
+    ):
+        raise ValidationError("กรุณาระบุเวลาส่งในอนาคต")
+    row.messages = build_messages(row.content)
+    recipients(row)
+    row.status = S.SCHEDULED if scheduled_at else S.QUEUED
+    row.scheduled_at = scheduled_at
+    row.confirmed_by, row.confirmed_at = user, timezone.now()
+    row.revision += 1
+    row.save()
+    from operations import broadcast_delivery
+
+    broadcast_delivery.enqueue(row)
+    identity.audit(
+        user,
+        "broadcast.confirmed",
+        row,
+        revision=row.revision,
+        scheduled_at=str(scheduled_at or ""),
+    )
+    return row
+
+
+@transaction.atomic
+def cancel(user, campaign_id, revision):
+    row = BroadcastCampaign.objects.select_for_update().get(pk=campaign_id)
+    require_editor(user, row)
+    _revision(row, revision)
+    if row.status not in EDITABLE or row.batches.exists():
+        raise ValidationError("ประกาศนี้เริ่มส่งแล้ว ไม่สามารถยกเลิกได้")
+    row.status = S.CANCELLED
+    row.revision += 1
+    row.save(update_fields=["status", "revision", "updated_at"])
+    identity.audit(user, "broadcast.cancelled", row)
+    return row

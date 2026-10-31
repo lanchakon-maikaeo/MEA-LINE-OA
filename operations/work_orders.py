@@ -104,7 +104,8 @@ def steps_for(user, order):
     for name, (label, starts, who, _) in STEPS.items():
         if order.status not in starts:
             continue
-        if who == "doer" and not is_doer(user, order, scope):
+        accepts_for_division = name == "acknowledge" and order.division_id in scope.overseen
+        if who == "doer" and not (is_doer(user, order, scope) or accepts_for_division):
             continue
         if who == "supervisor" and not is_supervisor(user, order, scope):
             continue

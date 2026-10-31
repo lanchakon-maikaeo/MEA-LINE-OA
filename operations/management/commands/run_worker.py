@@ -78,7 +78,14 @@ class Command(BaseCommand):
 
 
 def handle_event(event):
-    if event.event_type == orchestration.EVENT_CONVERSATION:
+    if event.event_type in {"broadcast.prepare", "broadcast.send_batch"}:
+        from operations import broadcast_delivery
+
+        if event.event_type == broadcast_delivery.PREPARE:
+            broadcast_delivery.prepare(event)
+        else:
+            broadcast_delivery.send_batch(event)
+    elif event.event_type == orchestration.EVENT_CONVERSATION:
         inbox_id = event.payload["inbox_id"]
         replies = conversation.handle_inbox(inbox_id)
         conversation.send_reply(inbox_id, replies)
@@ -112,10 +119,21 @@ def run_once(limit=20):
             handle_event(event)
         except Exception as exc:  # noqa: BLE001 - one bad event must not stop the queue
             try:
-                settled = orchestration.fail(event.event_id, event.lease_token, type(exc).__name__)
+                settled = orchestration.fail(
+                    event.event_id,
+                    event.lease_token,
+                    type(exc).__name__,
+                    retry_after=getattr(exc, "retry_after", None),
+                )
             except orchestration.LeaseError as lost:
                 _lease_lost(event, lost)
                 continue
+            if settled.status == OutboxEvent.Status.FAILED and event.event_type.startswith(
+                "broadcast."
+            ):
+                from operations import broadcast_delivery
+
+                broadcast_delivery.exhausted(event)
             if (
                 settled.status == OutboxEvent.Status.FAILED
                 and event.event_type == orchestration.EVENT_CONVERSATION

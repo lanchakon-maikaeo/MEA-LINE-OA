@@ -21,6 +21,7 @@ from django.utils import timezone
 from operations import identity as identity_services
 from operations import line_api, options, orchestration
 from operations.models import (
+    BroadcastBatch,
     ChannelIdentity,
     Decision,
     LineQuotaSnapshot,
@@ -71,15 +72,27 @@ def budget_state(now=None):
         budget = min(budget, snapshot.quota)
     if settings.APP_ENV != "production":
         budget = min(budget, settings.LINE_PUSH_NONPRODUCTION_CAP)
-    local = (
-        N.objects.filter(
-            channel=N.Channel.LINE_PUSH,
-            status__in=[N.Status.SENT, N.Status.UNKNOWN],
-            sent_at__gte=_month_start(now),
-        ).aggregate(total=Sum("counted"))["total"]
-        or 0
+    notices = N.objects.filter(channel=N.Channel.LINE_PUSH, sent_at__gte=_month_start(now))
+    batches = BroadcastBatch.objects.all()
+
+    def total(rows, field):
+        return rows.aggregate(total=Sum(field))["total"] or 0
+
+    sent = notices.filter(status=N.Status.SENT)
+    accepted = batches.filter(
+        status=BroadcastBatch.Status.ACCEPTED, accepted_at__gte=_month_start(now)
     )
-    used = max(local, snapshot.usage if snapshot else 0)
+    unknown = total(notices.filter(status=N.Status.UNKNOWN), "counted") + total(
+        batches.filter(status=BroadcastBatch.Status.UNKNOWN), "recipient_count"
+    )
+    local = total(sent, "counted") + total(accepted, "recipient_count") + unknown
+    remote = snapshot.usage if snapshot else 0
+    if snapshot and snapshot.checked_at:
+        remote += total(sent.filter(sent_at__gte=snapshot.checked_at), "counted")
+        remote += total(accepted.filter(accepted_at__gte=snapshot.checked_at), "recipient_count")
+        remote += unknown
+    reserved = total(batches.filter(status=BroadcastBatch.Status.RESERVED), "recipient_count")
+    used = max(local, remote) + reserved
     limit_reached = bool(snapshot and snapshot.limit_reached)
     ratio = used / budget if budget else 1
     if limit_reached or used >= budget:
@@ -94,6 +107,12 @@ def budget_state(now=None):
     days = calendar.monthrange(local_now.year, local_now.month)[1]
     elapsed = max((now - _month_start(now)).total_seconds() / 86400, 1)
     return BudgetState(budget, used, tier, int(used / elapsed * days), limit_reached)
+
+
+def lock_budget(now):
+    """Serialize quota reservations across normal notifications and campaigns."""
+    row, _ = LineQuotaSnapshot.objects.get_or_create(month=month_key(now))
+    return LineQuotaSnapshot.objects.select_for_update().get(pk=row.pk)
 
 
 def allows(level, state):
@@ -429,6 +448,7 @@ def send(delivery_id, now=None):
                 delivery.status, delivery.detail = N.Status.SKIPPED, problem
                 delivery.save(update_fields=["status", "detail"])
                 return SendResult("skipped")
+            lock_budget(now)
             state = budget_state(now)
             from operations import staff_line
 
@@ -524,7 +544,8 @@ def reconcile(now=None):
     snapshot.quota = quota.get("value") if quota.get("type") == "limited" else None
     snapshot.usage = int(usage.get("totalUsage") or 0)
     snapshot.checked_at = now
-    snapshot.save(update_fields=["quota", "usage", "checked_at"])
+    snapshot.limit_reached = snapshot.quota is not None and snapshot.usage >= snapshot.quota
+    snapshot.save(update_fields=["quota", "usage", "checked_at", "limit_reached"])
     return snapshot
 
 

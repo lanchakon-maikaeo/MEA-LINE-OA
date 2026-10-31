@@ -86,7 +86,7 @@ class WorkTabTests(StaffChatTestCase):
         )
         self.assertIn(f"ดูงาน {order.number}", buttons([push.message]))
         reply = self.tile(A.WORK_ORDERS)
-        detail = self.press(ALICE, order.number, reply)
+        detail = self.press(ALICE, "ดูรายละเอียด", reply)
         self.assertIn("เช็กสต็อกหม้อแปลง", texts(detail))
         self.press(ALICE, "รับทราบ", detail)
         self.assertEqual(WorkOrder.objects.get().status, S.ACKNOWLEDGED)

@@ -13,6 +13,7 @@ from operations.contracts import ErrorCode, fail
 from operations.models import (
     AckClock,
     AuthorityGrant,
+    Case,
     Decision,
     Division,
     EquipmentType,
@@ -294,7 +295,16 @@ def set_priority(ctx, case, payload, reason, target):
     exception_holder = ctx.requester is None and policy.has_authority(
         ctx.user, A.PRIORITY_EXCEPTION, case.owner_division_id
     )
-    if ctx.requester is not None or not (_member(ctx, case.owner_division_id) or exception_holder):
+    from operations import approvals
+
+    department_acceptance = (
+        ctx.scope.is_department_supervisor
+        and case.status == Case.Status.AWAITING_APPROVAL
+        and approvals.whole(case)
+    )
+    if ctx.requester is not None or not (
+        _member(ctx, case.owner_division_id) or exception_holder or department_acceptance
+    ):
         fail(ErrorCode.FORBIDDEN, "Only staff of the owner division can set the priority.")
     value = payload.get("priority")
     if value not in policy.PRIORITIES:

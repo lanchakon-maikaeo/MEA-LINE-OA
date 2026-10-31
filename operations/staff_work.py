@@ -24,6 +24,8 @@ CHAT_KINDS = {"text", "textarea", "select", "radio", "number"}
 ORDER_NUMBER = re.compile(r"^T\d{2}-\d{6}$")
 # LINE buttons hold 20 characters; these steps get a shorter name in chat.
 SHORT_LABELS = {
+    "approve": "ยืนยันรับเรื่อง",
+    "admin_send": "ส่งต่อให้กอง",
     "complete_triage": "คัดกรองเสร็จ",
     "set_priority": "ยืนยันระดับ",
     "request_info": "ขอข้อมูลเพิ่ม",
@@ -109,6 +111,10 @@ def list_button(turn, label, kind, page=1):
 def list_page(turn, user, kind="group", page=1):
     from django.core.paginator import Paginator
 
+    if kind == "received":
+        from operations import staff_inbox
+
+        return staff_inbox.show(turn, user)
     scope = identity.staff_scope(user)
     cases = queues.visible(user).select_related("owner_division")
     action, key = "staff_case", "case"
@@ -304,14 +310,9 @@ def order_detail(turn, user, order):
         else:
             buttons.append(turn.button(label, "staff_os", {"order": str(order.pk), "step": name}))
     buttons.append(("เปิดในเว็บ", web(f"/orders/{order.number}/")))
-    turn.say(
-        "\n".join(rows),
-        [
-            *buttons[:11],
-            turn.button("กลับรายการ", "staff_list", {"kind": "group"}),
-            turn.button("หน้าหลัก", "staff_menu"),
-        ],
-    )
+    from operations import staff_inbox
+
+    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับรายการ", "staff_inbox")])
 
 
 def order_step(turn, user, order, step, text="", person=None, skip_reason=False, page=1):
@@ -492,7 +493,10 @@ def case_detail(turn, user, case):
     buttons = []
     if options.get(options.STAFF_LINE_ACTIONS) == "act":
         st = web_actions.situation(user, case)
-        for offer in web_actions.available(user, case, st)[:10]:
+        offers = web_actions.available(user, case, st)
+        priority = {"approve": 0, "admin_send": 1, "assign": 2}
+        offers.sort(key=lambda offer: priority.get(offer.name, 3))
+        for offer in offers[:10]:
             form = web_actions.build_form(offer.name, st, {})
             label = SHORT_LABELS.get(offer.name, offer.label)
             if _askable(form) is not None:
@@ -505,14 +509,9 @@ def case_detail(turn, user, case):
                 shown = f"{label} (เว็บ)" if len(label) <= 14 else label
                 buttons.append((shown, web(path)))
     buttons.append(("เปิดในเว็บ", web(f"/cases/{case.number}/")))
-    turn.say(
-        "\n".join(rows),
-        [
-            *buttons[:11],
-            turn.button("กลับรายการ", "staff_list", {"kind": "group"}),
-            turn.button("หน้าหลัก", "staff_menu"),
-        ],
-    )
+    from operations import staff_inbox
+
+    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับรายการ", "staff_inbox")])
 
 
 def step_start(turn, user, case, action):

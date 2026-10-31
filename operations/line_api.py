@@ -101,3 +101,22 @@ def fetch_content(message_id, max_bytes):
     if len(data) > max_bytes:
         raise ContentTooLarge
     return data
+
+
+def campaign_send(endpoint, payload, retry_key):
+    """Immutable campaign request; return the original ID after a duplicate-key response."""
+    if endpoint not in {"multicast", "narrowcast", "push"}:
+        raise ValueError("Unsupported campaign endpoint")
+    try:
+        with _request(
+            f"{settings.LINE_API_BASE}/v2/bot/message/{endpoint}",
+            payload,
+            extra_headers={"X-Line-Retry-Key": str(retry_key)},
+        ) as response:
+            return response.headers.get("x-line-request-id", "")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 409:
+            return exc.headers.get("x-line-accepted-request-id", "")
+        raise LineApiError(
+            exc.code, exc.read(300).decode(errors="replace"), _retry_after(exc)
+        ) from exc

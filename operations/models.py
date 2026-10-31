@@ -3618,3 +3618,85 @@ class CaseMessage(models.Model):
     class Meta:
         ordering = ["created_at", "pk"]
         indexes = [models.Index(fields=["case", "status"])]
+
+
+# ADR 0040: one campaign and delivery ledger for the web and LINE Mini App.
+class BroadcastSegment(models.Model):
+    name = models.CharField(max_length=100)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    criteria = models.JSONField(default=dict)
+    revision = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class BroadcastCampaign(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "ร่าง"
+        PAUSED = "paused", "พักการส่งเพื่อแก้ไข"
+        SCHEDULED = "scheduled", "ตั้งเวลาส่งแล้ว"
+        QUEUED = "queued", "รอส่ง"
+        SENDING = "sending", "กำลังส่ง"
+        ACCEPTED = "accepted", "LINE รับคำขอแล้ว"
+        PARTIAL = "partial", "ส่งไม่ครบ"
+        HELD = "held", "พักการส่ง"
+        CANCELLED = "cancelled", "ยกเลิกแล้ว"
+
+    title = models.CharField(max_length=100)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    revision = models.PositiveIntegerField(default=1)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    audience = models.CharField(
+        max_length=10, choices=[("all", "เพื่อนทั้งหมด"), ("segment", "กลุ่มผู้รับ")], default="all"
+    )
+    segment = models.ForeignKey(BroadcastSegment, null=True, blank=True, on_delete=models.PROTECT)
+    content = models.JSONField(default=dict)
+    messages = models.JSONField(default=list)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    recipient_count = models.PositiveIntegerField(null=True, blank=True)
+    detail = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["status", "scheduled_at"])]
+
+
+class BroadcastBatch(models.Model):
+    class Status(models.TextChoices):
+        RESERVED = "reserved", "สำรองโควตาแล้ว"
+        UNKNOWN = "unknown", "รอตรวจผลจาก LINE"
+        ACCEPTED = "accepted", "LINE รับคำขอแล้ว"
+        FAILED = "failed", "ส่งไม่สำเร็จ"
+
+    campaign = models.ForeignKey(
+        BroadcastCampaign, on_delete=models.PROTECT, related_name="batches"
+    )
+    sequence = models.PositiveIntegerField()
+    endpoint = models.CharField(max_length=16)
+    payload = models.JSONField()
+    retry_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    request_id = models.CharField(max_length=128, blank=True)
+    result = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.RESERVED)
+    recipient_count = models.PositiveIntegerField()
+    attempts = models.PositiveIntegerField(default=0)
+    first_attempt_at = models.DateTimeField(null=True, blank=True)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    lease_until = models.DateTimeField(null=True, blank=True)
+    detail = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["campaign", "sequence"], name="broadcast_batch_once")
+        ]

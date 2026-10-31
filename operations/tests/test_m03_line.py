@@ -89,12 +89,25 @@ def buttons(messages):
                     found[body["action"]["displayText"]] = body["action"]["data"]
                 for button in body["contents"]:
                     if "action" in button:
-                        found[button["action"]["label"]] = button["action"]["data"]
+                        found[button["action"]["label"]] = button["action"].get("data") or button[
+                            "action"
+                        ].get("uri")
     return found
 
 
 def texts(messages):
-    return "\n".join(m["text"] for m in messages if m["type"] == "text")
+    def content(node):
+        if node.get("type") == "text":
+            yield node["text"]
+        if node.get("type") == "bubble":
+            yield from content(node["body"])
+        children = node.get("contents", [])
+        if isinstance(children, dict):
+            children = [children]
+        for child in children:
+            yield from content(child)
+
+    return "\n".join(text for message in messages for text in content(message))
 
 
 class LineTestCase(TestCase):
