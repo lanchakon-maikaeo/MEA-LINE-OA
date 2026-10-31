@@ -4,6 +4,7 @@ from django.views.generic import RedirectView
 
 from operations import (
     ai_web,
+    audit_web,
     broadcast_auth,
     broadcast_web,
     duties_web,
@@ -200,6 +201,8 @@ urlpatterns = [
     path("console/admin/divisions/", views.admin_divisions, name="admin-divisions"),
     path("console/admin/options/", views.admin_options, name="admin-options"),
     path("console/admin/employees/", views.admin_employees, name="admin-employees"),
+    path("console/admin/log/", audit_web.admin_log, name="admin-log"),
+    path("console/admin/log.csv", audit_web.admin_log_csv, name="admin-log-csv"),
     path("console/admin/answers/", views.admin_answers, name="admin-answers"),
     path("console/admin/questions/", views.admin_questions, name="admin-questions"),
     path("console/admin/free-chat/", free_chat_web.guides_page, name="admin-free-chat"),

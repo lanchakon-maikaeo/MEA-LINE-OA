@@ -11,11 +11,34 @@ from operations.models import Division
 ORDER = ("กคว.", "กอจ.", "กคอ.", "ศอค.", "กตฟ.", "บท.")
 # Codes a division had before its official abbreviation (the menu seed keeps both).
 EARLIER = {"กอจ.": ("กองอุปกรณ์ฯ",), "กคอ.": ("กองเครื่องมือฯ",)}
+# The rich menu tile and its published flow; a case filed from it carries the tile's name as the
+# start of its menu label (ADR 0039, 31 Oct 2569 Q12, Q13).
+TILE = "ปัญหา/ข้อเสนอแนะ"
+FLOW_KEY = "general"
 ADMIN = "admin"
 ADMIN_LABEL = "ปัญหาการใช้งานหรืออื่นๆ"
 ADMIN_TARGET = "แอดมินระบบ"
 PROMPT = "เลือกกองที่ต้องการแจ้ง"
 DETAIL = "พิมพ์รายละเอียดที่ต้องการแจ้ง ส่งรูปประกอบได้"
+
+
+def from_tile():
+    """Cases filed from the ปัญหา/ข้อเสนอแนะ tile, under any name the tile has had."""
+    from django.db.models import Q
+
+    from operations.models import LineFlow, LineMenuItem
+
+    labels = {
+        TILE,
+        *LineFlow.objects.filter(key=FLOW_KEY).values_list("tile", flat=True),
+        *LineMenuItem.objects.filter(action=LineMenuItem.Action.GENERAL).values_list(
+            "label", flat=True
+        ),
+    }
+    condition = Q(pk__in=[])
+    for label in filter(None, labels):
+        condition |= Q(menu_label=label) | Q(menu_label__startswith=f"{label} · ")
+    return condition
 
 
 def choices():

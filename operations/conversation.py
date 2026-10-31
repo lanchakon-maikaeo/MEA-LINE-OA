@@ -1804,6 +1804,8 @@ def _pick_division(turn, draft, code):
     fields = data["fields"] if data.get("topic") == Case.Topic.GENERAL else {}
     held = code == problem_pick.ADMIN
     draft.data = {
+        # 31 Oct 2569 Q13: every carousel pick (staff's แจ้งปัญหา too) is the tile's case.
+        "menu_label": problem_pick.TILE,
         **keep,
         "lines": [],
         "fields": fields,

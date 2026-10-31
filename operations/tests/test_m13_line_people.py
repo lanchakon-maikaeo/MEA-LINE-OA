@@ -342,3 +342,4 @@ class StaffLineTests(PeopleTestCase):
         self.assertTrue(case.requester.is_internal)
         self.assertEqual(case.requester.division.code, "กองอุปกรณ์ฯ")
         self.assertEqual((case.topic, case.owner_division.code), ("general", "กองอุปกรณ์ฯ"))
+        self.assertEqual(case.menu_label, "ปัญหา/ข้อเสนอแนะ")  # 31 Oct 2569 Q13: on the tab

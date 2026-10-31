@@ -12,6 +12,8 @@ code, old ones through the migration (AliasTests).
 
 ADR 0039 (31 Oct 2569): the CSV now carries every matching row and what the page shows, with the
 full text; an anonymous reporter is still only their code, and no LINE ID or location leaves.
+The list holds only cases from the ปัญหา/ข้อเสนอแนะ tile (31 Oct 2569 Q12, Q13): a problem staff
+recorded from a phone call is not on it.
 """
 
 import csv
@@ -24,7 +26,7 @@ from unittest.mock import patch
 from django.apps import apps
 from django.utils import timezone
 
-from operations import identity, options, problems_web, services
+from operations import identity, options, problem_pick, problems_web, services
 from operations.contracts import Actor
 from operations.models import AuditEvent, Case, ChannelIdentity, District, Requester
 from operations.tests.test_m02_cases import problem, withdrawal
@@ -40,10 +42,13 @@ class ProblemsTestCase(LineTestCase):
         super().setUp()
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
         self.requester = self.approve(ALICE)
-        self.named = self.submit(Actor.for_requester(self.requester), problem(description=TYPED))
+        tile = {"menu_label": problem_pick.TILE}
+        self.named = self.submit(
+            Actor.for_requester(self.requester), problem(description=TYPED, **tile)
+        )
         line = ChannelIdentity.objects.create(channel="line", external_id=BOB)
         self.anonymous = identity.anonymous_requester(line)
-        located = {"topic": "suggestion", "latitude": "13.7", "longitude": "100.5"}
+        located = {"topic": "suggestion", "latitude": "13.7", "longitude": "100.5", **tile}
         self.ideas = [
             self.submit(
                 Actor.for_requester(self.anonymous),
@@ -74,17 +79,16 @@ class ProblemsTestCase(LineTestCase):
 class ListTests(ProblemsTestCase):
     def test_every_problem_with_reporter_channel_and_time(self):
         page = self.client.get(LIST)
-        for case in (self.named, *self.ideas, self.phoned):
+        for case in (self.named, *self.ideas):
             self.assertContains(page, case.number)
         self.assertNotContains(page, self.withdrawal.number)
-        self.assertContains(page, "4 เรื่อง")
+        self.assertNotContains(page, self.phoned.number)  # not from the tile
+        self.assertContains(page, "3 เรื่อง")
         district = District.objects.get(code="D01").name
         self.assertContains(page, f"{self.requester.display_name} · {district}")
         self.assertContains(page, f"/console/admin/requesters/{self.requester.pk}/")
         self.assertContains(page, f"ไม่ระบุตัวตน #{self.anonymous.alias}", count=2)
         self.assertNotContains(page, BOB)
-        self.assertContains(page, "บันทึกแทนโดย Intake")
-        self.assertContains(page, "บันทึก ")  # filed two hours after the real report
         self.assertContains(page, "ไม่ระบุหัวข้อ")
         self.assertContains(page, "ข้อเสนอแนะ")
 
@@ -102,15 +106,15 @@ class FilterTests(ProblemsTestCase):
         ideas = {case.number for case in self.ideas}
         self.assertEqual(self.numbers("?topic=suggestion"), ideas)
         self.assertEqual(self.numbers("?topic=none"), {self.named.number})
-        self.assertEqual(self.numbers("?channel=phone"), {self.phoned.number})
-        self.assertEqual(len(self.numbers("?status=submitted")), 4)
+        self.assertEqual(self.numbers("?channel=phone"), set())
+        self.assertEqual(len(self.numbers("?status=submitted")), 3)
         division = self.named.owner_division.code
         self.assertIn(self.named.number, self.numbers(f"?division={division}"))
         today = timezone.localdate()
         self.assertEqual(self.numbers(f"?from={today + timedelta(days=1)}"), set())
         self.assertEqual(self.numbers(f"?to={today - timedelta(days=1)}"), set())
-        self.assertEqual(len(self.numbers(f"?from={today}&to={today}")), 4)
-        self.assertEqual(len(self.numbers("?topic=bogus&division=NOPE&from=x")), 4)
+        self.assertEqual(len(self.numbers(f"?from={today}&to={today}")), 3)
+        self.assertEqual(len(self.numbers("?topic=bogus&division=NOPE&from=x")), 3)
 
     def test_pages_keep_the_filters(self):
         # Three problems came through LINE: two a page makes two pages.
@@ -139,11 +143,9 @@ class ExportTests(ProblemsTestCase):
         self.assertTrue(text.startswith("﻿"))
         rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
         self.assertEqual(tuple(rows[0]), problems_web.HEADER)
-        self.assertEqual(len(rows) - 1, 4)
+        self.assertEqual(len(rows) - 1, 3)
         kinds = sorted(row[4] for row in rows[1:])
-        self.assertEqual(kinds, sorted(["ไม่ระบุตัวตน"] * 2 + ["ผู้แจ้งหน่วยงาน (เขต/ฝ่าย)"] * 2))
-        phoned = next(row for row in rows[1:] if row[0] == self.phoned.number)
-        self.assertEqual((phoned[6], phoned[7], phoned[8]), ("โทรศัพท์", "Intake", "SIM-TRIAGE"))
+        self.assertEqual(kinds, sorted(["ไม่ระบุตัวตน"] * 2 + ["ผู้แจ้งหน่วยงาน (เขต/ฝ่าย)"]))
         named = next(row for row in rows[1:] if row[0] == self.named.number)
         self.assertEqual(named[2], TYPED)
         self.assertTrue(named[3].startswith(self.requester.display_name))
@@ -153,11 +155,11 @@ class ExportTests(ProblemsTestCase):
             self.assertNotIn(private, text)
         event = AuditEvent.objects.get(action="cases.problems_exported")
         self.assertEqual(
-            (event.actor, event.data["rows"], event.data["filters"]), (self.admin, 4, {})
+            (event.actor, event.data["rows"], event.data["filters"]), (self.admin, 3, {})
         )
 
-        phone_only = self.client.get(CSV + "?channel=phone").content.decode("utf-8")
-        self.assertEqual(len(list(csv.reader(io.StringIO(phone_only)))) - 1, 1)
+        line_only = self.client.get(CSV + "?channel=line").content.decode("utf-8")
+        self.assertEqual(len(list(csv.reader(io.StringIO(line_only)))) - 1, 3)
 
 
 class AliasTests(ProblemsTestCase):

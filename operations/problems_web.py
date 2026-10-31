@@ -36,7 +36,7 @@ from django.utils import timezone
 from django.utils.http import urlencode
 from django.views.decorators.http import require_POST, require_safe
 
-from operations import identity, reports, services, workflow
+from operations import identity, problem_pick, reports, services, workflow
 from operations.contracts import Actor, CommandFailed
 from operations.models import Case, Division, RoleGrant
 
@@ -113,8 +113,9 @@ def _waiting():
 
 
 def _cases(chosen, tab="all"):
-    """Problem and suggestion cases matching the filters, newest real report time first."""
+    """Cases from the ปัญหา/ข้อเสนอแนะ tile matching the filters, newest real report first."""
     cases = (_waiting() if tab == "waiting" else Case.objects).filter(kind=Case.Kind.PROBLEM)
+    cases = cases.filter(problem_pick.from_tile())  # 31 Oct 2569 Q12: the tile's cases only
     cases = cases.annotate(reported=Coalesce("reported_at", "submitted_at"))
     if chosen.get("topic") == NO_TOPIC:
         cases = cases.filter(topic="")

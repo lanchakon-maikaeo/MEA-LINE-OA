@@ -52,6 +52,12 @@ GROUPS = (
                 badge="registrations",
             ),
             Page("admin-employees", "ทะเบียนพนักงาน", "รายชื่อพนักงานที่ใช้ยืนยันตัวตน"),
+            Page(
+                "admin-log",
+                "Log การใช้งาน",
+                "การเข้าสู่ระบบและกิจกรรมของบัญชีเจ้าหน้าที่",
+                ("admin-log-csv",),
+            ),
         ),
     ),
     Group(

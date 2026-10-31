@@ -1,13 +1,16 @@
 """สิทธิ์บนเว็บ 31 ต.ค. 2569 (ADR 0039): ตั้งสิทธิ์ให้พนักงานที่บัญชีเจ้าหน้าที่เดิมถูกระงับ, ทุกกองและ
 ปัญหาและข้อเสนอแนะของ Supervisor ระดับฝ่าย, และผู้ดูข้อมูลของกองและระดับฝ่ายที่ดูได้อย่างเดียว"""
 
+import csv
+import io
 import re
 
-from django.test import Client
+from django.test import Client, TestCase
+from django.utils import timezone
 
-from operations import forms, identity, services, staff_email
+from operations import audit_web, forms, identity, services, staff_email
 from operations.contracts import Actor, CommandFailed
-from operations.models import AuthorityGrant, Division, Role, RoleGrant
+from operations.models import AuditEvent, AuthorityGrant, Case, Division, Role, RoleGrant
 from operations.tests import test_m13_admin_line
 from operations.tests import test_m19_problem_tile as tile_tests
 from operations.tests.test_m02_cases import make_staff
@@ -182,7 +185,82 @@ class DepartmentAccessTests(tile_tests.PickTestCase):
             RoleGrant.objects.filter(role=Role.DEPARTMENT_SUPERVISOR, revoked_at=None).count(), 2
         )
 
+    def test_the_tab_holds_only_cases_from_the_tile(self):
+        # 31 Oct 2569 Q12: a problem from another tile stays in its division's queue only.
+        Case.objects.filter(pk=self.koj_case.pk).update(menu_label="Meter, CT, VT · โน้ตบุ๊กและหัวอ่าน")
+        web = self.web(self.director)
+        page = web.get("/console/admin/problems/?tab=all")
+        self.assertContains(page, self.kcw_case.number)
+        self.assertNotContains(page, self.koj_case.number)
+        self.assertNotContains(web.get("/console/admin/problems.csv"), self.koj_case.number)
+        self.assertContains(web.get("/divisions/กอจ./"), self.koj_case.number)
+
     def test_admins_give_the_viewer_roles_on_the_staff_page(self):
         choices = dict(forms.GrantRoleForm().fields["role"].choices)
         self.assertEqual(choices[Role.DIVISION_VIEWER], "ผู้ดูข้อมูลของกอง")
         self.assertEqual(choices[Role.DEPARTMENT_VIEWER], "ผู้ดูข้อมูลระดับฝ่าย")
+
+
+class LogTests(TestCase):
+    """Log การใช้งาน (31 Oct 2569 Q14 to Q17)."""
+
+    CHROME = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36"
+    )
+
+    def setUp(self):
+        self.admin = make_staff("log-admin", (Role.ADMIN, None))
+        self.admin.staff_profile.display_name = "แอดมินทดสอบ"
+        self.admin.staff_profile.save()
+        self.password = "รหัสลับ-" + "x" * 12
+        self.staff = make_staff("log-staff")
+        self.staff.set_password(self.password)
+        self.staff.save()
+
+    def sign_in(self, password):
+        client = Client(HTTP_USER_AGENT=self.CHROME)
+        client.post("/accounts/login/", {"username": "log-staff", "password": password})
+        return client
+
+    def test_sign_ins_are_recorded_without_the_password(self):
+        self.sign_in("ผิด")
+        client = self.sign_in(self.password)
+        client.post("/accounts/logout/")
+        failed = AuditEvent.objects.get(action="staff.login_failed")
+        self.assertEqual(failed.target_id, str(self.staff.pk))
+        self.assertEqual(failed.data["username"], "log-staff")
+        self.assertNotIn("ผิด", str(failed.data))
+        login = AuditEvent.objects.get(action="staff.login")
+        self.assertEqual(
+            (login.actor, login.data["ip"], login.data["browser"]),
+            (self.staff, "127.0.0.1", "Chrome บน Windows"),
+        )
+        self.assertTrue(AuditEvent.objects.filter(action="staff.logout", actor=self.staff).exists())
+
+    def test_admins_read_the_log_in_thai_with_filters_and_a_csv(self):
+        self.sign_in("ผิด")
+        self.sign_in(self.password)
+        identity.audit(self.staff, "case.take", self.staff)
+        web = Client()
+        web.force_login(self.admin)
+        page = web.get("/console/admin/log/")
+        for text in ("เข้าสู่ระบบ", "เข้าสู่ระบบไม่สำเร็จ", "Chrome บน Windows", "127.0.0.1"):
+            self.assertContains(page, text)
+        self.assertContains(page, audit_web.label("case.take"))
+        for code in ("staff.login", "case.take"):
+            self.assertNotContains(page, code)
+        now = timezone.localtime()
+        self.assertContains(page, f"{now.day} {audit_web.MONTHS[now.month - 1]} {now.year + 543}")
+        mine = web.get(f"/console/admin/log/?account={self.staff.pk}&kind=login")
+        self.assertEqual(
+            {row["what"] for row in mine.context["rows"]}, {"เข้าสู่ระบบ", "เข้าสู่ระบบไม่สำเร็จ"}
+        )
+        self.assertContains(web.get("/console/admin/"), "Log การใช้งาน")
+        response = web.get(f"/console/admin/log.csv?account={self.staff.pk}")
+        rows = list(csv.reader(io.StringIO(response.content.decode("utf-8").lstrip("﻿"))))
+        self.assertEqual(tuple(rows[0]), audit_web.HEADER)
+        self.assertEqual(len(rows) - 1, 3)
+        self.assertTrue(AuditEvent.objects.filter(action="audit.exported").exists())
+        staff = Client()
+        staff.force_login(self.staff)
+        self.assertEqual(staff.get("/console/admin/log/").status_code, 403)
