@@ -51,9 +51,7 @@ GENERAL_NOTE = "เป็นความรู้ทั่วไป ไม่ใ
 AI_NOTICE = "คำตอบนี้สร้างโดย AI อาจไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง"
 # A question about a case number that is not the asker's (live eval r06, 31 Oct 2569: the model
 # answered with the asker's own case instead), said without any AI call.
-NOT_OWN = (
-    "ในแชตนี้ดูได้เฉพาะเรื่องที่คุณแจ้งเอง เลขเรื่องนี้ไม่อยู่ในเรื่องของคุณ ถ้าเป็นเรื่องของคนอื่น ให้เจ้าของเรื่องสอบถามเอง"
-)
+NOT_OWN = "ในแชตนี้สามารถดูได้เฉพาะเรื่องที่คุณแจ้งไว้ เลขเรื่องนี้ไม่อยู่ในเรื่องของคุณ"
 SYSTEM_TOOLS = {"my_cases", "org_units", "menus"}
 BASES = ("system", "docs", "general")
 # "อะไร" and "ทำไม" are not questions in conversation.QUESTION, because problem descriptions end

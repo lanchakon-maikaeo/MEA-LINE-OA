@@ -146,7 +146,7 @@ class ChatTests(FreeChatCase):
         _, run, reply = self.ask(ALICE, f"เรื่อง {other.number} ของเพื่อนผมอยู่ขั้นไหน")
         self.assertEqual(self.bodies, [])  # no AI call
         self.assertEqual(run.result["free_chat"]["by"], "program")
-        self.assertIn("ดูได้เฉพาะเรื่องที่คุณแจ้งเอง", said(reply))
+        self.assertEqual(said(reply).strip(), free_chat.NOT_OWN)
         self.assertNotIn(other.number, said(reply))
         self.assertFalse(UnansweredQuestion.objects.exists())
         _, run, _ = self.ask(
