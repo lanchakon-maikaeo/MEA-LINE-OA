@@ -425,4 +425,16 @@
     form.addEventListener("change", save);
     form.addEventListener("submit", save);
   });
+
+  // ADR 0036: คัดลอก beside the tracking number on a case card.
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest && event.target.closest("[data-copy]");
+    if (!button || !navigator.clipboard) return;
+    navigator.clipboard.writeText(button.dataset.copy).then(function () {
+      var label = button.querySelector("[data-copy-label]");
+      if (!label) return;
+      label.textContent = "คัดลอกแล้ว";
+      setTimeout(function () { label.textContent = "คัดลอก"; }, 2000);
+    });
+  });
 })();

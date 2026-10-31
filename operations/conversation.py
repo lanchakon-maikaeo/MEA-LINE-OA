@@ -164,6 +164,7 @@ TOPIC_FIELD_LABELS = {
     "system": {"description": "ปัญหาที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
 }
 MENU = [("ส่งเรื่องใหม่", "m=new"), ("เรื่องของฉัน", "m=mine"), ("ติดตามเรื่อง", "m=track")]
+CONTACT_HINT = "หากต้องการส่งข้อความถึงเจ้าหน้าที่ กด เรื่องของฉัน เลือกเรื่อง แล้วกด ติดต่อเจ้าหน้าที่"
 MENU_WORDS = {label: data for label, data in MENU}
 MENU_WORDS.update({"บริการ": "m=home", "ติดตามเรื่องของฉัน": "m=mine", "เมนูตามสิทธิ์": "m=roles"})
 MENU_WORDS.update(
@@ -1350,7 +1351,7 @@ def _requester_turn(turn):
         answers.emergency(turn, text)  # hazard words: the guidance at once, then carry on
     message_type = (turn.event.get("message") or {}).get("type")
     if turn.inbox.event_type == "message" and message_type in {"image", "file"}:
-        return _attachment(turn, draft)
+        return _attachment(turn, draft, chat if turn.conversation.prompt == "case_chat" else None)
     location = _event_location(turn)
     if location is not None:
         if draft is not None and draft.step == "location":
@@ -1451,11 +1452,20 @@ def _free_text(turn, draft, text, message=None):
     if turn.conversation.prompt == "track" and text:
         turn.say("ไม่พบเรื่องที่มีเลขนี้ในเรื่องของคุณ พิมพ์เลขเรื่อง เช่น W69-000001 หรือเลข SAP")
         return
+    hint = ""
     if text and draft is None and not turn.conversation.prompt and not _open_drafts(turn).exists():
         from operations import questions  # local: questions reads answers, which read this module
 
         questions.record(turn, text)  # คำถามที่บอทตอบไม่ได้ (Q11)
-    _reprompt(turn, draft)
+        open_case = (
+            turn.requester is not None
+            and Case.objects.filter(requester=turn.requester)
+            .exclude(status__in=workflow.TERMINAL)
+            .exists()
+        )
+        if open_case:  # ADR 0036 Q1: typed text joins no case unasked, so say how to reach staff
+            hint = CONTACT_HINT
+    _reprompt(turn, draft, hint)
 
 
 def _updates(turn):
@@ -2186,14 +2196,15 @@ def _menu(turn, text):
     turn.say(text, [*buttons, *[turn.button(label, "staff_menu") for label, _ in extra]])
 
 
-def _reprompt(turn, draft):
+def _reprompt(turn, draft, hint=""):
     """Ask the current question again (free text is kept, never guessed into a field)."""
     if draft is not None:
         return _ask(turn, draft)
     drafts = list(_open_drafts(turn)[:10])
     if drafts:
         return _choose_draft(turn, drafts)
-    _menu(turn, "เลือกบริการจากเมนูด้านล่าง หรือพิมพ์เรื่องที่ต้องการแจ้งได้เลย")
+    text = "เลือกบริการจากเมนูด้านล่าง หรือพิมพ์เรื่องที่ต้องการแจ้งได้เลย"
+    _menu(turn, f"{text}\n{hint}" if hint else text)
 
 
 # --- Status replies ---------------------------------------------------------------------------
@@ -2320,11 +2331,8 @@ def _case_detail(turn, number):
         turn.say(f"ไม่พบเรื่อง {number} ในเรื่องของคุณ")
         return
     files = case.attachments.count()
-    sap = (
-        f"\n{typed_lines.sap_label(case.kind, case.topic)}: {case.sap_number}"
-        if case.sap_number and typed_lines.sap_label(case.kind, case.topic)
-        else ""
-    )
+    sap_label = typed_lines.sap_label(case.kind, case.topic, case.sap_kind)
+    sap = f"\n{sap_label}: {case.sap_number}" if case.sap_number and sap_label else ""
     if case.meters:
         sap += f"\nเครื่องวัดฯ: {usage_meters.describe(case.meters)}"
     bar, status = requester_steps.bar(case.status), _status_label(case)
@@ -2346,6 +2354,14 @@ def _case_detail(turn, number):
         buttons.append(turn.button("ตอบเจ้าหน้าที่", "case_reply", {"case": str(case.pk)}))
         if len(notices) > 1:
             buttons.append(turn.button("ดูข้อความก่อนหน้า", "case_notices", {"case": str(case.pk)}))
+    elif (
+        turn.requester is not None
+        and case.requester_id == turn.requester.pk
+        and case.status not in workflow.TERMINAL
+        and case.status != Case.Status.AWAITING_INFO
+    ):
+        # ADR 0036 Q1: the requester opens the case chat from its card; typing alone never does.
+        buttons.append(turn.button("ติดต่อเจ้าหน้าที่", "case_reply", {"case": str(case.pk)}))
     from operations import case_chat, warehouse  # local: both build on this module
 
     stage_lines = warehouse.status_lines(case)
@@ -3674,7 +3690,7 @@ def _confirm(turn, draft):
 # --- Attachments ---------------------------------------------------------------------------
 
 
-def _attachment(turn, draft):
+def _attachment(turn, draft, chat=None):
     message = turn.event.get("message") or {}
     image_set = message.get("imageSet") or {}
     quiet = image_set and image_set.get("index", 1) < image_set.get("total", 1)
@@ -3695,21 +3711,23 @@ def _attachment(turn, draft):
         turn.say(f"แนบไฟล์ได้ไม่เกิน {settings.ATTACHMENTS_PER_DRAFT} ไฟล์ต่อเรื่อง")
         return
     waiting = _awaiting_info(turn, draft)
+    # ADR 0036 Q2: while the requester chats about a case, a photo or file joins that case.
+    chatting = chat if draft is None and not waiting else None
+    case = waiting[0] if waiting else chatting
     attachment = Attachment.objects.create(
         identity=turn.identity,
         inbox=turn.inbox,
         line_message_id=str(message.get("id", "")),
-        draft=None if waiting else draft,
-        case=waiting[0] if waiting else None,  # a file sent after an information request
+        draft=None if case else draft,
+        case=case,  # a file sent after an information request, or in a case chat
         declared_name=str(message.get("fileName", ""))[:200],
     )
     if quiet:
         return
-    if waiting:
-        case = waiting[0]
+    if case is not None:
         identity_services.audit(
             None,
-            "case.info_file_received",
+            "case.chat_file_received" if chatting else "case.info_file_received",
             case,
             actor_label=f"requester:{turn.requester.pk}",
             number=case.number,
@@ -3720,10 +3738,12 @@ def _attachment(turn, draft):
             if len(waiting) > 1
             else ""
         )
+        from operations import case_chat  # local: case_chat builds on this module
+
         turn.say(
             f"ได้รับไฟล์แล้ว แนบกับเรื่อง {case.number}\n"
             f"เจ้าหน้าที่จะเห็นเมื่อระบบตรวจความปลอดภัยของไฟล์เสร็จ{more}",
-            MENU,
+            [(case_chat.END_LABEL, case_chat.END_POSTBACK)] if chatting else MENU,
         )
         return
     if draft is None:

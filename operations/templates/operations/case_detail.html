@@ -11,7 +11,7 @@
 </ol>
 
 <div class="case-head" data-tour="case-head">
-  <span class="eyebrow">{{ case.get_kind_display }} · ยื่นทาง {{ case.get_channel_display }}{% if case.menu_label %} · เมนู {{ case.menu_label }}{% endif %}</span>
+  <span class="eyebrow">{{ case.get_kind_display }} · ยื่นทาง {{ case.get_channel_display }}{% if case.menu_label and not page.line_request %} · เมนู {{ case.menu_label }}{% endif %}</span>
   <div class="case-head__title">
     <h1>{{ case.number }}</h1>
     {% prio page.level %}
@@ -47,19 +47,30 @@
 
 <div id="revision-watch" hx-get="{% url 'case-revision' case.number %}?r={{ case.revision }}" hx-trigger="every 30s, poll" hx-swap="innerHTML" data-poll aria-live="polite"></div>
 
-<div class="detail">
+<div class="detail{% if page.line_request %} detail--request{% endif %}">
+  {% with r=page.line_request %}{% if r %}
+  <section class="section line-request" aria-labelledby="s-line-request">
+    <div class="section-head"><h2 id="s-line-request">ข้อมูลที่ผู้แจ้งส่งผ่าน LINE</h2><span class="muted num">{{ case.submitted_at|thai_datetime }}</span></div>
+    <p class="labelled__label">รายการที่ผู้แจ้งเลือก</p>
+    <ol class="picks">{% if r.tile %}<li><span class="pick pick--tile">{{ r.tile }}</span></li>{% endif %}{% for p in r.picks %}<li><span class="pick">{{ p }}</span></li>{% endfor %}</ol>
+    {% if r.number %}
+    <div class="tracking">
+      <div><p class="tracking__label">{{ r.number_label }}</p><p class="tracking__number">{{ r.number }}</p></div>
+      <button class="btn btn--outline btn--sm" type="button" data-copy="{{ r.number }}">{% icon "copy" "sm" %} <span data-copy-label aria-live="polite">คัดลอก</span></button>
+    </div>
+    {% elif r.no_number %}
+    <p class="tracking tracking--none">ไม่มีเลขติดตาม เจ้าหน้าที่ค้นหาเอกสารจากรายละเอียดที่ผู้แจ้งระบุ</p>
+    {% endif %}
+    <div class="labelled"><p class="labelled__label">รายละเอียดที่ผู้แจ้งระบุ</p>{% if r.details %}<div class="prose-block">{{ r.details }}</div>{% else %}<p class="muted">ผู้แจ้งไม่ได้ระบุรายละเอียดเพิ่มเติม</p>{% endif %}</div>
+    {% if r.photos %}
+    <div class="labelled"><p class="labelled__label">รูปที่ผู้แจ้งแนบ</p>
+      <ul class="thumbs">{% for a in r.photos %}<li><a href="{% url 'attachment-download' a.pk %}" target="_blank" rel="noopener"><img src="{% url 'attachment-download' a.pk %}" alt="รูปที่ผู้แจ้งแนบ {{ forloop.counter }}" loading="lazy" decoding="async"></a></li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}{% endwith %}
   <div class="detail__main">
     <div id="action-slot" aria-live="polite"></div>
-
-    {% if page.info_replies %}
-    <section class="section" aria-labelledby="s-replies">
-      <div class="section-head"><h2 id="s-replies">ข้อมูลเพิ่มจากผู้แจ้ง (LINE)</h2><span class="muted">{{ page.info_replies|length }} ข้อความ</span></div>
-      {% for r in page.info_replies %}
-        <div class="labelled"><p class="labelled__label">{{ r.created_at|thai_datetime }}</p><div class="prose-block">{{ r.text }}</div></div>
-      {% endfor %}
-      {% if case.status == "awaiting_info" %}<p class="helptext">ถ้าข้อมูลครบแล้ว กด "ได้ข้อมูลครบแล้ว" ในสิ่งที่ทำได้ เพื่อให้เรื่องเดินต่อ</p>{% endif %}
-    </section>
-    {% endif %}
 
     {% include "operations/_case_panel.html" %}
 
@@ -72,6 +83,7 @@
     </section>
     {% endif %}
 
+    {% if page.lines.lines %}
     <section class="section" aria-labelledby="s-lines" data-tour="lines">
       <div class="section-head">
         <h2 id="s-lines">{% if case.kind != "problem" and not page.lines.stock %}รายละเอียดตามใบ{% else %}รายการอุปกรณ์{% endif %}</h2>
@@ -116,13 +128,13 @@
           <tbody data-more>
           {% for l in page.lines.lines %}
             <tr><td class="num">{{ l.line_no }}</td><td><span class="t-strong">{{ l.item }}</span> <span class="muted">{{ l.name }}</span>{% for t in l.typed %}<br><span>{{ t }}</span>{% endfor %}</td><td class="num">{{ l.requested }}</td><td>{{ l.serials|join:", "|default:"-" }}</td></tr>
-          {% empty %}<tr><td colspan="4" class="muted">ไม่ได้ระบุรายการของ</td></tr>
           {% endfor %}
           </tbody>
         </table>
         {% endif %}
       </div>
     </section>
+    {% endif %}
 
     {% if case.kind == "withdrawal" and page.lines.deliveries %}
     <section class="section" aria-labelledby="s-deliveries" data-tour="deliveries">
@@ -217,8 +229,8 @@
       {% if page.attachments %}
         <ul class="files">
           {% for a in page.attachments %}
-            <li class="file">{% icon "clip" %}
-              {% if a.scan_status == "clean" %}<a href="{% url 'attachment-download' a.pk %}">{{ a.declared_name|default:"ไฟล์แนบ" }}</a>{% else %}<span>{{ a.declared_name|default:"ไฟล์แนบ" }}</span>{% endif %}
+            <li class="file">{% if a.scan_status == "clean" and a.content_type != "application/pdf" %}<a class="file__thumb" href="{% url 'attachment-download' a.pk %}" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true"><img src="{% url 'attachment-download' a.pk %}" alt="" loading="lazy" decoding="async"></a>{% else %}{% icon "clip" %}{% endif %}
+              {% if a.scan_status == "clean" %}<a href="{% url 'attachment-download' a.pk %}"{% if a.content_type != "application/pdf" %} target="_blank" rel="noopener"{% endif %}>{{ a.declared_name|default:"ไฟล์แนบ" }}</a>{% else %}<span>{{ a.declared_name|default:"ไฟล์แนบ" }}</span>{% endif %}
               <span class="muted">{{ a.get_scan_status_display }}{% if a.size %} · {{ a.size|filesizeformat }}{% endif %}</span>
             </li>
           {% endfor %}

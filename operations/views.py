@@ -133,7 +133,11 @@ def attachment_download(request, pk):
     position = list(attachment.case.attachments.values_list("pk", flat=True)).index(attachment.pk)
     filename = f"{attachment.case.number}-{position + 1}.{EXTENSIONS[attachment.content_type]}"
     response = FileResponse(
-        path.open("rb"), as_attachment=True, filename=filename, content_type=attachment.content_type
+        path.open("rb"),
+        # ADR 0036 Q3: a photo opens in the browser; a PDF still downloads.
+        as_attachment=attachment.content_type == "application/pdf",
+        filename=filename,
+        content_type=attachment.content_type,
     )
     response["Cache-Control"] = "private, no-store"
     return response

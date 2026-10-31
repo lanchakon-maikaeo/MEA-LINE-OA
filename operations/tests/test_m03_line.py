@@ -887,8 +887,7 @@ class InfoReplyTests(InfoCase):
         staff = Client()
         staff.force_login(self.intake)
         page = staff.get(f"/cases/{case.number}/")
-        self.assertContains(page, "ข้อมูลเพิ่มจากผู้แจ้ง (LINE)")
-        self.assertContains(page, "ตู้หมายเลข 12 ปากซอย 3")
+        self.assertContains(page, "ตู้หมายเลข 12 ปากซอย 3")  # in the chat window (ADR 0036)
         whats = [e["what"] for e in page.context["page"]["timeline"]]
         self.assertIn("ผู้แจ้งตอบข้อมูลเพิ่มทาง LINE", whats)
         queue = staff.get("/divisions/SIM-TRIAGE/", {"tab": "district"})

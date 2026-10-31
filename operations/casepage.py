@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from operations import (
     coordination,
+    flow_runner,
     fulfilment,
     options,
     policy,
@@ -465,6 +466,39 @@ def journey(case):
     ]
 
 
+def line_request(case, attachments):
+    """ADR 0036: what the requester picked and typed in a LINE เบิก/คืน flow, built from what
+    the case already keeps, so older cases show it too; None for other cases."""
+    if case.channel != Case.Channel.LINE or case.kind not in (K.WITHDRAWAL, K.RETURN):
+        return None
+    data = case.intake_data or {}
+    no_number = bool(data.get("no_number")) and not case.sap_number
+    label = typed_lines.sap_label(case.kind, case.topic, case.sap_kind)
+    picks = [
+        flow_runner.SET_LABELS.get(data.get("set_kind"), data.get("set_kind"))
+        or data.get("equipment_name")
+        or flow_runner.GROUP_LABELS.get(data.get("group"), ""),
+        "ติดตามใบเบิก" if case.kind == K.WITHDRAWAL else "ติดตามใบส่งคืน",
+        "ไม่มีหมายเลข" if no_number else label if case.sap_number else "",
+    ]
+    typed = [t for t in (case.purpose, case.condition, case.return_reason) if t and t != "-"]
+    return {
+        "tile": (case.menu_label or "").split(" · ")[0],
+        "picks": [p for p in picks if p],
+        "number": case.sap_number,
+        "number_label": label,
+        "no_number": no_number,
+        "details": "\n".join(dict.fromkeys(typed)),  # a return keeps one text as both fields
+        "photos": [
+            a
+            for a in attachments
+            if a.identity_id
+            and a.scan_status == a.ScanStatus.CLEAN
+            and a.content_type.startswith("image/")
+        ],
+    }
+
+
 def build(case, now=None):
     now = now or timezone.now()
     triage = CaseTriage.objects.filter(case=case).select_related("confirmed_division").first()
@@ -479,15 +513,17 @@ def build(case, now=None):
     if case.related_case_id:
         related.append(case.related_case)
     related += list(Case.objects.filter(related_case=case).order_by("number"))
+    attachments = list(case.attachments.order_by("created_at"))
+    request = line_request(case, attachments)
+    sap_label = typed_lines.sap_label(case.kind, case.topic, case.sap_kind)
     return {
         "level": queues.level_of(triage),
         "triage": triage,
-        "texts": [
-            *(
-                [(typed_lines.sap_label(case.kind, case.topic), case.sap_number)]
-                if case.sap_number and typed_lines.sap_label(case.kind, case.topic)
-                else []
-            ),
+        "line_request": request,
+        "texts": []  # the LINE section says all of it (ADR 0036)
+        if request
+        else [
+            *([(sap_label, case.sap_number)] if case.sap_number and sap_label else []),
             *([("เครื่องวัดฯ", usage_meters.describe(case.meters))] if case.meters else []),
             *((label, getattr(case, name)) for name, label in TEXT_FIELDS if getattr(case, name)),
         ],
@@ -504,9 +540,8 @@ def build(case, now=None):
         "problem": problems.summary(case) if case.kind == K.PROBLEM else None,
         "handoff": _handoff(case),
         "review": RoutingReview.objects.filter(case=case, status=RoutingReview.Status.OPEN).first(),
-        "attachments": list(case.attachments.order_by("created_at")),
+        "attachments": attachments,
         "registry": registry_facts(case),
-        "info_replies": list(case.info_replies.order_by("created_at")),
         "timeline": timeline(case),
         "related": related,
         "update_due": policy.update_due(case),

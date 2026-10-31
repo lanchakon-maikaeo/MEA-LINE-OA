@@ -272,6 +272,20 @@ def thread(case):
                 "id": f"d{c.pk}",
             }
         )
+    # ADR 0036 Q2: a photo or file from LINE, sent while filing (faint) or after.
+    for a in case.attachments.filter(identity__isnull=False):
+        noun = "ไฟล์" if "pdf" in (a.content_type or a.declared_name.lower()) else "รูป"
+        items.append(
+            {
+                "who": "requester",
+                "text": f"ผู้แจ้งส่ง{noun} 1 {noun} ดูได้ที่ส่วนไฟล์แนบ",
+                "at": a.created_at,
+                "meta": "ผู้แจ้ง · ตอนสร้างเรื่อง" if a.draft_id else "ผู้แจ้ง",
+                "faint": bool(a.draft_id),
+                "contact": "",
+                "id": f"a{a.pk}",
+            }
+        )
     statuses = dict(case.Status.choices)
     for d in case.decisions.exclude(from_status="").select_related("actor__staff_profile"):
         if d.from_status == d.to_status:

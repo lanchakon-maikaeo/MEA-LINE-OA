@@ -40,6 +40,7 @@ ICONS = {
         '<path d="M5 5h14a1 1 0 011 1v9a1 1 0 01-1 1H10l-4 3.5V16H5a1 1 0 01-1-1V6a1 1 0 011-1z"/>'
     ),
     "send": '<path d="M4 12l16-7-6 16-3-6.5z"/><path d="M11 14.5L20 5"/>',
+    "copy": '<rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 5H5v10"/>',
 }
 
 

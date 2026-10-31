@@ -83,10 +83,15 @@ def identified(lines):
     )
 
 
-def sap_label(kind, topic=""):
-    """What this case's SAP number is called, or "" when this kind of case has none."""
+def sap_label(kind, topic="", sap_kind=""):
+    """What this case's SAP number is called, or "" when this kind of case has none. A
+    withdrawal or return filed from a LINE flow says the kind of number picked (ADR 0036)."""
     if kind == K.PROBLEM and topic == Case.Topic.REPAIR:
         return REPAIR_SAP_LABEL
+    if kind in SAP_LABELS and sap_kind:
+        from operations.flow_runner import TRACKING_LABELS  # local: flow_runner builds on this
+
+        return TRACKING_LABELS.get(sap_kind, SAP_LABELS[kind])
     return SAP_LABELS.get(kind, "")
 
 
