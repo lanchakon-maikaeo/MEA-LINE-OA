@@ -1438,7 +1438,10 @@ def _free_text(turn, draft, text, message=None):
         ):
             # ADR 0032 Q15, Q19: without AI the program says it; with AI, ai_chat.apply refuses.
             return slip_refusal(turn, text)
-        if use_ai and agent_chat.enabled():
+        from operations import free_chat
+
+        # ADR 0037 Q14: a question meets the keywords of คลังคำตอบ before ตอบอิสระ.
+        if use_ai and agent_chat.enabled() and not free_chat.wanted(turn, draft, text):
             return ai_chat.queue(turn, draft, text, message)
         found = answers.keyword_answer(turn, draft, text)  # คลังคำตอบ ก (ADR 0012)
         if found is not None:

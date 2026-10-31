@@ -56,7 +56,7 @@ from operations.models import (
 )
 
 ADMIN_URLS = ("admin-",)
-REFERENCE_URLS = {"pii", "routing-words", "duties"}
+REFERENCE_URLS = {"pii", "routing-words", "duties", "knowledge"}
 ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
 ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
 # ADR 0030 Q12: ปัญหาและข้อเสนอแนะ is a tab of its own after คิวงาน, for admins only.

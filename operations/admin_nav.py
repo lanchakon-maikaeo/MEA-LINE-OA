@@ -101,6 +101,7 @@ GROUPS = (
                 ("admin-flow", "admin-flow-start", "admin-flow-save", "admin-flow-publish"),
             ),
             Page("admin-answers", "คลังคำตอบ", "คำตอบที่บอทใช้ตอบคำถามทั่วไป"),
+            Page("admin-free-chat", "ตอบอิสระ", "คำแนะนำเฉพาะเรื่องของ AI ที่ตอบคำถามอิสระ"),
             Page(
                 "admin-questions",
                 "คำถามที่บอทตอบไม่ได้",

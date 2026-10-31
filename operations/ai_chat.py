@@ -61,7 +61,7 @@ def version_for_chat():
     from operations import ai_answer, answers
 
     version = ai.active_version()
-    if version is None and answers.mode() in ("choose", "write"):
+    if version is None and answers.mode() in ("choose", "write", "agent"):
         version = ai_answer.active_version()
     return version
 
@@ -69,7 +69,7 @@ def version_for_chat():
 def wants_ai(turn, draft, text):
     """Free text that the guided flow cannot use as an answer, when AI is configured. While the
     AI talks (chat_mode, ADR 0022 Q8) every typed message goes to it."""
-    from operations import agent_intake
+    from operations import agent_intake, free_chat
 
     talking = agent_intake.active()
     if not settings.AI_ENABLED or version_for_chat() is None:
@@ -79,8 +79,9 @@ def wants_ai(turn, draft, text):
     if private_text(draft, text):
         return False
     if getattr(turn, "anonymous", False):
-        # ผู้แจ้งไม่ระบุตัวตน: keyword answers only; the AI path needs a registered requester.
-        return False
+        # ผู้แจ้งไม่ระบุตัวตน: keyword answers only, except a question for ตอบอิสระ (ADR 0037
+        # Q8), which never sees cases; a draft's own typed answers stay the draft's.
+        return free_chat.wanted(turn, draft, text)
     if draft is None:
         # Several open drafts and none chosen: the user must pick one first (no guessing).
         return not conversation._open_drafts(turn).exists()
@@ -102,6 +103,8 @@ def wants_ai(turn, draft, text):
     if shape == "question":
         from operations import ai_answer, answers
 
+        if free_chat.wanted(turn, draft, text):
+            return True
         return answers.mode() in ("choose", "write") and ai_answer.active_version() is not None
     return shape == "request"
 
@@ -119,7 +122,12 @@ def queue(turn, draft, text, message=None):
     if message is not None:
         result["message"] = message.pk
     shape = conversation.off_step(draft, text)
-    if agent_intake.active(version):
+    from operations import free_chat
+
+    if free_chat.wanted(turn, draft, text):
+        # ADR 0037: a question for ตอบอิสระ; the mark also counts it against the limits.
+        result["free_chat"] = {"anonymous": bool(getattr(turn, "anonymous", False))}
+    if agent_intake.active(version) and not getattr(turn, "anonymous", False):
         # ADR 0022: the AI decides what the text is. A step that takes typed answers is kept
         # so that, if the AI fails or is late, the step takes the text as before (Q10).
         result["intake"] = {"draft": draft is not None}
@@ -172,6 +180,24 @@ def _turn_for(run):
     turn = Turn(run.inbox, run.inbox.payload, identity, conv, timezone.now())
     requester = identity.requester
     from operations import staff_line
+
+    if (run.result.get("free_chat") or {}).get("anonymous"):
+        # ADR 0037 Q8: an anonymous reporter's question; the tools never show it any case.
+        anonymous = Requester.objects.filter(anonymous_identity=identity).first()
+        draft = conv.active_draft
+        if (
+            anonymous is not None
+            and run.inbox.source_user_id == identity.external_id
+            and run.inbox.channel == identity.channel
+            and (
+                draft is None
+                or (draft.identity_id == identity.pk and draft.requester_id == anonymous.pk)
+            )
+        ):
+            turn.requester, turn.anonymous = anonymous, True
+            return turn, True
+        turn.say("บัญชีผู้แจ้งของคุณใช้งานไม่ได้ในขณะนี้ กรุณาติดต่อ ฝอจ.")
+        return turn, False
 
     if (
         run.result.get("agent_context") is not None
@@ -326,8 +352,27 @@ def process(run_id):
         act = decided["act"]
         budget = max(0, budget - (time.monotonic() - started))
     calls = decided["calls"] if decided else 0
+    from operations import free_chat
+
+    free = None
+    if run.result.get("free_chat") is not None and (
+        act is None or (act == "reply" and free_chat.asks(source_text))
+    ):
+        # ADR 0037: ตอบอิสระ answers the question (Q33: with a draft open, then the step again).
+        tools = free_chat.Tools(run.identity_id, run.result["free_chat"].get("anonymous", False))
+        calls_left = free_chat.MAX_TOOL_CALLS + 1 if act is None else agent_intake.MAX_CALLS - calls
+        free = free_chat.run(
+            source_text,
+            tools,
+            free_chat.version(),
+            budget,
+            free_chat.history(run),
+            max_calls=max(2, calls_left),
+        )
+        calls += len({a["step"] for a in free["attempts"]})
+        budget = max(0, budget - (time.monotonic() - started))
     agent_result, agent_attempts = (None, [])
-    if run.result.get("agent_context") is not None and act in (None, "lookup"):
+    if free is None and run.result.get("agent_context") is not None and act in (None, "lookup"):
         steps = agent_chat.MAX_STEPS if act is None else agent_intake.MAX_CALLS - calls
         agent_result, agent_attempts = agent_chat.plan(run, source_text, budget, max_steps=steps)
         calls += len({a["step"] for a in agent_attempts if "step" in a})
@@ -338,7 +383,9 @@ def process(run_id):
     reads = (act in (None, "fill", "new") and not fallback) or (
         act == "answer" and (not seen["typed"] or numeric)
     )
-    if agent_result is not None:
+    if free is not None:
+        attempts = free["attempts"]
+    elif agent_result is not None:
         attempts = agent_attempts
     elif not reads:
         attempts = []
@@ -353,7 +400,8 @@ def process(run_id):
         attempts = decided["attempts"] + attempts
     chat = None
     if (
-        agent_result is None
+        free is None
+        and agent_result is None
         and act is None
         and not fallback
         and turn.requester is not None
@@ -378,6 +426,21 @@ def process(run_id):
         wording = False
         if status:
             extraction = None
+        elif free is not None and (free["sent"] or draft is None or not (act or typed)):
+            status = R.ANSWERED
+            run.result = {
+                **run.result,
+                "free_chat": {**run.result["free_chat"], **free_chat.respond(turn, draft, free)},
+            }
+            if free["sent"]:
+                run.result["free_chat_reply"] = free["reply"]  # what the next question sees
+            elif draft is None:
+                questions.record(turn, source_text)  # คำถามที่บอทตอบไม่ได้ (Q18)
+        elif free is not None and act is None:
+            # No answer at a step that takes typed answers: the step takes the text (ADR 0012).
+            status = R.TAKEN
+            run.result = {**run.result, "free_chat": {**run.result["free_chat"], "by": "step"}}
+            conversation._draft_text(turn, draft, source_text)
         elif act is not None and agent_result is None and draft is not None:
             status, wording = _intake(turn, draft, decided, extraction, run, source_text)
         elif agent_result is not None:

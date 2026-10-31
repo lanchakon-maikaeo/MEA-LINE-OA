@@ -1,0 +1,78 @@
+{% extends "operations/admin_base.html" %}
+{% load ui %}
+{% block title %}ตอบอิสระ · แอดมิน · DED Center{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>ตอบอิสระ: คำแนะนำเฉพาะเรื่อง</h1>
+    <p class="lede">AI ที่ตอบคำถามอิสระอ่านกฎหลักที่ล็อกไว้ก่อน แล้วจึงอ่านคำแนะนำของแต่ละเรื่องในหน้านี้ คำแนะนำช่วยเรื่องวิธีใช้ข้อมูลและถ้อยคำ แต่เปิดกฎหลักไม่ได้ เช่น ให้บอกข้อมูลรายบุคคลไม่ได้ ฉบับใหม่ทุกฉบับต้องผ่านกฎและชุดตรวจตอนกลางคืนก่อนใช้จริง</p>
+  </div>
+</div>
+<section class="section" aria-labelledby="fc-state">
+  <div class="section-head"><h2 id="fc-state">ตอนนี้เป็นอย่างไร</h2></div>
+  <ul>
+    <li>ตัวเลือกระบบ: {{ mode }} (<a href="{% url 'admin-options' %}#opt-chat_answers">เปลี่ยน</a>)</li>
+    <li>{% if usable %}บอทตอบอิสระได้ รุ่น AI ผ่านการประเมินของงานนี้แล้ว{% elif on %}เปิดระดับตอบอิสระแล้ว แต่รุ่น AI งานตอบแชตยังไม่มีผลประเมินของงานนี้ บอทจึงตอบด้วยคำสำคัญอย่างเดียว{% else %}ยังไม่ได้เปิดระดับตอบอิสระ{% endif %}</li>
+    <li>AI ปรับคำแนะนำเองทุกคืน: {% if tuning %}เปิด{% else %}ปิด{% endif %} (<a href="{% url 'admin-options' %}#opt-free_chat_tuning">เปลี่ยน</a>)</li>
+  </ul>
+</section>
+{% for t in topics %}
+<section class="section" aria-labelledby="g-{{ t.topic }}">
+  <div class="section-head"><h2 id="g-{{ t.topic }}">{{ t.label }}</h2>
+    <span class="muted">{% if t.active %}ฉบับ {{ t.active.number }} ({{ t.active.get_source_display }}){% else %}ฉบับเริ่มต้น{% endif %}</span></div>
+  <p>{{ t.text }}</p>
+  <details class="fold">
+    <summary><span class="fold__title">เขียนฉบับใหม่</span></summary>
+    <div class="fold__body">
+      <form method="post" action="{% url 'admin-free-chat' %}">
+        {% csrf_token %}<input type="hidden" name="topic" value="{{ t.topic }}">
+        <div class="field"><label for="x-{{ t.topic }}">คำแนะนำ (ไม่มีตัวเลข ชื่อคน เบอร์ หรือลิงก์)</label><textarea id="x-{{ t.topic }}" name="text" rows="3" maxlength="{{ max_guide }}" required>{{ t.text }}</textarea></div>
+        <div class="field"><label for="r-{{ t.topic }}">เหตุผล</label><input id="r-{{ t.topic }}" name="reason" maxlength="500"></div>
+        <button class="btn btn--sm" type="submit" name="op" value="save">บันทึก</button>
+      </form>
+    </div>
+  </details>
+  <details class="fold">
+    <summary><span class="fold__title">ทุกฉบับ</span><span class="fold__sub">{{ t.versions|length }} ฉบับ</span></summary>
+    <div class="fold__body">
+      <div class="table-wrap"><table class="table--cards">
+        <thead><tr><th scope="col">ฉบับ</th><th scope="col">ข้อความ</th><th scope="col">สถานะ</th><th scope="col">ที่มา</th><th scope="col"></th></tr></thead>
+        <tbody>
+        {% for v in t.versions %}
+          <tr>
+            <td class="num" data-label="ฉบับ">{{ v.number }}</td>
+            <td>{{ v.text }}{% if v.reason %}<br><span class="muted">{{ v.reason }}</span>{% endif %}</td>
+            <td class="cell--wide" data-label="สถานะ">{{ v.get_status_display }}{% if v.status == 'refused' %}<br><span class="muted">{% if v.check_result.rules %}{{ v.check_result.rules }}{% else %}ชุดตรวจไม่ผ่าน{% for f in v.check_result.failed %} {{ f.id }}{% endfor %}{% endif %}</span>{% endif %}</td>
+            <td class="cell--wide" data-label="ที่มา">{{ v.get_source_display }}{% if v.created_by %} · {{ v.created_by.username }}{% endif %} · {{ v.created_at|thai_datetime }}</td>
+            <td class="cell--wide">{% if v.status == 'retired' and v.activated_at %}
+              <form method="post" action="{% url 'admin-free-chat' %}" class="inline">
+                {% csrf_token %}<input type="hidden" name="topic" value="{{ t.topic }}"><input type="hidden" name="guide" value="{{ v.pk }}"><input type="hidden" name="reason" value="ย้อนกลับไปฉบับ {{ v.number }}">
+                <button class="btn btn--sm btn--ghost" type="submit" name="op" value="rollback">ใช้ฉบับนี้</button>
+              </form>{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5">ยังใช้ฉบับเริ่มต้น</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+      {% if t.active %}
+      <form method="post" action="{% url 'admin-free-chat' %}" class="mt-8">
+        {% csrf_token %}<input type="hidden" name="topic" value="{{ t.topic }}"><input type="hidden" name="reason" value="กลับไปฉบับเริ่มต้น">
+        <button class="btn btn--sm btn--ghost" type="submit" name="op" value="rollback">กลับไปฉบับเริ่มต้น</button>
+      </form>
+      {% endif %}
+    </div>
+  </details>
+</section>
+{% endfor %}
+<section class="section" aria-labelledby="fc-history">
+  <details class="fold">
+  <summary><span class="fold__title" id="fc-history">ประวัติ</span></summary>
+  <div class="fold__body"><ul>
+    {% for e in history %}<li>{{ e.created_at|thai_datetime }} · {{ e.actor.username|default:e.actor_label }} · {{ e.action }}{% if e.data.topic %} · {{ e.data.topic }} ฉบับ {{ e.data.number }}{% endif %}{% if e.reason %} · {{ e.reason }}{% endif %}</li>
+    {% empty %}<li class="muted">ยังไม่มี</li>{% endfor %}
+  </ul></div>
+  </details>
+</section>
+{% endblock %}

@@ -403,6 +403,9 @@ def record_eval(version, report):
         passed = ai_triage.gate_passed(report, version)
     elif version.task == AIConfigVersion.Task.ANSWER:
         passed = ai_answer.gate_passed(report, version)
+        kept = (version.eval_result or {}).get("free_chat")
+        if kept and "free_chat" not in report:
+            report = {**report, "free_chat": kept}  # ADR 0037: its own gate, bound to the version
     elif version.task == AIConfigVersion.Task.ROUTING:
         passed = ai_routing.gate_passed(report, version)
     else:

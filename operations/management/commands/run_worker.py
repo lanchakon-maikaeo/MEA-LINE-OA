@@ -55,6 +55,12 @@ class Command(BaseCommand):
             threading.Thread(
                 target=sheet_lookup.sync_loop, name="sheet-sources", daemon=True
             ).start()
+            from operations import chat_guides
+
+            # ADR 0037 Q31, Q32: the AI tunes the free chat guides and checks them at night.
+            threading.Thread(
+                target=chat_guides.nightly_loop, name="chat-guides", daemon=True
+            ).start()
         next_approval_check = 0
         while True:
             if time.monotonic() >= next_approval_check:

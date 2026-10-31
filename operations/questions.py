@@ -19,6 +19,7 @@ from operations.models import UnansweredQuestion
 
 MIN_LETTERS = 4  # letters left without polite endings and punctuation
 MAX_TEXT = 500
+MAX_ASKERS = 100
 
 
 def record(turn, text):
@@ -33,15 +34,34 @@ def record(turn, text):
     key = hashlib.sha256(answers.rest(masked).encode()).hexdigest()
     rows = UnansweredQuestion.objects.filter(key=key)
     if rows.update(count=F("count") + 1, last_at=turn.now):
-        return rows.first()
+        return _asked_by(rows.first(), turn)
     try:
         with transaction.atomic():
-            return UnansweredQuestion.objects.create(
-                key=key, text=masked, first_at=turn.now, last_at=turn.now
+            return _asked_by(
+                UnansweredQuestion.objects.create(
+                    key=key, text=masked, first_at=turn.now, last_at=turn.now
+                ),
+                turn,
             )
     except IntegrityError:
         rows.update(count=F("count") + 1, last_at=turn.now)
-        return rows.first()
+        return _asked_by(rows.first(), turn)
+
+
+def _asked_by(question, turn):
+    """ADR 0037 Q31: a keyed hash of a registered asker and the day, so the nightly tuning
+    counts people; anonymous reporters are not counted. Who asked is never stored."""
+    from operations import free_chat  # local: free_chat reads the conversation
+
+    if question is None or getattr(turn, "anonymous", False) or turn.requester is None:
+        return question
+    entry = {"h": free_chat.asker_key(turn.identity.pk), "d": turn.now.date().isoformat()}
+    with transaction.atomic():
+        row = UnansweredQuestion.objects.select_for_update().get(pk=question.pk)
+        if entry not in row.askers:
+            row.askers = [*row.askers, entry][-MAX_ASKERS:]
+            row.save(update_fields=["askers"])
+    return row
 
 
 @transaction.atomic

@@ -5,6 +5,7 @@ from django.views.generic import RedirectView
 from operations import (
     duties_web,
     flows_web,
+    free_chat_web,
     internal_api,
     items_web,
     koj_web,
@@ -97,6 +98,7 @@ urlpatterns = [
     path("console/pii/", pii_web.page, name="pii"),
     path("routing/words/", routing_web.words, name="routing-words"),
     path("duties/", duties_web.staff_page, name="duties"),
+    path("knowledge/", free_chat_web.knowledge_page, name="knowledge"),
     path("registry/", registry_web.home, name="registry"),
     path("registry/export.csv", registry_web.export, name="registry-export"),
     path("registry/settings/", registry_web.settings_page, name="registry-settings"),
@@ -188,6 +190,7 @@ urlpatterns = [
     path("console/admin/employees/", views.admin_employees, name="admin-employees"),
     path("console/admin/answers/", views.admin_answers, name="admin-answers"),
     path("console/admin/questions/", views.admin_questions, name="admin-questions"),
+    path("console/admin/free-chat/", free_chat_web.guides_page, name="admin-free-chat"),
     path("console/admin/duties/", duties_web.admin_page, name="admin-duties"),
     path("console/admin/org/", units_web.admin_page, name="admin-org"),
     path(

@@ -174,6 +174,11 @@ AI_EVIDENCE_PUBLIC_KEYS = tuple(
     k.strip() for k in os.environ.get("AI_EVIDENCE_PUBLIC_KEYS", "").split(",") if k.strip()
 )
 AI_TOTAL_BUDGET_SECONDS = 25
+# ADR 0037: Pinecone for เอกสารความรู้ (an index with integrated embedding whose text field is
+# chunk_text). Used only while ตัวเลือกระบบ free_chat_docs is on.
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
+PINECONE_INDEX_HOST = os.environ.get("PINECONE_INDEX_HOST", "")
+PINECONE_NAMESPACE = os.environ.get("PINECONE_NAMESPACE", "knowledge")
 AI_REPLY_FALLBACK_SECONDS = 35
 # Harness pipeline: start the next model in parallel when the current one is this slow.
 AI_HEDGE_AFTER_SECONDS = float(os.environ.get("AI_HEDGE_AFTER_SECONDS", "6"))

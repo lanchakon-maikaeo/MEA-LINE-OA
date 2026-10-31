@@ -2898,6 +2898,9 @@ class UnansweredQuestion(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     handled_at = models.DateTimeField(null=True, blank=True)
+    # ADR 0037 Q31: who asked, only as keyed hashes of registered LINE accounts with the day,
+    # so the nightly tuning counts people (at least 3 in 7 days) without knowing who they are.
+    askers = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-last_at"]
@@ -2905,6 +2908,89 @@ class UnansweredQuestion(models.Model):
 
     def __str__(self):
         return self.text[:60]
+
+
+class KnowledgeDoc(models.Model):
+    """เอกสารความรู้ (ADR 0037 Q9, Q25): text that is not secret, uploaded by staff, that the free
+    chat agent may search. Personal data is refused at upload; another admin approves it, and only
+    then does it reach Pinecone. Retiring it removes it from Pinecone again."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "รอรับรอง"
+        APPROVED = "approved", "รับรองแล้ว ใช้ตอบได้"
+        RETIRED = "retired", "เลิกใช้"
+
+    title = models.CharField(max_length=200)
+    text = models.TextField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    revision = models.PositiveIntegerField(default=1)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    chunks = models.PositiveIntegerField(default=0)  # records in Pinecone
+    synced_at = models.DateTimeField(null=True, blank=True)
+    sync_error = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self):
+        return self.title
+
+
+class ChatGuide(models.Model):
+    """คำแนะนำเฉพาะเรื่อง (ADR 0037 Q22, Q23, Q30 to Q32): one sub-prompt per topic that the free
+    chat agent reads after its locked core. Admins edit it with a reason and the AI tunes it each
+    night; every version is kept, passes rules and a small check suite before it is used, and an
+    admin rolls back to any earlier one."""
+
+    class Topic(models.TextChoices):
+        ORG_UNITS = "org_units", "ผังหน่วยงาน"
+        MY_CASES = "my_cases", "เรื่องของฉัน"
+        HOW_TO_FILE = "how_to_file", "วิธีส่งเรื่อง"
+        GENERAL = "general", "ความรู้ทั่วไป"
+        TONE = "tone", "น้ำเสียง"
+
+    class Status(models.TextChoices):
+        CANDIDATE = "candidate", "รอชุดตรวจ"
+        ACTIVE = "active", "ใช้อยู่"
+        REFUSED = "refused", "ไม่ผ่าน"
+        RETIRED = "retired", "ฉบับก่อน"
+
+    class Source(models.TextChoices):
+        SEED = "seed", "ฉบับเริ่มต้น"
+        ADMIN = "admin", "แอดมินแก้"
+        AI = "ai", "AI ปรับเอง"
+
+    topic = models.CharField(max_length=16, choices=Topic.choices)
+    number = models.PositiveIntegerField()
+    text = models.TextField(max_length=800)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CANDIDATE)
+    source = models.CharField(max_length=8, choices=Source.choices)
+    reason = models.TextField(blank=True)
+    check_result = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["topic", "-number"]
+        constraints = [
+            models.UniqueConstraint(fields=["topic", "number"], name="chat_guide_number"),
+            models.UniqueConstraint(
+                fields=["topic"], condition=models.Q(status="active"), name="chat_guide_one_active"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_topic_display()} ฉบับ {self.number}"
 
 
 # --- หน้าที่ของกอง and the routing AI (ADR 0013) ---------------------------------------------------
