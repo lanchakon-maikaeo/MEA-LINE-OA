@@ -8,7 +8,7 @@
   <div class="page-head__text">
     <span class="eyebrow"><a href="{% url 'division-detail' division.code %}">คิว {{ division.code }}</a></span>
     <h1>ปฏิทินนัด</h1>
-    <p class="lede">นัดทุกเรื่องของ {{ division.code }} อยู่ในเดือนเดียว แยกด้วยสี คำขอที่ยังไม่ยืนยันถือว่าช่วงนั้นไม่ว่าง ผู้แจ้งได้ข้อความตอนยืนยัน เปลี่ยน หรือไม่รับนัด</p>
+    <p class="lede">นัดทุกเรื่องของ {{ division.code }} อยู่ในเดือนเดียว แยกด้วยสี เรื่องที่มีเวลาตั้งต้นจะว่างทุกวันทำการเอง ปิดได้ทั้งวันหรือทีละช่วง คำขอที่ยังไม่ยืนยันถือว่าช่วงนั้นไม่ว่าง ผู้แจ้งได้ข้อความตอนยืนยัน เปลี่ยน หรือไม่รับนัด</p>
   </div>
 </div>
 
@@ -81,6 +81,7 @@
   {% regroup picked.slots|dictsort:"calendar_id" by calendar as by_calendar %}
   {% for group in by_calendar %}
     <h3 class="cal-dayview__group"><span class="cal-dot cal-dot--{{ group.list.0.tone }}" aria-hidden="true"></span>{{ group.grouper.name }}</h3>
+    {% if picked.date > today %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="calendar" value="{{ group.grouper.key }}"><input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}"><button class="btn btn--ghost btn--sm" name="action" value="close_day" type="submit">ปิดทั้งวัน</button></form>{% endif %}
     {% for s in group.list %}
     <div class="cal-slot{% if not s.is_open %} is-closed{% elif s.taken >= s.capacity %} is-full{% endif %}">
       <div class="cal-slot__time">{{ s.starts_at|time:"H:i" }} ถึง {{ s.ends_at|time:"H:i" }} <span class="muted">นัดแล้ว {{ s.taken }} จาก {{ s.capacity }}</span>{% if s.note %} <span class="muted">{{ s.note }}</span>{% endif %}</div>
@@ -89,7 +90,7 @@
           {% if a.status == "confirmed" %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}"><input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}"><button class="btn btn--ghost btn--sm" name="action" value="done" type="submit">ทำเสร็จ</button></form>{% endif %}
         </div>
       {% endif %}{% endfor %}
-      {% if s.is_open %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="slot" value="{{ s.pk }}"><input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}"><button class="btn btn--ghost btn--sm" name="action" value="close" type="submit">ปิดช่วงนี้</button></form>{% else %}<span class="tag tag--muted">ปิดแล้ว</span>{% endif %}
+      {% if s.is_open %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="slot" value="{{ s.pk }}"><input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}"><button class="btn btn--ghost btn--sm" name="action" value="close" type="submit">ปิดช่วงนี้</button></form>{% else %}<span class="tag tag--muted">ปิดแล้ว</span>{% if s.starts_at > now %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="slot" value="{{ s.pk }}"><input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}"><button class="btn btn--ghost btn--sm" name="action" value="reopen" type="submit">เปิดอีกครั้ง</button></form>{% endif %}{% endif %}
     </div>
     {% endfor %}
   {% empty %}<p class="muted">วันนี้ยังไม่มีช่วงเวลา</p>{% endfor %}

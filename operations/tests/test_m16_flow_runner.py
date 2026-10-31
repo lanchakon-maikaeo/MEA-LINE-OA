@@ -280,6 +280,11 @@ class SetTests(FlowTestCase):
 
 
 class OtherPathTests(FlowTestCase):
+    def setUp(self):
+        super().setUp()
+        # Staff open each slot, as before ADR 0036 (test_m25_booking_cards has the default times).
+        Calendar.objects.filter(key="notebook").update(default_times=[])
+
     def slot(self, days=2):
         start = timezone.now() + timedelta(days=days)
         return CalendarSlot.objects.create(

@@ -3360,6 +3360,11 @@ class Calendar(models.Model):
     name = models.CharField(max_length=120)
     division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="calendars")
     is_active = models.BooleanField(default=True)
+    # ADR 0036: "HH:MM" times that are free on every working day unless booked or closed; empty
+    # keeps the old way, where staff open each slot.
+    default_times = models.JSONField(default=list, blank=True)
+    default_minutes = models.PositiveSmallIntegerField(default=60)
+    default_capacity = models.PositiveSmallIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

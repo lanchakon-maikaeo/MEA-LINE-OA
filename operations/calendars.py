@@ -1,12 +1,13 @@
 """ปฏิทินนัดของกอง (grill กคว. 27 ต.ค. 2569 Q13, Q14, Q25, Q26, Q34).
 
-Staff of the division open slots when it suits them. In LINE the requester picks a free slot (a
-quick reply per slot); the request holds the slot until staff confirm, move or reject it, and an
+Staff of the division open slots when it suits them, and a calendar with default times has those
+free on every working day (ADR 0036) until booked or closed. In LINE the requester picks a free
+slot on a card per day; the request holds the slot until staff confirm, move or reject it, and an
 unconfirmed request counts as taken. Staff decide on the web; the requester hears of the
 decision through the case chat (ADR 0024), never a push.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -48,6 +49,8 @@ MONTHS = (
     "ธ.ค.",
 )
 MAX_SHOWN = 12
+BOOKABLE_DAYS = 10  # ADR 0036 Q16, Q24: ten working days, from the next working day
+CARD_TIMES = 8  # Q16: at most eight times on a day's card
 
 
 def _open(calendar=None):
@@ -66,8 +69,112 @@ def free_slots(key, now=None):
         return []
     now = now or timezone.now()
     release_expired(now)
+    fill_defaults(calendar, bookable_days(now))
     slots = _open(calendar).filter(starts_at__gt=now, taken__lt=F("capacity"))
     return list(slots.order_by("starts_at")[:MAX_SHOWN])
+
+
+def working_days(first, count):
+    """count days from first on that are neither a Saturday, a Sunday nor a วันหยุด."""
+    off = set(holidays(first, first + timedelta(days=count * 3 + 30)))
+    found, day = [], first
+    while len(found) < count:
+        if day.weekday() < 5 and day not in off:
+            found.append(day)
+        day += timedelta(days=1)
+    return found
+
+
+def bookable_days(now=None):
+    """ADR 0036 Q24: the days a requester may book, from the next working day on."""
+    return working_days(timezone.localdate(now) + timedelta(days=1), BOOKABLE_DAYS)
+
+
+def _starts(day, text):
+    hour, minute = (int(x) for x in text.split(":"))
+    return timezone.make_aware(datetime(day.year, day.month, day.day, hour, minute))
+
+
+@transaction.atomic
+def fill_defaults(calendar, days):
+    """ADR 0036 Q8, Q22: each default time of the calendar is a slot on these days. A time that
+    already has a slot, a closed one included, is left as it is, so a closing stays."""
+    if not calendar.default_times or not days:
+        return
+    list(Calendar.objects.select_for_update().filter(pk=calendar.pk).values_list("pk"))
+    now = timezone.now()
+    starts = [_starts(day, text) for day in days for text in calendar.default_times]
+    have = set(
+        CalendarSlot.objects.filter(calendar=calendar, starts_at__in=starts).values_list(
+            "starts_at", flat=True
+        )
+    )
+    CalendarSlot.objects.bulk_create(
+        [
+            CalendarSlot(
+                calendar=calendar,
+                starts_at=start,
+                ends_at=start + timedelta(minutes=calendar.default_minutes),
+                capacity=calendar.default_capacity,
+                note="ช่วงตั้งต้น",
+            )
+            for start in starts
+            if start not in have and start > now
+        ]
+    )
+
+
+def fill_range(calendar, first, last):
+    """The default times on the working days from first to last (the staff month)."""
+    first = max(first, timezone.localdate() + timedelta(days=1))
+    if not calendar.default_times or first > last:
+        return
+    off = holidays(first, last)
+    days = [first + timedelta(days=i) for i in range((last - first).days + 1)]
+    fill_defaults(calendar, [d for d in days if d.weekday() < 5 and d not in off])
+
+
+def day_cards(key, now=None):
+    """[(day, [(slot, free)])] for the booking cards (ADR 0036 Q16, Q17): the open slots of the
+    bookable days, at most CARD_TIMES a day; a day with no open slot is left out."""
+    calendar = Calendar.objects.filter(key=key, is_active=True).first()
+    if calendar is None:
+        return []
+    now = now or timezone.now()
+    release_expired(now)
+    days = bookable_days(now)
+    fill_defaults(calendar, days)
+    tomorrow = timezone.localdate(now) + timedelta(days=1)  # a slot staff open on a Saturday shows
+    begin = timezone.make_aware(datetime.combine(tomorrow, time.min))
+    end = timezone.make_aware(datetime.combine(days[-1] + timedelta(days=1), time.min))
+    slots = _open(calendar).filter(starts_at__gt=now, starts_at__gte=begin, starts_at__lt=end)
+    found = {}
+    for slot in slots.order_by("starts_at"):
+        found.setdefault(timezone.localtime(slot.starts_at).date(), []).append(
+            (slot, slot.taken < slot.capacity)
+        )
+    return [(day, found[day][:CARD_TIMES]) for day in sorted(found)][:12]  # LINE: 12 cards
+
+
+def day_full(day):
+    """A card's head: จันทร์ 2 พ.ย. 2569."""
+    return f"{DAY_NAMES[day.weekday()]} {day.day} {MONTHS[day.month - 1]} {day.year + 543}"
+
+
+def day_short(day):
+    """A quick reply of a day: จ. 2 พ.ย."""
+    return f"{DAYS[day.weekday()]} {day.day} {MONTHS[day.month - 1]}"
+
+
+def clock(slot):
+    return f"{timezone.localtime(slot.starts_at):%H:%M}"
+
+
+def drop_request(draft):
+    """The draft's slot request, when it asks for a call back instead (ADR 0036 Q19)."""
+    Appointment.objects.filter(draft=draft, case__isnull=True, status=A.REQUESTED).update(
+        status=A.CANCELLED, decided_at=timezone.now()
+    )
 
 
 def holidays(first, last):
@@ -113,6 +220,8 @@ def month(actor, calendar, first):
     first = first.replace(day=1)
     start = first - timedelta(days=(first.weekday() + 1) % 7)
     end = start + timedelta(days=42)
+    for one in shown:  # ADR 0036: the default times show, so staff can close them
+        fill_range(one, start, end - timedelta(days=1))
     begin = timezone.make_aware(datetime(start.year, start.month, start.day))
     slots = (
         CalendarSlot.objects.filter(calendar__in=shown)
@@ -259,6 +368,28 @@ def close_slot(actor, slot):
     slot.is_open = False
     slot.save(update_fields=["is_open"])
     identity.audit(actor, "calendar.slot_closed", slot.calendar, slot=slot.pk)
+
+
+@transaction.atomic
+def close_day(actor, calendar, day):
+    """ADR 0036 Q23: a day off; requests already made stay for staff to move or reject."""
+    require_member(actor, calendar)
+    fill_range(calendar, day, day)
+    begin = timezone.make_aware(datetime.combine(day, time.min))
+    end = begin + timedelta(days=1)
+    closed = CalendarSlot.objects.filter(
+        calendar=calendar, is_open=True, starts_at__gte=begin, starts_at__lt=end
+    ).update(is_open=False)
+    identity.audit(actor, "calendar.day_closed", calendar, day=day.isoformat(), count=closed)
+    return closed
+
+
+@transaction.atomic
+def reopen_slot(actor, slot):
+    require_member(actor, slot.calendar)
+    slot.is_open = True
+    slot.save(update_fields=["is_open"])
+    identity.audit(actor, "calendar.slot_reopened", slot.calendar, slot=slot.pk)
 
 
 def _tell(actor, appointment, text):
