@@ -55,6 +55,12 @@ _TAIL = r"(?:\s*(?:ครับ|ค่ะ|คะ|คับ|นะ|หน่อ�
 ASKS_WHAT = re.compile(
     rf"อะไรบ้าง{_TAIL}|(?:คือ|ใช้|ต้องใช้|ต้องเตรียม|ต้องมี|หมายถึง)\s*\S*\s*อะไร{_TAIL}|^\s*ทำไม"
 )
+# A general-knowledge reply that names กฟน. or a way to get in touch may hold no invented number.
+MEA_FACT = re.compile(
+    r"กฟน|การไฟฟ้านครหลวง|การไฟฟ้ากรุงเทพ|การไฟฟ้า|MEA|เบอร์|โทร|สายด่วน|ติดต่อ|ค่าธรรมเนียม|"
+    r"ค่าบริการ|อัตรา|ภายใน\s*\d|วันทำการ",
+    re.I,
+)
 # Text that tries to steer the model gets the approved answer without any AI call (Q10).
 OVERRIDE = re.compile(
     r"ignore (?:all |the )?(?:previous|above|prior)|disregard|system prompt|jailbreak|"
@@ -431,11 +437,12 @@ def problem(reply, basis, sources, own_numbers, used_tools, titles):
         return "ตอบจากข้อมูลระบบโดยไม่ได้เรียกเครื่องมือ"
     if basis == "docs" and not titles:
         return "อ้างเอกสารที่ไม่ได้ค้นพบ"
-    if basis in ("system", "docs"):
-        allowed = set(re.findall(r"\d+", sources.translate(ai_answer.THAI_DIGITS)))
-        invented = set(re.findall(r"\d+", reply.translate(ai_answer.THAI_DIGITS))) - allowed
-        if invented:
-            return f"มีตัวเลขที่ไม่มีในข้อมูล ({', '.join(sorted(invented))})"
+    allowed = set(re.findall(r"\d+", sources.translate(ai_answer.THAI_DIGITS)))
+    invented = set(re.findall(r"\d+", reply.translate(ai_answer.THAI_DIGITS))) - allowed
+    if invented and (basis in ("system", "docs") or MEA_FACT.search(reply)):
+        # Rule 1 of the core: a number about กฟน. or a contact comes from the data, also when
+        # the model calls it general knowledge (it once gave กฟน.'s call centre as "196").
+        return f"มีตัวเลขที่ไม่มีในข้อมูล ({', '.join(sorted(invented))})"
     return ""
 
 

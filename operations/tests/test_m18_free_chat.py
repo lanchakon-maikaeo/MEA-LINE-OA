@@ -301,6 +301,13 @@ class ToolTests(FreeChatCase):
         self.assertEqual(
             free_chat.problem("ใช้ไฟเกินพิกัด 45 แอมป์ทำให้ร้อน", "general", sources, [], set(), []), ""
         )
+        # Seen live (31 Oct 2569): an invented call centre number called general knowledge.
+        self.assertIn(
+            "196",
+            free_chat.problem(
+                "เบอร์โทรศัพท์บริการลูกค้าการไฟฟ้ากรุงเทพมหานครคือ 196", "general", sources, [], set(), []
+            ),
+        )
 
 
 class GateTests(FreeChatCase):
