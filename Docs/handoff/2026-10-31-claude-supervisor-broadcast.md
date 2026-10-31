@@ -195,3 +195,24 @@ Native all-friends narrowcast ใช้ no recipient/filter + `upToRemainingQuot
 - `/tmp/check-broadcast-card-ui.py`: Chromium 390px บันทึก/preview ครบ 3 ปุ่ม ส่ง test request ด้วย revision ของร่างที่บันทึก ไม่มี page errors/overflow ภาพ `output/design/broadcast-mini-app/card-390.png`
 - `makemigrations --check --dry-run`: No changes detected
 - งานอัปโหลดสื่อ และ audit WorkOrder forward / integration ทั้งระบบ ยังไม่เสร็จ
+
+### อัปเดตชุดอัปโหลดสื่อ (หลัง 6310833)
+
+- HEAD ก่อนชุดนี้คือ `6310833` ซึ่ง commit UI/auth/test-to-self/menu และเอกสารส่งต่อนี้แล้ว
+- เพิ่ม `BroadcastMedia`, migration0090, `broadcast_media.py`, `broadcast_media_web.py`, routes, UI upload/poll/status, worker scan thread และ shared `clamd_scan` รองรับ file-like streaming
+- เพิ่ม Pillow13.0.0 ใน pyproject/uv.lock สำหรับ decode/metadata stripping/thumbnail ไม่ได้ใช้ imagegen แก้ภาพเมนู
+- Compose local/server ตั้ง ClamAV stream/file 210M, scan420M, alert exceeds yes; local clamav container ถูกเริ่ม/recreate และ healthy แล้ว
+- `/tmp/broadcast-media-tests.log`: 47 tests ผ่านก่อน cleanup/lease เพิ่ม; `/tmp/broadcast-media-regression.log`: 37 tests ผ่านรวม media9, attachments เดิม และ notifications
+- `/tmp/check-broadcast-upload-ui.py`: Chromium390px multipart -> pending/clean poll -> persisted media ID/preview ผ่าน ภาพ `output/design/broadcast-mini-app/upload-390.png`; UI server8017 หยุดหลังตรวจแล้ว
+- ทดสอบ scanner จริงที่127.0.0.1:53310ด้วย PNG และ EICAR ผ่าน ไม่มี LINE send/publish
+- setup docs ใหม่ `Docs/broadcast-mini-app-setup.md`; ยังต้อง audit worker integration, video playbackจริง/HTTPSจริง และงาน WorkOrder forward + full regression/end-to-end
+- มีงานอื่นแก้พร้อมกันเพิ่มใน `CONTEXT.md`, ADR0039, `operations/admin_nav.py`, `operations/apps.py`, `operations/access_log.py`, `operations/audit_web.py`, `operations/templates/operations/admin_log.html`, tests_m25 และ hunk audit routes ใน config/urls.py **ห้ามรวม commit ของเราโดยอัตโนมัติ**
+
+### Claude รับช่วงต่อ (31 ต.ค. 2569 หลัง 22:13)
+
+- Codex หยุดเพราะลิมิตการใช้งานตอน 22:13 หลังเขียน setup doc และรัน ruff ชุดสื่อ ยังไม่ได้ commit
+- Rich Menu ตรวจแล้วว่าภาพ `sup-work.jpg` และ `sup-report.jpg` ตรงกับภาพอ้างอิงของเจ้าของ ไม่มีงานค้างในส่วนนี้ ยังไม่ publish เข้า OA
+- ชุดสื่อ: tests Broadcast/Media/Auth ผ่าน 48 รายการ แล้ว commit แยก พร้อมยกเว้น `Docs/broadcast-mini-app-setup.md` ใน `.gitignore`
+- งานสั่ง: เพิ่มขั้น `forward` (ส่งต่อให้กอง) เฉพาะ Supervisor ฝ่าย จาก WorkOrder.OPEN ใช้ทางเดียวกับ reassign แต่ล้างผู้รับผิดชอบ ไม่เปลี่ยนวันกำหนด และต้องเป็นกองอื่น; แชตเลือกกองแล้วยืนยัน หน้าเว็บมีช่องเลือกกอง
+- tests รันบน test DB `test_mea_demo_ccd` เพราะมีอีก session รัน suite บน `test_mea_demo` พร้อมกัน
+- ยังเหลือ: ค่าบัญชีจริง (LIFF, Mini App channel, HTTPS media), timeout ของ gunicorn สำหรับวิดีโอใหญ่, ทดสอบครบทุกขั้นกับ worker จริงเมื่อเจ้าของอนุญาตให้ส่ง, push/deploy

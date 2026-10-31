@@ -113,6 +113,7 @@ SAID = {
     "send_back": "ส่งงานกลับผู้สั่งแล้ว",
     "assign_person": "มอบให้คนในกองแล้ว",
     "reassign": "สั่งงานใหม่แล้ว",
+    "forward": "ส่งต่อให้กองแล้ว",
     "close": "ปิดงานแล้ว",
     "cancel": "ยกเลิกงานแล้ว",
 }
@@ -224,6 +225,9 @@ def order_detail(request, number):
             "tucked": any(o["tucked"] for o in offers),
             "people": work_orders.members(order.division_id) if "assign_person" in names else [],
             "targets": _targets(request.user) if "reassign" in names else [],
+            "divisions": work_orders.issuable(request.user).exclude(pk=order.division_id)
+            if "forward" in names
+            else [],
             "files": order.attachments.order_by("created_at"),
             "timeline": work_orders.timeline(order),
             "journey": _journey(order),
@@ -249,6 +253,8 @@ def order_action(request, number, step):
             person = User.objects.filter(pk=int(data.get("person") or 0)).first()
         if step == "reassign":
             division, person = _read_target(data.get("target"), request.user)
+        if step == "forward":
+            division = work_orders.issuable(request.user).filter(pk=data.get("division")).first()
         work_orders.act(
             request.user,
             order,

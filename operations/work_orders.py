@@ -45,7 +45,8 @@ SUBJECTS = {
     "staff_order_late": "งานสั่งเกินกำหนดแล้ว",
 }
 
-# Steps: label, the statuses it starts from, who takes it ("doer" or "supervisor"), and what
+# Steps: label, the statuses it starts from, who takes it ("doer", "supervisor" or
+# "department"), and what
 # it needs typed. The web page and (later) LINE offer exactly these.
 STEPS = {
     "acknowledge": ("รับทราบ", (S.ASSIGNED,), "doer", ""),
@@ -54,6 +55,8 @@ STEPS = {
     "send_back": ("ส่งกลับผู้สั่ง", WorkOrder.OPEN, "doer", "reason"),
     "assign_person": ("มอบให้คนในกอง", WorkOrder.OPEN, "supervisor", "person"),
     "reassign": ("สั่งใหม่", (S.SENT_BACK,), "supervisor", "target"),
+    # ADR 0040 Q2, Q7: the department moves open work to another division at once, unassigned.
+    "forward": ("ส่งต่อให้กอง", WorkOrder.OPEN, "department", "division"),
     "close": ("ปิดงาน", (S.DONE,), "supervisor", ""),
     "cancel": ("ยกเลิกงาน", (*WorkOrder.OPEN, S.SENT_BACK), "supervisor", "reason"),
 }
@@ -108,6 +111,8 @@ def steps_for(user, order):
         if who == "doer" and not (is_doer(user, order, scope) or accepts_for_division):
             continue
         if who == "supervisor" and not is_supervisor(user, order, scope):
+            continue
+        if who == "department" and not scope.is_department_supervisor:
             continue
         allowed.append((name, label))
     return allowed
@@ -249,7 +254,11 @@ def act(actor, order, step, reason="", result="", assignee=None, division=None, 
         order.assignee = assignee
         data["assignee"] = assignee.pk
         notice = ("staff_order_new", [assignee])
-    elif step == "reassign":
+    elif step in ("reassign", "forward"):
+        if step == "forward":
+            if division is None or division.pk == order.division_id:
+                raise ValidationError("เลือกกองปลายทางที่ไม่ใช่กองเดิม")
+            assignee, due_on = None, None
         division = division or order.division
         _check_target(division, assignee)
         _require_issuer(actor, division)

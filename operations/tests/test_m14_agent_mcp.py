@@ -354,7 +354,8 @@ class MCPTests(AgentTestCase):
     def test_supervisor_command_keeps_final_order_confirmation(self):
         from operations.models import WorkOrder
 
-        head = make_staff("agent-head", (Role.SUPERVISOR, "SIM-EQP"))
+        # ADR 0040: only the department issues orders.
+        head = make_staff("agent-head", (Role.DEPARTMENT_SUPERVISOR, None))
         self.line.staff_user = head
         self.line.save(update_fields=["staff_user"])
         run, reply = self.propose("ให้ทั้งกอง SIM-EQP ตรวจอุปกรณ์")

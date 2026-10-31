@@ -298,7 +298,8 @@ def set_priority(ctx, case, payload, reason, target):
     from operations import approvals
 
     department_acceptance = (
-        ctx.scope.is_department_supervisor
+        ctx.scope is not None
+        and ctx.scope.is_department_supervisor
         and case.status == Case.Status.AWAITING_APPROVAL
         and approvals.whole(case)
     )

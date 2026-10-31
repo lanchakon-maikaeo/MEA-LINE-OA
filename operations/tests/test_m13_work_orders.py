@@ -171,6 +171,50 @@ class FlowTests(OrderTestCase):
         self.assertEqual(order.status, S.CANCELLED)
 
 
+class ForwardTests(OrderTestCase):
+    """ADR 0040 Q2, Q7: the department moves open work to another division, unassigned."""
+
+    def test_the_department_forwards_open_work_and_the_destination_acknowledges_again(self):
+        order = work_orders.act(self.kcw, self.order(assignee=self.kcw), "acknowledge")
+        self.assertNotIn("forward", dict(work_orders.steps_for(self.head, order)))
+        with self.assertRaises(PermissionDenied):
+            work_orders.act(self.head, order, "forward", division=self.ktf_division)
+        with self.assertRaises(ValidationError):
+            work_orders.act(self.director, order, "forward", division=self.kcw_division)
+        order = work_orders.act(
+            self.director, order, "forward", division=self.ktf_division, assignee=self.kcw
+        )
+        self.assertEqual(
+            (order.status, order.division, order.assignee, order.acknowledged_at),
+            (S.ASSIGNED, self.ktf_division, None, None),
+        )
+        self.assertEqual(self.notices("staff_order_new", self.ktf).count(), 1)
+        whats = [row["what"] for row in work_orders.timeline(order)]
+        self.assertEqual(whats, ["สั่งงาน", "รับทราบ", "ส่งต่อให้กอง"])
+        order = work_orders.act(self.director, order, "cancel")
+        self.assertNotIn("forward", dict(work_orders.steps_for(self.director, order)))
+
+    def test_the_web_forwards_with_a_division_choice(self):
+        order = self.order()
+        head = Client()
+        head.force_login(self.head)
+        self.assertNotContains(head.get(reverse("order-detail", args=[order.number])), "ส่งต่อถึงกอง")
+        client = Client()
+        client.force_login(self.director)
+        page = client.get(reverse("order-detail", args=[order.number]))
+        self.assertContains(page, "ส่งต่อถึงกอง")
+        self.assertContains(page, f'<option value="{self.ktf_division.pk}">')
+        client.post(reverse("order-action", args=[order.number, "forward"]), {"division": ""})
+        order.refresh_from_db()
+        self.assertEqual(order.division, self.kcw_division)
+        client.post(
+            reverse("order-action", args=[order.number, "forward"]),
+            {"division": self.ktf_division.pk},
+        )
+        order.refresh_from_db()
+        self.assertEqual(order.division, self.ktf_division)
+
+
 class ReminderTests(OrderTestCase):
     def test_one_reminder_near_the_due_date_and_one_after_it(self):
         today = timezone.localdate()

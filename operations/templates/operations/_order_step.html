@@ -8,6 +8,10 @@
     <label class="field"><span>คนในกอง {{ order.division.code }}</span>
       <select name="person" required><option value="">เลือกคน</option>{% for p in people %}<option value="{{ p.pk }}"{% if order.assignee_id == p.pk %} selected{% endif %}>{{ p.staff_profile.display_name|default:p.username }}</option>{% endfor %}</select>
     </label>
+  {% elif s.needs == "division" %}
+    <label class="field"><span>ส่งต่อถึงกอง</span>
+      <select name="division" required><option value="">เลือกกอง</option>{% for d in divisions %}<option value="{{ d.pk }}">{{ d.code }}</option>{% endfor %}</select>
+    </label>
   {% elif s.needs == "target" %}
     <label class="field"><span>สั่งถึง</span>
       <select name="target" required><option value="">เลือกกองหรือคน</option>{% for division, choices in targets %}<optgroup label="{{ division.code }}">{% for value, label in choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</optgroup>{% endfor %}</select>

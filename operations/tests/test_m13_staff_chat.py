@@ -171,6 +171,23 @@ class OrderTabTests(StaffChatTestCase):
         self.type(ALICE, "ยืนยัน")
         self.assertFalse(WorkOrder.objects.exists())
 
+    def test_the_department_forwards_an_order_after_picking_a_division_and_confirming(self):
+        other = work_orders.issuable(self.director).exclude(pk=self.kae.pk).first()
+        order = work_orders.create(self.director, "งานที่ส่งผิดกอง", self.kae, assignee=None)
+        self.link(self.head, BOB)
+        self.assertNotIn("ส่งต่อให้กอง", buttons(self.type(BOB, order.number)))
+        self.link(self.director, ALICE)
+        divisions = self.press(ALICE, "ส่งต่อให้กอง", self.type(ALICE, order.number))
+        self.assertNotIn(self.kae.code[:20], buttons(divisions))
+        confirm = self.press(ALICE, other.code[:20], divisions)
+        self.assertIn(f"ไป {other.code}", texts(confirm))
+        order.refresh_from_db()
+        self.assertEqual(order.division, self.kae)
+        self.press(ALICE, "ยืนยันส่งต่อ", confirm)
+        order.refresh_from_db()
+        self.assertEqual((order.division, order.status), (other, S.ASSIGNED))
+        self.assertIn(f"ถึง {other.code}", texts(self.sent[-1]))
+
     def test_typed_dates_read_thai_day_and_month(self):
         ahead = timezone.localdate() + timedelta(days=10)
         self.assertEqual(staff_work._typed_date(f"{ahead.day}/{ahead.month}"), ahead)

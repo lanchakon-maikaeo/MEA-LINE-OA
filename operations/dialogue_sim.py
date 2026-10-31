@@ -675,8 +675,9 @@ class Dialogue:
                     if body.get("action"):  # a bubble that is its own button (ADR 0030)
                         found[body["action"]["displayText"]] = body["action"]["data"]
                     for button in body["contents"]:
-                        if "action" in button:
-                            found[button["action"]["label"]] = button["action"]["data"]
+                        if "action" in button:  # postback, or a web link in a detail card
+                            action = button["action"]
+                            found[action["label"]] = action.get("data") or action.get("uri")
         return found
 
     def button(self, label, reply=None):

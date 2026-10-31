@@ -45,6 +45,7 @@ from operations.models import (
     ConversationMessage,
     Decision,
     District,
+    Division,
     EquipmentType,
     LineMenuItem,
     PostbackToken,
@@ -759,6 +760,10 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
                 person=person,
                 skip_reason=value.get("skip_reason", False),
                 page=value.get("page", 1),
+                division=Division.objects.filter(pk=value["division"], is_active=True).first()
+                if value.get("division")
+                else None,
+                confirmed=value.get("confirm", False),
             )
         return True
     if action == "staff_ow_start":

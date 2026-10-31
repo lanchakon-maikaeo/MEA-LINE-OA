@@ -315,8 +315,19 @@ def order_detail(turn, user, order):
     staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับรายการ", "staff_inbox")])
 
 
-def order_step(turn, user, order, step, text="", person=None, skip_reason=False, page=1):
-    """One step of a งานสั่ง; steps that need words or a person ask first."""
+def order_step(
+    turn,
+    user,
+    order,
+    step,
+    text="",
+    person=None,
+    skip_reason=False,
+    page=1,
+    division=None,
+    confirmed=False,
+):
+    """One step of a งานสั่ง; steps that need words, a person or a division ask first."""
     from django.core.exceptions import PermissionDenied, ValidationError
 
     if (
@@ -374,6 +385,9 @@ def order_step(turn, user, order, step, text="", person=None, skip_reason=False,
             quick,
         )
         return
+    if step == "forward" and not confirmed:
+        _forward_ask(turn, user, order, division, page)
+        return
     try:
         order = work_orders.act(
             user,
@@ -382,6 +396,7 @@ def order_step(turn, user, order, step, text="", person=None, skip_reason=False,
             reason=text if step in ("send_back", "cancel") else "",
             result=text if step == "done" else "",
             assignee=person,
+            division=division,
         )
     except PermissionDenied:
         turn.set_prompt()
@@ -392,6 +407,38 @@ def order_step(turn, user, order, step, text="", person=None, skip_reason=False,
         return
     turn.set_prompt()
     order_detail(turn, user, order)
+
+
+def _forward_ask(turn, user, order, division, page):
+    """ADR 0040 Q2: the department picks the division, then confirms before the order moves."""
+    from django.core.paginator import Paginator
+
+    if "forward" not in dict(work_orders.steps_for(user, order)):
+        turn.say("ทำขั้นนี้ไม่ได้แล้ว อาจมีคนทำไปก่อน")
+        return
+    key = {"order": str(order.pk), "step": "forward"}
+    back = turn.button("กลับงาน", "staff_order", {"order": str(order.pk)})
+    if division is not None:
+        turn.say(
+            f"ยืนยันส่งต่องาน {order.number} จาก {order.division.code} ไป {division.code}\n"
+            "งานจะไม่มีผู้รับผิดชอบจนกว่ากองปลายทางจะมอบหมาย",
+            [
+                turn.button(
+                    "ยืนยันส่งต่อ", "staff_os", {**key, "division": division.pk, "confirm": True}
+                ),
+                back,
+            ],
+        )
+        return
+    rows = Paginator(work_orders.issuable(user).exclude(pk=order.division_id), 9).get_page(page)
+    quick = [turn.button(d.code[:20], "staff_os", {**key, "division": d.pk}) for d in rows]
+    for label, number in (("ย้อนกลับ", rows.number - 1), ("ถัดไป", rows.number + 1)):
+        if 1 <= number <= rows.paginator.num_pages:
+            quick.append(turn.button(label, "staff_os", {**key, "page": number}))
+    quick.append(back)
+    turn.say(
+        f"ส่งต่องาน {order.number} ให้กองใด · หน้า {rows.number}/{rows.paginator.num_pages}", quick
+    )
 
 
 # Thai calendar date parser retained for callers of staff_work._typed_date.
