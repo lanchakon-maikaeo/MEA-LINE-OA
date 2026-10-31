@@ -864,6 +864,38 @@ meter::-moz-meter-bar { background: var(--ink); border-radius: var(--r-full); }
 .feature h3 { font-size: 20px; }
 .feature p { color: var(--charcoal); font-size: 15px; margin-top: var(--s-8); }
 
+/* หน้าแรก 31 ต.ค. 2569: one dark screen, the name on the left, the sign-in card on the right */
+body:has(.landing) { background: var(--ink); }
+body:has(.landing) .footer { border-top: 0; }
+body:has(.landing) .footer__inner { color: var(--stone); }
+.page.landing { max-width: none; padding: 0; display: flex; flex-direction: column; }
+.landing .messages { width: 100%; max-width: var(--page-max); margin: var(--s-24) auto 0; padding: 0 var(--gutter); }
+.landing__hero {
+  flex: 1; display: flex; align-items: center; color: var(--on-primary);
+  background: radial-gradient(1200px 600px at 85% 20%, rgb(255 255 255 / 0.07), transparent 60%), var(--ink);
+}
+.landing__inner {
+  width: 100%; max-width: var(--page-max); margin: 0 auto; padding: 72px var(--gutter);
+  display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(320px, 400px); gap: var(--s-48); align-items: center;
+}
+.landing__tag {
+  display: inline-block; padding: var(--s-4) var(--s-12); border-radius: var(--r-full);
+  border: 1px solid rgb(255 255 255 / 0.2); color: var(--stone); font-size: 13px; font-weight: 500;
+}
+.landing__title { margin-top: var(--s-18); font-size: clamp(48px, 8vw, 104px); font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; }
+.landing__lede { margin-top: var(--s-18); max-width: 40ch; color: var(--stone); font-size: 18px; }
+.landing__card {
+  background: var(--canvas); color: var(--ink); border-radius: 24px; padding: var(--s-30);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.35);
+}
+.landing__card h2 { font-size: 22px; margin-bottom: var(--s-18); }
+.landing__card button { margin-top: var(--s-4); }
+.landing__help { margin: var(--s-18) 0 0; font-size: 13px; color: var(--mute); text-align: center; }
+@media (max-width: 859px) {
+  .landing__inner { grid-template-columns: minmax(0, 1fr); gap: var(--s-30); padding: var(--s-48) var(--gutter); }
+  .landing__card { width: 100%; max-width: 440px; }
+}
+
 .auth { width: 100%; max-width: 440px; margin: 0 auto; padding-top: var(--s-48); }
 .auth h1 { font-size: 32px; margin-bottom: var(--s-8); }
 .auth .lede { margin-bottom: var(--s-24); }
@@ -873,7 +905,8 @@ meter::-moz-meter-bar { background: var(--ink); border-radius: var(--r-full); }
 .js-only { display: none; }
 .js .js-only { display: inline-flex; }
 .tour-start { min-height: 40px; }
-@media (max-width: 1199px) { .tour-start__label { display: none; } .tour-start { padding: 0 var(--s-12); } }
+@media (max-width: 1399px) { .tour-start__label { display: none; } .tour-start { padding: 0 var(--s-12); } }
+@media (min-width: 960px) and (max-width: 1299px) { .mainnav { gap: var(--s-18); } .mainnav a { font-size: 16px; } .topbar .search input { width: 160px; } }
 
 .tour { position: fixed; inset: 0; z-index: 90; pointer-events: none; }
 .tour--menu { pointer-events: auto; background: rgb(17 17 17 / 0.55); }
@@ -1217,6 +1250,56 @@ a.kpi--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 .ov-table__more { text-align: right; white-space: nowrap; font-size: 14px; }
 .ov-table tbody tr:hover { background: var(--cloud); }
 .ov-quiet { margin: 0; font-size: 14px; }
+
+/* ภาพรวม 31 ต.ค. 2569: white cards on a soft grey page, fewer words, no heavy rules */
+body:has(.ov-page) { background: #f4f4f5; }
+body:has(.ov-page) .footer { border-top: 0; }
+.ov-page .ov-head { margin-bottom: var(--s-30); }
+.ov-page .ov-head h1 { font-size: 34px; letter-spacing: -0.01em; }
+.ov-page .eyebrow { font-size: 13px; letter-spacing: 0.02em; }
+.ov-page .section { margin-top: var(--s-30); }
+.ov-page .section:first-of-type { margin-top: 0; }
+.ov-page .section-head { border-bottom: 0; padding-bottom: 0; margin-bottom: var(--s-12); }
+.ov-page .section-head h2 { font-size: 17px; }
+.ov-page .kpi, .ov-page .panel, .ov-page .ov-card, .ov-page .attention__item {
+  background: var(--canvas); border: 0;
+  box-shadow: 0 1px 2px rgb(17 17 17 / 0.04), 0 0 0 1px rgb(17 17 17 / 0.05);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.ov-page a.kpi:hover, .ov-page .attention__item:hover {
+  background: var(--canvas); transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgb(17 17 17 / 0.08), 0 0 0 1px rgb(17 17 17 / 0.06);
+}
+.ov-page .kpi--dark, .ov-page a.kpi--dark:hover { background: var(--ink); }
+.ov-page .kpi { padding: var(--s-24); gap: var(--s-8); grid-template-rows: auto 1fr auto; }
+.ov-page .kpi__value { align-self: center; }
+.ov-page .kpi__value--text { font-size: 28px; padding: 0; }
+.ov-page .kpi__label { font-size: 13px; color: var(--mute); }
+.ov-page .kpi--dark .kpi__label { color: var(--stone); }
+.ov-page .kpi__value { font-size: 44px; letter-spacing: -0.02em; }
+.ov-page .kpi__note { font-size: 12px; }
+.ov-page .attention__item--alert { background: var(--danger-tint); }
+.ov-page .attention--calm {
+  display: inline-flex; padding: var(--s-8) var(--s-18); border-radius: var(--r-full); font-size: 14px;
+}
+.ov-page .panel { padding: var(--s-24); }
+.ov-page .panel__head h3 { font-size: 15px; }
+.ov-page .panel__head .muted { font-size: 13px; }
+.ov-page .panel-grid { gap: var(--s-18); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.ov-page .ov-grid { gap: var(--s-18); margin-top: var(--s-18); }
+.ov-page .kpis { gap: var(--s-18); }
+.ov-page .ov-card { border-radius: 18px; padding: var(--s-4) var(--s-12); }
+.ov-page .ov-table thead th { border-bottom-color: var(--hairline-soft); }
+.ov-page .ov-table tbody tr:last-child > * { border-bottom: 0; }
+.ov-page .ov-quiet { margin-top: var(--s-12); }
+.ov-page .ov-reference .btn--secondary { background: var(--canvas); }
+@media (max-width: 720px) {
+  .ov-page .ov-card { padding: 0 var(--s-18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-page .kpi, .ov-page .attention__item { transition: none; }
+  .ov-page a.kpi:hover, .ov-page .attention__item:hover { transform: none; }
+}
 
 /* A table that becomes one card per row on phones: the first cell on top, each cell under its own
    label (data-label), so a long name no longer breaks mid-word in a squeezed column.

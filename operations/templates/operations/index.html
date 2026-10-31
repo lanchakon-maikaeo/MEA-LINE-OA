@@ -1,24 +1,28 @@
 {% extends "operations/base.html" %}
-{% block before_main %}
-<section class="hero" aria-labelledby="landing-title">
-  <div class="hero__inner">
-    <h1 class="hero__title" id="landing-title">DED Center</h1>
-    <p class="hero__lede">ติดตามใบเบิกและใบส่งคืนอุปกรณ์ และแจ้งปัญหาหรือข้อเสนอแนะถึงกองใน ฝอจ. จาก 18 หน่วยงานผ่าน LINE การเบิกยังทำใน SAP ตามเดิม</p>
-    <div class="hero__actions">
+{% block page_class %}landing{% endblock %}
+{% block content %}
+<section class="landing__hero" aria-labelledby="landing-title">
+  <div class="landing__inner">
+    <div class="landing__intro">
+      <span class="landing__tag">ฝอจ. กฟน.</span>
+      <h1 class="landing__title" id="landing-title">DED Center</h1>
+      <p class="landing__lede">ติดตามใบเบิก ใบส่งคืน และเรื่องที่แจ้งผ่าน LINE ในที่เดียว</p>
+    </div>
+    <div class="landing__card">
       {% if user.is_authenticated %}
-        <a class="btn" href="{% url 'console' %}">ไปที่คิวงาน</a>
+        <h2>สวัสดี {{ user.staff_profile.display_name|default:user.username }}</h2>
+        <a class="btn btn--block" href="{% url 'console' %}">ไปที่ภาพรวม</a>
       {% else %}
-        <a class="btn" href="{% url 'login' %}">เข้าสู่ระบบสำหรับเจ้าหน้าที่</a>
+        <h2>เข้าสู่ระบบ</h2>
+        <form method="post" action="{% url 'login' %}">
+          {% csrf_token %}
+          <div class="field"><label for="id_username">ชื่อผู้ใช้</label><input id="id_username" name="username" autocomplete="username" required></div>
+          <div class="field"><label for="id_password">รหัสผ่าน</label><input id="id_password" name="password" type="password" autocomplete="current-password" required></div>
+          <button class="btn--block" type="submit">เข้าสู่ระบบ</button>
+        </form>
+        <p class="landing__help">ลืมรหัสผ่าน ติดต่อแอดมินระบบ</p>
       {% endif %}
     </div>
   </div>
 </section>
-{% endblock %}
-{% block content %}
-  <div class="features">
-    <div class="feature"><h3>คิวเฉพาะกอง</h3><p>เจ้าหน้าที่เห็นเฉพาะเรื่องของกองตน เรียงตามระดับความเร่งด่วนและกรอบเวลา</p></div>
-    <div class="feature"><h3>ข้อเสนอแยกจากการตัดสิน</h3><p>ระบบและ AI เสนอกองและระดับ เจ้าหน้าที่เป็นผู้ยืนยันทุกครั้ง</p></div>
-    <div class="feature"><h3>ตรวจย้อนได้</h3><p>ทุกการกระทำบันทึกผู้ทำ เวลา และเหตุผล</p></div>
-  </div>
-  <p class="muted mt-24">ตรวจสถานะระบบ: <a href="/health/live/">สถานะเว็บ</a> · <a href="/health/ready/">สถานะฐานข้อมูล</a></p>
 {% endblock %}
