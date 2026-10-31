@@ -33,6 +33,8 @@
 #   deploy/e5-move.sh pii-key      PII_SECRET_KEY on E5 (made there if missing, never shown), a copy
 #                                  for the Mac standby and on the clipboard for the password manager
 #   deploy/e5-move.sh mail         the Gmail sender for OTP mail: address typed, app password hidden
+#   deploy/e5-move.sh mini-app     the Published LINE MINI App IDs for Broadcast (ADR 0040), then
+#                                  web and worker restart; its Endpoint URL is set in LINE Developers
 #   deploy/e5-move.sh purge-demo [--keep N1,N2 --apply --username U --reason R]
 #                                  remove the demo data (15 Oct 2026): a dry run that lists what
 #                                  would go unless --apply, which takes a fresh backup first
@@ -392,6 +394,17 @@ PY
   say "share each sheet (Viewer) with $email, then turn the sheet on in the admin web"
 }
 
+mini_app() {  # ADR 0040: "DED Center" in provider MEA; ID tokens must match the Published channel
+  tunnel
+  { echo "$REMOTE_LIB"; cat <<'EOF'
+set_kv /srv/faoj/env/django.env LINE_MINI_CHANNEL_ID 2012304620
+set_kv /srv/faoj/env/django.env LINE_LIFF_ID 2012304620-sg7m4ScY
+dc up -d --no-deps web worker
+echo "Mini App IDs set (Published 2012304620); web and worker restarted"
+EOF
+  } | as_root
+}
+
 put_secrets() {  # {"file": {"KEY": "value"}} on stdin, written by root on E5; never in argv
   on_e5 'sudo python3 -c "
 import json, os, re, sys
@@ -658,6 +671,7 @@ case "${1:-}" in
   pii-key) pii_key;;
   manage) shift; tunnel; manage_e5 "$@";;
   mail) mail_setup;;
+  mini-app) mini_app;;
   ssh) shift; on_e5 "$@";;
-  *) sed -n '2,35p' "$0"; exit 2;;
+  *) sed -n '2,47p' "$0"; exit 2;;
 esac

@@ -12,6 +12,16 @@
 - Token/secret ของ Messaging API ใช้ค่าของ OA เดิม อย่าสลับจาก URL บัญชีตัวอย่างโดยยังไม่ได้ยืนยันการผูกบัญชี
 - เปิด push/outbound และ quota ตามระบบเดิมเฉพาะเมื่อพร้อมเปิดใช้งานจริง การทดสอบ local/staging ต้องใช้ allowlist ตามเดิม
 
+### บัญชีจริง: Mini App "DED Center" (provider MEA เดียวกับ OA @705ttrga)
+
+| รุ่น | `LINE_MINI_CHANNEL_ID` | `LINE_LIFF_ID` | ใช้ที่ |
+|---|---|---|---|
+| Developing | 2012304618 | 2012304618-NA4nTywG | เครื่อง Mac ผ่าน HTTPS tunnel |
+| Published | 2012304620 | 2012304620-sg7m4ScY | production |
+
+- scope เปิด `openid, profile` แล้ว
+- production: หลัง deploy รุ่นที่มี `/broadcasts/` ให้รัน `deploy/e5-move.sh mini-app` เพื่อใส่ค่ารุ่น Published แล้วเปลี่ยน Endpoint URL ของรุ่น Published ใน LINE Developers เป็น `https://168-107-70-170.sslip.io/broadcasts/` ตอนนี้ยังเป็นหน้าตัวอย่างของ LINE
+
 ตาม [LINE ID token verification](https://developers.line.biz/en/reference/line-login/#verify-id-token) server ตรวจ token กับ channel ID โดยไม่เชื่อ roles/user ID จาก browser เซสชัน Mini App จำกัดเฉพาะ Broadcast และไม่เปลี่ยนเป็นเซสชันเว็บเจ้าหน้าที่ทั่วไป
 
 ## ติดตั้งและอัปเกรด

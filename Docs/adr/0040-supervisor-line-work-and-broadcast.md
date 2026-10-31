@@ -138,3 +138,10 @@ status: accepted
 - รันชุดทดสอบทั้งหมด 1388 รายการบน test DB แยกของ session นี้ พบ 5 รายการที่พังตั้งแต่ commit ก่อนหน้า คือการตั้งระดับความเร่งด่วนเมื่อผู้แจ้งเป็นผู้ทำ, การทดสอบสั่งงานที่ยังใช้ Supervisor กอง และตัวจำลองบทสนทนาที่อ่านปุ่มลิงก์ในการ์ดไม่ได้ แก้แล้ว หลัง commit รันทั้งหมด 1388 รายการบนสำเนาที่สะอาดของ dev ผ่านครบ
 - ยังไม่ได้ตรวจกับบัญชีจริง: ค่า LIFF และ Mini App channel, LINE ดึงไฟล์สื่อผ่าน HTTPS, การเล่นวิดีโอในแอป LINE และการส่งประกาศจริง ยังไม่ได้ทดสอบครบทุกขั้นบนฐานข้อมูล local พร้อม worker จริง เพราะ worker จะส่งข้อความออกจริง
 - ก่อนเปิดอัปโหลดวิดีโอจริงต้องตัดสินค่า timeout ของ gunicorn ซึ่งตอนนี้ตัดคำขอที่นานกว่า 30 วินาที ดู `Docs/broadcast-mini-app-setup.md`
+
+### ค่า Mini App ในบัญชี LINE (31 ต.ค. 2569)
+
+- Mini App "DED Center" อยู่ใน provider MEA เดียวกับ Messaging API ของ OA @705ttrga จึงได้ LINE user ID ชุดเดียวกับบัญชีที่เชื่อมไว้ ยังเป็น Unverified
+- ใช้รุ่น Developing ก่อน: `LINE_MINI_CHANNEL_ID=2012304618`, `LINE_LIFF_ID=2012304618-NA4nTywG` ใส่ใน `.env` ของเครื่อง Mac แล้ว รุ่น Review คือ 2012304619 และ Published คือ 2012304620 แต่ละรุ่นมี channel ID ของตัวเอง ID token ของรุ่นไหนต้องตรวจกับ channel ID ของรุ่นนั้น จึงต้องเปลี่ยนค่าเมื่อเปิดใช้รุ่น Published
+- เพิ่ม scope `openid` แล้ว ตอนนี้เป็น `openid, profile` เพื่อให้ Mini App ได้ ID token
+- Endpoint URL ทั้งสามรุ่นยังเป็นหน้าตัวอย่างของ LINE ต้องเปลี่ยนเป็น `https://<เว็บเจ้าหน้าที่>/broadcasts/` หลัง deploy หรือชี้ HTTPS tunnel ถ้าจะทดสอบกับเครื่อง Mac ยังไม่ได้ publish Rich Menu และยังไม่มีการส่งข้อความออก
