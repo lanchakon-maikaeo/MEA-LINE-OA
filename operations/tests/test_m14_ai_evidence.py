@@ -14,8 +14,14 @@ from django.core.management.base import CommandError
 from django.test import override_settings
 from django.urls import reverse
 
-from operations import ai, ai_eval, ai_evidence
-from operations.models import AIConfigVersion, AIExample, AuditEvent
+from operations import ai, ai_eval, ai_evidence, ai_release, answers
+from operations.models import (
+    AIConfigVersion,
+    AICredential,
+    AIExample,
+    AIModel,
+    AuditEvent,
+)
 from operations.tests.test_m14_typed_ai import TypedTestCase, passing_typed_gate
 
 PEM, PUBLIC = ai_evidence.new_private_key()
@@ -110,12 +116,13 @@ class ImportTests(EvidenceTestCase):
         )
         version = AIConfigVersion.objects.order_by("-number").first()
         self.assertRedirects(
-            response, f"{reverse('admin-ai')}#v{version.number}", fetch_redirect_response=False
+            response,
+            f"{reverse('admin-ai')}?tab=releases#v{version.number}",
+            fetch_redirect_response=False,
         )
         self.assertTrue(version.eval_passed)
-        page = self.client.get(reverse("admin-ai"))
-        self.assertContains(page, f"ผลประเมินนำเข้าจาก v{source.number}")
-        self.assertContains(page, f"อยู่ที่ v{version.number} บนเครื่องนี้")
+        page = self.client.get(f"{reverse('admin-ai')}?tab=releases")
+        self.assertContains(page, f"ผลประเมินของ v{source.number} อยู่ที่ v{version.number} บนเครื่องนี้")
 
 
 class RefusalTests(EvidenceTestCase):
@@ -233,3 +240,64 @@ class CommandTests(EvidenceTestCase):
                     stdout=out,
                 )
             self.assertIn("Evidence attached", out.getvalue())
+
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
+class ReleaseEvidenceTests(EvidenceTestCase):
+    """ADR 0038: a whole release travels in one signed file and keeps its label."""
+
+    def setUp(self):
+        super().setUp()
+        ai.save_credential(self.dev, "gemini", GEMINI_URL, "AIza" + "k" * 35, "เพิ่มคีย์")
+        models = [
+            AIModel.objects.get(model_id="gemini-3.8-flash"),
+            ai.add_model(self.dev, self.credential, "primary-model"),
+        ]
+        self.label = ai_release.create(self.dev, models)
+        for task, version in ai_release.members(self.label).items():
+            report = {"gate": "x", "version": version.number, **ai_evidence.data_here(task)}
+            if task == AIConfigVersion.Task.ROUTING:
+                report = {"not_ready": "ยังไม่มีรายการงานที่ดูแล"}
+            AIConfigVersion.objects.filter(pk=version.pk).update(
+                eval_passed=True, eval_result=report
+            )
+        with patch.object(ai_release, "eval_blocker", return_value=None):
+            self.raw = json.dumps(
+                ai_evidence.export_release(self.label, PEM), ensure_ascii=False
+            ).encode()
+        self.source = {t: v.number for t, v in ai_release.members(self.label).items()}
+        # Production does not have this release yet.
+        AIConfigVersion.objects.filter(release=self.label).update(release="", status="rejected")
+
+    def test_the_release_keeps_its_label_and_needs_a_test_here(self):
+        self.assertTrue(ai_evidence.is_release(self.raw))
+        with patch.object(ai_release, "eval_blocker", return_value=None):
+            label = ai_evidence.import_release(self.dev, self.raw, "นำเข้ารุ่นรวม")
+        self.assertEqual(label, self.label)
+        found = ai_release.members(label)
+        self.assertEqual(set(found), set(AIConfigVersion.Task.values))
+        for task, version in found.items():
+            self.assertNotEqual(version.number, self.source[task])
+            self.assertEqual(version.eval_result["provenance"]["release"], label)
+        extract = found[AIConfigVersion.Task.EXTRACT]
+        self.assertEqual(extract.eval_result["version"], extract.number)
+        self.assertEqual(
+            ai_release.not_ready(found[AIConfigVersion.Task.ROUTING]), "ยังไม่มีรายการงานที่ดูแล"
+        )
+        self.assertFalse(any(ai_release.tested(v) for v in found.values()))
+        with self.assertRaisesMessage(ValidationError, "นำเข้ารุ่น"):
+            ai_evidence.import_release(self.dev, self.raw, "ซ้ำ")
+        self.assertTrue(AuditEvent.objects.filter(action="ai.release_imported").exists())
+
+    def test_a_missing_provider_is_named(self):
+        ai.remove_key(self.dev, AICredential.objects.get(name="gemini"), "เครื่องนี้ยังไม่มีคีย์")
+        with self.assertRaisesMessage(ValidationError, "generativelanguage.googleapis.com"):
+            ai_evidence.import_release(self.dev, self.raw, "นำเข้า")
+
+    def test_different_data_here_is_refused_and_named(self):
+        with patch.object(answers, "bank_digest", return_value="อื่น"):
+            with self.assertRaisesMessage(ValidationError, "คลังคำตอบ"):
+                ai_evidence.import_release(self.dev, self.raw, "นำเข้า")
+        self.assertFalse(AIConfigVersion.objects.filter(release=self.label).exists())

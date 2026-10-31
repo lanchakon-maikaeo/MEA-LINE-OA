@@ -9,8 +9,11 @@ through the same validate → test → evaluate → activate path from the web a
 """
 
 import hashlib
+import ipaddress
 import json
 import re
+import socket
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -33,6 +36,7 @@ from operations.models import (
     AIConfigVersion,
     AICredential,
     AIExample,
+    AIModel,
     AIProfile,
     Case,
     EquipmentType,
@@ -75,30 +79,50 @@ def _fernet():
 
 
 def decrypt_key(credential):
+    if not credential.encrypted_key:
+        raise ImproperlyConfigured(f"{credential.title} has no API key yet.")
     try:
         return _fernet().decrypt(credential.encrypted_key.encode()).decode()
     except InvalidToken as exc:
         raise ImproperlyConfigured("Stored AI key cannot be decrypted with AI_SECRET_KEY.") from exc
 
 
+GEMINI_HOST = "generativelanguage.googleapis.com"
+# Hosts of the providers the system ships with (migration 0085): trusted without a DNS lookup.
+# Any other host must resolve to public addresses only (ADR 0038 Q3).
+KNOWN_HOSTS = frozenset({"thaillm.or.th", "api.opentyphoon.ai", GEMINI_HOST})
+
+
+def _public_host(host):
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        return False
+    return bool(infos) and all(ipaddress.ip_address(i[4][0]).is_global for i in infos)
+
+
 def clean_base_url(url):
-    """HTTPS to an allowed provider host only (no SSRF to internal addresses or other hosts)."""
+    """HTTPS on port 443 to a public host only: no SSRF to internal addresses (ADR 0038).
+    shortcut: urllib resolves the name again when it connects, so a host that switches its DNS
+    to a private address in between gets one call through; pin the address if that matters."""
     url = (url or "").strip().rstrip("/")
     try:
         parts = urlsplit(url)
         port = parts.port
     except ValueError as exc:
-        raise ValidationError("Invalid provider URL.") from exc
+        raise ValidationError("ที่อยู่ API ไม่ถูกต้อง") from exc
+    host = (parts.hostname or "").lower()
     if (
         parts.scheme != "https"
         or parts.username
         or parts.password
         or port not in (None, 443)
-        or (parts.hostname or "").lower() not in settings.AI_ALLOWED_HOSTS
         or parts.query
         or parts.fragment
+        or not host
+        or (host not in KNOWN_HOSTS and not _public_host(host))
     ):
-        raise ValidationError("Base URL must be HTTPS on an allowed AI provider host.")
+        raise ValidationError("ที่อยู่ API ต้องเป็น HTTPS ของเว็บไซต์สาธารณะ")
     return url
 
 
@@ -107,13 +131,14 @@ def clean_base_url(url):
 
 @transaction.atomic
 def save_credential(actor, name, base_url, api_key, reason):
-    """Create or rotate a provider credential. The key is write-only; audit keeps a hint."""
+    """Create a provider or give it a key or a new key. The key is write-only; audit keeps a
+    hint. A provider that waited without a key gets its first one, not a rotation."""
     identity.require_ai_editor(actor)
     reason = identity._require_reason(reason)
     base_url = clean_base_url(base_url)
     key = (api_key or "").strip()
     if not 16 <= len(key) <= 512 or any(c.isspace() for c in key):
-        raise ValidationError("API key looks invalid.")
+        raise ValidationError("คีย์ API ไม่ถูกต้อง")
     name = (name or "").strip()
     if not re.fullmatch(r"[a-z0-9-]{2,64}", name):
         raise ValidationError("Credential name: 2-64 lowercase letters, digits or dashes.")
@@ -129,12 +154,16 @@ def save_credential(actor, name, base_url, api_key, reason):
         )
         action = "ai.credential_created"
     else:
+        action = "ai.credential_rotated" if credential.has_key else "ai.credential_created"
+        if credential.has_key:
+            credential.rotated_at = timezone.now()
         credential.base_url = base_url
         credential.encrypted_key = encrypted
         credential.key_hint = key[-3:]
-        credential.rotated_at = timezone.now()
-        credential.save(update_fields=["base_url", "encrypted_key", "key_hint", "rotated_at"])
-        action = "ai.credential_rotated"
+        credential.is_hidden = False
+        credential.checked_at = credential.check_ok = None
+        credential.check_detail = ""
+        credential.save()
     identity.audit(actor, action, credential, reason, name=name, base_url=base_url)
     return credential
 
@@ -182,85 +211,227 @@ def create_profile(
     return profile
 
 
-# Ready-made models the admin page offers. The API key is never part of a preset: an admin
-# enters it once in the credential form (encrypted, write-only). `profile` is what a new
-# profile gets; the user chose JSON schema with temperature 0.4 for Typhoon (21 Oct 2569).
-PRESETS = {
-    "typhoon-v2.5-30b": {
-        "label": "Typhoon 2.5 30B A3B Instruct (OpenTyphoon)",
-        "credential": "opentyphoon",
-        "base_url": "https://api.opentyphoon.ai/v1",
-        "model_id": "typhoon-v2.5-30b-a3b-instruct",
-        "limits": "5 ครั้ง/วินาที, 200 ครั้ง/นาที, context 128K",
-        "docs_url": "https://docs.opentyphoon.ai/en/models/",
-        "key_url": "https://playground.opentyphoon.ai/api-key",
-        "profile": {"timeout_seconds": 15, "max_tokens": 1200, "temperature": "0.40"},
-    },
-}
+# --- Providers and their models (ADR 0038) ---------------------------------------------------
+
+# What a model's profile gets when its provider sets nothing else.
+PROFILE_DEFAULTS = {"timeout_seconds": 15, "max_tokens": 1200, "temperature": "0.40"}
 
 
-def preset_status():
-    credentials = {c.name: c for c in AICredential.objects.all()}
-    return [
-        {"key": key, **preset, "credential_ready": preset["credential"] in credentials}
-        for key, preset in PRESETS.items()
-    ]
+def providers():
+    """The providers the admin page lists, with their visible models first in order."""
+    return AICredential.objects.filter(is_hidden=False).prefetch_related("models").order_by("pk")
+
+
+def in_use(credential):
+    """Whether an active version calls this provider."""
+    active = AIConfigVersion.objects.filter(status=AIConfigVersion.Status.ACTIVE)
+    return (
+        AIConfigEntry.objects.filter(version__in=active, profile__credential=credential).exists()
+        or active.filter(screen_profile__credential=credential).exists()
+    )
 
 
 @transaction.atomic
-def create_preset_version(
-    actor,
-    key,
-    pipeline,
-    use_json_schema=True,
-    task=AIConfigVersion.Task.EXTRACT,
-    typed_fields=False,
-    menu_fields=False,
-    slip_facts=False,
-):
-    """A candidate with the preset model as primary and that task's active chain as fallbacks.
-    Extraction keeps the chosen pipeline and few-shot count; the other tasks run single."""
+def add_provider(actor, label, base_url, api_key, reason):
+    """A new OpenAI-compatible provider with its key (ADR 0038 Q3)."""
     identity.require_ai_editor(actor)
-    preset = PRESETS.get(key)
-    if preset is None:
-        raise ValidationError("Unknown preset.")
-    if task not in AIConfigVersion.Task.values:
-        raise ValidationError("Unknown AI task.")
-    credential = AICredential.objects.filter(name=preset["credential"]).first()
-    if credential is None or credential.base_url != preset["base_url"]:
-        raise ValidationError(
-            f"Add the API key first: credential '{preset['credential']}' with base URL "
-            f"{preset['base_url']}."
-        )
-    defaults = preset.get("profile", {})
-    profile = (
+    label = (label or "").strip()
+    if not 2 <= len(label) <= 100:
+        raise ValidationError("ใส่ชื่อผู้ให้บริการ")
+    base_url = clean_base_url(base_url)
+    if AICredential.objects.filter(base_url=base_url, is_hidden=False).exists():
+        raise ValidationError("มีผู้ให้บริการที่ที่อยู่ API นี้แล้ว")
+    stem = re.sub(r"[^a-z0-9]+", "-", urlsplit(base_url).hostname.lower()).strip("-")[:56]
+    name, n = stem, 1
+    while AICredential.objects.filter(name=name).exists():
+        n += 1
+        name = f"{stem}-{n}"
+    credential = save_credential(actor, name, base_url, api_key, reason)
+    credential.label = label
+    credential.save(update_fields=["label"])
+    return credential
+
+
+@transaction.atomic
+def update_provider(actor, credential, label, defaults, enforces_schema, reason):
+    """The provider's name and the defaults its models' profiles get (ตั้งค่าขั้นสูง)."""
+    identity.require_ai_editor(actor)
+    values = {**PROFILE_DEFAULTS, **(defaults or {})}
+    try:
+        values = {
+            "timeout_seconds": int(values["timeout_seconds"]),
+            "max_tokens": int(values["max_tokens"]),
+            "temperature": f"{Decimal(str(values['temperature'])):.2f}",
+        }
+    except (ArithmeticError, ValueError) as exc:
+        raise ValidationError("ค่าขั้นสูงต้องเป็นตัวเลข") from exc
+    if (
+        not 2 <= values["timeout_seconds"] <= 30
+        or not 64 <= values["max_tokens"] <= 2048
+        or not 0 <= Decimal(values["temperature"]) <= 1
+    ):
+        raise ValidationError("เวลารอ 2 ถึง 30 วินาที จำนวน token 64 ถึง 2048 และ temperature 0 ถึง 1")
+    credential.label = (label or "").strip()[:100] or credential.label
+    credential.defaults = values
+    credential.enforces_schema = bool(enforces_schema)
+    credential.save(update_fields=["label", "defaults", "enforces_schema"])
+    identity.audit(
+        actor,
+        "ai.provider_updated",
+        credential,
+        identity._require_reason(reason),
+        defaults=values,
+        enforces_schema=credential.enforces_schema,
+    )
+    return credential
+
+
+@transaction.atomic
+def remove_key(actor, credential, reason):
+    """Forget the key. Versions that call this provider must test again with a new key."""
+    identity.require_ai_editor(actor)
+    if in_use(credential):
+        raise ValidationError("ผู้ให้บริการนี้อยู่ในรุ่นที่ใช้งานอยู่ เปลี่ยนรุ่นก่อนลบคีย์")
+    AICredential.objects.filter(pk=credential.pk).update(
+        encrypted_key="",
+        key_hint="",
+        rotated_at=timezone.now(),
+        checked_at=None,
+        check_ok=None,
+        check_detail="",
+    )
+    identity.audit(actor, "ai.credential_key_removed", credential, identity._require_reason(reason))
+
+
+@transaction.atomic
+def remove_provider(actor, credential, reason):
+    """Delete a provider nothing has used; one with history is hidden and loses its key."""
+    identity.require_ai_editor(actor)
+    if in_use(credential):
+        raise ValidationError("ผู้ให้บริการนี้อยู่ในรุ่นที่ใช้งานอยู่ เปลี่ยนรุ่นก่อนลบ")
+    reason = identity._require_reason(reason)
+    if not AIProfile.objects.filter(credential=credential).exists():
+        identity.audit(actor, "ai.provider_deleted", credential, reason, name=credential.name)
+        credential.models.all().delete()
+        credential.delete()
+        return
+    remove_key(actor, credential, reason)
+    AICredential.objects.filter(pk=credential.pk).update(is_hidden=True)
+    identity.audit(actor, "ai.provider_hidden", credential, reason, name=credential.name)
+
+
+def check_key(actor, credential):
+    """Ask the provider one short question with its first model: (ok, detail in Thai).
+    Network, so outside transactions; the outcome is kept on the provider for its card."""
+    identity.require_ai_editor(actor)
+    credential = AICredential.objects.get(pk=credential.pk)  # the key as saved now
+    model = credential.models.filter(is_hidden=False).first()
+    if model is None:
+        ok, detail = False, "ยังไม่มีโมเดล"
+    else:
+        body = {
+            "model": model.model_id,
+            "messages": [{"role": "user", "content": "ตอบคำว่า พร้อม"}],
+            "max_tokens": 64,
+        }
+        try:
+            post(
+                f"{credential.base_url}/chat/completions",
+                decrypt_key(credential),
+                body,
+                15,
+                "key_check",
+            )
+            ok, detail = True, "ใช้ได้"
+        except ImproperlyConfigured:
+            ok, detail = False, "ยังไม่มีคีย์"
+        except AIError as exc:
+            ok, detail = False, KEY_ERRORS.get(str(exc), "ติดต่อผู้ให้บริการไม่ได้")
+    AICredential.objects.filter(pk=credential.pk).update(
+        checked_at=timezone.now(), check_ok=ok, check_detail=detail
+    )
+    identity.audit(actor, "ai.credential_checked", credential, ok=ok, detail=detail)
+    return ok, detail
+
+
+KEY_ERRORS = {
+    "HTTP 400": "ผู้ให้บริการไม่รับคำขอ",
+    "HTTP 401": "คีย์ไม่ถูกต้อง",
+    "HTTP 403": "คีย์ไม่มีสิทธิ์ใช้โมเดลนี้",
+    "HTTP 404": "ไม่พบโมเดล",
+    "HTTP 429": "โควตาหมด",
+}
+
+
+@transaction.atomic
+def add_model(actor, credential, model_id, label=""):
+    identity.require_ai_editor(actor)
+    model_id = (model_id or "").strip()
+    if not MODEL_ID.match(model_id):
+        raise ValidationError("รหัสโมเดลมีอักขระที่ใช้ไม่ได้")
+    if credential.models.filter(model_id=model_id).exists():
+        raise ValidationError("มีโมเดลนี้แล้ว")
+    last = credential.models.order_by("-position").first()
+    model = AIModel.objects.create(
+        provider=credential,
+        model_id=model_id,
+        label=(label or "").strip()[:100],
+        position=(last.position if last else 0) + 1,
+        created_by=actor,
+    )
+    identity.audit(actor, "ai.model_added", model, model_id=model_id, provider=credential.name)
+    return model
+
+
+def model_used(model):
+    """Whether any version, old or new, ever called this model (then it is never deleted)."""
+    profiles = AIProfile.objects.filter(credential=model.provider, model_id=model.model_id)
+    return (
+        AIConfigEntry.objects.filter(profile__in=profiles).exists()
+        or AIConfigVersion.objects.filter(screen_profile__in=profiles).exists()
+    )
+
+
+@transaction.atomic
+def set_model_hidden(actor, model, hidden):
+    identity.require_ai_editor(actor)
+    AIModel.objects.filter(pk=model.pk).update(is_hidden=bool(hidden))
+    identity.audit(
+        actor, "ai.model_hidden" if hidden else "ai.model_shown", model, model_id=model.model_id
+    )
+
+
+@transaction.atomic
+def delete_model(actor, model):
+    identity.require_ai_editor(actor)
+    if model_used(model):
+        raise ValidationError("โมเดลนี้เคยอยู่ในรุ่นแล้ว ซ่อนได้แต่ลบไม่ได้")
+    identity.audit(actor, "ai.model_deleted", model, model_id=model.model_id)
+    model.delete()
+
+
+def model_profile(actor, model, use_json_schema=True):
+    """The newest profile with the provider's defaults for this model, or a new one."""
+    values = {**PROFILE_DEFAULTS, **(model.provider.defaults or {})}
+    return (
         AIProfile.objects.filter(
-            credential=credential,
-            model_id=preset["model_id"],
+            credential=model.provider,
+            model_id=model.model_id,
             use_json_schema=bool(use_json_schema),
-            **{
-                name: Decimal(value) if name == "temperature" else value
-                for name, value in defaults.items()
-            },
+            timeout_seconds=int(values["timeout_seconds"]),
+            max_tokens=int(values["max_tokens"]),
+            temperature=Decimal(str(values["temperature"])),
         )
         .order_by("-pk")
         .first()
     ) or create_profile(
-        actor, credential, preset["model_id"], use_json_schema=use_json_schema, **defaults
-    )
-    active = active_version(task)
-    fallbacks = [p for p in (active.chain() if active else []) if p.pk != profile.pk]
-    extract = task == AIConfigVersion.Task.EXTRACT
-    return create_version(
         actor,
-        [profile, *fallbacks[: MAX_CHAIN - 1]],
-        f"preset {key}" + ("" if use_json_schema else " (no JSON schema)"),
-        (active.few_shot if active else 3) if extract else 0,
-        pipeline if extract else AIConfigVersion.Pipeline.SINGLE,
-        task=task,
-        typed_fields=extract and bool(typed_fields),
-        menu_fields=extract and bool(typed_fields) and bool(menu_fields),
-        slip_facts=extract and bool(typed_fields) and bool(menu_fields) and bool(slip_facts),
+        model.provider,
+        model.model_id,
+        values["timeout_seconds"],
+        values["max_tokens"],
+        values["temperature"],
+        use_json_schema,
     )
 
 
@@ -431,6 +602,11 @@ def activation_blocker(version):
         return "A rejected version cannot be activated."
     if not version.test_passed or not _tested_after_rotation(version):
         return "Run the connection test (again after any key rotation) first."
+    return eval_blocker(version)
+
+
+def eval_blocker(version):
+    """Why this version's evaluation evidence does not let it serve, or None."""
     if not version.eval_passed:
         return "The held-out evaluation has not passed for this version."
     if version.task == AIConfigVersion.Task.TRIAGE:
@@ -591,6 +767,29 @@ def post(url, api_key, body, timeout, task):
     return masker.restore_response(_post(url, api_key, sent, timeout))
 
 
+_quota = {"hits": 0}
+_quota_lock = threading.Lock()
+
+
+def _count_quota_hit():
+    with _quota_lock:
+        _quota["hits"] += 1
+
+
+def quota_hits():
+    """HTTP 429 answers this process has seen: an evaluation that saw one is not recorded
+    (ADR 0038 Q20), since the fallbacks answered for the model it measures."""
+    return _quota["hits"]
+
+
+def for_provider(url, body):
+    """Gemini 3 thinks hard by default and its thinking counts against max_tokens: ask for
+    little, so the JSON answer fits and comes back within the timeout."""
+    if (urlsplit(url).hostname or "").lower() == GEMINI_HOST and "reasoning_effort" not in body:
+        return {**body, "reasoning_effort": "low"}
+    return body
+
+
 def _post(url, api_key, body, timeout):
     try:
         clean_base_url(url)
@@ -598,7 +797,7 @@ def _post(url, api_key, body, timeout):
         raise AIError("Provider endpoint is not allowed.") from exc
     request = urllib.request.Request(
         url,
-        data=json.dumps(body, ensure_ascii=False).encode(),
+        data=json.dumps(for_provider(url, body), ensure_ascii=False).encode(),
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
@@ -611,6 +810,8 @@ def _post(url, api_key, body, timeout):
         with opener.open(request, timeout=timeout) as response:
             return json.loads(response.read(2_000_000))
     except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            _count_quota_hit()
         raise AIError(f"HTTP {exc.code}") from exc
     except (OSError, ValueError) as exc:
         raise AIError(type(exc).__name__) from exc
@@ -1274,12 +1475,9 @@ TRUNCATED_RETRY_MAX_TOKENS = 2048
 def schema_in_prompt(profile):
     """Whether the system prompt must carry the JSON schema. OpenTyphoon accepts
     response_format and ignores it (checked 7 Oct and again 21 Oct 2569, json_schema and
-    json_object alike), so the model only follows a schema it can read. Hosts listed in
-    AI_SCHEMA_ENFORCED_HOSTS enforce response_format and get it alone."""
-    if not profile.use_json_schema:
-        return True
-    host = (urlsplit(profile.credential.base_url).hostname or "").lower()
-    return host not in settings.AI_SCHEMA_ENFORCED_HOSTS
+    json_object alike), so the model only follows a schema it can read. A provider marked as
+    enforcing response_format (ThaiLLM's vLLM, ADR 0038 Q23) gets it alone."""
+    return not (profile.use_json_schema and profile.credential.enforces_schema)
 
 
 def first_json(content):

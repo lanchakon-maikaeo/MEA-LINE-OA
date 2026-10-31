@@ -156,18 +156,8 @@ AI_SECRET_KEY = os.environ.get("AI_SECRET_KEY", "")
 # the server, its standby and the owner's password manager, never in the database. Local and CI
 # derive one from SECRET_KEY (operations/sealing.py) so demos work without it.
 PII_SECRET_KEY = os.environ.get("PII_SECRET_KEY", "")
-AI_ALLOWED_HOSTS = frozenset(
-    h.strip().lower()
-    for h in os.environ.get("AI_ALLOWED_HOSTS", "thaillm.or.th,api.opentyphoon.ai").split(",")
-    if h.strip()
-)
-# Providers that enforce response_format json_schema (ThaiLLM's vLLM, checked 6 Oct 2569). Any
-# other host also gets the schema in the prompt, because OpenTyphoon accepts and ignores it.
-AI_SCHEMA_ENFORCED_HOSTS = frozenset(
-    h.strip().lower()
-    for h in os.environ.get("AI_SCHEMA_ENFORCED_HOSTS", "thaillm.or.th").split(",")
-    if h.strip()
-)
+# ADR 0038: the allowed provider hosts and which of them enforce response_format live with each
+# provider in the database (admin page), no longer in AI_ALLOWED_HOSTS/AI_SCHEMA_ENFORCED_HOSTS.
 # Public halves (base64, comma-separated) of the Ed25519 keys that sign evaluation evidence on the
 # machine that evaluates; production imports only evidence signed by one of them (24 Oct 2569).
 AI_EVIDENCE_PUBLIC_KEYS = tuple(

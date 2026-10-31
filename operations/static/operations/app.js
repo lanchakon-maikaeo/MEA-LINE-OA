@@ -22,6 +22,18 @@
     });
   });
 
+  // Show or hide what is typed in a key field; the value never comes back from the server.
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest && event.target.closest("[data-reveal]");
+    if (!button) return;
+    var input = document.getElementById(button.getAttribute("data-reveal"));
+    if (!input) return;
+    var shown = input.type === "password";
+    input.type = shown ? "text" : "password";
+    button.setAttribute("aria-pressed", shown ? "true" : "false");
+    button.textContent = shown ? "ซ่อน" : "แสดง";
+  });
+
   // Filter pills submit on change (a submit button remains for no-script use).
   document.addEventListener("change", function (event) {
     var form = event.target.closest && event.target.closest("form[data-autosubmit]");

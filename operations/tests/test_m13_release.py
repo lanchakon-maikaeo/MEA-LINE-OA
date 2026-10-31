@@ -135,17 +135,19 @@ class StopTriageTests(PolicyTestCase):
         version = self.activate_triage()
         client = Client()
         client.force_login(self.dev)
-        self.assertContains(client.get(reverse("admin-ai")), "หยุดใช้ AI ของงาน")
-        url = reverse("admin-ai-action", args=["stop"])
-        page = client.post(url, {"task": TRIAGE, "reason": ""}, follow=True)
-        self.assertContains(page, "หยุดใช้ AI แล้ว")
-        self.assertNotContains(page, "หยุดใช้ AI ของงาน")  # nothing left to stop
+        chain = f"{reverse('admin-ai')}?tab=chain"
+        self.assertContains(client.get(chain), f'name="task" value="{TRIAGE}"')
+        url = reverse("admin-ai-action", args=["task_switch"])
+        page = client.post(url, {"task": TRIAGE, "on": "0", "reason": ""}, follow=True)
+        self.assertContains(page, "ปิด AI ของงานนี้แล้ว")
         version.refresh_from_db()
         self.assertEqual(version.status, AIConfigVersion.Status.RETIRED)
         staff = Client()
         staff.force_login(self.coordinator)
         ai.activate(self.dev, version, "เปิดกลับเพื่อทดสอบ")
-        self.assertEqual(staff.post(url, {"task": TRIAGE, "reason": "x"}).status_code, 403)
+        self.assertEqual(
+            staff.post(url, {"task": TRIAGE, "on": "0", "reason": "x"}).status_code, 403
+        )
         out = StringIO()
         call_command("stop_ai", task=TRIAGE, username="dev", reason="หยุดจากคำสั่ง", stdout=out)
         self.assertIn(f"Stopped triage v{version.number}", out.getvalue())

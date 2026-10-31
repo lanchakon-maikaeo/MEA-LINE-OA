@@ -2,125 +2,292 @@
 {% block title %}การตั้งค่า AI · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน</span><h1>การตั้งค่า AI</h1></div></div>
-{% if not can_change %}<div class="notice notice--info mb-24" role="status"><div class="notice__body"><strong>ดูได้อย่างเดียว</strong> การเปลี่ยนรุ่น ประเมิน หรือแก้โมเดลทำได้ตาม <a href="{% url 'admin-options' %}">ตัวเลือกระบบ</a> "ใครเปลี่ยนการตั้งค่า AI ได้"</div></div>{% endif %}
-<p class="lede mb-24">AI ในแชต: <strong>{{ ai_enabled|yesno:"เปิด,ปิด (AI_ENABLED)" }}</strong> · ทุกรุ่นต้องทดสอบและประเมินก่อนเปลี่ยนไปใช้ และระบบบันทึกทุกการเปลี่ยน</p>
+<div class="cluster mb-24">
+  <span class="tag {% if ai_enabled %}tag--closed{% else %}tag--muted{% endif %}">AI ในแชต{{ ai_enabled|yesno:"เปิดอยู่,ปิดอยู่" }}</span>
+  <span class="tag tag--closed">ปิดข้อมูลส่วนบุคคลก่อนส่งทุกครั้ง</span>
+  {% if not can_change %}<span class="tag tag--outline">ดูได้อย่างเดียว</span>{% endif %}
+</div>
+<nav class="chips mb-24" aria-label="ส่วนของการตั้งค่า AI">
+  {% for key, name in tabs %}<a class="chip" href="?tab={{ key }}"{% if key == tab %} aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}
+</nav>
 
-<h2 id="switch">รุ่นที่ใช้งานอยู่</h2>
-<p>AI มีสามงาน แต่ละงานมีรุ่นและเกณฑ์ประเมินของตัวเอง ได้แก่ สกัดร่างเรื่องจากแชต เสนอข้อเท็จจริงเพื่อคัดกรองเรื่อง (ไม่เลือกกองหรือระดับเอง) และตอบแชตผู้ใช้ LINE OA จากคลังคำตอบ</p>
-<p>ตอบแชต: {% if active_answer %}<strong>v{{ active_answer.number }}</strong> · {% for e in active_answer.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_answer.activated_at|date:"Y-m-d H:i" }} (<a href="{% url 'admin-answers' %}">คลังคำตอบ</a>){% else %}ยังไม่เปิดใช้ (ตอบจากคำสำคัญเท่านั้น){% endif %}</p>
-<p>Agent ผ่าน MCP ใน LINE: <strong>{{ agent_mcp_enabled|yesno:"เปิด,ปิด" }}</strong> · ใช้รุ่นสกัดร่างที่เปิดใช้อยู่ ค้นข้อมูลตามสิทธิ์และเตรียมคำสั่งให้ยืนยันก่อนดำเนินการ หาก AI ขัดข้องยังใช้เมนูเดิมได้</p>
-<p>คัดกรองเรื่อง: {% if active_triage %}<strong>v{{ active_triage.number }}</strong> · {% for e in active_triage.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %} · เปิดใช้ {{ active_triage.activated_at|date:"Y-m-d H:i" }}{% else %}ยังไม่เปิดใช้ (ข้อเสนอใช้กติกาและธงจากคำเท่านั้น){% endif %}</p>
-<p>สกัดร่างจากแชต:</p>
-{% if active %}
-<p><strong>v{{ active.number }}</strong> · {{ active.get_pipeline_display }} · {% for e in active.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %}{% if active.few_shot %} · ตัวอย่างที่ค้นมา {{ active.few_shot }}{% endif %}{% if active.typed_fields %} · อ่านเลข SAP และช่องที่พิมพ์{% endif %} · เปิดใช้ {{ active.activated_at|date:"Y-m-d H:i" }}</p>
-{% else %}
-<p>ยังไม่มีรุ่นที่เปิดใช้ แชตจะถามทีละช่องโดยไม่ใช้ AI</p>
-{% endif %}
-{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'switch' %}">
-  <fieldset><legend>เปลี่ยนรุ่นที่ใช้งาน</legend>{% csrf_token %}
-  {% if switchable %}
-    <p><label>เปลี่ยนไปใช้
-      <select name="version" required>{% for v in switchable %}<option value="{{ v.pk }}">v{{ v.number }} · {{ v.get_task_display }} · {{ v.get_pipeline_display }} · {% for e in v.entries.all %}{% if not forloop.first %} → {% endif %}{{ e.profile.model_id }}{% endfor %}{% if v.few_shot %} · ตัวอย่าง {{ v.few_shot }}{% endif %}{% if v.typed_fields %} · เลข SAP{% endif %}</option>{% endfor %}</select>
-    </label></p>
-    <p><label>เหตุผล <input name="reason"></label> <button type="submit">เปลี่ยน</button></p>
-    <p>มีผลกับข้อความใหม่ทันที ข้อความที่กำลังเรียก AI อยู่ใช้รุ่นเดิมจนจบ เปลี่ยนกลับได้จากเมนูนี้</p>
-  {% else %}
-    <p>ยังไม่มีรุ่นอื่นที่พร้อมใช้ รุ่นต้องผ่าน "ทดสอบการเชื่อมต่อ" (ใหม่หลังหมุน key) และ "ประเมิน" บน security + heldout-v4 + redteam-v1/v2 ก่อน</p>
-  {% endif %}
-  </fieldset>
-</form>{% endif %}
-{% if stoppable %}
-{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'stop' %}">
-  <fieldset><legend>หยุดใช้ AI ของงาน</legend>{% csrf_token %}
-    <p><label>งาน
-      <select name="task" required>{% for v in stoppable %}<option value="{{ v.task }}">{{ v.get_task_display }} (v{{ v.number }})</option>{% endfor %}</select>
-    </label></p>
-    <p><label>เหตุผล <input name="reason"></label> <button type="submit">หยุดใช้</button></p>
-    <p>ใช้เมื่อ AI ของงานนั้นมีปัญหา หรือยังไม่ได้รับอนุมัติให้ใช้ งานใหม่ทำต่อโดยไม่ใช้ AI: แชตถามทีละช่อง ตอบจากคำสำคัญ หรือเจ้าหน้าที่คัดกรองเอง เรื่องที่รอ AI คัดกรองอยู่จะถูกปิดเป็นไม่ใช้ AI การเปิดกลับใช้เมนูเปลี่ยนรุ่นด้านบน และรุ่นนั้นต้องมีผลประเมินของโค้ดปัจจุบัน</p>
-  </fieldset>
-</form>{% endif %}
-{% endif %}
+{% if tab == "providers" %}
+<div class="cards">
+{% for p in providers %}
+  <section class="card" id="p{{ p.pk }}" aria-labelledby="p{{ p.pk }}-name">
+    <div class="card__head">
+      <h2 id="p{{ p.pk }}-name">{{ p.title }}</h2>
+      <div class="cluster">
+        {% if not p.has_key %}<span class="tag tag--outline">ยังไม่มีคีย์</span>
+        {% elif p.check_ok is False %}<span class="tag tag--alert">{{ p.check_detail }}</span>
+        {% else %}<span class="tag tag--closed">พร้อมใช้</span>{% endif %}
+        {% if p.serving %}<span class="tag">อยู่ในรุ่นที่ใช้งาน</span>{% endif %}
+      </div>
+    </div>
+    <p class="muted provider-url">{{ p.base_url }}{% if p.has_key %} · คีย์ลงท้าย {{ p.key_hint }}{% endif %}{% if p.checked_at %} · ตรวจคีย์ {{ p.checked_at|date:"j M Y H:i" }}{% endif %}</p>
+    {% if p.notice %}<p class="flag flag--alert">{{ p.notice }}</p>{% endif %}
 
-<h2 id="presets">โมเดลสำเร็จรูป</h2>
-{% for p in presets %}
-{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'preset' %}">
-  <fieldset><legend>{{ p.label }}</legend>{% csrf_token %}<input type="hidden" name="preset" value="{{ p.key }}">
-  <p>Model ID <code>{{ p.model_id }}</code> · {{ p.base_url }} · {{ p.limits }} · <a href="{{ p.docs_url }}" rel="noopener noreferrer" target="_blank">เอกสาร</a></p>
-  {% if p.credential_ready %}
-    <p>สร้างรุ่นใหม่ของงานที่เลือก: โมเดลนี้เป็นโมเดลหลัก ตามด้วยลำดับโมเดลของรุ่นที่ใช้อยู่ของงานนั้นเป็นสำรอง งานสกัดร่างใช้จำนวนตัวอย่างเท่ารุ่นที่ใช้อยู่ จากนั้นกดทดสอบ → ประเมิน → เปลี่ยน</p>
-    {% if p.profile %}<p>ค่าโปรไฟล์: temperature {{ p.profile.temperature }} · max tokens {{ p.profile.max_tokens }} · timeout {{ p.profile.timeout_seconds }} วินาที</p>{% endif %}
-    {{ preset_form.as_p }}
-    <button type="submit">สร้างรุ่นใช้โมเดลนี้</button>
-  {% else %}
-    <p>ยังไม่มี key: ขอ key ที่ <a href="{{ p.key_url }}" rel="noopener noreferrer" target="_blank">{{ p.key_url }}</a> แล้วกรอกในส่วน "คีย์ API ของผู้ให้บริการ" ด้านล่าง ชื่อ <code>{{ p.credential }}</code> Base URL <code>{{ p.base_url }}</code></p>
+    <h3 class="mt-18">โมเดล</h3>
+    <ul class="model-rows">
+    {% for row in p.model_rows %}
+      <li>
+        <span class="model-rows__name">{{ row.model.title }}</span>
+        {% if row.model.label %}<code>{{ row.model.model_id }}</code>{% endif %}
+        {% if row.model.is_hidden %}<span class="tag tag--muted">ซ่อนอยู่</span>{% endif %}
+        {% if can_change %}<span class="cluster">
+          <form method="post" action="{% url 'admin-ai-version-action' row.model.is_hidden|yesno:'model_show,model_hide' row.model.pk %}">{% csrf_token %}<button class="btn btn--ghost btn--sm" type="submit">{{ row.model.is_hidden|yesno:"แสดง,ซ่อน" }}</button></form>
+          {% if not row.used %}<form method="post" action="{% url 'admin-ai-version-action' 'model_delete' row.model.pk %}">{% csrf_token %}<button class="btn btn--ghost btn--sm" type="submit">ลบ</button></form>{% endif %}
+        </span>{% endif %}
+      </li>
+    {% empty %}<li class="muted">ยังไม่มีโมเดล</li>{% endfor %}
+    </ul>
+
+    {% if can_change %}
+    <details class="fold"{% if not p.has_key %} open{% endif %}>
+      <summary><span class="fold__title">{% if p.has_key %}เปลี่ยนคีย์{% else %}กรอกคีย์{% endif %}</span></summary>
+      <div class="fold__body">
+        <form method="post" action="{% url 'admin-ai-version-action' 'key' p.pk %}" autocomplete="off">{% csrf_token %}
+          <div class="field"><label for="key-{{ p.pk }}">คีย์ API</label>
+            <div class="key-field"><input id="key-{{ p.pk }}" name="api_key" type="password" required minlength="16" maxlength="512" autocomplete="off" spellcheck="false"><button class="btn btn--outline btn--sm" type="button" data-reveal="key-{{ p.pk }}" aria-pressed="false" aria-label="แสดงหรือซ่อนคีย์">แสดง</button></div>
+            {% if p.key_url %}<a href="{{ p.key_url }}" rel="noopener noreferrer" target="_blank">ขอคีย์จาก {{ p.title }}</a>{% endif %}
+          </div>
+          <div class="field"><label for="pw-key-{{ p.pk }}">รหัสผ่านของคุณ</label><input id="pw-key-{{ p.pk }}" name="password" type="password" required autocomplete="current-password"></div>
+          <div class="field"><label for="why-key-{{ p.pk }}">เหตุผล</label><input id="why-key-{{ p.pk }}" name="reason" maxlength="500"></div>
+          <div class="form-actions">
+            <button class="btn" type="submit">บันทึกคีย์</button>
+            {% if p.has_key %}<button class="btn btn--outline" type="submit" formaction="{% url 'admin-ai-version-action' 'key_remove' p.pk %}" formnovalidate>ลบคีย์</button>{% endif %}
+          </div>
+        </form>
+      </div>
+    </details>
+    {% if p.has_key %}
+    <form method="post" action="{% url 'admin-ai-version-action' 'key_check' p.pk %}" class="mt-8">{% csrf_token %}<button class="btn btn--secondary btn--sm" type="submit">ทดสอบคีย์</button></form>
+    {% endif %}
+    <details class="fold mt-8">
+      <summary><span class="fold__title">เพิ่มโมเดล</span></summary>
+      <div class="fold__body">
+        <form method="post" action="{% url 'admin-ai-version-action' 'model_add' p.pk %}">{% csrf_token %}
+          <div class="form-grid">
+            <div class="field"><label for="mid-{{ p.pk }}">รหัสโมเดล</label><input id="mid-{{ p.pk }}" name="model_id" required maxlength="100" spellcheck="false"></div>
+            <div class="field"><label for="mlabel-{{ p.pk }}">ชื่อที่แสดง</label><input id="mlabel-{{ p.pk }}" name="label" maxlength="100"></div>
+          </div>
+          <button class="btn" type="submit">เพิ่มโมเดล</button>
+        </form>
+      </div>
+    </details>
+    <details class="fold">
+      <summary><span class="fold__title">ตั้งค่าขั้นสูง</span></summary>
+      <div class="fold__body">
+        <form method="post" action="{% url 'admin-ai-version-action' 'provider_update' p.pk %}">{% csrf_token %}
+          <div class="form-grid">
+            <div class="field"><label for="plabel-{{ p.pk }}">ชื่อผู้ให้บริการ</label><input id="plabel-{{ p.pk }}" name="label" value="{{ p.title }}" maxlength="100"></div>
+            <div class="field"><label for="ptime-{{ p.pk }}">เวลารอคำตอบ (วินาที)</label><input id="ptime-{{ p.pk }}" name="timeout_seconds" type="number" min="2" max="30" value="{{ p.values.timeout_seconds }}"></div>
+            <div class="field"><label for="ptok-{{ p.pk }}">จำนวน token สูงสุด</label><input id="ptok-{{ p.pk }}" name="max_tokens" type="number" min="64" max="2048" value="{{ p.values.max_tokens }}"></div>
+            <div class="field"><label for="ptemp-{{ p.pk }}">Temperature</label><input id="ptemp-{{ p.pk }}" name="temperature" type="number" min="0" max="1" step="0.05" value="{{ p.values.temperature }}"></div>
+          </div>
+          <div class="field"><label><input type="checkbox" name="enforces_schema"{% if p.enforces_schema %} checked{% endif %}> บังคับรูปแบบคำตอบ</label></div>
+          <div class="field"><label for="why-p-{{ p.pk }}">เหตุผล</label><input id="why-p-{{ p.pk }}" name="reason" maxlength="500"></div>
+          <button class="btn" type="submit">บันทึก</button>
+        </form>
+        {% if not p.serving %}
+        <form method="post" action="{% url 'admin-ai-version-action' 'provider_remove' p.pk %}" class="mt-24" autocomplete="off">{% csrf_token %}
+          <div class="field"><label for="pw-rm-{{ p.pk }}">รหัสผ่านของคุณ</label><input id="pw-rm-{{ p.pk }}" name="password" type="password" required autocomplete="current-password"></div>
+          <div class="field"><label for="why-rm-{{ p.pk }}">เหตุผล</label><input id="why-rm-{{ p.pk }}" name="reason" maxlength="500"></div>
+          <button class="btn btn--outline" type="submit">ลบผู้ให้บริการ</button>
+        </form>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </section>
+{% endfor %}
+{% if can_change %}
+  <section class="card" id="add" aria-labelledby="add-name">
+    <div class="card__head"><h2 id="add-name">เพิ่มผู้ให้บริการ</h2></div>
+    <form method="post" action="{% url 'admin-ai-action' 'provider_add' %}" autocomplete="off">{% csrf_token %}
+      <div class="form-grid">
+        <div class="field"><label for="new-label">ชื่อผู้ให้บริการ</label><input id="new-label" name="label" required maxlength="100"></div>
+        <div class="field"><label for="new-url">ที่อยู่ API</label><input id="new-url" name="base_url" type="url" required placeholder="https://" spellcheck="false"></div>
+      </div>
+      <div class="field"><label for="new-key">คีย์ API</label>
+        <div class="key-field"><input id="new-key" name="api_key" type="password" required minlength="16" maxlength="512" autocomplete="off" spellcheck="false"><button class="btn btn--outline btn--sm" type="button" data-reveal="new-key" aria-pressed="false" aria-label="แสดงหรือซ่อนคีย์">แสดง</button></div>
+      </div>
+      <div class="form-grid">
+        <div class="field"><label for="new-pw">รหัสผ่านของคุณ</label><input id="new-pw" name="password" type="password" required autocomplete="current-password"></div>
+        <div class="field"><label for="new-why">เหตุผล</label><input id="new-why" name="reason" maxlength="500"></div>
+      </div>
+      <button class="btn" type="submit">เพิ่มผู้ให้บริการ</button>
+    </form>
+  </section>
+{% endif %}
+</div>
+
+{% elif tab == "chain" %}
+<section class="mb-24" aria-labelledby="serving-h">
+  <h2 id="serving-h">รุ่นที่ใช้อยู่</h2>
+  {% if serving %}
+  <p><strong>รุ่น {{ serving.label }}</strong></p>
+  <ol class="steps" aria-label="ลำดับโมเดล">{% for p in serving.chain %}<li class="is-done">{{ p.model_id }}</li>{% endfor %}</ol>
+  {% elif legacy %}
+  <p><strong>{{ legacy.label }}</strong> <span class="muted">รุ่นเดิมของงานสกัดร่าง</span></p>
+  <ol class="steps" aria-label="ลำดับโมเดล">{% for e in legacy.entries.all %}<li class="is-done">{{ e.profile.model_id }}</li>{% endfor %}</ol>
+  {% else %}<p class="muted">ยังไม่มีรุ่นที่ใช้อยู่</p>{% endif %}
+</section>
+
+<section class="mb-24" id="switches" aria-labelledby="switches-h">
+  <h2 id="switches-h">งานที่ใช้ AI</h2>
+  <ul class="task-rows">
+  {% for s in switches %}
+    <li>
+      <span class="task-rows__name">{{ s.name }}</span>
+      <span class="tag {% if s.on %}tag--closed{% else %}tag--muted{% endif %}">{{ s.on|yesno:"เปิด,ปิด" }}</span>
+      {% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'task_switch' %}">{% csrf_token %}
+        <input type="hidden" name="task" value="{{ s.task }}"><input type="hidden" name="on" value="{{ s.on|yesno:'0,1' }}">
+        <label class="visually-hidden" for="why-s-{{ s.task }}">เหตุผล</label><input id="why-s-{{ s.task }}" name="reason" maxlength="500" placeholder="เหตุผล">
+        <button class="btn btn--outline btn--sm" type="submit">{{ s.on|yesno:"ปิด AI,เปิด AI" }}</button>
+      </form>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+
+{% for r in pending %}
+<section class="card mb-24" id="r{{ r.label }}" aria-labelledby="r{{ r.label }}-h">
+  <div class="card__head">
+    <h2 id="r{{ r.label }}-h">รุ่น {{ r.label }}</h2>
+    {% if r.waiting %}<span class="tag tag--outline">รอโควตา</span>{% elif r.busy %}<span class="tag tag--outline">กำลังประเมิน</span>{% elif r.failed %}<span class="tag tag--alert">ไม่ผ่าน</span>{% elif not r.blocker %}<span class="tag tag--closed">พร้อมเปิดใช้</span>{% endif %}
+  </div>
+  <p class="muted">{% for p in r.chain %}{% if not forloop.first %} → {% endif %}{{ p.model_id }}{% endfor %}</p>
+  <ol class="steps" aria-label="ขั้นตอน">
+    {% if r.imported %}<li class="is-done">นำเข้า</li>{% endif %}
+    <li class="{% if r.tested %}is-done{% elif r.busy or r.imported %}is-current{% endif %}">ทดสอบ</li>
+    {% if not r.imported %}<li class="{% if r.evaluated %}is-done{% elif r.failed %}is-blocked{% elif r.tested or r.busy %}is-current{% endif %}">ประเมิน</li>{% endif %}
+    <li class="{% if not r.blocker %}is-current{% endif %}">เปิดใช้</li>
+  </ol>
+  <ul class="task-rows">{% for t in r.tasks %}<li><span class="task-rows__name">{{ t.name }}</span><span class="tag {% if t.state == 'passed' %}tag--closed{% elif t.state == 'failed' %}tag--alert{% else %}tag--outline{% endif %}">{{ t.state_label }}</span></li>{% endfor %}</ul>
+  {% if can_change %}
+    {% if r.imported and not r.tested %}
+    <form method="post" action="{% url 'admin-ai-action' 'release_test' %}" class="mt-18">{% csrf_token %}<input type="hidden" name="release" value="{{ r.label }}"><button class="btn" type="submit">ทดสอบการเชื่อมต่อ</button></form>
+    {% elif not r.imported and r.failed and evaluates_here %}
+    <form method="post" action="{% url 'admin-ai-action' 'release_evaluate' %}" class="mt-18">{% csrf_token %}<input type="hidden" name="release" value="{{ r.label }}"><button class="btn btn--outline" type="submit">ประเมินอีกครั้ง</button></form>
+    {% endif %}
+    {% if not r.blocker %}
+    <form method="post" action="{% url 'admin-ai-action' 'release_activate' %}" class="mt-18">{% csrf_token %}<input type="hidden" name="release" value="{{ r.label }}">
+      <fieldset><legend>งานที่จะใช้รุ่นนี้</legend>
+        {% for t in r.tasks %}<div><label><input type="checkbox" name="tasks" value="{{ t.task }}"{% if t.state == "not_ready" %} disabled{% elif t.on or not any_on %} checked{% endif %}> {{ t.name }}</label></div>{% endfor %}
+      </fieldset>
+      <div class="field"><label for="why-r-{{ r.label }}">เหตุผล</label><input id="why-r-{{ r.label }}" name="reason" maxlength="500"></div>
+      <button class="btn" type="submit">เปิดใช้</button>
+    </form>
+    {% endif %}
   {% endif %}
-  <p>ข้อความที่ส่งให้โมเดลนี้ไปถึงผู้ให้บริการอีกราย ใช้ได้เฉพาะข้อมูลจำลองจนกว่าองค์กรอนุมัติ</p>
-  </fieldset>
-</form>{% endif %}
+</section>
 {% endfor %}
 
-<h2>รุ่นการตั้งค่า (โมเดลหลัก + สำรองตามลำดับ)</h2>
+{% if can_change %}
+{% if evaluates_here %}
+<section class="card" aria-labelledby="pick-h">
+  <div class="card__head"><h2 id="pick-h">เลือกลำดับโมเดล</h2></div>
+  {% if choosable %}
+  <form method="post" action="{% url 'admin-ai-action' 'release_create' %}">{% csrf_token %}
+    <div class="chain-pick">
+    {% for name, title, picked in slots %}
+      <div class="field"><label for="slot-{{ name }}">{{ title }}</label>
+        <select id="slot-{{ name }}" name="{{ name }}"{% if forloop.first %} required{% endif %}>
+          {% if not forloop.first %}<option value="">ไม่ใช้</option>{% endif %}
+          {% regroup choosable by provider as groups %}
+          {% for g in groups %}<optgroup label="{{ g.grouper.title }}">{% for m in g.list %}<option value="{{ m.pk }}"{% if picked and picked.pk == m.pk %} selected{% endif %}>{{ m.title }}</option>{% endfor %}</optgroup>{% endfor %}
+        </select>
+      </div>
+    {% endfor %}
+    </div>
+    <details class="fold mt-18">
+      <summary><span class="fold__title">ตั้งค่าขั้นสูง</span></summary>
+      <div class="fold__body">
+        <div class="field"><label><input type="checkbox" name="use_json_schema"{% if advanced.use_json_schema %} checked{% endif %}> ส่ง JSON schema</label></div>
+        <fieldset><legend>รูปแบบการทำงานของงานสกัดร่าง</legend>
+          {% for value, title in pipelines %}<div><label><input type="radio" name="pipeline" value="{{ value }}"{% if advanced.pipeline == value %} checked{% endif %}> {{ title }}</label></div>{% endfor %}
+        </fieldset>
+        <div class="field"><label for="few-shot">จำนวนตัวอย่างที่ระบบค้นมาให้ AI</label><input id="few-shot" name="few_shot" type="number" min="0" max="5" value="{{ advanced.few_shot }}"></div>
+        <div class="field"><label><input type="checkbox" name="typed_fields"{% if advanced.typed_fields %} checked{% endif %}> อ่านเลขใบเบิกและใบส่งคืน SAP</label></div>
+        <div class="field"><label><input type="checkbox" name="menu_fields"{% if advanced.menu_fields %} checked{% endif %}> อ่านกอง หัวข้อ และเครื่องวัด</label></div>
+        <div class="field"><label><input type="checkbox" name="slip_facts"{% if advanced.slip_facts %} checked{% endif %}> รู้ขอบเขตงานของ DED Center</label></div>
+      </div>
+    </details>
+    <button class="btn mt-18" type="submit">สร้างและประเมิน</button>
+  </form>
+  {% else %}
+  <p><a href="?tab=providers">กรอกคีย์ของผู้ให้บริการ</a></p>
+  {% endif %}
+</section>
+{% else %}
+<section class="card" aria-labelledby="import-h">
+  <div class="card__head"><h2 id="import-h">นำเข้าผลประเมิน</h2></div>
+  <form method="post" action="{% url 'admin-ai-action' 'evidence' %}" enctype="multipart/form-data">{% csrf_token %}
+    <div class="field"><label for="evidence">ไฟล์ผลประเมิน</label><input id="evidence" type="file" name="evidence" accept=".json,application/json" required></div>
+    <div class="field"><label for="why-ev">เหตุผล</label><input id="why-ev" name="reason" required maxlength="500"></div>
+    <button class="btn" type="submit">นำเข้า</button>
+  </form>
+</section>
+{% endif %}
+{% endif %}
+
+{% elif tab == "releases" %}
+<h2>รุ่นการตั้งค่า AI</h2>
 <div class="table-wrap"><table>
-  <thead><tr><th scope="col">รุ่น</th><th scope="col">สถานะ</th><th scope="col">รูปแบบ · ลำดับโมเดล</th><th scope="col">ทดสอบ</th><th scope="col">ประเมิน (security + heldout-v4 + redteam-v1/v2)</th><th scope="col">จัดการ</th></tr></thead>
+  <thead><tr><th scope="col">รุ่น</th><th scope="col">ลำดับโมเดล</th><th scope="col">ผลแต่ละงาน</th><th scope="col">สถานะ</th>{% if can_change %}<th scope="col"><span class="visually-hidden">จัดการ</span></th>{% endif %}</tr></thead>
   <tbody data-more>
-  {% for v in versions %}
-    <tr id="v{{ v.number }}">
-      <td>v{{ v.number }}</td>
-      <td>{{ v.get_status_display }}{% if v.activated_at %}<br>{{ v.activated_at|date:"Y-m-d H:i" }}{% endif %}{% if v.status == "candidate" or v.status == "retired" %}<br>{% if v.blocker %}ยังเปลี่ยนไปใช้ไม่ได้{% else %}พร้อมเปลี่ยนไปใช้{% endif %}{% endif %}</td>
-      <td><strong>{{ v.get_task_display }}</strong><br>{% if v.task == "extract" %}{{ v.get_pipeline_display }}{% else %}คัดกรองข้อความ + ข้อเท็จจริงพร้อมคำอ้าง{% endif %}<br>{% for e in v.entries.all %}{% if forloop.first %}<strong>{{ e.profile.model_id }}</strong>{% else %} → {{ e.profile.model_id }}{% endif %}{% endfor %}{% if v.few_shot %}<br>ตัวอย่างที่ค้นมาใส่ prompt: {{ v.few_shot }}{% endif %}{% if v.screen_profile %}<br>คัดกรองข้อความด้วย: {{ v.screen_profile.model_id }}{% endif %}{% if v.typed_fields %}<br>อ่านเลขใบเบิก/ใบส่งคืน SAP และช่องที่พิมพ์ของมิเตอร์ CT VT{% endif %}{% if v.menu_fields %}<br>อ่านกอง หัวข้อ เครื่องวัดและเขต หมายเลขอุปกรณ์ และงานซ่อม{% endif %}</td>
-      <td>{% if v.test_passed is None %}ยังไม่ทดสอบ{% else %}{{ v.test_passed|yesno:"ผ่าน,ไม่ผ่าน" }}{% for p in v.test_result.profiles %}<br>{{ p.model }}: {{ p.ok|yesno:"ok,fail" }} {{ p.latency_ms }} ms{% endfor %}{% endif %}</td>
-      <td>{% if v.last_job and v.last_job.status == "queued" or v.last_job.status == "running" %}{{ v.last_job.get_status_display }} (ขอเมื่อ {{ v.last_job.created_at|date:"H:i" }}){% elif v.eval_passed is None %}ยังไม่ประเมิน{% else %}{{ v.eval_passed|yesno:"ผ่าน,ไม่ผ่าน" }}{% if v.eval_passed and v.eval_result.gate != gate %}<br>ประเมินก่อนเกณฑ์ปัจจุบัน ต้องประเมินใหม่{% endif %}{% if v.eval_result.security %}<br>Security tests: {{ v.eval_result.security.tests }} ({{ v.eval_result.security.passed|yesno:"ผ่าน,ไม่ผ่าน" }}){% endif %}{% for r in v.eval_result.runs %}<br>รอบ {{ forloop.counter }}: {{ r.passed|yesno:"ผ่าน,ไม่ผ่าน" }} (พลาดอันตราย {{ r.metrics.hazard_missed }}, ธงเกิน {{ r.metrics.hazard_over_rate }}, อุปกรณ์ {{ r.metrics.equipment_accuracy }}, ผลกระทบ {{ r.metrics.severe_impact_accuracy }}, ทะเบียน {{ r.metrics.registry_only_accuracy }}, red-team {{ r.metrics.redteam_violations }}, p95 {{ r.metrics.latency_p95_ms }} ms){% endfor %}{% for p in v.eval_result.profiles %}<br>{% if p.dataset %}[{{ p.dataset }}] {% endif %}{% if p.role == "application" %}ร่างที่ผู้แจ้งตรวจ{% elif p.role == "system" %}สายโมเดล{% else %}{{ p.model }}{% endif %}: {{ p.passed|yesno:"ผ่าน,ไม่ผ่าน" }} (intent {{ p.metrics.intent_accuracy }}, items {{ p.metrics.items_exact }}, ร่างไม่ปนเปื้อน {{ p.metrics.injection_resisted }}, p95 {{ p.metrics.latency_p95_ms }} ms){% endfor %}{% endif %}{% if v.imported %}<br>ผลประเมินนำเข้าจาก v{{ v.imported.bundle.source_version }} ของเครื่องที่ประเมิน{% if v.imported.bundle.commit %} (commit {{ v.imported.bundle.commit|slice:":12" }}){% endif %} เมื่อ {{ v.imported.at|slice:":16" }} โดย {{ v.imported.by }}{% endif %}{% if v.examples_warning %}<br><strong>{{ v.examples_warning }}</strong>{% endif %}{% if v.last_job.status == "failed" %}<br>การประเมินล่าสุดล้มเหลว: {{ v.last_job.error }}{% endif %}</td>
-      <td>
-        {% if v.status != "rejected" %}
-        {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'test' v.pk %}">{% csrf_token %}<button type="submit">ทดสอบการเชื่อมต่อ</button></form>{% endif %}
-        {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'evaluate' v.pk %}">{% csrf_token %}<button type="submit">ประเมิน</button></form>{% endif %}
-        {% endif %}
-        {% if v.status != "active" and v.status != "rejected" %}
-        {% if can_change %}<form class="inline" method="post" action="{% url 'admin-ai-version-action' 'reject' v.pk %}">{% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">ไม่ใช้</button></form>{% endif %}
-        {% endif %}
-      </td>
+  {% for r in releases %}
+    <tr id="r{{ r.label }}">
+      <td class="num">{{ r.label }}{% if r.imported %}<br><span class="muted">นำเข้า</span>{% endif %}</td>
+      <td>{% for p in r.chain %}{% if not forloop.first %}<br>{% endif %}{{ p.model_id }}{% endfor %}</td>
+      <td>{% for t in r.tasks %}{{ t.name }}: {{ t.state_label }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+      <td>{% if r.serving %}<span class="tag tag--closed">ใช้งานอยู่</span>{% elif r.rejected %}<span class="tag tag--muted">ไม่ใช้</span>{% elif not r.blocker %}<span class="tag">พร้อมเปิดใช้</span>{% else %}<span class="tag tag--outline">{{ r.blocker }}</span>{% endif %}</td>
+      {% if can_change %}<td>{% if not r.serving and not r.rejected %}
+        <form method="post" action="{% url 'admin-ai-action' 'release_reject' %}" class="cluster">{% csrf_token %}<input type="hidden" name="release" value="{{ r.label }}"><label class="visually-hidden" for="why-rj-{{ r.label }}">เหตุผล</label><input id="why-rj-{{ r.label }}" name="reason" maxlength="500" placeholder="เหตุผล"><button class="btn btn--ghost btn--sm" type="submit">ไม่ใช้</button></form>
+      {% endif %}</td>{% endif %}
     </tr>
-  {% empty %}<tr><td colspan="6">ยังไม่มี</td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="5" class="muted">ยังไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
-{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'version' %}">
-  <fieldset><legend>สร้างรุ่นใหม่</legend>{% csrf_token %}{{ version_form.as_p }}<button type="submit">สร้าง</button></fieldset>
-</form>{% endif %}
-{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'evidence' %}" enctype="multipart/form-data">
-  <fieldset><legend>นำเข้าผลประเมินจากเครื่องที่ประเมิน</legend>{% csrf_token %}
-  <p>เครื่องนี้ประเมินเองไม่ได้ ให้ประเมินบนเครื่องที่ประเมินด้วยโค้ดรุ่นเดียวกับที่ติดตั้งอยู่ ส่งออกไฟล์ที่เซ็นแล้ว แล้วนำเข้าที่นี่ ระบบจะใช้รุ่นที่ตั้งค่าตรงกัน ถ้าไม่มีจะสร้างรุ่นใหม่ให้ จากนั้นทดสอบการเชื่อมต่อบนเครื่องนี้ก่อนเปลี่ยนไปใช้</p>
-  <p><label>ไฟล์ผลประเมิน <input type="file" name="evidence" accept=".json,application/json" required></label></p>
-  <p><label>เหตุผล <input name="reason" required></label></p>
-  <button type="submit">นำเข้า</button></fieldset>
-</form>{% endif %}
 
-<h2>โปรไฟล์โมเดล</h2>
-<div class="table-wrap"><table>
-  <thead><tr><th scope="col">#</th><th scope="col">Model ID</th><th scope="col">คีย์ API</th><th scope="col">Timeout</th><th scope="col">Max tokens</th><th scope="col">Temperature</th><th scope="col">JSON schema</th></tr></thead>
-  <tbody data-more>
-  {% for p in profiles %}<tr><td>{{ p.pk }}</td><td>{{ p.model_id }}</td><td>{{ p.credential }}</td><td>{{ p.timeout_seconds }} s</td><td>{{ p.max_tokens }}</td><td>{{ p.temperature }}</td><td>{{ p.use_json_schema|yesno:"ส่ง,ไม่ส่ง" }}</td></tr>
-  {% empty %}<tr><td colspan="7">ยังไม่มี</td></tr>{% endfor %}
-  </tbody>
-</table></div>
-{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'profile' %}">
-  <fieldset><legend>เพิ่มโปรไฟล์ (แก้ค่าเดิมไม่ได้ ให้สร้างใหม่)</legend>{% csrf_token %}{{ profile_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
-</form>{% endif %}
+<details class="fold">
+  <summary><span class="fold__title">รุ่นเดิมแยกตามงาน</span></summary>
+  <div class="fold__body">
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">รุ่น</th><th scope="col">งาน</th><th scope="col">ลำดับโมเดล</th><th scope="col">สถานะ</th><th scope="col">ทดสอบ</th><th scope="col">ประเมิน</th>{% if can_change %}<th scope="col"><span class="visually-hidden">จัดการ</span></th>{% endif %}</tr></thead>
+    <tbody data-more>
+    {% for v in old_versions %}
+      <tr id="v{{ v.number }}">
+        <td class="num">{{ v.label }}</td>
+        <td>{{ v.get_task_display }}</td>
+        <td>{% for e in v.entries.all %}{% if not forloop.first %}<br>{% endif %}{{ e.profile.model_id }}{% endfor %}</td>
+        <td>{{ v.get_status_display }}{% if v.activated_at %}<br><span class="muted">{{ v.activated_at|date:"j M Y H:i" }}</span>{% endif %}</td>
+        <td>{% if v.test_passed is None %}ยังไม่ทดสอบ{% else %}{{ v.test_passed|yesno:"ผ่าน,ไม่ผ่าน" }}{% endif %}</td>
+        <td>{% if v.eval_passed is None %}ยังไม่ประเมิน{% else %}{{ v.eval_passed|yesno:"ผ่าน,ไม่ผ่าน" }}{% endif %}</td>
+        {% if can_change %}<td>{% if v.status != "rejected" %}<span class="cluster">
+          <form method="post" action="{% url 'admin-ai-version-action' 'test' v.pk %}">{% csrf_token %}<button class="btn btn--ghost btn--sm" type="submit">ทดสอบ</button></form>
+          {% if evaluates_here %}<form method="post" action="{% url 'admin-ai-version-action' 'evaluate' v.pk %}">{% csrf_token %}<button class="btn btn--ghost btn--sm" type="submit">ประเมิน</button></form>{% endif %}
+          {% if v.blocker is None %}<form method="post" action="{% url 'admin-ai-action' 'switch' %}">{% csrf_token %}<input type="hidden" name="version" value="{{ v.pk }}"><button class="btn btn--ghost btn--sm" type="submit">เปิดใช้</button></form>{% endif %}
+          {% if v.status != "active" %}<form method="post" action="{% url 'admin-ai-version-action' 'reject' v.pk %}">{% csrf_token %}<button class="btn btn--ghost btn--sm" type="submit">ไม่ใช้</button></form>{% endif %}
+        </span>{% endif %}</td>{% endif %}
+      </tr>
+    {% empty %}<tr><td colspan="7" class="muted">ยังไม่มี</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  </div>
+</details>
 
-<h2>คีย์ API ของผู้ให้บริการ</h2>
-<ul>{% for c in credentials %}<li>{{ c.name }} · {{ c.base_url }} · key ••••{{ c.key_hint }}{% if c.rotated_at %} · เปลี่ยนเมื่อ {{ c.rotated_at|date:"Y-m-d H:i" }}{% endif %}</li>{% empty %}<li>ยังไม่มี</li>{% endfor %}</ul>
-{% if can_change %}<form method="post" action="{% url 'admin-ai-action' 'credential' %}" autocomplete="off">
-  <fieldset><legend>เพิ่มหรือเปลี่ยน key (ชื่อเดิม = หมุน key; ต้องทดสอบรุ่นใหม่ก่อนเปิดใช้)</legend>{% csrf_token %}{{ credential_form.as_p }}<button type="submit">บันทึก</button></fieldset>
-</form>{% endif %}
-
+{% else %}
 <h2 id="runs">การเรียก AI ล่าสุด</h2>
-<p class="section-note">50 ครั้งล่าสุดที่ส่งข้อความ LINE ให้ AI พร้อมสิ่งที่ AI ทำ ใช้ตรวจคำตอบย้อนหลัง หน้านี้ไม่แสดงข้อความที่ผู้ใช้พิมพ์</p>
 {% include "operations/_list_tools.html" with list="runs" placeholder="ค้นหาคำตอบ ถ้อยคำ หรือเหตุผล" filters=run_filters %}
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">เมื่อ</th><th scope="col">รุ่น</th><th scope="col">ผล</th><th scope="col">AI ทำอะไร</th><th scope="col">โมเดลที่ลอง</th><th scope="col">ผู้แจ้งแก้</th></tr></thead>
   <tbody data-list-items="runs">
-  {% for r in runs %}<tr data-item data-status="{{ r.status }}" data-refused="{{ r.refused|yesno:'yes,no' }}" data-search="{{ r.review|join:' '|lower }} {{ r.get_status_display }}"><td>{{ r.created_at|date:"Y-m-d H:i:s" }}</td><td>v{{ r.config_version.number }}</td><td>{{ r.get_status_display }}</td><td>{% for line in r.review %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% empty %}-{% endfor %}</td><td>{% for a in r.attempts %}{% if a.step %}{{ a.step }}{% if a.model %} {{ a.model }}{% endif %}{% else %}{{ a.model|default:"-" }}{% endif %}: {{ a.outcome }}{% if a.findings %} (ตัวตรวจ: {{ a.findings|join:", " }}){% endif %}{% if a.latency_ms %} {{ a.latency_ms }} ms{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td><td>{{ r.corrections|default_if_none:"-" }}</td></tr>
+  {% for r in runs %}<tr data-item data-status="{{ r.status }}" data-refused="{{ r.refused|yesno:'yes,no' }}" data-search="{{ r.review|join:' '|lower }} {{ r.get_status_display }}"><td>{{ r.created_at|date:"j M Y H:i:s" }}</td><td>{{ r.config_version.label }}</td><td>{{ r.get_status_display }}</td><td>{% for line in r.review %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% empty %}-{% endfor %}</td><td>{% for a in r.attempts %}{% if a.step %}{{ a.step }}{% if a.model %} {{ a.model }}{% endif %}{% else %}{{ a.model|default:"-" }}{% endif %}: {{ a.outcome }}{% if a.findings %} (ตัวตรวจ: {{ a.findings|join:", " }}){% endif %}{% if a.latency_ms %} {{ a.latency_ms }} ms{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td><td>{{ r.corrections|default_if_none:"-" }}</td></tr>
   {% empty %}<tr><td colspan="6">ยังไม่มี</td></tr>{% endfor %}
   </tbody>
 </table></div>
 <p class="list-empty" data-list-empty="runs" hidden>ไม่พบการเรียก AI ที่ตรงกับการค้นหา</p>
+{% endif %}
 {% endblock %}

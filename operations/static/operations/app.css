@@ -1440,3 +1440,36 @@ body:has(.ov-page) .footer { border-top: 0; }
 .org-move { margin-top: var(--s-18); }
 .org-move__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 var(--s-18); align-items: end; }
 .org-move__form .btn { margin-bottom: var(--s-18); }
+
+/* --- การตั้งค่า AI (ADR 0038): steps of a release, model rows, the key field ------------------ */
+.cards > .card { min-width: 0; }
+.provider-url { overflow-wrap: anywhere; }
+.steps { display: flex; flex-wrap: wrap; gap: var(--s-8); list-style: none; margin: var(--s-12) 0; padding: 0; counter-reset: step; }
+.steps li {
+  counter-increment: step; display: inline-flex; align-items: center; gap: var(--s-8);
+  min-height: 36px; padding: 0 var(--s-12); border-radius: var(--r-pill);
+  border: 1px solid var(--hairline); color: var(--mute); font-size: 14px; font-weight: 500;
+}
+.steps li::before {
+  content: counter(step); display: inline-grid; place-items: center; width: 22px; height: 22px;
+  border-radius: var(--r-full); background: var(--cloud); color: var(--ink); font-size: 12px; font-weight: 700;
+}
+.steps .is-done { border-color: var(--success); color: var(--success); }
+.steps .is-done::before { content: "✓"; background: var(--success); color: var(--on-primary); }
+.steps .is-current { border-color: var(--ink); color: var(--ink); }
+.steps .is-current::before { background: var(--ink); color: var(--on-primary); }
+.steps .is-blocked { border-color: var(--danger); color: var(--danger); }
+.model-rows { list-style: none; margin: var(--s-8) 0 var(--s-12); padding: 0; }
+.model-rows li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8); padding: var(--s-8) 0; border-top: 1px solid var(--hairline-soft); }
+.model-rows li:first-child { border-top: 0; }
+.model-rows .model-rows__name { font-weight: 600; }
+.model-rows form { margin: 0; }
+.model-rows .cluster { margin-left: auto; }
+.key-field { display: flex; gap: var(--s-8); align-items: stretch; }
+.key-field input { flex: 1; min-width: 0; }
+.chain-pick { display: grid; gap: var(--s-12); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.task-rows { list-style: none; margin: 0; padding: 0; }
+.task-rows li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-8) var(--s-12); padding: var(--s-12) 0; border-top: 1px solid var(--hairline-soft); }
+.task-rows li:first-child { border-top: 0; }
+.task-rows__name { flex: 1 1 220px; font-weight: 500; }
+.task-rows form { margin: 0; display: flex; gap: var(--s-8); align-items: center; }

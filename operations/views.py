@@ -19,9 +19,6 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 
 from operations import (
     ai,
-    ai_chat,
-    ai_eval,
-    ai_evidence,
     answers,
     attachments,
     email_codes,
@@ -42,9 +39,6 @@ from operations import (
 from operations.models import (
     DUTY_ROLES,
     AIConfigVersion,
-    AICredential,
-    AIProfile,
-    AIRun,
     Allocation,
     Attachment,
     AuditEvent,
@@ -1063,60 +1057,6 @@ def ai_editor_required(view):
 
 
 @admin_required
-@require_safe
-def admin_ai(request):
-    versions = list(
-        AIConfigVersion.objects.select_related("screen_profile").prefetch_related(
-            "entries__profile__credential", "eval_jobs"
-        )
-    )
-    for version in versions:
-        version.blocker = ai.activation_blocker(version)
-        version.imported = (version.eval_result or {}).get("imported")
-        version.examples_warning = ai_evidence.examples_warning(version)
-        version.last_job = next(iter(version.eval_jobs.all()), None)
-    # The last 50 messages that went to the AI, with what it did (ADR 0012 review).
-    runs = list(AIRun.objects.select_related("config_version").order_by("-pk")[:50])
-    titles = dict(ChatAnswer.objects.values_list("key", "title"))
-    for run in runs:
-        run.review, run.refused = ai_chat.review(run, titles)
-    return render(
-        request,
-        "operations/admin_ai.html",
-        {
-            "credentials": AICredential.objects.all(),
-            "profiles": AIProfile.objects.select_related("credential").order_by("-pk"),
-            "versions": versions,
-            "active": next(
-                (v for v in versions if v.status == "active" and v.task == "extract"), None
-            ),
-            "active_triage": next(
-                (v for v in versions if v.status == "active" and v.task == "triage"), None
-            ),
-            "active_answer": next(
-                (v for v in versions if v.status == "active" and v.task == "answer"), None
-            ),
-            "switchable": [v for v in versions if v.blocker is None],
-            "stoppable": [v for v in versions if v.status == "active"],
-            "presets": ai.preset_status(),
-            "gate": ai.EVAL_GATE,
-            "preset_form": forms.AIPresetForm(),
-            "runs": runs,
-            "run_filters": [
-                ("status", "ผล", AIRun.Status.choices),
-                ("refused", "ถ้อยคำของ AI", [("yes", "มีที่ถูกตีกลับ"), ("no", "ไม่มีที่ถูกตีกลับ")]),
-            ],
-            "ai_enabled": settings.AI_ENABLED,
-            "agent_mcp_enabled": settings.AI_ENABLED and settings.AI_MCP_ENABLED,
-            "can_change": identity.may_change_ai(request.user),
-            "credential_form": forms.AICredentialForm(),
-            "profile_form": forms.AIProfileForm(),
-            "version_form": forms.AIVersionForm(),
-        },
-    )
-
-
-@admin_required
 def admin_monitoring(request):
     """Monitoring (15 ต.ค. 2569 Q40–Q47): every admin looks; computing now follows the AI right."""
     from operations import monitor_judge
@@ -1188,158 +1128,6 @@ def admin_monitoring_report(request):
     response["Content-Security-Policy"] = EVIDENTLY_CSP
     response["Cache-Control"] = "no-store"
     return response
-
-
-@ai_editor_required
-@require_POST
-def admin_ai_action(request, action, pk=None):
-    actor, data = request.user, request.POST
-    reason = data.get("reason", "")
-    if action == "credential":
-        form = forms.AICredentialForm(data)
-        if form.is_valid():
-            d = form.cleaned_data
-            _run(
-                request,
-                lambda: ai.save_credential(
-                    actor, d["name"], d["base_url"], d["api_key"], d["reason"]
-                ),
-                "บันทึก credential แล้ว (เข้ารหัส)",
-            )
-        else:
-            messages.error(request, "ข้อมูล credential ไม่ครบ")
-    elif action == "profile":
-        form = forms.AIProfileForm(data)
-        if form.is_valid():
-            d = form.cleaned_data
-            _run(
-                request,
-                lambda: ai.create_profile(
-                    actor,
-                    d["credential"],
-                    d["model_id"],
-                    d["timeout_seconds"],
-                    d["max_tokens"],
-                    d["temperature"],
-                    d["use_json_schema"],
-                ),
-                "เพิ่มโปรไฟล์แล้ว",
-            )
-        else:
-            messages.error(request, "ข้อมูลโปรไฟล์ไม่ถูกต้อง")
-    elif action == "version":
-        form = forms.AIVersionForm(data)
-        if form.is_valid():
-            d = form.cleaned_data
-            _run(
-                request,
-                lambda: ai.create_version(
-                    actor,
-                    form.profiles(),
-                    d["note"],
-                    d["few_shot"],
-                    d["pipeline"],
-                    d["screen_profile"],
-                    d["task"] or AIConfigVersion.Task.EXTRACT,
-                    d["typed_fields"] and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
-                    d["menu_fields"]
-                    and d["typed_fields"]
-                    and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
-                    d["slip_facts"]
-                    and d["menu_fields"]
-                    and d["typed_fields"]
-                    and (d["task"] or "extract") == AIConfigVersion.Task.EXTRACT,
-                ),
-                "สร้างรุ่นการตั้งค่าแล้ว (รอทดสอบและประเมิน)",
-            )
-        else:
-            messages.error(request, "เลือกโมเดลหลักและรูปแบบการทำงานก่อน")
-    elif action == "preset":
-        form = forms.AIPresetForm(data)
-        key = data.get("preset", "")
-        if form.is_valid():
-            d = form.cleaned_data
-            version = _run(
-                request,
-                lambda: ai.create_preset_version(
-                    actor,
-                    key,
-                    d["pipeline"],
-                    d["use_json_schema"],
-                    d["task"] or AIConfigVersion.Task.EXTRACT,
-                    d["typed_fields"],
-                    d["menu_fields"],
-                    d["slip_facts"],
-                ),
-                "สร้างรุ่นใหม่จากโมเดลสำเร็จรูปแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อ → ประเมิน → เปลี่ยน",
-            )
-            if version is not None:
-                return redirect(f"{reverse('admin-ai')}#v{version.number}")
-        else:
-            messages.error(request, "เลือกรูปแบบการทำงานก่อน")
-    elif action == "evidence":
-        upload = request.FILES.get("evidence")
-        if upload is None or upload.size > ai_evidence.MAX_BYTES:
-            messages.error(request, "เลือกไฟล์ผลประเมินที่ส่งออกจากเครื่องที่ประเมิน")
-        else:
-            imported = _run(
-                request,
-                lambda: ai_evidence.import_evidence(actor, upload.read(), reason),
-                "นำเข้าผลประเมินแล้ว ขั้นต่อไป: ทดสอบการเชื่อมต่อบนเครื่องนี้ แล้วจึงเปลี่ยนไปใช้",
-            )
-            if imported is not None:
-                version = imported[0]
-                source = version.eval_result["imported"]["bundle"]["source_version"]
-                # This machine numbers its own versions, so say which one the evidence went to.
-                messages.info(
-                    request,
-                    f"ผลประเมินของ v{source} จากเครื่องที่ประเมินอยู่ที่ v{version.number} "
-                    "บนเครื่องนี้ ดูได้ในตารางรุ่นการตั้งค่า",
-                )
-                if imported[1]:
-                    messages.warning(request, imported[1])
-                return redirect(f"{reverse('admin-ai')}#v{imported[0].number}")
-    elif action == "stop":
-        task = data.get("task", "")
-        if task not in AIConfigVersion.Task.values:
-            messages.error(request, "เลือกงานที่จะหยุดใช้ AI")
-        else:
-            stopped = _run(request, lambda: ai.stop(actor, task, reason), "หยุดใช้ AI แล้ว")
-            if stopped and stopped[1]:
-                messages.info(request, f"ปิดงานคัดกรองที่รอ AI อยู่ {stopped[1]} เรื่อง")
-    elif action == "switch":
-        version = AIConfigVersion.objects.filter(pk=data.get("version") or None).first()
-        if version is None:
-            messages.error(request, "เลือกรุ่นที่จะเปลี่ยนไปใช้")
-        else:
-            _run(
-                request,
-                lambda: ai.activate(actor, version, reason),
-                f"เปลี่ยนไปใช้ v{version.number} แล้ว ({version.get_task_display()}: งานใหม่ใช้รุ่นนี้)",
-            )
-    elif action in {"test", "evaluate", "activate", "reject"}:
-        version = get_object_or_404(AIConfigVersion, pk=pk)
-        operation = {
-            "test": lambda: ai.test_version(actor, version),
-            "evaluate": lambda: ai_eval.request_eval(actor, version),
-            "activate": lambda: ai.activate(actor, version, reason),
-            "reject": lambda: ai.reject(actor, version, reason),
-        }[action]
-        _run(
-            request,
-            operation,
-            {
-                "test": "ทดสอบแล้ว",
-                "evaluate": (
-                    "เข้าคิวประเมินแล้ว (worker ประเมินบน heldout-v1 + redteam-v1 ใช้เวลาหลายนาที)"
-                ),
-                "activate": "เปิดใช้แล้ว",
-                "reject": "ทำเครื่องหมายไม่ใช้แล้ว",
-            }[action],
-        )
-    else:
-        raise Http404
-    return redirect("admin-ai")
 
 
 @admin_required

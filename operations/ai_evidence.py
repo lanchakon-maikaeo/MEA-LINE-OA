@@ -11,8 +11,10 @@ connection with its own key before a switch. Extraction versions only for now (Q
 import base64
 import hashlib
 import json
+import re
 import subprocess
 from decimal import Decimal
+from urllib.parse import urlsplit
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -333,3 +335,195 @@ def import_evidence(actor, raw, reason):
         examples_match=meta["examples_match"],
     )
     return version, examples_warning(version)
+
+
+# --- Releases (ADR 0038): every task's evidence in one file, kept under the same label ----------
+
+RELEASE_SCHEMA = 2
+RELEASE_LABEL = re.compile(r"^\d{4}\.\d{2}\.\d{2}\.\d{1,3}$")
+# What an evaluation read from the data of the machine it ran on; the machine that imports it
+# must hold the same, or the import is refused (owner, 31 ต.ค. 2569).
+DATA_NAMES = {
+    "policy": "กติกาคัดกรองที่ใช้อยู่",
+    "bank": "คลังคำตอบ",
+    "duties": "หน้าที่ของกอง",
+    "examples": "ตัวอย่างที่ระบบค้นมาให้ AI",
+}
+
+
+def data_here(task, few_shot=0):
+    from operations import answers, duties, policy
+
+    if task == AIConfigVersion.Task.TRIAGE:
+        active = policy.active_policy()
+        return {"policy": {"code": active.code, "digest": active.digest} if active else None}
+    if task == AIConfigVersion.Task.ANSWER:
+        return {"bank": answers.bank_digest()}
+    if task == AIConfigVersion.Task.ROUTING:
+        return {"duties": duties.digest()}
+    if task == AIConfigVersion.Task.EXTRACT and few_shot:
+        return {"examples": examples_summary()["digest"]}
+    return {}
+
+
+def export_release(label, private_pem):
+    """The signed evidence of a release whose every task passed or had nothing to evaluate."""
+    from operations import ai_release
+
+    require_demo_database(settings.APP_ENV, settings.DATABASES["default"])
+    found = ai_release.members(label)
+    if set(found) != set(ai_release.TASKS):
+        raise ValidationError(f"Release {label} does not have every task.")
+    for task, version in found.items():
+        if (version.eval_result or {}).get("provenance"):
+            raise ValidationError(f"{label} was imported here; export it where it was evaluated.")
+        if not ai_release.not_ready(version) and ai_release.eval_blocker(version):
+            raise ValidationError(f"{label}: {task} has no passing evaluation of this code.")
+    private = serialization.load_pem_private_key(private_pem, password=None)
+    if not isinstance(private, Ed25519PrivateKey):
+        raise ValidationError("The signing key is not an Ed25519 key.")
+    public = public_key_text(private.public_key())
+    bundle = {
+        "kind": KIND,
+        "schema": RELEASE_SCHEMA,
+        "release": label,
+        "source_digest": ai_eval.source_digest(),
+        "commit": _commit(),
+        "signed_at": timezone.now().isoformat(),
+        "members": [
+            {
+                "task": task,
+                "config": portable_config(found[task]),
+                "data": data_here(task, found[task].few_shot),
+                "report": found[task].eval_result or {},
+            }
+            for task in ai_release.TASKS
+        ],
+    }
+    signature = base64.b64encode(private.sign(_canonical(bundle))).decode()
+    return {"bundle": bundle, "key_id": key_id(public), "signature": signature}
+
+
+def is_release(raw):
+    """Whether a file is a release's evidence (ADR 0038) rather than one earlier version's."""
+    try:
+        return json.loads(raw)["bundle"]["schema"] == RELEASE_SCHEMA
+    except (ValueError, KeyError, TypeError):
+        return False
+
+
+def _read_release(raw):
+    if len(raw) > MAX_BYTES:
+        raise ValidationError("ไฟล์ใหญ่เกินไปสำหรับผลประเมิน")
+    try:
+        data = json.loads(raw)
+        bundle, signature, signer = data["bundle"], data["signature"], data["key_id"]
+        if bundle["kind"] != KIND or bundle["schema"] != RELEASE_SCHEMA:
+            raise ValueError
+        if not RELEASE_LABEL.match(bundle["release"]) or not isinstance(bundle["members"], list):
+            raise ValueError
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ValidationError("ไฟล์นี้ไม่ใช่ผลประเมินรุ่นการตั้งค่า AI จากเครื่องที่ประเมิน") from exc
+    if not settings.AI_EVIDENCE_PUBLIC_KEYS:
+        raise ValidationError("เครื่องนี้ยังไม่ได้ตั้งกุญแจตรวจลายเซ็นผลประเมิน")
+    if not _signed(bundle, signature, signer):
+        raise ValidationError("ลายเซ็นของไฟล์ไม่ถูกต้อง หรือเซ็นด้วยกุญแจที่เครื่องนี้ไม่รู้จัก")
+    if bundle["source_digest"] != ai_eval.source_digest():
+        raise ValidationError("ผลประเมินนี้ทำกับโปรแกรมคนละรุ่นกับที่เครื่องนี้ใช้อยู่")
+    return bundle, signature, signer
+
+
+def _here(report, version):
+    """The signed report bound to this machine's version: its number and configuration digest
+    are local, everything measured stays as signed."""
+    local = {"version": version.number, "config_digest": ai_eval.config_digest(version)}
+    report = {**report, **local}
+    if isinstance(report.get("free_chat"), dict):
+        report["free_chat"] = {**report["free_chat"], **local}
+    return report
+
+
+@transaction.atomic
+def import_release(actor, raw, reason):
+    """A release evaluated on the evaluating machine, under its own label (ADR 0038 Q17). It
+    still needs a connection test here with this machine's keys before it serves."""
+    from operations import ai_release
+
+    identity.require_ai_editor(actor)
+    reason = identity._require_reason(reason)
+    bundle, signature, signer = _read_release(raw)
+    label = bundle["release"]
+    if AIConfigVersion.objects.filter(release=label).exists():
+        raise ValidationError(f"นำเข้ารุ่น {label} แล้ว")
+    entries = {m["task"]: m for m in bundle["members"]}
+    if set(entries) != set(ai_release.TASKS):
+        raise ValidationError("ไฟล์นี้มีผลประเมินไม่ครบทุกงาน")
+    wanted = {
+        entry["base_url"]
+        for m in entries.values()
+        for entry in [*m["config"]["chain"], m["config"]["screen"]]
+        if entry
+    }
+    ready = set(
+        AICredential.objects.filter(base_url__in=wanted)
+        .exclude(encrypted_key="")
+        .values_list("base_url", flat=True)
+    )
+    hosts = {urlsplit(url).hostname for url in wanted - ready}
+    if hosts:
+        raise ValidationError(f"เพิ่มผู้ให้บริการ {' และ '.join(sorted(hosts))} พร้อมคีย์ก่อนนำเข้า")
+    differ = []
+    for task, member in entries.items():
+        if member["report"].get("not_ready"):
+            continue
+        here = data_here(task, member["config"]["few_shot"])
+        differ += [DATA_NAMES[k] for k, v in member["data"].items() if here.get(k) != v]
+    if differ:
+        raise ValidationError(
+            f"ข้อมูลบนเครื่องนี้ต่างจากตอนประเมิน: {' '.join(dict.fromkeys(differ))} "
+            "ทำข้อมูลบนเครื่องที่ประเมินให้ตรงกันแล้วประเมินใหม่"
+        )
+    provenance = {
+        "release": label,
+        "commit": bundle.get("commit", ""),
+        "key_id": signer,
+        "signed_at": bundle.get("signed_at", ""),
+        "file_sha256": hashlib.sha256(raw).hexdigest(),
+        "at": timezone.now().isoformat(),
+        "by": actor.username,
+    }
+    for task in ai_release.TASKS:
+        config = entries[task]["config"]
+        version = ai.create_version(
+            actor,
+            [_local_profile(actor, entry) for entry in config["chain"]],
+            f"รุ่น {label}",
+            config["few_shot"],
+            config["pipeline"],
+            _local_profile(actor, config["screen"]) if config["screen"] else None,
+            task,
+            config["typed_fields"],
+            config.get("menu_fields", False),
+            config.get("slip_facts", False),
+        )
+        if portable_digest(version) != _digest(config):
+            raise ValidationError("สร้างรุ่นบนเครื่องนี้ให้ตรงกับที่ประเมินไม่ได้ (ค่าระยะเวลาของระบบต่างกัน)")
+        AIConfigVersion.objects.filter(pk=version.pk).update(release=label)
+        version.refresh_from_db()
+        report = entries[task]["report"]
+        if report.get("not_ready"):
+            AIConfigVersion.objects.filter(pk=version.pk).update(
+                eval_result={**report, "provenance": provenance}
+            )
+            continue
+        version = ai.record_eval(version, {**_here(report, version), "provenance": provenance})
+        if ai_release.eval_blocker(version):
+            raise ValidationError(f"ผลประเมินของงาน{AIConfigVersion.Task(task).label}ใช้กับเครื่องนี้ไม่ได้")
+    identity.audit(
+        actor,
+        "ai.release_imported",
+        ai_release.members(label)[AIConfigVersion.Task.EXTRACT],
+        reason,
+        **provenance,
+    )
+    return label

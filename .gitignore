@@ -54,6 +54,7 @@ archive/
 !Docs/adr/0031-org-chart-decides-unit-owner-and-line-alerts.md
 !Docs/adr/0032-the-system-tracks-slips-and-hides-the-old-stock-work.md
 !Docs/adr/0037-free-chat-answers-with-tools-and-guides.md
+!Docs/adr/0038-one-ai-configuration-version-for-every-task.md
 !Docs/koj-tracking-setup.md
 
 !operations/line_assets/*.jpg

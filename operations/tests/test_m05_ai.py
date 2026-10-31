@@ -14,11 +14,13 @@ from django.core.management.base import CommandError
 from django.test import Client, override_settings
 from django.utils import timezone
 
-from operations import ai, ai_eval, ai_harness, ai_screen, line_api, options, pii
+from operations import ai, ai_eval, ai_harness, ai_release, ai_screen, line_api, options, pii
 from operations.management.commands.run_worker import run_once
 from operations.models import (
     AIConfigVersion,
     AICredential,
+    AIEvalJob,
+    AIModel,
     AIProfile,
     AIRun,
     AuditEvent,
@@ -188,7 +190,7 @@ class AITestCase(OrchestrationTestCase):
 
 class ConfigurationTests(AITestCase):
     def test_api_key_is_encrypted_write_only_and_never_logged(self):
-        stored = AICredential.objects.get()
+        stored = AICredential.objects.get(name="thaillm")
         self.assertNotIn(RAW_KEY, stored.encrypted_key)
         self.assertEqual((ai.decrypt_key(stored), stored.key_hint), (RAW_KEY, "abc"))
         for event in AuditEvent.objects.filter(action__startswith="ai."):
@@ -197,7 +199,7 @@ class ConfigurationTests(AITestCase):
         page.force_login(self.dev)
         html = page.get("/console/admin/ai/").content.decode()
         self.assertNotIn(RAW_KEY, html)
-        self.assertIn("••••abc", html)
+        self.assertIn("คีย์ลงท้าย abc", html)
         ai.save_credential(
             self.dev, "thaillm", "https://thaillm.or.th/api/v1", "sk-new-" + "y" * 30, "หมุน key"
         )
@@ -229,7 +231,7 @@ class ConfigurationTests(AITestCase):
         self.assertEqual(meter.get("/console/admin/ai/").status_code, 403)
         page = admin.get("/console/admin/ai/")
         self.assertContains(page, "ดูได้อย่างเดียว")
-        self.assertNotContains(page, "/console/admin/ai/credential/")
+        self.assertNotContains(page, "/console/admin/ai/provider_add/")
         with self.assertRaises(CommandError):
             call_command(
                 "import_ai_config", "--username", "admin", "--reason", "ลอง", stdout=StringIO()
@@ -237,7 +239,7 @@ class ConfigurationTests(AITestCase):
         options.change(None, options.AI_EDITORS, "admin", "ให้แอดมินทุกคนแก้การตั้งค่า AI")
         page = admin.get("/console/admin/ai/")
         self.assertNotContains(page, "ดูได้อย่างเดียว")
-        self.assertContains(page, "/console/admin/ai/credential/")
+        self.assertContains(page, "/console/admin/ai/provider_add/")
         with self.assertRaises(PermissionDenied):
             ai.activate(self.meter, self.version, "ลอง")
 
@@ -316,7 +318,7 @@ class ConfigurationTests(AITestCase):
                 stdout=out,
             )
         self.assertEqual(AIConfigVersion.objects.count(), 1)  # same chain, same key: nothing new
-        self.assertEqual(AICredential.objects.count(), 1)
+        self.assertEqual(AICredential.objects.exclude(encrypted_key="").count(), 1)
         self.assertIn("v1", out.getvalue())
 
 
@@ -1199,11 +1201,10 @@ class SwitchTests(AITestCase):
         ready = HarnessTests.harness_version(self, activate=False)
         unready = ai.create_version(self.dev, self.profiles[:1])
         client = self.page()
-        html = client.get("/console/admin/ai/").content.decode()
-        menu = html[html.index('name="version"') : html.index("</select>")]
-        self.assertIn(f'value="{ready.pk}"', menu)
-        self.assertNotIn(f'value="{unready.pk}"', menu)
-        self.assertNotIn(f'value="{self.version.pk}"', menu)  # already active
+        html = client.get("/console/admin/ai/?tab=releases").content.decode()
+        self.assertIn(f'name="version" value="{ready.pk}"', html)
+        self.assertNotIn(f'name="version" value="{unready.pk}"', html)
+        self.assertNotIn(f'name="version" value="{self.version.pk}"', html)  # already active
         client.post("/console/admin/ai/switch/", {"version": unready.pk, "reason": "ลอง"})
         self.assertEqual(ai.active_version(), self.version)
         client.post("/console/admin/ai/switch/", {"version": ready.pk, "reason": ""})
@@ -1250,44 +1251,6 @@ class SwitchTests(AITestCase):
             403,
         )
 
-    def test_opentyphoon_preset_needs_its_own_key_and_keeps_the_chain_as_fallbacks(self):
-        client = self.page()
-        html = client.get("/console/admin/ai/").content.decode()
-        self.assertIn("typhoon-v2.5-30b-a3b-instruct", html)
-        self.assertIn("ยังไม่มี key", html)
-        client.post(
-            "/console/admin/ai/preset/", {"preset": "typhoon-v2.5-30b", "pipeline": "harness"}
-        )
-        self.assertEqual(AIConfigVersion.objects.count(), 1)  # no credential, nothing created
-        ai.save_credential(
-            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
-        )
-        client.post(
-            "/console/admin/ai/preset/",
-            {"preset": "typhoon-v2.5-30b", "pipeline": "harness", "use_json_schema": "on"},
-        )
-        version = AIConfigVersion.objects.get(number=2)
-        self.assertEqual(
-            [p.model_id for p in version.chain()],
-            ["typhoon-v2.5-30b-a3b-instruct", "primary-model", "fallback-a", "fallback-b"],
-        )
-        self.assertEqual((version.pipeline, version.status), ("harness", "candidate"))
-        self.assertEqual(version.chain()[0].credential.name, "opentyphoon")
-        # Without JSON schema (if the provider rejects response_format) is a separate profile.
-        client.post(
-            "/console/admin/ai/preset/", {"preset": "typhoon-v2.5-30b", "pipeline": "single"}
-        )
-        plain = AIConfigVersion.objects.get(number=3).chain()[0]
-        self.assertFalse(plain.use_json_schema)
-        ai.test_version(self.dev, AIConfigVersion.objects.get(number=3))
-        call = next(c for c in self.llm.calls if c["body"]["model"] == plain.model_id)
-        self.assertNotIn("response_format", call["body"])
-        # The provider does not enforce the schema, so the prompt carries it instead.
-        self.assertIn("matches this JSON Schema", call["body"]["messages"][0]["content"])
-        self.assertIn("FUSE_SYN_A", call["body"]["messages"][0]["content"])
-        self.assertEqual(call["url"], "https://api.opentyphoon.ai/v1/chat/completions")
-        self.assertNotEqual(call["key"], RAW_KEY)  # its own key, not ThaiLLM's
-
 
 # --- JSON schema calls (Typhoon 2.5, JSON schema + temperature 0.4, 21 Oct 2569) ------------------
 
@@ -1297,28 +1260,12 @@ class JSONSchemaCallTests(AITestCase):
         credential = ai.save_credential(
             self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
         )
-        defaults = ai.PRESETS["typhoon-v2.5-30b"]["profile"]
         return ai.create_profile(
             self.dev,
             credential,
             "typhoon-v2.5-30b-a3b-instruct",
-            **{**defaults, **values},
+            **{**ai.PROFILE_DEFAULTS, **values},
         )
-
-    def test_typhoon_preset_is_json_schema_at_temperature_point_four(self):
-        ai.save_credential(
-            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
-        )
-        version = ai.create_preset_version(self.dev, "typhoon-v2.5-30b", "harness")
-        profile = version.chain()[0]
-        self.assertEqual(
-            (profile.temperature, profile.use_json_schema, profile.max_tokens),
-            (Decimal("0.40"), True, 1200),
-        )
-        self.assertEqual(profile.timeout_seconds, 15)
-        # The same preset again reuses that profile instead of adding another.
-        again = ai.create_preset_version(self.dev, "typhoon-v2.5-30b", "harness")
-        self.assertEqual(again.chain()[0].pk, profile.pk)
 
     def test_typhoon_gets_response_format_and_the_schema_in_the_prompt(self):
         profile = self.typhoon()
@@ -1332,13 +1279,13 @@ class JSONSchemaCallTests(AITestCase):
         self.assertIn("matches this JSON Schema", body["messages"][0]["content"])
         self.assertIn('"requests"', body["messages"][0]["content"])
 
-    def test_a_host_that_enforces_the_schema_gets_response_format_only(self):
+    def test_a_provider_that_enforces_the_schema_gets_response_format_only(self):
         ai.extract("ขอเบิกฟิวส์ 2 ชิ้น", None, self.version)
         body = self.llm.calls[-1]["body"]
         self.assertIn("response_format", body)
         self.assertNotIn("matches this JSON Schema", body["messages"][0]["content"])
-        with override_settings(AI_SCHEMA_ENFORCED_HOSTS=frozenset()):
-            ai.extract("ขอเบิกฟิวส์ 2 ชิ้น", None, self.version)
+        ai.update_provider(self.dev, self.credential, "ThaiLLM", {}, False, "ไม่บังคับแล้ว")
+        ai.extract("ขอเบิกฟิวส์ 2 ชิ้น", None, self.version)
         self.assertIn(
             "matches this JSON Schema", self.llm.calls[-1]["body"]["messages"][0]["content"]
         )
@@ -1379,46 +1326,286 @@ class JSONSchemaCallTests(AITestCase):
         extraction, _ = ai.extract("คืนฟิวส์ 3 ชิ้น", None, self.version)
         self.assertEqual(extraction.requests[0].intent, "return")
 
-    def test_chat_answer_preset_runs_single_with_the_answer_chain_as_fallbacks(self):
-        from operations import ai_answer
-
-        ai.save_credential(
-            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
+    def test_gemini_calls_ask_for_low_thinking_and_others_are_unchanged(self):
+        body = {"model": "m", "messages": []}
+        gemini = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        self.assertEqual(ai.for_provider(gemini, body)["reasoning_effort"], "low")
+        self.assertEqual(
+            ai.for_provider(gemini, {**body, "reasoning_effort": "high"}),
+            {**body, "reasoning_effort": "high"},
         )
-        version = ai.create_preset_version(
-            self.dev, "typhoon-v2.5-30b", "harness", task=AIConfigVersion.Task.ANSWER
+        self.assertIs(ai.for_provider("https://api.opentyphoon.ai/v1/chat/completions", body), body)
+
+
+# --- Providers, keys and models on the web (ADR 0038) ------------------------------------------
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+PUBLIC = [(2, 1, 6, "", ("93.184.216.34", 443))]
+PRIVATE = [(2, 1, 6, "", ("10.0.0.5", 443))]
+PASSWORD = "local-test-" + "p" * 12  # pragma: allowlist secret
+
+
+class ProviderTests(AITestCase):
+    def setUp(self):
+        super().setUp()
+        self.dev.set_password(PASSWORD)
+        self.dev.save()
+        self.client = Client()
+        self.client.force_login(self.dev)
+        self.gemini = AICredential.objects.get(name="gemini")
+
+    def post(self, action, pk=None, **data):
+        url = f"/console/admin/ai/{action}/" + (f"{pk}/" if pk else "")
+        return self.client.post(url, data, follow=True)
+
+    def test_gemini_waits_without_a_key_with_its_models_in_the_set_order(self):
+        self.assertFalse(self.gemini.has_key)
+        self.assertEqual(
+            [m.model_id for m in self.gemini.models.all()],
+            ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"],
+        )
+        html = self.client.get("/console/admin/ai/").content.decode()
+        for text in ("Google Gemini", "Gemini 3.8 Flash", "ยังไม่มีคีย์", "แผนฟรี: ห้ามใช้กับข้อมูลจริง"):
+            self.assertIn(text, html)
+        self.assertIn("ปิดข้อมูลส่วนบุคคลก่อนส่งทุกครั้ง", html)
+
+    def test_a_key_needs_the_password_again_and_is_checked_at_once(self):
+        key = "AIza" + "k" * 35
+        page = self.post("key", self.gemini.pk, api_key=key, password="wrong", reason="ลอง")
+        self.assertContains(page, "รหัสผ่านไม่ถูกต้อง")
+        self.gemini.refresh_from_db()
+        self.assertFalse(self.gemini.has_key)
+        self.assertTrue(AuditEvent.objects.filter(action="ai.password_check_failed").exists())
+        page = self.post("key", self.gemini.pk, api_key=key, password=PASSWORD, reason="เพิ่มคีย์")
+        self.assertContains(page, "Google Gemini: ใช้ได้")
+        self.assertNotContains(page, key)
+        self.gemini.refresh_from_db()
+        self.assertEqual(
+            (self.gemini.has_key, self.gemini.key_hint, self.gemini.check_ok), (True, "kkk", True)
+        )
+        self.assertIsNone(self.gemini.rotated_at)  # a first key, not a rotation
+        call = self.llm.calls[-1]
+        self.assertEqual((call["url"], call["key"]), (f"{GEMINI_URL}/chat/completions", key))
+        self.assertEqual(call["body"]["model"], "gemini-3.8-flash")
+        for event in AuditEvent.objects.filter(action__startswith="ai."):
+            self.assertNotIn(key, json.dumps(event.data) + event.reason)
+
+    def test_the_key_check_says_why_a_key_does_not_work(self):
+        ai.save_credential(self.dev, "gemini", GEMINI_URL, "AIza" + "k" * 35, "เพิ่มคีย์")
+        for error, detail in (("HTTP 429", "โควตาหมด"), ("HTTP 401", "คีย์ไม่ถูกต้อง")):
+            with self.subTest(error=error):
+                self.llm.by_model["gemini-3.8-flash"] = ai.AIError(error)
+                self.assertEqual(ai.check_key(self.dev, self.gemini), (False, detail))
+
+    def test_a_key_in_use_cannot_be_removed(self):
+        page = self.post("key_remove", self.credential.pk, password=PASSWORD, reason="ลบ")
+        self.assertContains(page, "อยู่ในรุ่นที่ใช้งานอยู่")
+        self.credential.refresh_from_db()
+        self.assertTrue(self.credential.has_key)
+        ai.save_credential(self.dev, "gemini", GEMINI_URL, "AIza" + "k" * 35, "เพิ่มคีย์")
+        self.post("key_remove", self.gemini.pk, password=PASSWORD, reason="ลบ")
+        self.gemini.refresh_from_db()
+        self.assertEqual((self.gemini.has_key, self.gemini.key_hint), (False, ""))
+
+    def test_a_new_provider_must_be_https_on_a_public_host(self):
+        key = "ex-" + "k" * 30
+        with patch.object(ai.socket, "getaddrinfo", return_value=PRIVATE):
+            with self.assertRaises(ValidationError):
+                ai.add_provider(self.dev, "ภายใน", "https://intranet.example/v1", key, "ลอง")
+        for url in ("http://api.example.com/v1", "https://api.example.com:8443/v1"):
+            with self.subTest(url=url), self.assertRaises(ValidationError):
+                ai.add_provider(self.dev, "ตัวอย่าง", url, key, "ลอง")
+        with patch.object(ai.socket, "getaddrinfo", return_value=PUBLIC):
+            page = self.post(
+                "provider_add",
+                label="ผู้ให้บริการตัวอย่าง",
+                base_url="https://api.example.com/v1",
+                api_key=key,
+                password=PASSWORD,
+                reason="เพิ่ม",
+            )
+            self.assertContains(page, "เพิ่มผู้ให้บริการแล้ว")
+            made = AICredential.objects.get(base_url="https://api.example.com/v1")
+            self.assertEqual((made.name, made.label), ("api-example-com", "ผู้ให้บริการตัวอย่าง"))
+            with self.assertRaises(ValidationError):
+                ai.add_provider(self.dev, "ซ้ำ", "https://api.example.com/v1", key, "ลอง")
+            # A provider added from the web gets masked text like every other (ADR 0014, Q10).
+            model = ai.add_model(self.dev, made, "ex-model")
+            profile = ai.model_profile(self.dev, model)
+            ai.extract_with(profile, "ขอเบิกฟิวส์ 2 ชิ้น โทร 081-234-5678", None, ai._catalog(), 10)
+        sent = json.dumps(self.llm.calls[-1]["body"], ensure_ascii=False)
+        self.assertEqual(self.llm.calls[-1]["url"], "https://api.example.com/v1/chat/completions")
+        self.assertNotIn("081-234-5678", sent)
+        self.assertIn("[เบอร์โทร-1]", sent)
+
+    def test_a_model_that_served_is_hidden_never_deleted(self):
+        used = ai.add_model(self.dev, self.credential, "primary-model")
+        spare = ai.add_model(self.dev, self.credential, "spare-model")
+        with self.assertRaises(ValidationError):
+            ai.delete_model(self.dev, used)
+        self.post("model_hide", used.pk)
+        used.refresh_from_db()
+        self.assertTrue(used.is_hidden)
+        self.post("model_delete", spare.pk)
+        self.assertFalse(AIModel.objects.filter(pk=spare.pk).exists())
+
+    def test_profiles_take_the_providers_defaults(self):
+        typhoon = AIModel.objects.get(model_id="typhoon-v2.5-30b-a3b-instruct")
+        gemini = self.gemini.models.first()
+        self.assertEqual(
+            (
+                ai.model_profile(self.dev, typhoon).temperature,
+                ai.model_profile(self.dev, gemini).temperature,
+            ),
+            (Decimal("0.40"), Decimal("1.00")),
         )
         self.assertEqual(
-            (version.task, version.pipeline, version.few_shot), ("answer", "single", 0)
+            ai.model_profile(self.dev, typhoon).pk, ai.model_profile(self.dev, typhoon).pk
         )
-        self.llm.default = {
-            "choices": [{"message": {"content": '{"answer": "none", "reply": null}'}}]
+        ai.update_provider(self.dev, self.gemini, "", {"temperature": "0.7"}, False, "ปรับ")
+        self.gemini.refresh_from_db()
+        self.assertEqual(
+            ai.model_profile(self.dev, self.gemini.models.first()).temperature, Decimal("0.70")
+        )
+        with self.assertRaises(ValidationError):
+            ai.update_provider(self.dev, self.gemini, "", {"max_tokens": 9000}, False, "ปรับ")
+
+    def test_viewers_cannot_touch_keys(self):
+        viewer = Client()
+        viewer.force_login(self.admin)
+        response = viewer.post(f"/console/admin/ai/key/{self.gemini.pk}/", {"api_key": "x" * 20})
+        self.assertEqual(response.status_code, 403)
+        self.assertNotContains(viewer.get("/console/admin/ai/"), "บันทึกคีย์")
+
+
+# --- รุ่นการตั้งค่า AI (ADR 0038) --------------------------------------------------------------
+
+
+class ReleaseTests(AITestCase):
+    def setUp(self):
+        super().setUp()
+        ai.save_credential(self.dev, "gemini", GEMINI_URL, "AIza" + "k" * 35, "เพิ่มคีย์")
+        ai.save_credential(
+            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่มคีย์"
+        )
+        self.models = list(AIModel.objects.filter(provider__name="gemini")) + [
+            AIModel.objects.get(model_id="typhoon-v2.5-30b-a3b-instruct")
+        ]
+        self.client = Client()
+        self.client.force_login(self.dev)
+
+    def release(self):
+        return ai_release.create(self.dev, self.models)
+
+    def test_a_release_holds_every_task_under_one_calver_label(self):
+        day = timezone.localdate().strftime("%Y.%m.%d")
+        label = self.release()
+        self.assertEqual(label, f"{day}.1")
+        found = ai_release.members(label)
+        self.assertEqual(set(found), set(AIConfigVersion.Task.values))
+        for version in found.values():
+            self.assertEqual(
+                [p.model_id for p in version.chain()],
+                [
+                    "gemini-3.8-flash",
+                    "gemini-3.5-flash-lite",
+                    "gemini-3.1-flash-lite",
+                    "typhoon-v2.5-30b-a3b-instruct",
+                ],
+            )
+            self.assertEqual(version.label, label)
+        self.assertEqual(self.release(), f"{day}.2")
+        with patch.object(ai_release, "evaluates_here", return_value=False):
+            with self.assertRaisesMessage(ValidationError, "เครื่องที่ประเมิน"):
+                self.release()
+        ai.remove_key(self.dev, AICredential.objects.get(name="gemini"), "ลบ")
+        with self.assertRaisesMessage(ValidationError, "ยังไม่มีคีย์ของ Google Gemini"):
+            self.release()
+
+    def test_the_chain_page_starts_from_geminis_order_then_typhoon(self):
+        html = self.client.get("/console/admin/ai/?tab=chain").content.decode()
+        for slot, model in zip(
+            ("primary", "fallback_1", "fallback_2", "fallback_3"), self.models, strict=True
+        ):
+            block = html[html.index(f'id="slot-{slot}"') :]
+            block = block[: block.index("</select>")]
+            self.assertIn(f'value="{model.pk}" selected', block)
+        self.assertIn("สร้างและประเมิน", html)
+
+    def test_create_and_evaluate_queues_every_task_and_tests_first(self):
+        data = {
+            "primary": self.models[0].pk,
+            "fallback_1": self.models[3].pk,
+            "pipeline": "harness",
         }
-        ai_answer.call(version.chain()[0], [{"role": "system", "content": "s"}], ["greeting"], 10)
-        body = self.llm.calls[-1]["body"]
-        self.assertEqual(
-            (body["temperature"], body["response_format"]["json_schema"]["name"]),
-            (0.4, "chat_answer"),
-        )
-        self.assertIn("matches this JSON Schema", body["messages"][0]["content"])
+        page = self.client.post("/console/admin/ai/release_create/", data, follow=True)
+        self.assertContains(page, "สร้างรุ่นแล้ว")
+        label = ai_release.labels()[0]
+        self.assertEqual(AIEvalJob.objects.filter(version__release=label).count(), 6)
+        with patch.object(ai_eval, "_gate_report", return_value=({"gate": "x"}, None)):
+            job = ai_eval.run_next_job()
+        self.assertEqual(job.status, "done")
+        found = ai_release.members(label)
+        self.assertTrue(all(v.test_passed for v in found.values()))  # tested once, for all
+        self.assertTrue(found[AIConfigVersion.Task.EXTRACT].chain()[0].use_json_schema is False)
 
-    def test_admin_page_makes_a_chat_answer_version_from_the_preset(self):
-        ai.save_credential(
-            self.dev, "opentyphoon", "https://api.opentyphoon.ai/v1", "tp-" + "k" * 30, "เพิ่ม key"
-        )
-        client = Client()
-        client.force_login(self.dev)
-        html = client.get("/console/admin/ai/").content.decode()
-        self.assertIn("temperature 0.40", html)
-        client.post(
-            "/console/admin/ai/preset/",
-            {
-                "preset": "typhoon-v2.5-30b",
-                "pipeline": "harness",
-                "use_json_schema": "on",
-                "task": "answer",
-            },
-        )
-        version = AIConfigVersion.objects.latest("number")
-        self.assertEqual((version.task, version.pipeline), ("answer", "single"))
-        self.assertEqual(version.chain()[0].temperature, Decimal("0.40"))
+    def test_a_quota_answer_makes_the_job_wait_and_records_nothing(self):
+        label = self.release()
+        ai_release.evaluate(self.dev, label)
+
+        def quota(version):
+            ai._count_quota_hit()
+            return {"gate": "x"}, None
+
+        with patch.object(ai_eval, "_gate_report", side_effect=quota):
+            job = ai_eval.run_next_job()
+        self.assertEqual((job.status, job.error), ("waiting", "HTTP 429"))
+        self.assertGreater(job.retry_at, timezone.now())
+        self.assertIsNone(job.version.eval_passed)
+        self.assertEqual(ai_release.state(ai_release.members(label)[job.version.task]), "waiting")
+        AIEvalJob.objects.exclude(pk=job.pk).update(status="done")
+        self.assertIsNone(ai_eval.run_next_job())  # not before its time
+        AIEvalJob.objects.filter(pk=job.pk).update(retry_at=timezone.now())
+        with patch.object(ai_eval, "_gate_report", return_value=({"gate": "x"}, None)):
+            self.assertEqual(ai_eval.run_next_job().pk, job.pk)
+
+    def test_a_task_with_nothing_to_evaluate_stays_off_and_does_not_block(self):
+        label = self.release()
+        ai_release.test(self.dev, label)
+        routing = ai_release.members(label)[AIConfigVersion.Task.ROUTING]
+        AIEvalJob.objects.create(version=routing, requested_by=self.dev)
+        with patch.object(
+            ai_eval, "_gate_report", side_effect=ValidationError("ยังไม่มีรายการงานที่ดูแล")
+        ):
+            ai_eval.run_next_job()
+        routing.refresh_from_db()
+        self.assertEqual(ai_release.not_ready(routing), "ยังไม่มีรายการงานที่ดูแล")
+        with patch.object(ai_release, "eval_blocker", return_value=None):
+            self.assertIn("ยังไม่พร้อมประเมิน", ai_release.blocker(label, {"routing"}))
+            self.assertIsNone(ai_release.blocker(label, {"extract"}))
+        with patch.object(
+            ai_release, "eval_blocker", side_effect=lambda v: v.task == "triage" or None
+        ):
+            self.assertIn("ยังไม่ผ่านการประเมิน", ai_release.blocker(label, {"extract"}))
+
+    def test_switching_on_moves_every_chosen_task_and_keeps_the_others_off(self):
+        label = self.release()
+        ai_release.test(self.dev, label)
+        with (
+            patch.object(ai_release, "eval_blocker", return_value=None),
+            patch.object(ai, "eval_blocker", return_value=None),
+        ):
+            ai_release.activate(self.dev, label, ["extract", "answer"], "เปิดรุ่นรวม")
+            found = ai_release.members(label)
+            self.assertEqual(ai.active_version("extract"), found["extract"])
+            self.assertEqual(ai.active_version("answer"), found["answer"])
+            self.assertIsNone(ai.active_version("triage"))
+            self.version.refresh_from_db()
+            self.assertEqual(self.version.status, "retired")
+            self.assertEqual(ai_release.current(), label)
+            ai_release.switch(self.dev, "triage", True, "เปิดคัดกรอง")
+            self.assertEqual(ai.active_version("triage"), found["triage"])
+            ai_release.switch(self.dev, "extract", False, "ปิดชั่วคราว")
+            self.assertIsNone(ai.active_version("extract"))
+            html = self.client.get("/console/admin/ai/?tab=chain").content.decode()
+        self.assertIn(f"รุ่น {label}", html)

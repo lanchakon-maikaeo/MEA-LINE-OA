@@ -3,6 +3,7 @@ from django.urls import path
 from django.views.generic import RedirectView
 
 from operations import (
+    ai_web,
     duties_web,
     flows_web,
     free_chat_web,
@@ -171,17 +172,17 @@ urlpatterns = [
         views.admin_inventory_action,
         name="admin-inventory-action",
     ),
-    path("console/admin/ai/", views.admin_ai, name="admin-ai"),
+    path("console/admin/ai/", ai_web.admin_ai, name="admin-ai"),
     path("console/admin/monitoring/", views.admin_monitoring, name="admin-monitoring"),
     path(
         "console/admin/monitoring/report/",
         views.admin_monitoring_report,
         name="admin-monitoring-report",
     ),
-    path("console/admin/ai/<slug:action>/", views.admin_ai_action, name="admin-ai-action"),
+    path("console/admin/ai/<slug:action>/", ai_web.admin_ai_action, name="admin-ai-action"),
     path(
         "console/admin/ai/<slug:action>/<int:pk>/",
-        views.admin_ai_action,
+        ai_web.admin_ai_action,
         name="admin-ai-version-action",
     ),
     path("console/admin/line/requeue/<int:pk>/", views.admin_requeue, name="admin-requeue"),

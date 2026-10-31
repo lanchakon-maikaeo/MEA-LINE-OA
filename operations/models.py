@@ -1126,20 +1126,70 @@ class LineQuotaSnapshot(models.Model):
 
 
 class AICredential(models.Model):
-    """Provider endpoint and API key. The key is Fernet-encrypted and never shown again."""
+    """ผู้ให้บริการ AI (ADR 0038): endpoint, API key and the defaults its models get. The key is
+    Fernet-encrypted and never shown again; a provider may wait without a key."""
 
     name = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=100, blank=True)
     base_url = models.URLField(max_length=200)
-    encrypted_key = models.TextField()
-    key_hint = models.CharField(max_length=8)
+    encrypted_key = models.TextField(blank=True)
+    key_hint = models.CharField(max_length=8, blank=True)
+    key_url = models.URLField(max_length=200, blank=True)
+    notice = models.CharField(max_length=200, blank=True)
+    # Replaces AI_SCHEMA_ENFORCED_HOSTS: the provider enforces response_format json_schema.
+    enforces_schema = models.BooleanField(default=False, db_default=False)
+    # timeout_seconds, max_tokens and temperature for the profiles of this provider's models.
+    defaults = models.JSONField(default=dict, blank=True)
+    is_hidden = models.BooleanField(default=False, db_default=False)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    check_ok = models.BooleanField(null=True, blank=True)
+    check_detail = models.CharField(max_length=100, blank=True)
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     rotated_at = models.DateTimeField(null=True, blank=True)
 
+    @property
+    def has_key(self):
+        return bool(self.encrypted_key)
+
+    @property
+    def title(self):
+        return self.label or self.name
+
     def __str__(self):
-        return f"{self.name} (••••{self.key_hint})"
+        return f"{self.title} (••••{self.key_hint})" if self.has_key else self.title
+
+
+class AIModel(models.Model):
+    """A model a provider offers, as the admin page lists it (ADR 0038 Q6). Its call settings
+    live in AIProfile rows; a model that ever served in a version is hidden, never deleted."""
+
+    provider = models.ForeignKey(AICredential, on_delete=models.PROTECT, related_name="models")
+    model_id = models.CharField(max_length=100)
+    label = models.CharField(max_length=100, blank=True)
+    position = models.PositiveSmallIntegerField(default=0)
+    is_hidden = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["provider_id", "position", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "model_id"], name="ai_model_once_per_provider"
+            )
+        ]
+
+    @property
+    def title(self):
+        return self.label or self.model_id
+
+    def __str__(self):
+        return self.title
 
 
 class AIProfile(AppendOnlyModel):
@@ -1198,6 +1248,9 @@ class AIConfigVersion(models.Model):
         HARNESS = "harness", "Harness (กรองคำสั่งแฝง + ตัวตรวจ + แก้ 1 รอบ + hedge)"
 
     number = models.PositiveIntegerField(unique=True)
+    # ADR 0038: the CalVer label (2026.10.31.1) shared by one version per task, made on the
+    # evaluating machine and kept on import. Blank for the earlier per-task versions.
+    release = models.CharField(max_length=16, blank=True, default="", db_index=True)
     # Each task has its own evaluation gate and its own active version (ADR 0002).
     task = models.CharField(max_length=16, choices=Task.choices, default=Task.EXTRACT)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.CANDIDATE)
@@ -1241,13 +1294,22 @@ class AIConfigVersion(models.Model):
                 fields=["task"], condition=Q(status="active"), name="ai_single_active_per_task"
             ),
             models.CheckConstraint(name="ai_few_shot_bounds", condition=Q(few_shot__lte=5)),
+            models.UniqueConstraint(
+                fields=["release", "task"],
+                condition=~Q(release=""),
+                name="ai_one_version_per_task_per_release",
+            ),
         ]
 
     def chain(self):
         return [entry.profile for entry in self.entries.select_related("profile__credential")]
 
+    @property
+    def label(self):
+        return self.release or f"v{self.number}"
+
     def __str__(self):
-        return f"v{self.number}"
+        return self.label
 
 
 class AIConfigEntry(models.Model):
@@ -1304,6 +1366,7 @@ class AIEvalJob(models.Model):
         RUNNING = "running", "กำลังประเมิน"
         DONE = "done", "เสร็จ"
         FAILED = "failed", "ล้มเหลว"
+        WAITING = "waiting", "รอโควตา"
 
     version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="eval_jobs")
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
@@ -1315,13 +1378,15 @@ class AIEvalJob(models.Model):
     finished_at = models.DateTimeField(null=True, blank=True)
     passed = models.BooleanField(null=True)
     error = models.CharField(max_length=200, blank=True)
+    # A waiting job (the provider answered HTTP 429) runs again from this time (ADR 0038 Q20).
+    retry_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-pk"]
         constraints = [
             models.UniqueConstraint(
                 fields=["version"],
-                condition=Q(status__in=["queued", "running"]),
+                condition=Q(status__in=["queued", "running", "waiting"]),
                 name="ai_one_open_eval_per_version",
             )
         ]
