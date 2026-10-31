@@ -381,9 +381,24 @@ def personal(reply, sources):
     found = []
     for label in pii.LABEL.finditer(masked):
         value = masker.labels.get((label[1], int(label[2])))
-        if value and value not in sources and label[0] not in reply:
-            found.append(label[1])
+        if not value or value in sources or label[0] in reply:
+            continue
+        if label[1] == pii.KINDS["name"][0] and _you(value, reply, masker.names):
+            continue
+        found.append(label[1])
     return found
+
+
+def _you(value, reply, names):
+    """คุณ is also "you": "คุณสามารถติดตามได้" holds no name (the live eval, 31 Oct 2569). A
+    single word after คุณ is a name only when the system knows it; นาย, นาง and a surname still
+    count."""
+    word = value.strip()
+    if " " in word or word.lower() in names.first.get(len(word), ()):
+        return False
+    return any(f"คุณ{gap}{word}" in reply for gap in ("", " ")) and not any(
+        f"{title}{gap}{word}" in reply for title in ("นาย", "นาง", "น.ส.") for gap in ("", " ")
+    )
 
 
 def problem(reply, basis, sources, own_numbers, used_tools, titles):

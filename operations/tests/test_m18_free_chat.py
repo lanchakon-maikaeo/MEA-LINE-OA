@@ -275,6 +275,15 @@ class ToolTests(FreeChatCase):
         post.assert_not_called()
         self.assertEqual(result["documents"], [])
 
+    def test_you_is_not_a_name_but_people_still_are(self):
+        self.assertEqual(free_chat.personal("คุณสามารถติดตามได้ที่เรื่องของฉัน", ""), [])
+        self.assertTrue(free_chat.personal("ติดต่อคุณสมชาย ใจดี ได้เลย", ""))
+        self.assertTrue(free_chat.personal("นายสามารถ อยู่แผนกทดสอบ", ""))
+        staff = make_staff("named-staff", (Role.ADMIN, None))
+        staff.staff_profile.display_name = "วิมลรัตน์ ทดสอบ"
+        staff.staff_profile.save(update_fields=["display_name"])
+        self.assertTrue(free_chat.personal("ถามคุณวิมลรัตน์ได้", ""))  # a name the system knows
+
     def test_reply_checks(self):
         sources = "ข้อมูล"
         self.assertIn("รับปาก", free_chat.problem("อนุมัติแล้ว", "general", sources, [], set(), []))

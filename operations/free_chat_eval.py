@@ -98,6 +98,7 @@ def score(row, result):
         "called": called,
         "outcome": result["outcome"],
         "sent": sent,
+        "written": result["reply"],  # the model's own words, also when refused
         "refused": result["refused"],
         "tools": result["tools"],
         "violations": violations,
