@@ -66,7 +66,9 @@ BULK_DEFAULT = {"none": S.RECEIVED, S.RECEIVED: S.KEYED, S.KEYED: S.ISSUED, S.IS
 def _division(request, code):
     division = Division.objects.filter(code=code, is_active=True).first()
     scope = identity.staff_scope(request.user)
-    if division is None or not identity.can_access_division(scope, division.pk):
+    # ADR 0039: a viewer opens the pages; only staff of the division post to them.
+    check = identity.may_read_division if request.method == "GET" else identity.can_access_division
+    if division is None or not check(scope, division.pk):
         raise Http404
     return division
 
@@ -117,6 +119,8 @@ def warehouse_page(request, code):
         .order_by("submitted_at")
     )
     today = timezone.localdate()
+    # ADR 0039: a viewer sees the stages and gets no form.
+    may_act = identity.can_access_division(identity.staff_scope(request.user), division.pk)
     by_tab = {key: [] for key, _ in TABS}
     for case in cases[:500]:
         done = {m.stage: m for m in case.milestones.all()}
@@ -129,7 +133,7 @@ def warehouse_page(request, code):
             (a for a in case.appointments.all() if a.status in Appointment.HOLDING and a.method),
             None,
         )
-        nxt = None if waiting else _next_stage(case, done)
+        nxt = None if waiting or not may_act else _next_stage(case, done)
         row = {
             "case": case,
             "stage": now,
@@ -162,6 +166,7 @@ def warehouse_page(request, code):
             "bulk_stage": BULK_DEFAULT.get(tab, S.RECEIVED),
             "today": today,
             "schedule": warehouse.schedule_of(division),
+            "may_act": may_act,
         },
     )
 
@@ -226,6 +231,9 @@ def schedule_page(request, code):
         "operations/warehouse_schedule.html",
         {
             "division": division,
+            "may_act": identity.can_access_division(
+                identity.staff_scope(request.user), division.pk
+            ),
             "groups": groups,
             "group_choices": GROUPS,
             "weekdays": WEEKDAYS,

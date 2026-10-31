@@ -19,6 +19,7 @@ from django.utils import timezone
 from operations import orchestration, queues, services
 from operations.contracts import Actor
 from operations.models import (
+    VIEWER_ROLES,
     AuthorityGrant,
     Case,
     CaseTriage,
@@ -70,9 +71,13 @@ def _with_email(users):
 
 
 def members(division_id, roles=None):
-    grants = RoleGrant.objects.filter(
-        division_id=division_id, revoked_at__isnull=True, user__is_active=True
-    ).select_related("user")
+    grants = (
+        RoleGrant.objects.filter(
+            division_id=division_id, revoked_at__isnull=True, user__is_active=True
+        )
+        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: viewers get no alerts
+        .select_related("user")
+    )
     if roles:
         grants = grants.filter(role__in=roles)
     return _with_email(g.user for g in grants.order_by("user_id"))

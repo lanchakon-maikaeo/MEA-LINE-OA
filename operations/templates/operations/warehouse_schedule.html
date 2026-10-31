@@ -18,7 +18,8 @@
   <button class="chip" type="button" data-sc-tab="stages">ชื่อขั้น</button>
 </nav>
 
-<form method="post" class="stack">
+{# ADR 0039: a viewer reads the same table, every field disabled and no save. #}
+{% if may_act %}<form method="post" class="stack">{% else %}<fieldset class="stack" disabled>{% endif %}
   {% csrf_token %}
   <section class="panel" data-sc-part="sla">
     <div class="panel__head"><h2>กำหนดจ่าย</h2><span class="panel__note">ขนาดที่ไม่มีแถวของตัวเองใช้แถว "ทุกขนาด" ของกลุ่ม ลบแถวโดยล้างช่องจำนวนวัน</span></div>
@@ -91,11 +92,11 @@
   </section>
 
   <div class="panel sc-save">
-    <div class="field"><label for="sc-reason">เหตุผลที่แก้</label><input type="text" id="sc-reason" name="reason" required maxlength="300" placeholder="เช่น ปรับตามรอบรถเดือนใหม่"></div>
-    <button class="btn" type="submit">บันทึกตาราง</button>
+    {% if may_act %}<div class="field"><label for="sc-reason">เหตุผลที่แก้</label><input type="text" id="sc-reason" name="reason" required maxlength="300" placeholder="เช่น ปรับตามรอบรถเดือนใหม่"></div>
+    <button class="btn" type="submit">บันทึกตาราง</button>{% endif %}
     {% if schedule.updated_by %}<p class="muted">แก้ล่าสุดโดย {{ schedule.updated_by.staff_profile.display_name|default:schedule.updated_by.username }} {{ schedule.updated_at|thai_datetime }}</p>{% endif %}
   </div>
-</form>
+{% if may_act %}</form>{% else %}</fieldset>{% endif %}
 
 <section class="panel mt-24" aria-labelledby="sc-try">
   <div class="panel__head"><h2 id="sc-try">ลองคำนวณจากตารางที่บันทึกแล้ว</h2></div>

@@ -18,6 +18,7 @@ from django.utils import timezone
 
 from operations import identity, options, orchestration
 from operations.models import (
+    VIEWER_ROLES,
     AuditEvent,
     CaseNumberCounter,
     ChannelIdentity,
@@ -78,9 +79,9 @@ def visible(user):
     orders = WorkOrder.objects.all()
     if scope.is_admin or scope.is_support:
         return orders
-    if not scope.has_any_access:
+    if not scope.may_read:
         return orders.none()
-    divisions = [*scope.division_roles, *scope.overseen]
+    divisions = [*scope.division_roles, *scope.overseen, *scope.viewed]  # ADR 0039
     return orders.filter(Q(division__in=divisions) | Q(issued_by=user) | Q(assignee=user))
 
 
@@ -117,6 +118,7 @@ def members(division_id):
         RoleGrant.objects.filter(
             division_id=division_id, revoked_at__isnull=True, user__is_active=True
         )
+        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: nobody gives work to a viewer
         .select_related("user__staff_profile")
         .order_by("user__username")
     )

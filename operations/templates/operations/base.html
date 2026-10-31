@@ -22,9 +22,9 @@
           <nav class="drawer__panel" aria-label="เมนูหลัก (มือถือ)">
             <a href="{% url 'console' %}"{% if nav.url_name == 'console' or nav.section == 'reports' %} aria-current="page"{% endif %}>ภาพรวมและรายงาน</a>
             {% if nav.divisions %}<p class="drawer__group">คิวงาน</p>{% endif %}
-            {% if nav.scope.is_admin %}<a href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
+            {% if nav.scope.sees_department %}<a href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
             {% for d in nav.divisions %}<a href="{% url 'division-detail' d.code %}"{% if nav.url_name == 'division-detail' and nav.current == d.code %} aria-current="page"{% endif %}>{{ d.code }} {{ d.name }}</a>{% endfor %}
-            {% if nav.scope.is_admin %}<a href="{% url 'admin-problems' %}"{% if nav.section == 'problems' %} aria-current="page"{% endif %}>ปัญหาและข้อเสนอแนะ{% if nav.admin_waiting %} ({{ nav.admin_waiting }}){% endif %}</a>{% endif %}
+            {% if nav.scope.sees_department %}<a href="{% url 'admin-problems' %}"{% if nav.section == 'problems' %} aria-current="page"{% endif %}>ปัญหาและข้อเสนอแนะ{% if nav.admin_waiting %} ({{ nav.admin_waiting }}){% endif %}</a>{% endif %}
             <p class="drawer__group">อื่น ๆ</p>
             {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน (SAP)</a>{% endif %}
             {% if nav.sheets %}<a href="{% url 'sheets' %}"{% if nav.url_name == 'sheets' %} aria-current="page"{% endif %}>ชีทที่ระบบอ่าน</a>{% endif %}
@@ -51,7 +51,7 @@
           {% with first=nav.divisions.0 %}
           <a href="{% if nav.all_queue %}{% url 'queue-all' %}{% elif nav.current %}{% url 'division-detail' nav.current %}{% elif first %}{% url 'division-detail' first.code %}{% else %}{% url 'console' %}{% endif %}"{% if nav.section == 'queue' and nav.url_name != 'console' %} aria-current="page"{% endif %} data-tour-link="queue">คิวงาน</a>
           {% endwith %}
-          {% if nav.scope.is_admin %}<a href="{% url 'admin-problems' %}"{% if nav.section == 'problems' %} aria-current="page"{% endif %}>ปัญหาและข้อเสนอแนะ{% if nav.admin_waiting %} <span class="chip__count chip__count--alert">{{ nav.admin_waiting }}</span>{% endif %}</a>{% endif %}
+          {% if nav.scope.sees_department %}<a href="{% url 'admin-problems' %}"{% if nav.section == 'problems' %} aria-current="page"{% endif %}>ปัญหาและข้อเสนอแนะ{% if nav.admin_waiting %} <span class="chip__count chip__count--alert">{{ nav.admin_waiting }}</span>{% endif %}</a>{% endif %}
           {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน</a>{% endif %}
           {% if nav.sheets %}<a href="{% url 'sheets' %}"{% if nav.url_name == 'sheets' %} aria-current="page"{% endif %}>ชีท</a>{% endif %}
           {% if nav.scope.is_admin %}<a href="{% url 'admin-home' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>แอดมิน</a>{% elif nav.registrations %}<a href="{% url 'admin-registrations' %}"{% if nav.url_name == 'admin-registrations' %} aria-current="page"{% endif %}>ผู้ใช้ LINE OA</a>{% endif %}
@@ -63,12 +63,12 @@
             <input id="q" name="q" type="search" placeholder="ค้นหาเลขเรื่อง  /" autocomplete="off" value="{{ request.GET.q|default:'' }}">
             {% icon "search" %}
           </form>
-          {% if nav.divisions|length > 1 or nav.scope.is_admin %}
+          {% if nav.divisions|length > 1 or nav.scope.sees_department %}
             <details class="menu division-switch" data-tour="division-switch">
               <summary class="chip" aria-label="เลือกกอง"><span class="chip__label">{% if nav.all_queue %}ทุกกอง{% else %}{{ nav.current|default:"เลือกกอง" }}{% endif %}</span> {% icon "grid" "sm" %}</summary>
               <div class="menu__panel">
                 <p class="menu__label">คิวงานของกอง</p>
-                {% if nav.scope.is_admin %}<a class="menu__item" href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
+                {% if nav.scope.sees_department %}<a class="menu__item" href="{% url 'queue-all' %}"{% if nav.url_name == 'queue-all' %} aria-current="page"{% endif %}>ทุกกอง</a>{% endif %}
                 {% for d in nav.divisions %}<a class="menu__item" href="{% url 'division-detail' d.code %}"{% if nav.current == d.code and nav.url_name == 'division-detail' %} aria-current="page"{% endif %}><strong>{{ d.code }}</strong> <span class="muted">{{ d.name }}</span></a>{% endfor %}
               </div>
             </details>
@@ -102,6 +102,7 @@
   {% block before_main %}{% endblock %}
   {% if nav.admin and not nav.admin.home %}<div class="admin-shell">{% include "operations/_admin_menu.html" %}{% endif %}
   <main id="main" class="page {% block page_class %}{% endblock %}" tabindex="-1">
+    {% if nav.scope.read_only %}<div class="notice mb-24" role="note">{% icon "info" %}<div class="notice__body">บัญชีนี้ดูได้อย่างเดียว เปิดดูเรื่องและรายงานได้ แต่บันทึกหรือเปลี่ยนแปลงอะไรไม่ได้</div></div>{% endif %}
     {% if messages %}
       <div class="messages" role="status">
         {% for message in messages %}

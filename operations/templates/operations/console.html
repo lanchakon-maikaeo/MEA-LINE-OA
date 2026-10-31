@@ -17,7 +17,7 @@
     {% if divisions|length > 1 %}
       <label class="visually-hidden" for="r-division">เลือกกอง</label>
       <select id="r-division" name="division" class="pill-select is-set">
-        {% if scope.is_admin %}<option value="">ทุกกอง</option>{% endif %}
+        {% if scope.sees_department %}<option value="">ทุกกอง</option>{% endif %}
         {% for d in divisions %}<option value="{{ d.code }}"{% if chosen and chosen.code == d.code %} selected{% endif %}>{{ d.code }}</option>{% endfor %}
       </select>
     {% elif chosen %}<input type="hidden" name="division" value="{{ chosen.code }}">{% endif %}
@@ -36,7 +36,7 @@
 <section class="section" aria-labelledby="ov-attention">
   <div class="section-head">
     <h2 id="ov-attention">ต้องดูตอนนี้{% if chosen %} · {{ chosen.code }}{% endif %}</h2>
-    {% if scope.is_admin %}<a class="section-head__link" href="{% url 'queue-all' %}">เปิดคิวทุกกอง</a>{% endif %}
+    {% if scope.sees_department %}<a class="section-head__link" href="{% url 'queue-all' %}">เปิดคิวทุกกอง</a>{% endif %}
   </div>
   {% if attention %}
     <div class="attention" data-tour="report-stats">

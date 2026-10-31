@@ -21,6 +21,7 @@ from operations.models import (
     DUTY_ROLES,
     GLOBAL_ROLES,
     MEMBER_ROLES,
+    VIEWER_ROLES,
     AuditEvent,
     AuthorityGrant,
     ChannelIdentity,
@@ -53,10 +54,34 @@ class StaffScope:
     # Supervisor ระดับฝ่าย supervises every active division without being a member of it.
     overseen: frozenset[int] = frozenset()
     is_department_supervisor: bool = False
+    # ADR 0039: divisions this person only reads (ผู้ดูข้อมูลของกอง, or every active division
+    # for ผู้ดูข้อมูลระดับฝ่าย). They never count as access for acting.
+    viewed: frozenset[int] = frozenset()
+    is_department_viewer: bool = False
 
     @property
     def has_any_access(self):
+        """May act somewhere; every command and LINE staff path asks this."""
         return self.is_admin or self.is_support or bool(self.division_roles or self.overseen)
+
+    @property
+    def may_read(self):
+        """May open the staff pages: acting access, or a viewer's read-only access."""
+        return self.has_any_access or bool(self.viewed)
+
+    @property
+    def read_only(self):
+        return not self.has_any_access and bool(self.viewed)
+
+    @property
+    def sees_department(self):
+        """ADR 0039: ทุกกอง and ปัญหาและข้อเสนอแนะ, as the admins see them."""
+        return (
+            self.is_admin
+            or self.is_support
+            or self.is_department_supervisor
+            or self.is_department_viewer
+        )
 
 
 NO_SCOPE = StaffScope(user_id=None)
@@ -90,8 +115,11 @@ def staff_scope(user):
     )
     roles = {}
     global_roles = set()
+    viewed = set()
     for role, division_id in grants.values_list("role", "division_id"):
-        if division_id is None:
+        if role == Role.DIVISION_VIEWER:
+            viewed.add(division_id)
+        elif division_id is None:
             global_roles.add(role)
         else:
             roles.setdefault(division_id, set()).add(role)
@@ -99,8 +127,11 @@ def staff_scope(user):
     split = work_is_split() if roles else True
     department = Role.DEPARTMENT_SUPERVISOR in global_roles
     overseen = {d for d, r in roles.items() if Role.SUPERVISOR in r}
-    if department:
-        overseen |= set(Division.objects.filter(is_active=True).values_list("pk", flat=True))
+    viewer = Role.DEPARTMENT_VIEWER in global_roles
+    if department or viewer:
+        active = set(Division.objects.filter(is_active=True).values_list("pk", flat=True))
+        overseen |= active if department else set()
+        viewed |= active if viewer else set()
     return StaffScope(
         user_id=user.pk,
         is_admin=is_admin,
@@ -110,6 +141,8 @@ def staff_scope(user):
         is_support=Role.SYSTEM_SUPPORT in global_roles,
         overseen=frozenset(overseen),
         is_department_supervisor=department,
+        viewed=frozenset(viewed - overseen - set(roles)),
+        is_department_viewer=viewer,
     )
 
 
@@ -153,11 +186,17 @@ def can_access_division(scope, division_id, roles=None):
     return bool(held) if roles is None else bool(held & set(roles))
 
 
+def may_read_division(scope, division_id):
+    """ADR 0039: what may be opened to read; a viewer's divisions count here only."""
+    return can_access_division(scope, division_id) or division_id in scope.viewed
+
+
 def filter_by_division(queryset, scope, field_name):
-    """Restrict a queryset of division-owned rows to the scope; deny by default."""
+    """Restrict a queryset of division-owned rows to what the scope reads; deny by default."""
     if scope.is_admin or scope.is_support:
         return queryset
-    return queryset.filter(**{f"{field_name}__in": [*scope.division_roles, *scope.overseen]})
+    divisions = [*scope.division_roles, *scope.overseen, *scope.viewed]
+    return queryset.filter(**{f"{field_name}__in": divisions})
 
 
 def resolve_requester(channel, external_id):
@@ -492,9 +531,9 @@ def sync_membership_authority(user, actor=None):
     while the membership lasts and the division's work is not split (policy.active_grants), so
     nothing is revoked here. `actor` None = a migration or manage.py. Returns rows added."""
     divisions = Division.objects.filter(
-        pk__in=RoleGrant.objects.filter(
-            user=user, revoked_at__isnull=True, division__isnull=False
-        ).values("division")
+        pk__in=RoleGrant.objects.filter(user=user, revoked_at__isnull=True, division__isnull=False)
+        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: a viewer holds no authority
+        .values("division")
     ).order_by("pk")
     now = timezone.now()
     added = 0
@@ -554,7 +593,11 @@ def grant_full_division(actor, user, division, reason, approval_reference):
         raise ValidationError("ใช้ได้กับกองและบัญชีที่ใช้งานอยู่เท่านั้น")
     if not work_is_split():
         # 16 Oct 2569 Q3: membership already brings every step and the division's authority.
-        if RoleGrant.objects.filter(user=user, division=division, revoked_at__isnull=True).exists():
+        if (
+            RoleGrant.objects.filter(user=user, division=division, revoked_at__isnull=True)
+            .exclude(role__in=VIEWER_ROLES)
+            .exists()
+        ):
             return 0, sync_membership_authority(user, actor)
         grant = RoleGrant.objects.create(
             user=user, role=Role.STAFF, division=division, granted_by=actor, reason=reason
@@ -570,7 +613,7 @@ def grant_full_division(actor, user, division, reason, approval_reference):
         )
         return 1, sync_membership_authority(user, actor)
     roles = 0
-    for role in sorted(DIVISION_ROLES):
+    for role in sorted(DIVISION_ROLES - VIEWER_ROLES):
         if RoleGrant.objects.filter(
             user=user, role=role, division=division, revoked_at__isnull=True
         ).exists():
@@ -870,7 +913,7 @@ def provision_employee_staff(identity_row, employee, actor):
     if profiles:
         user = profiles[0].user
         if not user.is_active:
-            raise ValidationError("บัญชีเจ้าหน้าที่ถูกระงับ ให้แอดมินตรวจ")
+            _reopen_without_old_roles(user, actor)
     else:
         username = f"line-employee-{employee.pk}"
         if User.objects.filter(username=username).exists():
@@ -912,6 +955,32 @@ def provision_employee_staff(identity_row, employee, actor):
 
     transaction.on_commit(lambda: line_menu.relink_user(user))
     return user
+
+
+def _reopen_without_old_roles(user, actor):
+    """User, 31 Oct 2569 (Q9): the person is verified and not suspended today, so a suspended
+    staff account left from before (e.g. the 29 Oct LINE wipe) opens again with no old role;
+    the old roles stay in its history."""
+    reason = "เปิดบัญชีเดิมอีกครั้งเพราะผู้ใช้ LINE OA คนนี้ยังใช้งานได้ สิทธิ์เก่าถอนออกทั้งหมด"
+    user = User.objects.select_for_update().get(pk=user.pk)
+    for grant in RoleGrant.objects.select_for_update().filter(user=user, revoked_at__isnull=True):
+        grant.revoked_at, grant.revoked_by, grant.reason = timezone.now(), actor, reason
+        grant.save(update_fields=["revoked_at", "revoked_by", "reason"])
+        if grant.role == Role.SYSTEM_SUPPORT:
+            from operations import support  # ADR 0007: its authority ends with the role
+
+            support.revoke_grants(user, actor, reason)
+        audit(
+            actor,
+            "role.revoked",
+            user,
+            reason,
+            role=grant.role,
+            division=grant.division.code if grant.division else None,
+        )
+    user.is_active = True
+    user.save(update_fields=["is_active"])
+    audit(actor, "staff.activated", user, reason)
 
 
 @transaction.atomic

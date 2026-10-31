@@ -32,6 +32,7 @@ from operations import (
 )
 from operations.fulfilment import CANCEL_RESOLUTIONS
 from operations.models import (
+    VIEWER_ROLES,
     AuthorityGrant,
     Case,
     CaseTriage,
@@ -193,6 +194,7 @@ class Situation:
     sections: list = field(default_factory=list)  # the owner division's active แผนก
     overseen: frozenset = frozenset()  # divisions this viewer supervises (16 Oct 2569 Q5)
     admin: bool = False  # ADR 0030: admins send cases to divisions and answer what they hold
+    department: bool = False  # ADR 0039: a Supervisor ระดับฝ่าย sends the admins' cases too
 
     def member(self, division_id, roles=None):
         if self.support:
@@ -268,6 +270,7 @@ def situation(user, case):
         separation=identity.separated(scope),
         overseen=scope.overseen,
         admin=scope.is_admin or scope.is_support,
+        department=scope.is_department_supervisor,
         **_readiness(case, lines),
     )
 
@@ -429,7 +432,7 @@ RULES = {
         and any(line.return_outstanding > 0 for line in st.lines)
     ),
     # The case page offers it for the admins' own cases; any case moves from the tab (Q11).
-    "admin_send": lambda st: st.admin and st.case.held_by_admin,
+    "admin_send": lambda st: (st.admin or st.department) and st.case.held_by_admin,
     "admin_answer": lambda st: st.admin and st.case.held_by_admin and st.case.kind == K.PROBLEM,
     "resolve": lambda st: (
         st.case.kind == K.PROBLEM
@@ -633,6 +636,7 @@ def _members(division_id):
         RoleGrant.objects.filter(
             division_id=division_id, revoked_at__isnull=True, user__is_active=True
         )
+        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: nobody assigns work to a viewer
         .select_related("user__staff_profile")
         .order_by("user__username")
     )

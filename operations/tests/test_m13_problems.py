@@ -7,9 +7,11 @@ only as a random code, on this page only (Q1, Q5).
 Acceptance → tests: the list shows every problem and suggestion (no withdrawals) with reporter,
 channel and time, and an anonymous reporter only as a stable random code that never reaches the
 case page (ListTests); filters and pages narrow it (FilterTests); only admins open the list or
-download it, and the CSV has no names, codes, typed text, locations or staff names and is
-audited (ExportTests); every anonymous reporter gets a unique random code, old ones through the
-migration (AliasTests).
+download it, and the CSV is audited (ExportTests); every anonymous reporter gets a unique random
+code, old ones through the migration (AliasTests).
+
+ADR 0039 (31 Oct 2569): the CSV now carries every matching row and what the page shows, with the
+full text; an anonymous reporter is still only their code, and no LINE ID or location leaves.
 """
 
 import csv
@@ -129,7 +131,7 @@ class ExportTests(ProblemsTestCase):
             self.assertEqual(self.client.get(CSV).status_code, 403)
         self.assertFalse(AuditEvent.objects.filter(action="cases.problems_exported").exists())
 
-    def test_the_csv_has_no_personal_data_and_is_audited(self):
+    def test_the_csv_has_what_the_page_shows_and_is_audited(self):
         response = self.client.get(CSV)
         self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
         self.assertEqual(response["Cache-Control"], "private, no-store")
@@ -138,22 +140,16 @@ class ExportTests(ProblemsTestCase):
         rows = list(csv.reader(io.StringIO(text.lstrip("﻿"))))
         self.assertEqual(tuple(rows[0]), problems_web.HEADER)
         self.assertEqual(len(rows) - 1, 4)
-        kinds = sorted(row[2] for row in rows[1:])
+        kinds = sorted(row[4] for row in rows[1:])
         self.assertEqual(kinds, sorted(["ไม่ระบุตัวตน"] * 2 + ["ผู้แจ้งหน่วยงาน (เขต/ฝ่าย)"] * 2))
         phoned = next(row for row in rows[1:] if row[0] == self.phoned.number)
-        self.assertEqual((phoned[4], phoned[5], phoned[6]), ("โทรศัพท์", "ใช่", "SIM-TRIAGE"))
-        for private in (
-            self.requester.display_name,
-            TYPED,
-            "081-234-5678",
-            "อยากให้มีที่จอดรถ",
-            "มิเตอร์จอดับ",
-            self.anonymous.alias,
-            "Intake",
-            "13.7",
-            ALICE,
-            BOB,
-        ):
+        self.assertEqual((phoned[6], phoned[7], phoned[8]), ("โทรศัพท์", "Intake", "SIM-TRIAGE"))
+        named = next(row for row in rows[1:] if row[0] == self.named.number)
+        self.assertEqual(named[2], TYPED)
+        self.assertTrue(named[3].startswith(self.requester.display_name))
+        idea = next(row for row in rows[1:] if row[0] == self.ideas[0].number)
+        self.assertEqual(idea[3], f"ไม่ระบุตัวตน #{self.anonymous.alias}")
+        for private in ("13.7", ALICE, BOB):
             self.assertNotIn(private, text)
         event = AuditEvent.objects.get(action="cases.problems_exported")
         self.assertEqual(

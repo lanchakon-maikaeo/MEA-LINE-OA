@@ -117,7 +117,7 @@ def attachment_download(request, pk):
         .first()
     )
     # Same scope as the case page (M10 round 2 Q1/Q2): whoever may see the case.
-    if attachment is None or not identity.staff_scope(request.user).has_any_access:
+    if attachment is None or not identity.staff_scope(request.user).may_read:
         raise Http404
     if not queues.visible(request.user).filter(pk=attachment.case_id).exists():
         raise Http404

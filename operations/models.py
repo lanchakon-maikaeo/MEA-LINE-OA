@@ -141,14 +141,24 @@ class Role(models.TextChoices):
     INSPECTOR = "inspector", "ผู้ตรวจสภาพ"
     RESOLVER = "resolver", "ผู้แก้ปัญหา"
     SUPERVISOR = "supervisor", "Supervisor ของกอง"
+    # ADR 0039: sees what a Supervisor of the scope sees and does nothing.
+    DIVISION_VIEWER = "division_viewer", "ผู้ดูข้อมูลของกอง"
+    DEPARTMENT_VIEWER = "department_viewer", "ผู้ดูข้อมูลระดับฝ่าย"
 
 
 GLOBAL_ROLES = frozenset(
-    {Role.ADMIN, Role.DEVELOPER_ADMIN, Role.SYSTEM_SUPPORT, Role.DEPARTMENT_SUPERVISOR}
+    {
+        Role.ADMIN,
+        Role.DEVELOPER_ADMIN,
+        Role.SYSTEM_SUPPORT,
+        Role.DEPARTMENT_SUPERVISOR,
+        Role.DEPARTMENT_VIEWER,
+    }
 )
 DIVISION_ROLES = frozenset(set(Role) - GLOBAL_ROLES)
+VIEWER_ROLES = frozenset({Role.DIVISION_VIEWER, Role.DEPARTMENT_VIEWER})
 # What a member does when the division's work is not split (16 Oct 2569 Q3).
-MEMBER_ROLES = frozenset(DIVISION_ROLES - {Role.SUPERVISOR})
+MEMBER_ROLES = frozenset(DIVISION_ROLES - {Role.SUPERVISOR, Role.DIVISION_VIEWER})
 # The duties a split division hands out one by one; merged into สมาชิกกอง on 16 Oct 2569.
 DUTY_ROLES = frozenset(MEMBER_ROLES - {Role.STAFF})
 

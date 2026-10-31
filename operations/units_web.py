@@ -10,6 +10,7 @@ from django.views.decorators.http import require_http_methods
 from operations import koj_tracking, units
 from operations.koj_models import KojRecipient
 from operations.models import (
+    VIEWER_ROLES,
     ChannelIdentity,
     Division,
     RoleGrant,
@@ -66,9 +67,13 @@ def _chart(divisions):
         )
     )
     members = {}
-    for grant in RoleGrant.objects.filter(
-        revoked_at__isnull=True, division__in=divisions, user__is_active=True
-    ).select_related("user__staff_profile"):
+    for grant in (
+        RoleGrant.objects.filter(
+            revoked_at__isnull=True, division__in=divisions, user__is_active=True
+        )
+        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: viewers take no work
+        .select_related("user__staff_profile")
+    ):
         members.setdefault(grant.division_id, {})[grant.user_id] = grant.user
     profiles = {
         p.user_id: p

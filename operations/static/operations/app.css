@@ -1473,3 +1473,5 @@ body:has(.ov-page) .footer { border-top: 0; }
 .task-rows li:first-child { border-top: 0; }
 .task-rows__name { flex: 1 1 220px; font-weight: 500; }
 .task-rows form { margin: 0; display: flex; gap: var(--s-8); align-items: center; }
+/* ADR 0039: a viewer's read-only form keeps the form's layout. */
+fieldset.stack { border: 0; padding: 0; margin: 0; min-width: 0; }

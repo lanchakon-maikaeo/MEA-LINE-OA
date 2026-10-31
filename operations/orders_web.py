@@ -31,7 +31,7 @@ JOURNEY = (
 
 
 def _require_access(request):
-    if not identity.staff_scope(request.user).has_any_access:
+    if not identity.staff_scope(request.user).may_read:  # ADR 0039: viewers read งานสั่ง
         raise Http404
 
 
