@@ -177,7 +177,7 @@ class StaffMenuTests(MenuTestCase):
         switches = [a["action"] for a in menu["areas"] if a["action"]["type"] == "richmenuswitch"]
         self.assertEqual(
             [s["richMenuAliasId"] for s in switches],
-            ["faoj-sup-report", "faoj-sup-work", "faoj-sup-order"],
+            ["faoj-sup-report", "faoj-sup-work"],
         )
         tiles = [a for a in menu["areas"] if a["action"]["type"] == "postback"]
         self.assertEqual(len(tiles), 4)

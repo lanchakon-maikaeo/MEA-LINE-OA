@@ -304,7 +304,7 @@ def _queue(request, division, admin_all=False):
         ],
         "districts": District.objects.order_by("name"),
         "sections": list(division.sections.filter(is_active=True)) if division else [],
-        "may_order": division.pk in scope.overseen if division else bool(scope.overseen),
+        "may_order": scope.is_department_supervisor,
     }
     context["registry_count"] = _registry_count(request.user, division, admin_all)
     if _is_htmx(request):

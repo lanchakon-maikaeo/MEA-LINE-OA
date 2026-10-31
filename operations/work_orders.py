@@ -63,11 +63,11 @@ STEPS = {
 
 
 def may_issue(user):
-    return bool(identity.staff_scope(user).overseen)
+    return identity.staff_scope(user).is_department_supervisor
 
 
 def issuable(user):
-    """Divisions this person may give work to (the ones they supervise)."""
+    """Divisions supervised by this person, also used for assigning existing cases."""
     scope = identity.staff_scope(user)
     return Division.objects.filter(pk__in=scope.overseen, is_active=True).order_by("kind", "code")
 
@@ -174,6 +174,8 @@ def create(
     channel=WorkOrder.Channel.WEB,
 ):
     """A new งานสั่ง; the doer is told at once (Q14)."""
+    if not may_issue(actor):
+        raise PermissionDenied("การสั่งงานสงวนสิทธิ์สำหรับ Supervisor ระดับฝ่ายเท่านั้น")
     title = " ".join((title or "").split())
     if not title:
         raise ValidationError("บอกว่าให้ทำอะไร")

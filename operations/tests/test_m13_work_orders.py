@@ -52,12 +52,14 @@ class OrderTestCase(OrgTestCase):
 
 
 class IssueTests(OrderTestCase):
-    def test_only_a_supervisor_issues_and_only_to_divisions_they_oversee(self):
+    def test_only_department_supervisors_issue_orders(self):
         with self.assertRaises(PermissionDenied):
             work_orders.create(self.kcw, "งานทดสอบ", self.kcw_division)
         with self.assertRaises(PermissionDenied):
             work_orders.create(self.head, "งานทดสอบ", self.ktf_division)
-        order = work_orders.create(self.head, "งานทดสอบ", self.kcw_division)
+        with self.assertRaises(PermissionDenied):
+            work_orders.create(self.head, "งานทดสอบ", self.kcw_division)
+        order = work_orders.create(self.director, "งานทดสอบ", self.kcw_division)
         self.assertRegex(order.number, r"^T\d\d-000001$")
         other = work_orders.create(self.director, "งานทดสอบ", self.ktf_division)
         self.assertEqual(other.number[-6:], "000002")
@@ -67,6 +69,32 @@ class IssueTests(OrderTestCase):
             work_orders.create(self.director, "  ", self.kcw_division)
         with self.assertRaises(ValidationError):
             work_orders.create(self.director, "งานทดสอบ", self.kcw_division, channel="unknown")
+
+    def test_web_creation_is_department_only_for_get_and_post(self):
+        for user in (self.head, self.kcw, self.admin):
+            with self.subTest(user=user.username):
+                client = Client()
+                client.force_login(user)
+                self.assertEqual(client.get(reverse("order-new")).status_code, 403)
+                page = client.get(reverse("division-detail", args=[self.kcw_division.code]))
+                self.assertNotContains(page, "สั่งงานถึงกองนี้")
+                response = client.post(
+                    reverse("order-new"),
+                    {"title": "งานที่ไม่มีสิทธิ์", "target": f"d:{self.kcw_division.pk}"},
+                )
+                self.assertEqual(response.status_code, 403)
+        self.assertFalse(WorkOrder.objects.exists())
+
+    def test_revoked_department_role_cannot_use_a_stale_user_to_create(self):
+        from operations.models import RoleGrant
+
+        self.assertTrue(work_orders.may_issue(self.director))
+        grant = RoleGrant.objects.get(user=self.director, role=Role.DEPARTMENT_SUPERVISOR)
+        identity.revoke_role(self.admin, grant, "ถอนสิทธิ์ทดสอบ")
+        self.assertFalse(work_orders.may_issue(self.director))
+        with self.assertRaises(PermissionDenied):
+            work_orders.create(self.director, "งานจากร่างเดิม", self.kcw_division)
+        self.assertFalse(WorkOrder.objects.exists())
 
     def test_division_work_goes_to_its_supervisor_and_person_work_to_the_person(self):
         self.order()

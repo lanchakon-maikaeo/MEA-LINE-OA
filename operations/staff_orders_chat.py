@@ -83,7 +83,7 @@ def extract(messages):
 
 def start(turn, user):
     if not work_orders.may_issue(user):
-        turn.say("คุณยังไม่มีสิทธิ์ Supervisor")
+        turn.say("การสั่งงานสงวนสิทธิ์สำหรับ Supervisor ระดับฝ่ายเท่านั้น")
         return
     turn.set_prompt(PROMPT, messages=[])
     turn.say(

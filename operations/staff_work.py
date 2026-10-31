@@ -60,30 +60,20 @@ def _case_line(case):
 
 
 def navigation(turn, user):
-    """Less frequent actions stay in chat, within the linked account's current role."""
-    actions = {A.WORK_DUE, A.WORK_FIND, A.OPEN_WEB}
+    """The approved extra menu contains only department-level order creation."""
+    quick = []
     if work_orders.may_issue(user):
-        actions |= {A.ORDER_ISSUED, A.ORDER_LATE, A.ORDER_TODAY}
-    rows = LineMenuItem.objects.filter(
-        action__in=actions, place=LineMenuItem.Place.TILE, is_active=True
-    ).order_by("tab", "position", "pk")
-    seen, quick = set(), []
-    for item in rows:
-        if item.action not in seen:
-            seen.add(item.action)
-            quick.append((item.label, f"m=item&id={item.pk}"))
-    if identity.staff_scope(user).is_admin:
-        from operations.admin_line import nav_button
-
-        quick.append(nav_button(turn, "แอดมิน", "home"))
-    quick.append(("บริการ", "m=home"))
-    turn.say("เลือกการดำเนินการตามสิทธิ์", quick)
+        quick.append(turn.button("สั่งงาน", "staff_ow_start"))
+    turn.say("กรุณาเลือกการดำเนินการ" if quick else "ขณะนี้ไม่มีเมนูเพิ่มเติมสำหรับสิทธิ์ของท่าน", quick)
 
 
 def handle_item(turn, user, item):
     """A tap on a งานของกอง or สั่งงาน button of the rich menu."""
-    if item.tab == T.ORDER and not work_orders.may_issue(user):
-        turn.say("เมนูสั่งงานใช้ได้เฉพาะ Supervisor", [web_button()])
+    if item.action == A.ORDER_NEW and not work_orders.may_issue(user):
+        turn.say("การสั่งงานสงวนสิทธิ์สำหรับ Supervisor ระดับฝ่ายเท่านั้น", [web_button()])
+        return
+    if item.tab == T.ORDER and not identity.staff_scope(user).overseen:
+        turn.say("เมนูนี้สงวนสิทธิ์สำหรับ Supervisor เท่านั้น", [web_button()])
         return
     turn.set_prompt()
     {
@@ -160,10 +150,9 @@ def list_page(turn, user, kind="group", page=1):
         if 1 <= number <= rows.paginator.num_pages:
             quick.append(list_button(turn, label, kind, number))
     quick += [list_button(turn, "งานของฉัน", "mine"), list_button(turn, "งานสั่งที่ได้รับ", "received")]
-    if work_orders.may_issue(user):
+    if scope.overseen:
         quick += [
             list_button(turn, "งานที่ฉันสั่ง", "issued"),
-            turn.button("สั่งงานใหม่", "staff_ow_start"),
         ]
     if kind in {"due_cases", "late"}:
         quick.append(

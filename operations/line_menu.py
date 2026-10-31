@@ -18,7 +18,7 @@ A = LineMenuItem.Action
 P = LineMenuItem.Place
 T = LineMenuItem.Tab
 # The tabs each role's menu shows, and every page that is published.
-ROLE_TABS = {"staff": (T.REPORT, T.WORK), "sup": (T.REPORT, T.WORK, T.ORDER)}
+ROLE_TABS = {"staff": (T.REPORT, T.WORK), "sup": (T.REPORT, T.WORK)}
 # These remain the compact quick replies in chat.  The rich menu itself uses the six fixed
 # service tiles from the catalogue below, plus its two bottom actions.
 SERVICE_BUTTONS = (
