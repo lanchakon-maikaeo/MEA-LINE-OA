@@ -6,7 +6,8 @@
   const notice = text => { $('notice').textContent = text; $('notice').hidden = !text; };
   const csrf = () => document.cookie.split('; ').find(v => v.startsWith('csrftoken='))?.split('=').slice(1).join('=') || '';
   async function api(path, body) {
-    const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', credentials:'same-origin', headers: body === undefined ? {} : {'Content-Type':'application/json','X-CSRFToken':decodeURIComponent(csrf())}, ...(body === undefined ? {} : {body:JSON.stringify(body)})});
+    const multipart = body instanceof FormData;
+    const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', credentials:'same-origin', headers: body === undefined ? {} : {...(multipart ? {} : {'Content-Type':'application/json'}),'X-CSRFToken':decodeURIComponent(csrf())}, ...(body === undefined ? {} : {body:multipart ? body : JSON.stringify(body)})});
     let value;
     try { value = await response.json(); } catch { throw new Error('ไม่สามารถโหลดข้อมูลได้ กรุณาลองใหม่อีกครั้ง'); }
     if (!response.ok) { const error = new Error(value.error || 'ไม่สามารถดำเนินการได้'); error.status = response.status; throw error; }
@@ -41,7 +42,9 @@
   }
   function content() {
     const c = {kind:$('kind').value,text:$('text').value};
-    if (c.kind !== 'text') c.url = $('media-url').value.trim();
+    if (c.kind !== 'text') { c.url = $('media-url').value.trim(); if($('media-url').dataset.mediaId) c.media_id = $('media-url').dataset.mediaId; }
+    if (c.kind === 'image' && $('media-url').dataset.previewUrl) c.preview = $('media-url').dataset.previewUrl;
+    if (c.kind === 'video' && $('preview-url').dataset.mediaId) c.preview_id = $('preview-url').dataset.mediaId;
     if (c.kind === 'video') c.preview = $('preview-url').value.trim();
     if (['card','click_image'].includes(c.kind)) c.title = $('card-title').value;
     if (c.kind === 'click_image') c.link = $('link-url').value.trim();
@@ -61,6 +64,7 @@
   }
   function refreshFields() {
     const kind = $('kind').value;
+    $('media-upload').accept = kind === 'video' ? 'video/mp4' : 'image/jpeg,image/png';
     $('media-fields').hidden = kind === 'text'; $('video-fields').hidden = kind !== 'video';
     $('card-fields').hidden = !['card','click_image'].includes(kind); $('card-buttons').hidden = kind !== 'card'; $('click-link-field').hidden = kind !== 'click_image';
     $('segment-choice').hidden = document.querySelector('[name=audience]:checked').value !== 'segment';
@@ -75,9 +79,11 @@
     $('confirm-check').checked = false;
   }
   function start(row = null) {
+    ['media','preview'].forEach(key => { $(key+'-url').dataset.mediaId = ''; $(key+'-url').dataset.previewUrl = ''; $(key+'-upload-status').textContent = ''; $(key+'-check').hidden = true; });
     campaign = row; testRequest = null; $('test-status').textContent = ''; $('composer').reset();
     const c = row?.content || {kind:'text',text:''};
     $('title').value = row?.title || ''; $('kind').value = c.kind; $('text').value = c.text || '';
+    $('media-url').dataset.mediaId = c.media_id || ''; $('preview-url').dataset.mediaId = c.preview_id || ''; $('media-url').dataset.previewUrl = c.preview || '';
     $('media-url').value = c.url || ''; $('preview-url').value = c.preview || ''; $('card-title').value = c.title || '';
     $('link-url').value = c.link || ''; $('button-rows').replaceChildren(); (c.buttons || [{label:'ดูรายละเอียด',url:''}]).forEach(addCardButton);
     document.querySelector(`[name=audience][value=${row?.audience || 'all'}]`).checked = true;
@@ -150,9 +156,46 @@
   $('filter').onchange = () => run(async () => {page = 1; await history();});
   $('previous-page').onclick = () => run(async () => {page = Math.max(1,page-1); await history();});
   $('next-page').onclick = () => run(async () => {page = Math.min(pages,page+1); await history();});
+  async function checkMedia(key) {
+    const field = $(key+'-url'), id = field.dataset.mediaId;
+    if(!id) return;
+    $(key+'-check').hidden = true;
+    for(let attempt=0; attempt<30; attempt++) {
+      let row;
+      try { row = (await api(`/broadcasts/api/media/${id}/`)).media; }
+      catch(error) { $(key+'-check').hidden = false; throw error; }
+      if(field.dataset.mediaId !== id) return;
+      $(key+'-upload-status').textContent = row.detail || row.status_label;
+      if(row.status === 'clean') {
+        field.value = key === 'preview' ? row.preview : row.url;
+        field.dataset.previewUrl = row.preview || '';
+        refreshFields(); return;
+      }
+      if(row.status === 'rejected') { field.value = ''; throw new Error(row.detail || 'ไฟล์ไม่ผ่านการตรวจ กรุณาเลือกไฟล์ใหม่'); }
+      await new Promise(resolve => setTimeout(resolve,2000));
+    }
+    $(key+'-check').hidden = false;
+    $(key+'-upload-status').textContent = 'ไฟล์ยังอยู่ระหว่างตรวจสอบ ท่านสามารถตรวจสถานะอีกครั้งได้';
+  }
+  ['media','preview'].forEach(key => {
+    $(key+'-check').onclick = () => run(() => checkMedia(key));
+    $(key+'-upload').onchange = () => run(async () => {
+      const file = $(key+'-upload').files[0]; if(!file) return;
+      const limit = key === 'media' && $('kind').value === 'video' ? 200000000 : 10000000;
+      if(file.size > limit) throw new Error('ไฟล์มีขนาดเกินที่กำหนด กรุณาเลือกไฟล์ใหม่');
+      $(key+'-upload-status').textContent = 'กำลังอัปโหลดไฟล์ กรุณารอสักครู่';
+      const form = new FormData(); form.append('file',file);
+      const row = (await api('/broadcasts/api/media/',form)).media;
+      $(key+'-url').dataset.mediaId = row.id;
+      $(key+'-url').dataset.previewUrl = '';
+      $(key+'-url').value = '';
+      await checkMedia(key);
+    });
+  });
   $('add-card-button').onclick = () => {addCardButton(); refreshFields();};
   $('composer').onsubmit = event => event.preventDefault();
-  $('composer').oninput = refreshFields; $('composer').onchange = refreshFields;
+  $('composer').oninput = event => { if(['media-url','preview-url'].includes(event.target.id)) { event.target.dataset.mediaId = ''; event.target.dataset.previewUrl = ''; } refreshFields(); };
+  $('composer').onchange = refreshFields;
   $('previous-step').onclick = () => showStep(Math.max(0,step-1));
   $('next-step').onclick = () => run(async () => { if(step === 2) await review(); else showStep(step+1); });
   $('save').onclick = () => run(async () => { await save(); notice('บันทึกร่างเรียบร้อยแล้ว'); });

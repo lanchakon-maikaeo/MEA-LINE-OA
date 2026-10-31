@@ -6,6 +6,7 @@ from operations import (
     ai_web,
     audit_web,
     broadcast_auth,
+    broadcast_media_web,
     broadcast_web,
     duties_web,
     flows_web,
@@ -27,6 +28,9 @@ from operations import (
 )
 
 urlpatterns = [
+    path("broadcasts/api/media/", broadcast_media_web.upload),
+    path("broadcasts/api/media/<uuid:pk>/", broadcast_media_web.status),
+    path("broadcasts/media/<uuid:pk>/<str:variant>/", broadcast_media_web.public),
     path("broadcasts/", broadcast_web.page, name="broadcasts"),
     path("broadcasts/<int:pk>/", broadcast_web.page, name="broadcast-detail"),
     path("broadcasts/api/bootstrap/", broadcast_web.bootstrap),

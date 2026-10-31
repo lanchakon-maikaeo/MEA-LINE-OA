@@ -143,6 +143,9 @@ def _url(value):
 def build_messages(content):
     if not isinstance(content, dict):
         raise ValidationError("เนื้อหาประกาศไม่ถูกต้อง")
+    from operations import broadcast_media
+
+    content = broadcast_media.resolve_content(content)
     kind = content.get("kind")
     text = content.get("text", "")
     if not isinstance(text, str) or len(text) > 5000:

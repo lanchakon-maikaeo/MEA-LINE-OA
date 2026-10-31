@@ -58,6 +58,7 @@ archive/
 !Docs/adr/0039-department-sees-every-division-and-viewers-only-read.md
 !Docs/adr/0040-supervisor-line-work-and-broadcast.md
 !Docs/koj-tracking-setup.md
+!Docs/broadcast-mini-app-setup.md
 
 !operations/line_assets/*.jpg
 

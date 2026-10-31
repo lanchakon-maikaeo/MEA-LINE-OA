@@ -3706,3 +3706,24 @@ class BroadcastBatch(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["campaign", "sequence"], name="broadcast_batch_once")
         ]
+
+
+class BroadcastMedia(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอตรวจไฟล์"
+        SCANNING = "scanning", "กำลังตรวจไฟล์"
+        CLEAN = "clean", "พร้อมใช้งาน"
+        REJECTED = "rejected", "ไม่ผ่านการตรวจไฟล์"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    name = models.CharField(max_length=200)
+    content_type = models.CharField(max_length=32)
+    size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    detail = models.CharField(max_length=200, blank=True)
+    next_scan_at = models.DateTimeField(default=timezone.now, db_index=True)
+    lease_token = models.UUIDField(null=True, blank=True)
+    storage_name = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)

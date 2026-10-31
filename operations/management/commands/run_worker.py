@@ -12,6 +12,7 @@ from operations import (
     ai_keywords,
     ai_routing,
     attachments,
+    broadcast_media,
     conversation,
     monitor_judge,
     monitoring,
@@ -47,6 +48,9 @@ class Command(BaseCommand):
                 target=line_menu_release.run_loop, name="line-menu", daemon=True
             ).start()
             threading.Thread(target=ai_eval.job_loop, name="ai-eval", daemon=True).start()
+            threading.Thread(
+                target=scan_broadcast_media, name="broadcast-media", daemon=True
+            ).start()
             from operations import koj_tracking
 
             threading.Thread(target=koj_tracking.sync_loop, name="koj-sources", daemon=True).start()
@@ -71,6 +75,7 @@ class Command(BaseCommand):
             handled = run_once()
             HEARTBEAT.touch()
             if once:
+                broadcast_media.process_pending()
                 self.stdout.write(f"Handled {handled} event(s).")
                 return
             if not handled:
@@ -164,3 +169,18 @@ def run_once(limit=20):
         created_at__lt=timezone.now() - timezone.timedelta(days=1)
     ).delete()
     return len(events)
+
+
+def scan_broadcast_media():
+    # Video scans can take longer than a chat turn; keep them off the chat/heartbeat loop.
+    from django.db import close_old_connections
+
+    while True:
+        try:
+            close_old_connections()
+            broadcast_media.process_pending(limit=1)
+        except Exception:  # noqa: BLE001 - the lease recovers failed scans on the next pass
+            logger.exception("Broadcast media scan failed")
+        finally:
+            close_old_connections()
+        time.sleep(2)
