@@ -7,6 +7,7 @@ import re
 from datetime import timedelta
 
 from django.core import mail
+from django.test import override_settings
 from django.utils import timezone
 
 from operations import identity, options, staff_line, staff_work, work_orders
@@ -77,6 +78,26 @@ class LinkTests(StaffChatTestCase):
 
 
 class WorkTabTests(StaffChatTestCase):
+    @override_settings(LINE_LIFF_ID="2012304618-TestOnly")
+    def test_broadcast_postback_checks_current_supervisor_role(self):
+        self.link(self.head, ALICE)
+        reply = self.say(self.postback(ALICE, "m=broadcast"))
+        self.assertIn("เปิด Broadcast", buttons(reply))
+        self.assertIn("https://miniapp.line.me/2012304618-TestOnly", str(reply))
+        from operations.models import RoleGrant
+
+        RoleGrant.objects.filter(user=self.head).update(revoked_at=timezone.now())
+        reply = self.say(self.postback(ALICE, "m=broadcast"))
+        self.assertIn("สงวนสิทธิ์สำหรับ Supervisor", texts(reply))
+        self.assertNotIn("เปิด Broadcast", buttons(reply))
+
+    def test_new_received_tile_opens_scoped_inbox(self):
+        self.link(self.head, ALICE)
+        order = work_orders.create(self.director, "งานจากปุ่มใหม่", self.kae)
+        reply = self.say(self.postback(ALICE, "m=staff_inbox"))
+        self.assertIn(order.number, texts(reply))
+        self.assertIn("ดูรายละเอียด", buttons(reply))
+
     def test_a_received_order_is_acknowledged_and_finished_in_chat(self):
         self.link(self.head, ALICE)
         self.assertIn("ยังไม่มีงานสั่ง", texts(self.tile(A.WORK_ORDERS)))

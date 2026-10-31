@@ -181,6 +181,45 @@ class BroadcastDeliveryTests(TestCase):
     def send_events(self):
         return list(OutboxEvent.objects.filter(event_type=broadcast_delivery.SEND).order_by("pk"))
 
+    def test_test_send_is_separate_idempotent_and_only_targets_current_sender(self):
+        import uuid
+
+        source = self.draft()
+        key = uuid.uuid4()
+        test = broadcasts.test_to_self(self.head, source.pk, source.revision, key)
+        again = broadcasts.test_to_self(self.head, source.pk, source.revision, key)
+        self.assertEqual(test.pk, again.pk)
+        source.refresh_from_db()
+        self.assertEqual(source.status, "draft")
+        self.assertEqual(source.revision, 1)
+        event = OutboxEvent.objects.get(
+            event_type=broadcast_delivery.PREPARE, subject_id=str(test.pk)
+        )
+        with patch("operations.notifications.reconcile", side_effect=self.quota):
+            broadcast_delivery.prepare(event)
+        batch = test.batches.get()
+        self.assertEqual(batch.payload["to"], [self.sender.external_id])
+        self.assertEqual(batch.recipient_count, 1)
+        with patch("operations.line_api.campaign_send", return_value="test-request") as send:
+            send_event = self.send_events()[0]
+            broadcast_delivery.send_batch(send_event)
+            broadcast_delivery.send_batch(send_event)
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(notifications.budget_state().used, 1)
+        with self.assertRaises(ValidationError):
+            broadcasts.test_to_self(self.head, source.pk, source.revision + 1, key)
+        with self.assertRaises(PermissionDenied):
+            broadcasts.test_to_self(self.other, source.pk, source.revision, uuid.uuid4())
+
+    def test_copy_draft_does_not_send_or_change_source(self):
+        source = self.draft()
+        copied = broadcasts.copy_draft(self.other, source.pk)
+        self.assertEqual(copied.created_by, self.other)
+        self.assertEqual(copied.status, "draft")
+        self.assertEqual(copied.content, source.content)
+        self.assertNotEqual(copied.pk, source.pk)
+        self.assertFalse(OutboxEvent.objects.filter(event_type=broadcast_delivery.PREPARE).exists())
+
     def test_full_group_is_reserved_before_any_send_and_insufficient_quota_holds_all(self):
         self.quota_limit = 1
         with patch("operations.line_api.campaign_send") as send:

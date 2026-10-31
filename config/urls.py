@@ -4,6 +4,8 @@ from django.views.generic import RedirectView
 
 from operations import (
     ai_web,
+    broadcast_auth,
+    broadcast_web,
     duties_web,
     flows_web,
     free_chat_web,
@@ -24,6 +26,15 @@ from operations import (
 )
 
 urlpatterns = [
+    path("broadcasts/", broadcast_web.page, name="broadcasts"),
+    path("broadcasts/<int:pk>/", broadcast_web.page, name="broadcast-detail"),
+    path("broadcasts/api/bootstrap/", broadcast_web.bootstrap),
+    path("broadcasts/api/campaigns/", broadcast_web.campaigns),
+    path("broadcasts/api/campaigns/<int:pk>/", broadcast_web.detail),
+    path("broadcasts/api/campaigns/<int:pk>/<slug:action>/", broadcast_web.action),
+    path("broadcasts/api/segments/", broadcast_web.segments),
+    path("broadcasts/auth/line/", broadcast_auth.login, name="broadcast-line-login"),
+    path("broadcasts/auth/logout/", broadcast_auth.logout, name="broadcast-line-logout"),
     # ADR 0033: both kinds of sheet sit on one page; the old addresses lead there.
     path("koj/", RedirectView.as_view(pattern_name="sheets"), name="koj-sources"),
     path("console/sheets/", sheets_web.page, name="sheets"),

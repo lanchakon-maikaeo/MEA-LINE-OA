@@ -114,6 +114,8 @@ LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_AGE = 10 * 60 * 60
 
 # --- LINE intake (M03) ------------------------------------------------------------------------
+LINE_MINI_CHANNEL_ID = os.environ.get("LINE_MINI_CHANNEL_ID", "")
+LINE_LIFF_ID = os.environ.get("LINE_LIFF_ID", "")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 # Outside production, replies go only to these LINE user IDs (one OA serves all environments)

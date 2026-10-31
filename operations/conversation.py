@@ -557,6 +557,21 @@ def _staff_turn(turn):
     if data.startswith("tab="):
         return True  # a rich menu tab switch (richmenuswitch): LINE changes the menu itself
     user = staff_line.staff_of(turn.identity)
+    if data in {"m=broadcast", "m=staff_inbox"} or command == "Broadcast":
+        from operations import identity, line_menu, staff_inbox
+
+        if user is None or not identity.staff_scope(user).overseen:
+            turn.say("รายการนี้สงวนสิทธิ์สำหรับ Supervisor กรุณาตรวจสอบการเชื่อมบัญชีเจ้าหน้าที่")
+        elif data == "m=staff_inbox":
+            turn.set_prompt()
+            staff_inbox.show(turn, user)
+        else:
+            url = line_menu.broadcast_url()
+            if url:
+                turn.say("กรุณาเปิดหน้าประกาศข่าวสารเพื่อเลือกผู้รับและจัดทำข้อความ", [("เปิด Broadcast", url)])
+            else:
+                turn.say("ยังไม่ได้ตั้งค่าหน้าประกาศข่าวสาร กรุณาติดต่อผู้ดูแลระบบ")
+        return True
     if user is None:
         return False
     if (

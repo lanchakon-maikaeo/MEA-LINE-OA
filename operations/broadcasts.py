@@ -1,5 +1,7 @@
 """Shared draft, audience and confirmation rules for web and Mini App (ADR 0040)."""
 
+import uuid
+
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.validators import URLValidator
 from django.db import transaction
@@ -121,6 +123,8 @@ def sender_identity(user):
 def recipients(campaign):
     """Resolve at send time. The creator receives one copy even outside the segment."""
     sender = sender_identity(campaign.created_by)
+    if campaign.test_source_id:
+        return [sender.external_id]
     if campaign.audience == "all":
         return None  # Only the LINE broadcast endpoint knows every OA friend.
     return sorted(
@@ -230,7 +234,11 @@ def save_draft(
         row = BroadcastCampaign.objects.select_for_update().get(pk=campaign_id)
         require_editor(user, row)
         _revision(row, revision)
-        if row.status not in {S.DRAFT, S.PAUSED, S.HELD} or row.batches.exists():
+        if (
+            row.test_source_id
+            or row.status not in {S.DRAFT, S.PAUSED, S.HELD}
+            or row.batches.exists()
+        ):
             raise ValidationError("กรุณาเริ่มแก้ไขเพื่อพักการส่งก่อนบันทึก")
         row.revision += 1
     else:
@@ -247,7 +255,7 @@ def begin_edit(user, campaign_id, revision):
     row = BroadcastCampaign.objects.select_for_update().get(pk=campaign_id)
     require_editor(user, row)
     _revision(row, revision)
-    if row.status not in EDITABLE or row.batches.exists():
+    if row.test_source_id or row.status not in EDITABLE or row.batches.exists():
         raise ValidationError("ประกาศนี้เริ่มส่งแล้ว ไม่สามารถแก้ไขได้")
     row.status = S.PAUSED
     row.revision += 1
@@ -267,7 +275,7 @@ def confirm(user, campaign_id, revision, scheduled_at=None):
     if row.status in {S.QUEUED, S.SCHEDULED} and revision in {row.revision, row.revision - 1}:
         return row
     _revision(row, revision)
-    if row.status not in {S.DRAFT, S.PAUSED, S.HELD} or row.batches.exists():
+    if row.test_source_id or row.status not in {S.DRAFT, S.PAUSED, S.HELD} or row.batches.exists():
         raise ValidationError("ประกาศนี้ไม่อยู่ในสถานะที่ยืนยันส่งได้")
     if scheduled_at is not None and (
         timezone.is_naive(scheduled_at) or scheduled_at <= timezone.now()
@@ -305,3 +313,62 @@ def cancel(user, campaign_id, revision):
     row.save(update_fields=["status", "revision", "updated_at"])
     identity.audit(user, "broadcast.cancelled", row)
     return row
+
+
+@transaction.atomic
+def test_to_self(user, campaign_id, revision, request_key):
+    """Snapshot a separate one-recipient job; retries never confirm the real draft."""
+    try:
+        key = uuid.UUID(str(request_key))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValidationError("รหัสการส่งทดสอบไม่ถูกต้อง") from exc
+    row = BroadcastCampaign.objects.select_for_update().get(pk=campaign_id)
+    require_editor(user, row)
+    existing = BroadcastCampaign.objects.filter(test_key=key).first()
+    if existing:
+        if (
+            existing.created_by_id != user.pk
+            or existing.test_source_id != row.pk
+            or existing.test_revision != revision
+        ):
+            raise ValidationError("รหัสการส่งทดสอบนี้ถูกใช้กับรายการอื่นแล้ว")
+        return existing
+    _revision(row, revision)
+    if row.test_source_id or row.status not in {S.DRAFT, S.PAUSED, S.HELD} or row.batches.exists():
+        raise ValidationError("กรุณาเปิดร่างเพื่อส่งทดสอบก่อนยืนยันประกาศจริง")
+    messages = build_messages(row.content)
+    sender_identity(user)
+    test = BroadcastCampaign.objects.create(
+        title=row.title,
+        created_by=user,
+        confirmed_by=user,
+        confirmed_at=timezone.now(),
+        content=row.content,
+        messages=messages,
+        status=S.QUEUED,
+        audience=row.audience,
+        segment=row.segment,
+        test_source=row,
+        test_key=key,
+        test_revision=revision,
+    )
+    from operations import broadcast_delivery
+
+    broadcast_delivery.enqueue(test)
+    identity.audit(user, "broadcast.test_to_self", test, source=row.pk, revision=revision)
+    return test
+
+
+@transaction.atomic
+def copy_draft(user, campaign_id):
+    require_supervisor(user)
+    row = BroadcastCampaign.objects.select_for_update().get(pk=campaign_id)
+    if row.batches.filter(status="unknown").exists():
+        raise ValidationError("กรุณารอผลที่ยังไม่ทราบแน่ชัดก่อนคัดลอก เพื่อป้องกันการส่งซ้ำ")
+    return save_draft(
+        user,
+        title=("สำเนา " + row.title)[:100],
+        content=row.content,
+        audience=row.audience,
+        segment_id=row.segment_id,
+    )

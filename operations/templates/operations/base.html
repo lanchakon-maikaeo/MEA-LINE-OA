@@ -31,6 +31,7 @@
             {% if nav.is_intake %}<a href="{% url 'case-new' %}">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
             {% if nav.registrations %}<a href="{% url 'admin-registrations' %}">ผู้ใช้ LINE OA</a>{% endif %}
             {% if nav.scope.is_admin %}<a href="{% url 'admin-home' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>ตั้งค่าระบบ (แอดมิน)</a>{% endif %}
+            {% if nav.scope.overseen %}<a href="{% url 'broadcasts' %}">ประกาศข่าวสาร</a>{% endif %}
             <p class="drawer__group">บัญชี</p>
             {% if nav.scope.is_admin %}{# ข้อมูลประกอบงาน: admins only (15 ต.ค. 2569 Q5) #}
             <a href="{% url 'duties' %}"{% if nav.url_name == 'duties' %} aria-current="page"{% endif %}>หน้าที่ของกอง</a>

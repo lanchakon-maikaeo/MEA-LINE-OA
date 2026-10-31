@@ -3644,6 +3644,12 @@ class BroadcastCampaign(models.Model):
         HELD = "held", "พักการส่ง"
         CANCELLED = "cancelled", "ยกเลิกแล้ว"
 
+    test_source = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="test_sends"
+    )
+    test_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    test_revision = models.PositiveIntegerField(null=True, blank=True)
+
     title = models.CharField(max_length=100)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
