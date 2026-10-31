@@ -2,7 +2,7 @@
 staff change a status from the case page with a notice and an internal note (FormTests); the
 requester reads four steps, the real status and the latest notice in LINE, once, and answers by
 opening the case's chat (LineTests); which step a status shows is an admin option, and moving
-into รอข้อมูลจากคุณ or เสร็จแล้ว needs a notice (RuleTests)."""
+into รอข้อมูลจากคุณ or เสร็จสิ้น needs a notice (RuleTests)."""
 
 import uuid
 
@@ -145,4 +145,4 @@ class RuleTests(StatusTestCase):
         self.assertFalse(need("hold", S.AWAITING_EXECUTION, S.ON_HOLD))
         self.assertFalse(need("close", S.CLOSED, S.CLOSED))
         self.assertEqual(requester_steps.bar(S.REJECTED), "")
-        self.assertEqual(requester_steps.LABEL[requester_steps.key(S.CLOSED)], "เสร็จแล้ว")
+        self.assertEqual(requester_steps.LABEL[requester_steps.key(S.CLOSED)], "เสร็จสิ้น")

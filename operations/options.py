@@ -631,13 +631,13 @@ OPTIONS = {
 
 
 # ADR 0028: the step a requester sees in LINE for each open status; closed, rejected and
-# cancelled are fixed (เสร็จแล้ว, and no step bar for the other two).
+# cancelled are fixed (เสร็จสิ้น, and no step bar for the other two).
 STEP_PREFIX = "requester_step:"
 STEP_CHOICES = {
     "received": ("รับเรื่องแล้ว", "แถบขั้น ●○○○"),
     "working": ("กำลังดำเนินการ", "แถบขั้น ●●○○"),
     "need_you": ("รอข้อมูลจากคุณ", "แถบขั้น ●●●○"),
-    "done_confirm": ("เสร็จแล้ว รอคุณยืนยัน", "แถบขั้น ●●●● พร้อมปุ่มยืนยัน"),
+    "done_confirm": ("เสร็จสิ้น รอคุณยืนยัน", "แถบขั้น ●●●● พร้อมปุ่มยืนยัน"),
 }
 STEP_DEFAULTS = (
     ("submitted", "รอคัดกรอง", "received", "ADR 0028"),

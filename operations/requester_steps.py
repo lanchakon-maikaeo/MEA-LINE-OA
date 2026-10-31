@@ -12,9 +12,9 @@ from operations.models import Case
 
 S = Case.Status
 
-STEPS = ("รับเรื่องแล้ว", "กำลังดำเนินการ", "รอข้อมูลจากคุณ", "เสร็จแล้ว")
+STEPS = ("รับเรื่องแล้ว", "กำลังดำเนินการ", "รอข้อมูลจากคุณ", "เสร็จสิ้น")
 INDEX = {"received": 0, "working": 1, "need_you": 2, "done_confirm": 3, "done": 3}
-LABEL = {**{key: STEPS[i] for key, i in INDEX.items()}, "done_confirm": "เสร็จแล้ว รอคุณยืนยัน"}
+LABEL = {**{key: STEPS[i] for key, i in INDEX.items()}, "done_confirm": "เสร็จสิ้น รอคุณยืนยัน"}
 NEEDS_NOTICE = {"need_you", "done_confirm", "done"}
 # Q14: actions whose own text already reaches the requester; it counts as their notice.
 REASON_IS_NOTICE = {"request_info", "decline", "deny_approval", "cancel", "reopen"}
@@ -83,7 +83,7 @@ def notice_of(action, payload, reason):
 
 
 def notice_required(action, from_status, to_status):
-    """Q3: staff moving a case into รอข้อมูลจากคุณ or เสร็จแล้ว write to the requester (the
+    """Q3: staff moving a case into รอข้อมูลจากคุณ or เสร็จสิ้น write to the requester (the
     requester's own steps never need one)."""
     if to_status == from_status or to_status not in S.values or key(to_status) not in NEEDS_NOTICE:
         return False
