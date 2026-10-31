@@ -5,7 +5,6 @@ why the guard suite refused one, and roll back in one step (Q22, Q30). Staff upl
 documents; another admin approves or retires them (Q25).
 """
 
-from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
@@ -85,22 +84,12 @@ def knowledge_page(request):
             _run(request, lambda: knowledge.retire(request.user, doc, reason), "เลิกใช้แล้ว")
         else:
             upload = request.FILES.get("file")
-            text = data.get("text", "")
-            if upload is not None:
-                try:
-                    text = upload.read(knowledge.MAX_TEXT * 4 + 1).decode("utf-8")
-                except UnicodeDecodeError:
-                    text = "\0"  # refused below as unreadable
-            if "\0" in text:
-                messages.error(request, "อ่านไฟล์ไม่ได้ ใช้ไฟล์ข้อความ .txt หรือ .md แบบ UTF-8")
-            else:
-                _run(
-                    request,
-                    lambda: knowledge.upload(
-                        request.user, data.get("title", ""), text, reason, doc
-                    ),
-                    "อัปโหลดแล้ว รอแอดมินอีกคนรับรอง",
-                )
+
+            def save():
+                text = knowledge.read_upload(upload) if upload else data.get("text", "")
+                return knowledge.upload(request.user, data.get("title", ""), text, reason, doc)
+
+            _run(request, save, "อัปโหลดแล้ว รอแอดมินอีกคนรับรอง")
         return redirect("knowledge")
     return render(
         request,

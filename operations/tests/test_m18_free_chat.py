@@ -420,7 +420,10 @@ class GuideTests(FreeChatCase):
         self.assertIsNone(chat_guides.nightly(night.replace(hour=1)))
 
 
-@override_settings(PINECONE_API_KEY="pc-test", PINECONE_INDEX_HOST="idx.test.pinecone.io")
+@override_settings(
+    PINECONE_API_KEY="pc-test",  # pragma: allowlist secret
+    PINECONE_INDEX_HOST="idx.test.pinecone.io",
+)
 class KnowledgeTests(FreeChatCase):
     def setUp(self):
         super().setUp()
@@ -471,6 +474,30 @@ class KnowledgeTests(FreeChatCase):
         knowledge.retire(self.second, doc, "เลิกใช้")
         self.assertEqual(self.calls[-1], ("/vectors/delete", {"ids": [f"doc-{doc.pk}-0"]}))
         self.assertEqual(tools.invoke("search_docs", "ขอเปลี่ยน")["documents"], [])
+
+    def test_pdf_and_text_files_are_read(self):
+        from io import BytesIO
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from pypdf import PdfWriter
+
+        blank = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        writer.write(blank)
+        with self.assertRaisesMessage(ValidationError, "ภาพสแกน"):
+            knowledge.read_upload(SimpleUploadedFile("scan.pdf", blank.getvalue()))
+        with self.assertRaisesMessage(ValidationError, "อ่าน PDF นี้ไม่ได้"):
+            knowledge.read_upload(SimpleUploadedFile("bad.pdf", b"%PDF-1.4 not really"))
+        text = SimpleUploadedFile("note.md", "ขั้นตอนแรก\n\nขั้นตอนสอง".encode())
+        self.assertEqual(knowledge.read_upload(text), "ขั้นตอนแรก\n\nขั้นตอนสอง")
+        with self.assertRaises(ValidationError):
+            knowledge.read_upload(SimpleUploadedFile("x.txt", b"\xff\xfe\x00bad"))
+        with patch.object(knowledge, "_pdf_text", return_value="ข้อความจาก PDF") as read:
+            self.assertEqual(
+                knowledge.read_upload(SimpleUploadedFile("k.pdf", b"%PDF-1.7 ...")), "ข้อความจาก PDF"
+            )
+        read.assert_called_once()
 
     def test_chunks_keep_paragraphs(self):
         text = "\n\n".join(["ก" * 500, "ข" * 300, "ค" * 2000])

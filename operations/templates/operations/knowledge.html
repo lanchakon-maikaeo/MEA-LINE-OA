@@ -48,7 +48,7 @@
     {% csrf_token %}<input type="hidden" name="op" value="upload">
     <div class="field"><label for="kn-title">ชื่อเอกสาร</label><input id="kn-title" name="title" maxlength="200" required></div>
     <div class="field"><label for="kn-text">เนื้อหา</label><textarea id="kn-text" name="text" rows="8" maxlength="{{ max_text }}"></textarea></div>
-    <div class="field"><label for="kn-file">หรือไฟล์ข้อความ .txt หรือ .md</label><input id="kn-file" name="file" type="file" accept=".txt,.md,text/plain,text/markdown"></div>
+    <div class="field"><label for="kn-file">หรือไฟล์ .txt .md หรือ .pdf (ระบบอ่านเฉพาะตัวอักษรใน PDF ไม่อ่านภาพสแกน)</label><input id="kn-file" name="file" type="file" accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"></div>
     <div class="field"><label for="kn-reason">เหตุผล</label><input id="kn-reason" name="reason" maxlength="500"></div>
     <button class="btn btn--sm" type="submit">อัปโหลด</button>
   </form>

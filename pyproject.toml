@@ -13,6 +13,7 @@ dependencies = [
     "evidently>=0.7.23,<0.8",
     "mcp>=1.26,<2",
     "google-auth[requests]>=2,<3",
+    "pypdf>=5,<7",
 ]
 
 [dependency-groups]

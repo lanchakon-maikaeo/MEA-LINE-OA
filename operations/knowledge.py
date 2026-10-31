@@ -1,11 +1,12 @@
 """เอกสารความรู้ (ADR 0037 Q9, Q13, Q21, Q24 to Q26): text the free chat agent may search.
 
-Staff upload text that is not secret; the system refuses it when it finds personal data, and an
-admin other than the uploader approves it. Only an approved document reaches Pinecone, as chunks
-of an index with integrated embedding (text field `chunk_text`), and retiring it deletes those
-chunks again. A search sends only the masked question. Everything that talks to Pinecone stays
-off until ตัวเลือกระบบ free_chat_docs is on and the key and index host are set: the owner opens
-a Starter account (no card) later, and the system never upgrades a plan.
+Staff paste text or upload a .txt, .md or .pdf file (its text layer) that is not secret; the
+system refuses it when it finds personal data, and an admin other than the uploader approves it.
+Only an approved document reaches Pinecone, as chunks of an index with integrated embedding (text
+field `chunk_text`), and retiring it deletes those chunks again. A search sends only the masked
+question. Everything that talks to Pinecone stays off until ตัวเลือกระบบ free_chat_docs is on and
+the key and index host are set: the owner opens a Starter account (no card) later, and the
+system never upgrades a plan.
 """
 
 import json
@@ -21,6 +22,8 @@ from operations import identity, options, pii
 from operations.models import KnowledgeDoc
 
 MAX_TEXT = 20000
+MAX_FILE = 5_000_000  # bytes of an uploaded file
+MAX_PAGES = 50
 CHUNK = 900  # characters per record; paragraphs stay together when they fit
 TOP_K = 3
 MIN_SCORE = 0.35  # Q15: a weaker hit means "no information"; the score is never shown
@@ -57,6 +60,43 @@ def found_in(lines, kinds):
         if hits:
             found.append((number, [pii.KINDS[k][1] for k in sorted(hits, key=pii.RANK.get)]))
     return found
+
+
+def read_upload(upload):
+    """The text of an uploaded .txt, .md or .pdf file (a PDF's own text layer, never OCR)."""
+    data = upload.read(MAX_FILE + 1)
+    if len(data) > MAX_FILE:
+        raise ValidationError(f"ไฟล์ใหญ่เกิน {MAX_FILE // 1_000_000} MB")
+    if (upload.name or "").lower().endswith(".pdf") or data[:5] == b"%PDF-":
+        return _pdf_text(data)
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValidationError("อ่านไฟล์ไม่ได้ ใช้ไฟล์ .txt หรือ .md แบบ UTF-8 หรือไฟล์ PDF") from exc
+    if "\0" in text:
+        raise ValidationError("อ่านไฟล์ไม่ได้ ใช้ไฟล์ .txt หรือ .md แบบ UTF-8 หรือไฟล์ PDF")
+    return text
+
+
+def _pdf_text(data):
+    import io
+
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
+
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted:
+            raise ValidationError("PDF นี้ใส่รหัสผ่านไว้ ปลดรหัสก่อนอัปโหลด")
+        if len(reader.pages) > MAX_PAGES:
+            raise ValidationError(f"PDF ยาวเกิน {MAX_PAGES} หน้า แบ่งเป็นหลายเอกสารได้")
+        pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    except (PdfReadError, ValueError, KeyError, TypeError) as exc:
+        raise ValidationError("อ่าน PDF นี้ไม่ได้") from exc
+    text = "\n\n".join(p for p in pages if p)
+    if not text.strip():
+        raise ValidationError("PDF นี้ไม่มีข้อความให้อ่าน อาจเป็นภาพสแกน พิมพ์เนื้อหาแทนได้")
+    return text
 
 
 def _clean(title, text):
