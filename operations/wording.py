@@ -65,7 +65,6 @@ EXACT = {
     "Withdrawals and returns need a registered requester.": (
         "เบิกและคืนของต้องลงทะเบียนและยืนยันตัวตนก่อน"
     ),
-    "An anonymous report needs a location.": "แจ้งแบบไม่ระบุตัวตนต้องส่งตำแหน่งที่พบเรื่อง",
     "Daily limit of anonymous reports reached.": "วันนี้แจ้งแบบไม่ระบุตัวตนครบจำนวนแล้ว ลองใหม่พรุ่งนี้",
     "Only a problem with no division waits for the admins.": (
         "เรื่องที่ส่งถึงแอดมินต้องเป็นเรื่องแจ้งปัญหาที่ไม่ได้เลือกกอง"

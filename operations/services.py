@@ -449,13 +449,12 @@ def _submission_requester(ctx, submission, intake):
 
 
 def _check_anonymous(requester, submission):
-    """Anonymous reports are problem-only, require a location and have a daily limit."""
+    """Anonymous reports are problem-only and have a daily limit (no location since
+    31 ต.ค. 2569)."""
     from operations import options
 
     if submission.kind != Case.Kind.PROBLEM:
         fail(ErrorCode.FORBIDDEN, "Withdrawals and returns need a registered requester.")
-    if submission.fields.get("latitude") is None:
-        fail(ErrorCode.VALIDATION_ERROR, "An anonymous report needs a location.")
     limit = int(options.get(options.ANONYMOUS_LIMIT))
     since = timezone.now() - timedelta(days=1)
     if Case.objects.filter(requester=requester, submitted_at__gte=since).count() >= limit:

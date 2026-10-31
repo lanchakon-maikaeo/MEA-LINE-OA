@@ -293,7 +293,6 @@ class MessagesTests(RequesterTestCase):
         self.press(ALICE, "ไม่ระบุตัวตน")
         self.press(ALICE, "ปัญหาการใช้งานหรืออื่นๆ")  # ADR 0030: the division carousel
         self.type(ALICE, "อยากให้มีที่จอดรถรับของ")
-        self.say(self.location(ALICE))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         registration = identity.submit_registration("line", ALICE, "สมหญิง ทดสอบ", "D01")
         requester = identity.approve_registration(self.admin, registration)

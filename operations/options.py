@@ -769,8 +769,9 @@ def change(actor, key, value, reason):
 def rows():
     """(key, option, current value, stored row or None) for the settings page."""
     stored = {row.key: row for row in SystemOption.objects.select_related("updated_by")}
-    # Historical settings remain readable for migrations, but cannot override ADR 0019.
-    retired = {REGISTRATION_CHECK, EMAIL_TYPED}
+    # Historical settings remain readable for migrations, but cannot override ADR 0019; LINE
+    # registration asks no location since 31 ต.ค. 2569, whatever the stored value.
+    retired = {REGISTRATION_CHECK, EMAIL_TYPED, REGISTRATION_LOCATION}
     return [
         (key, option, get(key), stored.get(key))
         for key, option in OPTIONS.items()

@@ -31,7 +31,7 @@ from operations.models import Case, ChatAnswer
 A = ChatAnswer.Action
 OUT_OF_SCOPE = "out_of_scope"
 # Steps where a typed message is not the answer to the bot's question (a choice is expected).
-ANSWER_STEPS = {"kind", "topic", "category", "meter_group", "item", "more", "summary", "location"}
+ANSWER_STEPS = {"kind", "topic", "category", "meter_group", "item", "more", "summary"}
 PARTICLES = ("ครับ", "ค่ะ", "คะ", "นะ", "จ้า", "จ้ะ", "ฮะ", "ค้าบ", "ๆ")
 SHORT_REST = 6  # characters a greeting may carry besides its keyword (e.g. a name)
 # Greetings and thanks when the bank has no short-only answer yet (they are never information

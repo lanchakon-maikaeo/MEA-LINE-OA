@@ -204,14 +204,9 @@ def _fit(label, limit):
     return label if len(label) <= limit else label[: limit - 1] + "…"
 
 
-LOCATION = "@location"  # a quick reply that opens LINE's location picker
-
-
 def _postback(label, data, display=None):
     """A quick reply; `display` is what shows in the chat when the label had to be shortened
     (25 Oct 2569 Q3: "ทบทวนหน่วยไฟฟ้า" for ทบทวนหน่วยไฟฟ้าจากการร้องเรียน)."""
-    if data == LOCATION:
-        return {"type": "action", "action": {"type": "location", "label": _fit(label, 20)}}
     if data.startswith("https://") or data.startswith("http://"):
         return {"type": "action", "action": {"type": "uri", "label": _fit(label, 20), "uri": data}}
     return {
@@ -935,12 +930,7 @@ def _registration(turn):
 
         turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
         return
-    if prompt == "reg_location":
-        location = _event_location(turn)
-        if location is not None:
-            return _registration_next(turn, {**data, "location": list(location)})
-        if token is not None and token.action == "reg_skip_location":
-            return _registration_next(turn, {**data, "location": None})
+    if prompt == "reg_location":  # left at the location step removed 31 ต.ค. 2569: go on
         return _registration_next(turn, data)
     if prompt == "reg_name" and text:
         text = " ".join(text.split())
@@ -984,7 +974,7 @@ def _ask_kind(turn, lead):
 
 def _other_path(turn, data):
     """อื่น ๆ or ใช้วิธีอื่น: the name (when not given yet) and the unit, for a person to approve."""
-    data = {k: v for k, v in data.items() if k in ("name", "district", "location")}
+    data = {k: v for k, v in data.items() if k in ("name", "district")}
     if data.get("name") and data.get("district"):
         return _registration_next(turn, {**data, "checked": True})
     turn.set_prompt("reg_name", checked=True)
@@ -1203,8 +1193,9 @@ def _ask_district(turn, name, **data):
 
 
 def _registration_next(turn, data):
-    """The next registration step (ADR 0010): an employee check and a location when
-    ตัวเลือกระบบ asks for them, then the request, approved at once when the check allows."""
+    """The next registration step (ADR 0010): an employee check when ตัวเลือกระบบ asks for
+    one, then the request, approved at once when the check allows. No location is asked
+    (31 ต.ค. 2569)."""
     from operations import employees, options
 
     check = options.get(options.REGISTRATION_CHECK)
@@ -1214,14 +1205,6 @@ def _registration_next(turn, data):
             "ยืนยันตัวตนด้วยรหัสพนักงาน\nพิมพ์รหัสพนักงานของคุณ หรือกด 'ใช้วิธีอื่น' ให้เจ้าหน้าที่ตรวจแทน",
             [turn.button("ใช้วิธีอื่น", "reg_other")],
         )
-        return
-    where = options.get(options.REGISTRATION_LOCATION)
-    if where != "off" and "location" not in data:
-        turn.set_prompt("reg_location", **data)
-        quick = [("ส่งตำแหน่ง", LOCATION)]
-        if where == "optional":
-            quick.append(turn.button("ข้าม", "reg_skip_location"))
-        turn.say("ส่งตำแหน่งที่คุณอยู่ตอนนี้ ใช้ประกอบการยืนยันตัวตนเท่านั้น", quick)
         return
     from operations.models import Employee
 
@@ -1235,7 +1218,6 @@ def _registration_next(turn, data):
         data.get("name", ""),
         data.get("district", ""),
         employee=employee,
-        location=tuple(data["location"]) if data.get("location") else None,
         verified_by=method,
     )
     turn.set_prompt()
@@ -1286,12 +1268,12 @@ def _registration_check(turn, data, proof):
 
 
 def _start_anonymous(turn):
-    """แจ้งแบบไม่ระบุตัวตน: a problem or suggestion draft that ends with a location."""
+    """แจ้งแบบไม่ระบุตัวตน: a problem or suggestion draft; no location (31 ต.ค. 2569)."""
     turn.set_prompt()
     turn.requester = identity_services.anonymous_requester(turn.identity)
     turn.anonymous = True
     draft = _new_draft(turn)
-    turn.say("แจ้งได้โดยไม่ต้องบอกชื่อ เจ้าหน้าที่จะไม่เห็นว่าใครแจ้ง แต่ต้องส่งตำแหน่งที่พบเรื่อง")
+    turn.say("แจ้งได้โดยไม่ต้องบอกชื่อ เจ้าหน้าที่จะไม่เห็นว่าใครแจ้ง")
     _ask(turn, draft)
 
 
@@ -1352,12 +1334,8 @@ def _requester_turn(turn):
     message_type = (turn.event.get("message") or {}).get("type")
     if turn.inbox.event_type == "message" and message_type in {"image", "file"}:
         return _attachment(turn, draft, chat if turn.conversation.prompt == "case_chat" else None)
-    location = _event_location(turn)
-    if location is not None:
-        if draft is not None and draft.step == "location":
-            draft.data = dict(draft.data, location=list(location))
-            return _set(turn, draft, "summary")
-        turn.say("ได้รับตำแหน่งแล้ว แต่ตอนนี้ยังไม่ได้ขอ")
+    if _event_location(turn) is not None:  # no step asks for one (31 ต.ค. 2569)
+        turn.say("ระบบไม่ได้ใช้ตำแหน่ง")
         return _reprompt(turn, draft)
 
     data = (turn.event.get("postback") or {}).get("data", "")
@@ -1791,7 +1769,7 @@ def _pick_division(turn, draft, code):
     if code not in dict(problem_pick.choices()):
         return _ask(turn, draft)
     data = draft.data
-    keep = {k: data[k] for k in ("anonymous", "location", "menu_label") if data.get(k)}
+    keep = {k: data[k] for k in ("anonymous", "menu_label") if data.get(k)}
     fields = data["fields"] if data.get("topic") == Case.Topic.GENERAL else {}
     held = code == problem_pick.ADMIN
     draft.data = {
@@ -2709,8 +2687,8 @@ def _ask_question(turn, draft):
         if not required:
             buttons.append(b("ข้าม", "skip_field", draft=draft))
         turn.say(question, buttons or None)
-    elif step == "location":
-        turn.say("กด 'ส่งตำแหน่ง' แล้วเลือกจุดที่พบเรื่องนี้", [("ส่งตำแหน่ง", LOCATION)])
+    elif step == "location":  # a draft left at the step removed 31 ต.ค. 2569
+        return _set(turn, draft, _next_field(draft))
     elif step == "sap":
         label = typed_lines.sap_label(draft.kind, draft.data.get("topic"))
         if draft.data.get("topic") != Case.Topic.REPAIR:
@@ -2836,8 +2814,6 @@ def _summary(draft):
     for name in sorted(data["fields"], key=lambda n: asked.index(n) if n in asked else len(asked)):
         if data["fields"][name]:
             lines.append(f"{labels[name]}: {data['fields'][name]}")
-    if data.get("location"):
-        lines.append("ตำแหน่ง: ส่งแล้ว")
     if data.get("anonymous"):
         lines.append("แจ้งแบบไม่ระบุตัวตน")
     files = list(draft.attachments.all())
@@ -2911,8 +2887,6 @@ def _next_field(draft):
     for name, _, _ in _fields(draft):
         if name not in filled:
             return f"field:{name}"
-    if draft.data.get("anonymous") and not draft.data.get("location"):
-        return "location"
     # 23 Oct 2569: a division that follows SAP slips needs the slip's number, and the same
     # typed fields as its own menu (ตัวเลือกระบบ sap_line_entry), before the summary.
     if _sap_missing(draft):
@@ -3599,7 +3573,6 @@ CHOICE_HINTS = {
     "kind": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
     "topic": "แตะชื่อกองด้านบน หรือพิมพ์ชื่อกอง",
     "category": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
-    "location": "กด 'ส่งตำแหน่ง' ด้านล่าง",
 }
 
 
@@ -3608,8 +3581,6 @@ def _payload(draft):
     payload = {"kind": draft.kind, "lines": data["lines"]}
     if data.get("topic"):
         payload["topic"] = data["topic"]
-    if data.get("location"):
-        payload["latitude"], payload["longitude"] = data["location"]
     if data.get("division"):
         payload["division_code"] = data["division"]
     elif data.get("hold_for_admin"):

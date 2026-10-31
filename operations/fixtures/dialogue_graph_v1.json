@@ -17,7 +17,6 @@
     "reg_district": [["press_district", 1]],
     "reg_employee": [["type_employee_id", 4], ["press_other_way", 1]],
     "reg_check": [["type_proof", 1]],
-    "reg_location": [["send_location", 3], ["skip_location", 1]],
     "idle": [["press_new", 3], ["type_new", 1]],
     "kind": [["press_kind", 4], ["type_kind_number", 1], ["press_discard", 1]],
     "topic": [
@@ -38,7 +37,6 @@
     "district": [["type_district", 1]],
     "meters_more": [["press_continue", 1]],
     "entry": [["type_entry", 1]],
-    "location": [["send_location", 1]],
     "summary": [["press_confirm", 6], ["press_restart", 1], ["press_discard", 1]],
     "staff_start": [["follow", 1]],
     "staff_unlinked": [["type_link_code", 3], ["ask_employee_link", 1]],
@@ -204,7 +202,7 @@
       "kind": "problem",
       "topics": ["meter", "transformer", "suggestion"],
       "choose": "topic",
-      "options": {"registration_check": "employee_auto", "registration_location": "optional"}
+      "options": {"registration_check": "employee_auto"}
     },
     {
       "id": "newcomer_other_way",
@@ -212,7 +210,7 @@
       "weight": 1,
       "actor": "newcomer",
       "registration": "other_way",
-      "options": {"registration_check": "employee_auto", "registration_location": "optional"}
+      "options": {"registration_check": "employee_auto"}
     },
     {
       "id": "info_reply",

@@ -10,7 +10,7 @@ dialogue that passes here is one the real bot holds.
   how often, plus personas, scenarios and Thai text banks. A new bot step or a new kind of user
   is a change to that file (ADR 0009: design for change).
 - A random walk over the graph, held to the scenario's goal, is the path. Templates turn each
-  move into Thai text, a button press, a location or a photo. No model is called.
+  move into Thai text, a button press or a photo. No model is called.
 - Retry with feedback, at two levels. Before sending, each text is checked against the
   dialogue's labels under the active policy (a meter story must not name a transformer, a
   hazard it does not have, or การใช้ไฟฟ้า words) and drawn again when it fails. After sending,
@@ -92,7 +92,6 @@ CHOICE_STEPS = {
     "item",
     "more",
     "summary",
-    "location",
     "reg_district",
     "reg_kind",
 }
@@ -320,7 +319,6 @@ class Goal:
     registration: str = ""
     dual: bool = False
     district: object = None
-    location: tuple | None = None
     info: bool = False  # after the case, staff ask for more and the person answers in the chat
 
 
@@ -660,12 +658,6 @@ class Dialogue:
     def postback(self, intent, data, shown, **kwargs):
         return Move(intent, self.event("postback", postback={"data": data}), shown, **kwargs)
 
-    def location(self, intent):
-        lat = round(self.rng.uniform(13.55, 13.95), 6)
-        lng = round(self.rng.uniform(100.35, 100.85), 6)
-        event = self.message(type="location", latitude=lat, longitude=lng, address="ตำแหน่งจำลอง")
-        return Move(intent, event, f"[ตำแหน่ง] {lat}, {lng}"), (lat, lng)
-
     @property
     def last(self):
         return self.history[-1] if self.history else []
@@ -676,11 +668,7 @@ class Dialogue:
         for message in reply or []:
             for item in message.get("quickReply", {}).get("items", []):
                 action = item["action"]
-                found[action["label"]] = (
-                    conversation.LOCATION
-                    if action["type"] == "location"
-                    else action.get("data") or action.get("uri")
-                )
+                found[action["label"]] = action.get("data") or action.get("uri")
             if message.get("type") == "flex":
                 for bubble in message["contents"]["contents"]:
                     body = bubble["body"]
@@ -1114,8 +1102,8 @@ class Dialogue:
             case = self.cases[0]
             if not case.requester.is_anonymous or str(case.requester) != "ไม่ระบุตัวตน":
                 self.fail("anonymous", f"ผู้แจ้งไม่ใช่ผู้แจ้งไม่ระบุตัวตน ({case.requester})")
-            if (case.latitude, case.longitude) != _decimal_point(goal.location):
-                self.fail("anonymous", f"ตำแหน่ง {case.latitude},{case.longitude} ไม่ตรงกับที่ส่ง")
+            if case.latitude is not None:
+                self.fail("anonymous", "เรื่องไม่ระบุตัวตนมีตำแหน่ง ทั้งที่ไม่ได้ถาม")
             self.passed("anonymous")
 
     def _registration_outcome(self):
@@ -1134,9 +1122,6 @@ class Dialogue:
                 self.fail("registration", f"รหัสพนักงานตรงแต่ไม่ได้อนุมัติโดยระบบ ({decider})")
         elif registration.status != RegistrationRequest.Status.PENDING:
             self.fail("registration", f"เลือกวิธีอื่นแต่สถานะคือ {registration.status}")
-        sent = self.flags.get("reg_location")
-        if sent and (registration.latitude, registration.longitude) != _decimal_point(sent):
-            self.fail("registration", "ตำแหน่งที่เก็บกับคำขอไม่ตรงกับที่ส่ง")
         self.passed("registration")
 
     # -- staff ------------------------------------------------------------------------------
@@ -1241,10 +1226,6 @@ class Dialogue:
         }
 
 
-def _decimal_point(point):
-    return tuple(Decimal(str(v)).quantize(Decimal("0.000001")) for v in point)
-
-
 # --- Intents: what the person does at a step (None = does not apply now) ------------------------
 # Only the move that is chosen is built, so a function may change the dialogue's memory.
 
@@ -1309,19 +1290,6 @@ def i_press_other_way(d):
 
 def i_type_proof(d):
     return d.text("type_proof", d.digits(d.employee.proof))
-
-
-def i_send_location(d):
-    move, point = d.location("send_location")
-    if d.observe() == "reg_location":
-        d.flags["reg_location"] = point
-    else:
-        d.goal.location = point
-    return move
-
-
-def i_skip_location(d):
-    return d.press("skip_location", "ข้าม") if "ข้าม" in d.buttons(d.last) else None
 
 
 # Problem cards that still open a topic's own questions; the general problem choice became the

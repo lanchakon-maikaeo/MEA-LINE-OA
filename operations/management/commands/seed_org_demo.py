@@ -162,7 +162,6 @@ class Command(DemoCommand):
         chosen = {
             options.SEPARATION: "off",
             options.REGISTRATION_CHECK: "employee_auto",
-            options.REGISTRATION_LOCATION: "optional",
             options.ANONYMOUS: "on",
             options.STAFF_LINK: "code_or_employee",
             options.STAFF_LINE_ACTIONS: "act",

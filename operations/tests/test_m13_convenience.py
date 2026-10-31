@@ -149,7 +149,7 @@ class SimpleServiceTests(menu_tests.MenuTestCase):
         draft = conversation.ConversationDraft.objects.get(status="open")
         self.assertEqual((draft.kind, draft.data["topic"]), ("problem", "transformer"))
 
-    def test_anonymous_system_problem_keeps_anonymity_and_location_step(self):
+    def test_anonymous_system_problem_keeps_anonymity_and_goes_to_the_summary(self):
         from operations import identity, line_menu_catalog, options
 
         line_menu_catalog.sync()
@@ -163,7 +163,7 @@ class SimpleServiceTests(menu_tests.MenuTestCase):
         draft = conversation.ConversationDraft.objects.get(identity=line, status="open")
         self.assertTrue(draft.data["anonymous"])
         self.assertTrue(draft.requester.is_anonymous)
-        self.assertEqual(draft.step, "location")
+        self.assertEqual(draft.step, "summary")  # no location step (31 ต.ค. 2569)
 
 
 class MaterialGroupTests(registry_tests.RegistryTestCase):

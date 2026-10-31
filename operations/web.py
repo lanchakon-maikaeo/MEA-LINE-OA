@@ -26,6 +26,7 @@ from operations import (
     approvals,
     casepage,
     charts,
+    employees,
     identity,
     options,
     policy,
@@ -477,6 +478,9 @@ def case_detail(request, number):
             "hints": web_actions.hints(st, offers),
             "can_upload": uploads.may_upload(st),
             "panel": warehouse_web.case_panel(request.user, case),
+            # Zero trust (31 ต.ค. 2569 Q2): a typed name is not checked against the roster.
+            "unverified": not (case.requester.is_anonymous or case.requester.is_internal)
+            and employees.identity_state(case.requester) != "verified",
         },
     )
 

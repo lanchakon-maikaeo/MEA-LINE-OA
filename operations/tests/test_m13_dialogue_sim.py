@@ -136,7 +136,7 @@ class SimulationTests(SimTestCase):
             patch.object(line_api, "push", side_effect=AssertionError("push sent")),
         ):
             for scenario in graph["scenarios"]:
-                found, _ = self.run_sim(count=4, seed=11, scenarios=[scenario["id"]])
+                found, _ = self.run_sim(count=5, seed=11, scenarios=[scenario["id"]])
                 records.extend(found)
         result = dialogue_sim.report(graph, records, 11)
         failures = [(r["id"], r["scenario"], r["note"]) for r in records if r["status"] != "passed"]
