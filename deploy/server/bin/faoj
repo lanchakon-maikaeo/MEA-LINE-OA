@@ -228,6 +228,18 @@ preflight() {
   [ "$free" -ge 15 ] || die "only $free% disk free on $FAOJ_ROOT"
 }
 
+image_room() {  # images live on the root disk, which FAOJ_ROOT's check never sees
+  # 1 Nov 2026: 79 old images filled E5's 48 GB root disk and a pull failed. Unused images older
+  # than a day go; the running release's stay, and an older one is pulled again if ever needed.
+  docker image prune -af --filter until=24h >/dev/null || die "could not remove old images"
+  local store free
+  for store in "$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)" /var/lib/containerd; do
+    [ -n "$store" ] && [ -d "$store" ] || continue
+    free=$(python3 -c 'import shutil,sys; u=shutil.disk_usage(sys.argv[1]); print(int(100*u.free/u.total))' "$store")
+    [ "$free" -ge 15 ] || die "only $free% disk free for images on $store"
+  done
+}
+
 n8n_import() {  # this release's workflows, then a restart so n8n reloads them
   dc_in "$1" run --rm n8n-import >/dev/null && dc_in "$1" restart n8n >/dev/null
 }
@@ -252,7 +264,7 @@ deploy() {
   [ -n "$image" ] || die "deploy <image@sha256:…>"
   release_id "$image" >/dev/null
   [ "$FAOJ_ENV" != "production" ] || [ -n "$approval" ] || die "production needs --approval \"…\" (E.8 step 1)"
-  lock; preflight; backup_fresh_or_first
+  lock; preflight; image_room; backup_fresh_or_first
   local new old; new=$(install_bundle "$image"); old=$(current_dir)
   # A first install that failed midway left "current" without any "ok" release: there is nothing
   # to drain, back up or roll back to, and its containers may hold settings since corrected.
