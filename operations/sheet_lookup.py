@@ -569,20 +569,15 @@ def own_reports(source, employee_id):
 
 
 def own_answer(reports, employee_id, note=""):
-    if not reports:
-        lines = [
-            f"ยังไม่พบรายการที่แจ้งด้วยรหัสพนักงาน {employee_id}",
-            "รายการที่แจ้งโดยไม่ได้กรอกรหัสพนักงานจะไม่ขึ้นที่นี่ ตรวจด้วยเลข UI ได้ที่ FAQ",
-        ]
-    else:
-        shown = reports[-MAX_OWN:]
-        lines = [f"รายการที่แจ้งด้วยรหัสพนักงาน {employee_id} ทั้งหมด {len(reports)} รายการ"]
-        if len(reports) > len(shown):
-            lines[0] += f" (แสดง {len(shown)} รายการล่าสุด)"
-        first = len(reports) - len(shown) + 1
-        for n, (numbers, status) in enumerate(shown, first):
-            ui = ", ".join(numbers) if numbers else "ไม่ได้กรอก"
-            lines.append(f"{n}. เลข UI {ui}: {status or PENDING}")
+    """The reports found (the box asks for เลข UI itself when there are none, 30 ต.ค. 2569)."""
+    shown = reports[-MAX_OWN:]
+    lines = [f"รายการที่แจ้งด้วยรหัสพนักงาน {employee_id} ทั้งหมด {len(reports)} รายการ"]
+    if len(reports) > len(shown):
+        lines[0] += f" (แสดง {len(shown)} รายการล่าสุด)"
+    first = len(reports) - len(shown) + 1
+    for n, (numbers, status) in enumerate(shown, first):
+        ui = ", ".join(numbers) if numbers else "ไม่ได้กรอก"
+        lines.append(f"{n}. เลข UI {ui}: {status or PENDING}")
     if note:
         lines.append(note)
     return "\n".join(lines)

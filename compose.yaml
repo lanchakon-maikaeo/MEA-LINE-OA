@@ -132,6 +132,11 @@ services:
   clamav:
     # Multi-arch (arm64 for OCI A1); clamd + freshclam signature updates in one container.
     image: clamav/clamav-debian:1.4@sha256:6d0680780fd29855cb7018f68272cb520821f614259e2066f8ec669069ac91b3
+    environment:
+      CLAMD_CONF_StreamMaxLength: 210M
+      CLAMD_CONF_MaxFileSize: 210M
+      CLAMD_CONF_MaxScanSize: 420M
+      CLAMD_CONF_AlertExceedsMax: "yes"
     ports:
       - "127.0.0.1:53310:3310"
     volumes:

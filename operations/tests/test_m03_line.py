@@ -89,7 +89,9 @@ def buttons(messages):
                     found[body["action"]["displayText"]] = body["action"]["data"]
                 for button in body["contents"]:
                     if "action" in button:
-                        found[button["action"]["label"]] = button["action"]["data"]
+                        found[button["action"]["label"]] = button["action"].get("data") or button[
+                            "action"
+                        ].get("uri")
                     for inner in button.get("contents", []):  # ADR 0036: a card's row of times
                         if "action" in inner:
                             found[inner["action"]["displayText"]] = inner["action"]["data"]
@@ -97,7 +99,18 @@ def buttons(messages):
 
 
 def texts(messages):
-    return "\n".join(m["text"] for m in messages if m["type"] == "text")
+    def content(node):
+        if node.get("type") == "text":
+            yield node["text"]
+        if node.get("type") == "bubble":
+            yield from content(node["body"])
+        children = node.get("contents", [])
+        if isinstance(children, dict):
+            children = [children]
+        for child in children:
+            yield from content(child)
+
+    return "\n".join(text for message in messages for text in content(message))
 
 
 class LineTestCase(TestCase):
@@ -890,8 +903,7 @@ class InfoReplyTests(InfoCase):
         staff = Client()
         staff.force_login(self.intake)
         page = staff.get(f"/cases/{case.number}/")
-        self.assertContains(page, "ข้อมูลเพิ่มจากผู้แจ้ง (LINE)")
-        self.assertContains(page, "ตู้หมายเลข 12 ปากซอย 3")
+        self.assertContains(page, "ตู้หมายเลข 12 ปากซอย 3")  # in the chat window (ADR 0036)
         whats = [e["what"] for e in page.context["page"]["timeline"]]
         self.assertIn("ผู้แจ้งตอบข้อมูลเพิ่มทาง LINE", whats)
         queue = staff.get("/divisions/SIM-TRIAGE/", {"tab": "district"})

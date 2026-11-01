@@ -12,6 +12,7 @@ from operations import (
     ai_keywords,
     ai_routing,
     attachments,
+    broadcast_media,
     conversation,
     monitor_judge,
     monitoring,
@@ -47,6 +48,9 @@ class Command(BaseCommand):
                 target=line_menu_release.run_loop, name="line-menu", daemon=True
             ).start()
             threading.Thread(target=ai_eval.job_loop, name="ai-eval", daemon=True).start()
+            threading.Thread(
+                target=scan_broadcast_media, name="broadcast-media", daemon=True
+            ).start()
             from operations import koj_tracking
 
             threading.Thread(target=koj_tracking.sync_loop, name="koj-sources", daemon=True).start()
@@ -54,6 +58,12 @@ class Command(BaseCommand):
 
             threading.Thread(
                 target=sheet_lookup.sync_loop, name="sheet-sources", daemon=True
+            ).start()
+            from operations import chat_guides
+
+            # ADR 0037 Q31, Q32: the AI tunes the free chat guides and checks them at night.
+            threading.Thread(
+                target=chat_guides.nightly_loop, name="chat-guides", daemon=True
             ).start()
         next_approval_check = 0
         while True:
@@ -65,6 +75,7 @@ class Command(BaseCommand):
             handled = run_once()
             HEARTBEAT.touch()
             if once:
+                broadcast_media.process_pending()
                 self.stdout.write(f"Handled {handled} event(s).")
                 return
             if not handled:
@@ -72,7 +83,14 @@ class Command(BaseCommand):
 
 
 def handle_event(event):
-    if event.event_type == orchestration.EVENT_CONVERSATION:
+    if event.event_type in {"broadcast.prepare", "broadcast.send_batch"}:
+        from operations import broadcast_delivery
+
+        if event.event_type == broadcast_delivery.PREPARE:
+            broadcast_delivery.prepare(event)
+        else:
+            broadcast_delivery.send_batch(event)
+    elif event.event_type == orchestration.EVENT_CONVERSATION:
         inbox_id = event.payload["inbox_id"]
         replies = conversation.handle_inbox(inbox_id)
         conversation.send_reply(inbox_id, replies)
@@ -106,10 +124,21 @@ def run_once(limit=20):
             handle_event(event)
         except Exception as exc:  # noqa: BLE001 - one bad event must not stop the queue
             try:
-                settled = orchestration.fail(event.event_id, event.lease_token, type(exc).__name__)
+                settled = orchestration.fail(
+                    event.event_id,
+                    event.lease_token,
+                    type(exc).__name__,
+                    retry_after=getattr(exc, "retry_after", None),
+                )
             except orchestration.LeaseError as lost:
                 _lease_lost(event, lost)
                 continue
+            if settled.status == OutboxEvent.Status.FAILED and event.event_type.startswith(
+                "broadcast."
+            ):
+                from operations import broadcast_delivery
+
+                broadcast_delivery.exhausted(event)
             if (
                 settled.status == OutboxEvent.Status.FAILED
                 and event.event_type == orchestration.EVENT_CONVERSATION
@@ -140,3 +169,18 @@ def run_once(limit=20):
         created_at__lt=timezone.now() - timezone.timedelta(days=1)
     ).delete()
     return len(events)
+
+
+def scan_broadcast_media():
+    # Video scans can take longer than a chat turn; keep them off the chat/heartbeat loop.
+    from django.db import close_old_connections
+
+    while True:
+        try:
+            close_old_connections()
+            broadcast_media.process_pending(limit=1)
+        except Exception:  # noqa: BLE001 - the lease recovers failed scans on the next pass
+            logger.exception("Broadcast media scan failed")
+        finally:
+            close_old_connections()
+        time.sleep(2)

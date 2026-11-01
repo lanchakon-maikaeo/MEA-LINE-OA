@@ -99,7 +99,7 @@ class _Context:
     requester: object = None
 
 
-def _resolve(actor):
+def _resolve(actor, read=False):
     if not isinstance(actor, Actor):
         fail(ErrorCode.AUTH_REQUIRED)
     if actor.is_requester:
@@ -114,7 +114,7 @@ def _resolve(actor):
     if not getattr(actor.user, "is_authenticated", False):
         fail(ErrorCode.AUTH_REQUIRED)
     scope = identity.staff_scope(actor.user)
-    if not scope.has_any_access:
+    if not (scope.may_read if read else scope.has_any_access):  # ADR 0039: viewers only read
         fail(ErrorCode.FORBIDDEN, "No role.")
     return _Context(label=actor.key, user=actor.user, scope=scope)
 
@@ -152,7 +152,8 @@ def _staff_condition(ctx):
     within their authority. Other divisions' queues stay closed (B.2)."""
     divisions = list(ctx.scope.division_roles)
     # 16 Oct 2569 Q5: a Supervisor reads every case of the divisions they oversee.
-    condition = Q(owner_division__in=[*divisions, *ctx.scope.overseen]) | Q(
+    owners = [*divisions, *ctx.scope.overseen, *ctx.scope.viewed]  # ADR 0039: viewers read
+    condition = Q(owner_division__in=owners) | Q(
         Exists(
             Handoff.objects.filter(
                 case=OuterRef("pk"), status=Handoff.Status.PENDING, to_division__in=divisions
@@ -179,8 +180,8 @@ def _can_view(ctx, case):
     if ctx.requester is not None:
         return case.requester_id == ctx.requester.pk
     if case.held_by_admin:
-        return ctx.scope.is_admin or ctx.scope.is_support  # ADR 0030: the admins hold it
-    if identity.can_access_division(ctx.scope, case.owner_division_id):
+        return ctx.scope.sees_department  # ADR 0030: the admins hold it; ADR 0039: ฝ่าย sees it
+    if identity.may_read_division(ctx.scope, case.owner_division_id):
         return True
     return Case.objects.filter(_staff_condition(ctx), pk=case.pk).exists()
 
@@ -193,12 +194,14 @@ def _is_member(ctx, division_id, roles=None):
 
 def visible_cases(actor):
     """Own-requester rule for requesters, owner-division rule for staff, all for admins."""
-    ctx = _resolve(actor)
+    ctx = _resolve(actor, read=True)
     cases = Case.objects.select_related("district", "owner_division", "requester")
     if ctx.requester is not None:
         return identity.filter_by_requester(cases, ctx.requester)
     if ctx.scope.is_admin or ctx.scope.is_support:
         return cases
+    if ctx.scope.sees_department:  # ADR 0039: the admins' problem cases too
+        return cases.filter(_staff_condition(ctx) | Q(held_by_admin=True))
     return cases.filter(_staff_condition(ctx)).exclude(held_by_admin=True)
 
 
@@ -449,13 +452,12 @@ def _submission_requester(ctx, submission, intake):
 
 
 def _check_anonymous(requester, submission):
-    """Anonymous reports are problem-only, require a location and have a daily limit."""
+    """Anonymous reports are problem-only and have a daily limit (no location since
+    31 ต.ค. 2569)."""
     from operations import options
 
     if submission.kind != Case.Kind.PROBLEM:
         fail(ErrorCode.FORBIDDEN, "Withdrawals and returns need a registered requester.")
-    if submission.fields.get("latitude") is None:
-        fail(ErrorCode.VALIDATION_ERROR, "An anonymous report needs a location.")
     limit = int(options.get(options.ANONYMOUS_LIMIT))
     since = timezone.now() - timedelta(days=1)
     if Case.objects.filter(requester=requester, submitted_at__gte=since).count() >= limit:

@@ -316,7 +316,7 @@ class ReviewTests(TypedCase):
         dev = make_staff("dev", (Role.ADMIN, None), (Role.DEVELOPER_ADMIN, None))
         client = Client()
         client.force_login(dev)
-        page = client.get("/console/admin/ai/")
+        page = client.get("/console/admin/ai/?tab=runs")
         self.assertContains(page, "พิมพ์ในขั้น field:purpose (คำถาม)")
         self.assertContains(page, "คำตอบ: ")
         self.assertContains(page, "ไม่ส่งถ้อยคำของ AI เพราะ")

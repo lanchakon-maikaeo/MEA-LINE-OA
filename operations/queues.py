@@ -83,7 +83,7 @@ def decides(user, now=None):
     """Holds an authority that makes cases wait for this user (routing, approval, ...)."""
     if policy.routing_scope(user, now) is not None:
         return True
-    if work_orders.may_issue(user) or WorkOrder.objects.filter(issued_by=user).exists():
+    if identity.staff_scope(user).overseen or WorkOrder.objects.filter(issued_by=user).exists():
         return True
     return any(
         policy.active_grants(user, activity, now).exists() for activity in DECISION_ACTIVITIES
@@ -574,4 +574,4 @@ def own_divisions(scope):
     divisions = Division.objects.filter(is_active=True).order_by("code")
     if scope.is_admin or scope.is_support:
         return list(divisions)
-    return list(divisions.filter(pk__in=[*scope.division_roles, *scope.overseen]))
+    return list(divisions.filter(pk__in=[*scope.division_roles, *scope.overseen, *scope.viewed]))

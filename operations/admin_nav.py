@@ -52,6 +52,12 @@ GROUPS = (
                 badge="registrations",
             ),
             Page("admin-employees", "ทะเบียนพนักงาน", "รายชื่อพนักงานที่ใช้ยืนยันตัวตน"),
+            Page(
+                "admin-log",
+                "Log การใช้งาน",
+                "การเข้าสู่ระบบและกิจกรรมของบัญชีเจ้าหน้าที่",
+                ("admin-log-csv",),
+            ),
         ),
     ),
     Group(
@@ -101,6 +107,7 @@ GROUPS = (
                 ("admin-flow", "admin-flow-start", "admin-flow-save", "admin-flow-publish"),
             ),
             Page("admin-answers", "คลังคำตอบ", "คำตอบที่บอทใช้ตอบคำถามทั่วไป"),
+            Page("admin-free-chat", "ตอบอิสระ", "คำแนะนำเฉพาะเรื่องของ AI ที่ตอบคำถามอิสระ"),
             Page(
                 "admin-questions",
                 "คำถามที่บอทตอบไม่ได้",

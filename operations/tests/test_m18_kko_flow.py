@@ -71,8 +71,7 @@ class KkoTestCase(FlowTestCase):
             self.type(user, details or "คีมตัดสาย 2 อัน ส่งใบเบิก 27 ต.ค.")
         else:
             self.press(user, kind)
-            self.type(user, number)
-            self.press(user, "ข้าม")
+            self.type(user, number)  # 30 ต.ค. 2569: the summary comes right after the number
         self.press(user, "ยืนยันส่งเรื่อง")
         case = Case.objects.order_by("-submitted_at").first()
         done, skipped = approvals.bulk_approve(self.kko_approver, [case])
@@ -97,8 +96,7 @@ class TileTests(KkoTestCase):
             ["เลขที่ใบเบิก", "เลขใบสั่งงานจาก SAP", "เลขที่ M/N", "ไม่มีหมายเลข"],
         )
         self.press(ALICE, "เลขที่ M/N")
-        self.type(ALICE, "คม. 123/2569")
-        reply = self.press(ALICE, "ข้าม")
+        reply = self.type(ALICE, "คม. 123/2569")
         self.assertIn("เลขที่ M/N: คม. 123/2569", texts(reply))
         self.assertIn("ส่งถึง: กคอ.", texts(reply))
         self.press(ALICE, "ยืนยันส่งเรื่อง")

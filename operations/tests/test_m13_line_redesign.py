@@ -26,7 +26,7 @@ class MenuRegressionTests(MenuTestCase):
 
 class StaffConfirmationTests(StaffChatTestCase):
     def test_old_confirmation_cannot_submit_new_order(self):
-        self.link(self.head, ALICE)
+        self.link(self.director, ALICE)  # ADR 0040: only the department issues orders
 
         def summary(title):
             self.tile(LineMenuItem.Action.ORDER_NEW)

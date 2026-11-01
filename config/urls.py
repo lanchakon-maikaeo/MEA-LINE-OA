@@ -3,8 +3,14 @@ from django.urls import path
 from django.views.generic import RedirectView
 
 from operations import (
+    ai_web,
+    audit_web,
+    broadcast_auth,
+    broadcast_media_web,
+    broadcast_web,
     duties_web,
     flows_web,
+    free_chat_web,
     internal_api,
     items_web,
     koj_web,
@@ -22,6 +28,18 @@ from operations import (
 )
 
 urlpatterns = [
+    path("broadcasts/api/media/", broadcast_media_web.upload),
+    path("broadcasts/api/media/<uuid:pk>/", broadcast_media_web.status),
+    path("broadcasts/media/<uuid:pk>/<str:variant>/", broadcast_media_web.public),
+    path("broadcasts/", broadcast_web.page, name="broadcasts"),
+    path("broadcasts/<int:pk>/", broadcast_web.page, name="broadcast-detail"),
+    path("broadcasts/api/bootstrap/", broadcast_web.bootstrap),
+    path("broadcasts/api/campaigns/", broadcast_web.campaigns),
+    path("broadcasts/api/campaigns/<int:pk>/", broadcast_web.detail),
+    path("broadcasts/api/campaigns/<int:pk>/<slug:action>/", broadcast_web.action),
+    path("broadcasts/api/segments/", broadcast_web.segments),
+    path("broadcasts/auth/line/", broadcast_auth.login, name="broadcast-line-login"),
+    path("broadcasts/auth/logout/", broadcast_auth.logout, name="broadcast-line-logout"),
     # ADR 0033: both kinds of sheet sit on one page; the old addresses lead there.
     path("koj/", RedirectView.as_view(pattern_name="sheets"), name="koj-sources"),
     path("console/sheets/", sheets_web.page, name="sheets"),
@@ -97,6 +115,7 @@ urlpatterns = [
     path("console/pii/", pii_web.page, name="pii"),
     path("routing/words/", routing_web.words, name="routing-words"),
     path("duties/", duties_web.staff_page, name="duties"),
+    path("knowledge/", free_chat_web.knowledge_page, name="knowledge"),
     path("registry/", registry_web.home, name="registry"),
     path("registry/export.csv", registry_web.export, name="registry-export"),
     path("registry/settings/", registry_web.settings_page, name="registry-settings"),
@@ -169,25 +188,28 @@ urlpatterns = [
         views.admin_inventory_action,
         name="admin-inventory-action",
     ),
-    path("console/admin/ai/", views.admin_ai, name="admin-ai"),
+    path("console/admin/ai/", ai_web.admin_ai, name="admin-ai"),
     path("console/admin/monitoring/", views.admin_monitoring, name="admin-monitoring"),
     path(
         "console/admin/monitoring/report/",
         views.admin_monitoring_report,
         name="admin-monitoring-report",
     ),
-    path("console/admin/ai/<slug:action>/", views.admin_ai_action, name="admin-ai-action"),
+    path("console/admin/ai/<slug:action>/", ai_web.admin_ai_action, name="admin-ai-action"),
     path(
         "console/admin/ai/<slug:action>/<int:pk>/",
-        views.admin_ai_action,
+        ai_web.admin_ai_action,
         name="admin-ai-version-action",
     ),
     path("console/admin/line/requeue/<int:pk>/", views.admin_requeue, name="admin-requeue"),
     path("console/admin/divisions/", views.admin_divisions, name="admin-divisions"),
     path("console/admin/options/", views.admin_options, name="admin-options"),
     path("console/admin/employees/", views.admin_employees, name="admin-employees"),
+    path("console/admin/log/", audit_web.admin_log, name="admin-log"),
+    path("console/admin/log.csv", audit_web.admin_log_csv, name="admin-log-csv"),
     path("console/admin/answers/", views.admin_answers, name="admin-answers"),
     path("console/admin/questions/", views.admin_questions, name="admin-questions"),
+    path("console/admin/free-chat/", free_chat_web.guides_page, name="admin-free-chat"),
     path("console/admin/duties/", duties_web.admin_page, name="admin-duties"),
     path("console/admin/org/", units_web.admin_page, name="admin-org"),
     path(

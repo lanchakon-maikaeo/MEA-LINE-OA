@@ -1,5 +1,6 @@
 """An AI version for chat answers (ADR 0012): create from existing profiles, then the same
-connection test, evaluation gate and activation as the web page (developer-admin, reason)."""
+connection test, evaluation gate and activation as the web page (developer-admin, reason).
+The free chat evaluation (ADR 0037) is stored on the same version."""
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -27,8 +28,24 @@ class Command(BaseCommand):
             "--evaluate", action="store_true", help="Calls the provider (~110 calls)"
         )
         parser.add_argument("--activate", action="store_true")
+        parser.add_argument(
+            "--evaluate-free-chat",
+            action="store_true",
+            help="ตอบอิสระ (ADR 0037): the free chat sets, twice (~200 calls)",
+        )
 
-    def handle(self, *args, username, reason, profile, test, evaluate, activate, **options):
+    def handle(
+        self,
+        *args,
+        username,
+        reason,
+        profile,
+        test,
+        evaluate,
+        activate,
+        evaluate_free_chat,
+        **options,
+    ):
         actor = get_user_model().objects.filter(username=username, is_active=True).first()
         if actor is None:
             raise CommandError("Unknown or inactive user.")
@@ -50,6 +67,13 @@ class Command(BaseCommand):
                 for run in version.eval_result.get("runs", []):
                     self.stdout.write(f"  {run['metrics']}")
                 self.stdout.write(f"Evaluation: {'passed' if version.eval_passed else 'FAILED'}")
+            if evaluate_free_chat:
+                from operations import free_chat_eval
+
+                passed = free_chat_eval.record(version, free_chat_eval.run_gate(version))
+                for run in version.eval_result["free_chat"]["runs"]:
+                    self.stdout.write(f"  {run['metrics']}")
+                self.stdout.write(f"Free chat evaluation: {'passed' if passed else 'FAILED'}")
             if activate and version.status != AIConfigVersion.Status.ACTIVE:
                 ai.activate(actor, version, reason)
                 self.stdout.write(f"Activated v{version.number} for chat answers.")

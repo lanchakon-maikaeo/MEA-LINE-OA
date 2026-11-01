@@ -753,7 +753,7 @@ class PriorityAndCompletionTests(PolicyTestCase):
             requester=self.req1,
             say=lambda text, quick=None: replies.append(text),
         )
-        # ADR 0028: submitted, triage and approval are all รับเรื่องแล้ว for the requester.
+        # ADR 0028: submitted and triage are both รับเรื่องแล้ว for the requester.
         self.act(self.intake, case, "start_triage")
         conversation._updates(turn)
         self.assertEqual(replies, [])
@@ -764,7 +764,8 @@ class PriorityAndCompletionTests(PolicyTestCase):
         self.assertEqual(replies, [])  # internal routing is not news for the requester
         self.act(self.meter, case, "complete_triage")
         conversation._updates(turn)
-        self.assertEqual(replies, [])
+        # 30 ต.ค. 2569 Q5: waiting for the division reads กำลังดำเนินการ
+        self.assertIn(f"{case.number} · กำลังดำเนินการ", replies[-1])
         self.act(self.meter, case, "request_info", {"reason": "ขอรูปหน้าปัด"})
         conversation._updates(turn)
         self.assertIn(f"{case.number} · รอข้อมูลจากคุณ", replies[-1])

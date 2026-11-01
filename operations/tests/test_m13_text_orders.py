@@ -13,7 +13,7 @@ from operations.tests.test_m13_staff_chat import StaffChatTestCase
 class TextOrderTests(StaffChatTestCase):
     def setUp(self):
         super().setUp()
-        self.link(self.head, ALICE)
+        self.link(self.director, ALICE)
 
     def proposal(self, **changes):
         return {
@@ -40,13 +40,13 @@ class TextOrderTests(StaffChatTestCase):
         recipient = make_staff("recipient", (Role.STAFF, self.kae.code))
         for order in orders:
             work_orders.act(self.head, order, "assign_person", assignee=recipient)
-        for user in (self.head, recipient, self.admin):
+        for user in (self.director, recipient, self.admin):
             with self.subTest(user=user.username):
                 client = Client()
                 client.force_login(user)
                 page = client.get(reverse("division-detail", args=[self.kae.code]))
                 self.assertContains(page, "ผ่าน LINE", count=2)
-                self.assertContains(page, "สั่งโดย Kaehead", count=2)
+                self.assertContains(page, "สั่งโดย Director", count=2)
                 if user == self.admin:
                     self.assertContains(client.get(reverse("queue-all")), orders[0].number)
                 for order in orders:
@@ -82,9 +82,12 @@ class TextOrderTests(StaffChatTestCase):
         self.assertFalse(WorkOrder.objects.exists())
 
     def test_revoking_supervisor_invalidates_confirmation(self):
+        identity.grant_role(self.admin, self.director, Role.SUPERVISOR, self.kae, "คงสิทธิ์กอง")
         with patch("operations.staff_orders_chat.extract", return_value=self.proposal()):
             summary = self.type(ALICE, "ให้ Kaehead กองอุปกรณ์ฯ ตรวจมิเตอร์")
-        grant = RoleGrant.objects.get(user=self.head, role="supervisor", revoked_at=None)
+        grant = RoleGrant.objects.get(
+            user=self.director, role=Role.DEPARTMENT_SUPERVISOR, revoked_at=None
+        )
         identity.revoke_role(self.admin, grant, "ถอนสิทธิ์")
         self.say(self.postback(ALICE, buttons(summary)["ยืนยัน"]))
         self.assertFalse(WorkOrder.objects.exists())

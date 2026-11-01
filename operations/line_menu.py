@@ -1,6 +1,7 @@
 """Role-based LINE menu geometry. Fixed catalogue and release images are published by the worker."""
 
 import logging
+import re
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -18,7 +19,7 @@ A = LineMenuItem.Action
 P = LineMenuItem.Place
 T = LineMenuItem.Tab
 # The tabs each role's menu shows, and every page that is published.
-ROLE_TABS = {"staff": (T.REPORT, T.WORK), "sup": (T.REPORT, T.WORK, T.ORDER)}
+ROLE_TABS = {"staff": (T.REPORT, T.WORK), "sup": (T.REPORT, T.WORK)}
 # These remain the compact quick replies in chat.  The rich menu itself uses the six fixed
 # service tiles from the catalogue below, plus its two bottom actions.
 SERVICE_BUTTONS = (
@@ -42,7 +43,7 @@ PAGE_TITLES = {
     "staff-report": "เจ้าหน้าที่ · บริการ",
     "staff-work": "เจ้าหน้าที่ · งานของกอง",
     "sup-report": "Supervisor · บริการ",
-    "sup-work": "Supervisor · งานของกอง",
+    "sup-work": "Supervisor · งานของกอง/ฝ่าย",
     "sup-order": "Supervisor · สั่งงาน",
 }
 logger = logging.getLogger(__name__)
@@ -94,6 +95,14 @@ def alias(page):
     return f"{PREFIX}{page}"
 
 
+def broadcast_url():
+    liff_id = settings.LINE_LIFF_ID.strip()
+    if re.fullmatch(r"[0-9]+-[A-Za-z0-9]+", liff_id):
+        return f"https://miniapp.line.me/{liff_id}"
+    base = settings.STAFF_WEB_BASE_URL.rstrip("/")
+    return f"{base}/broadcasts/" if base.startswith("https://") else ""
+
+
 def areas(page="user"):
     """One role's tappable areas.
 
@@ -108,6 +117,17 @@ def areas(page="user"):
     if is_service_page:
         top = [{"item": item} for item in tiles(T.REPORT)]
         bottom = [{"item": item} for item in bar(T.REPORT)]
+    elif page == "sup-work":
+        url = broadcast_url()
+        top = [
+            {"item": None, "label": "งานสั่งที่ได้รับ", "postback": "m=staff_inbox"},
+            {
+                "item": None,
+                "label": "Broadcast",
+                **({"uri": url} if url else {"postback": "m=broadcast"}),
+            },
+        ]
+        bottom = [{"item": None, "label": "เมนูเพิ่มเติม", "postback": "m=roles", "place": "bar"}]
     else:
         top = [{"item": item} for item in tiles(tab)[:3]]
         top.append({"item": None, "label": "เมนูเพิ่มเติม", "postback": "m=roles"})
@@ -127,8 +147,8 @@ def areas(page="user"):
                 "h": top_h,
             }
         )
-    if is_service_page:
-        columns = 3
+    if is_service_page or page == "sup-work":
+        columns = 2 if page == "sup-work" else 3
         rows = [top[i : i + columns] for i in range(0, len(top), columns)]
         grid_h = tile_h - (BAR if bottom else 0)
         for r, row in enumerate(rows):
@@ -176,6 +196,8 @@ def areas(page="user"):
 
 
 def _area_action(area):
+    if "uri" in area:
+        return {"type": "uri", "uri": area["uri"]}
     if "postback" in area:
         return {"type": "postback", "data": area["postback"], "displayText": area["label"]}
     if area["item"] is None:
@@ -216,10 +238,12 @@ def drawing():
         _, tab = _split(page)
         boxes = []
         for a in areas(page):
-            if "postback" in a:
-                label, note, place = a["label"], "", "tile"
+            if "postback" in a or "uri" in a:
+                label, note, place = a["label"], "", a.get("place", "tile")
             elif a["item"] is None:
                 label = "บริการ" if a["tab"] == T.REPORT else T(a["tab"]).label
+                if a["role"] == "sup" and a["tab"] == T.WORK:
+                    label = "งานของกอง/ฝ่าย"
                 note, place = "", "tab"
             else:
                 label, note, place = a["item"].label, a["item"].note, a["item"].place

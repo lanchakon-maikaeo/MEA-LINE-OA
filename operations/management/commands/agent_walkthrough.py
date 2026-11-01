@@ -16,6 +16,7 @@ from operations.contracts import Actor
 from operations.management.demo import DemoCommand
 from operations.models import (
     AIConfigVersion,
+    AIModel,
     AIRun,
     ChannelIdentity,
     Conversation,
@@ -45,23 +46,22 @@ class Command(DemoCommand):
     def add_arguments(self, parser):
         parser.add_argument("--message", action="append", help="Message to try (repeatable)")
         parser.add_argument(
-            "--preset",
-            choices=sorted(ai.PRESETS),
-            help="Try this preset's profile (e.g. Typhoon 2.5, JSON schema, temperature 0.4) "
-            "instead of the active versions",
+            "--model",
+            help="Try this model from the admin page's list (e.g. gemini-3.8-flash), with its "
+            "provider's defaults, instead of the active versions",
         )
         parser.add_argument("--budget", type=float, default=20, help="Seconds per message")
 
-    def handle_demo(self, *args, message, preset, budget, **options):
+    def handle_demo(self, *args, message, model, budget, **options):
         try:
             with override_settings(AI_ENABLED=True, AI_MCP_ENABLED=True), transaction.atomic():
-                self._walk(message or MESSAGES, preset, budget)
+                self._walk(message or MESSAGES, model, budget)
                 raise Rollback
         except Rollback:
             self.stdout.write(self.style.NOTICE("Rolled back: nothing was kept or sent."))
 
-    def _walk(self, messages, preset, budget):
-        extract, answer = self._versions(preset)
+    def _walk(self, messages, model_id, budget):
+        extract, answer = self._versions(model_id)
         line = self._account()
         mode = answers.mode() if answers.mode() in ("choose", "write") else "write"
         self.stdout.write(
@@ -82,22 +82,24 @@ class Command(DemoCommand):
             outcomes = ", ".join(a.get("outcome", "") for a in attempts)
             self.stdout.write(f"  [{int((time.monotonic() - started) * 1000)} ms] {outcomes}")
 
-    def _versions(self, preset):
-        if not preset:
+    def _versions(self, model_id):
+        if not model_id:
             extract = ai.active_version()
             if extract is None:
-                raise CommandError("No active extraction version; pass --preset.")
+                raise CommandError("No active extraction version; pass --model.")
             return extract, ai_answer.active_version()
         # A throwaway developer-admin inside the rolled-back transaction makes the candidates.
         dev = get_user_model().objects.create_user(username="walkthrough-dev")
         StaffProfile.objects.create(user=dev, display_name="Walkthrough")
         RoleGrant.objects.create(user=dev, role=Role.DEVELOPER_ADMIN)
         RoleGrant.objects.create(user=dev, role=Role.ADMIN)
+        model = AIModel.objects.select_related("provider").filter(model_id=model_id).first()
+        if model is None or not model.provider.has_key:
+            raise CommandError(f"No model {model_id} with a provider key on the admin page.")
         try:
-            extract = ai.create_preset_version(dev, preset, AIConfigVersion.Pipeline.HARNESS)
-            answer = ai.create_preset_version(
-                dev, preset, AIConfigVersion.Pipeline.SINGLE, task=AIConfigVersion.Task.ANSWER
-            )
+            profile = ai.model_profile(dev, model)
+            extract = ai.create_version(dev, [profile], pipeline=AIConfigVersion.Pipeline.HARNESS)
+            answer = ai.create_version(dev, [profile], task=AIConfigVersion.Task.ANSWER)
         except Exception as exc:  # noqa: BLE001 - show the admin-page message as it is
             raise CommandError(str(exc)) from exc
         return extract, answer

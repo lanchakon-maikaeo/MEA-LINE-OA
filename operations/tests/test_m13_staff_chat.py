@@ -7,6 +7,7 @@ import re
 from datetime import timedelta
 
 from django.core import mail
+from django.test import override_settings
 from django.utils import timezone
 
 from operations import identity, options, staff_line, staff_work, work_orders
@@ -77,6 +78,26 @@ class LinkTests(StaffChatTestCase):
 
 
 class WorkTabTests(StaffChatTestCase):
+    @override_settings(LINE_LIFF_ID="2012304618-TestOnly")
+    def test_broadcast_postback_checks_current_supervisor_role(self):
+        self.link(self.head, ALICE)
+        reply = self.say(self.postback(ALICE, "m=broadcast"))
+        self.assertIn("เปิด Broadcast", buttons(reply))
+        self.assertIn("https://miniapp.line.me/2012304618-TestOnly", str(reply))
+        from operations.models import RoleGrant
+
+        RoleGrant.objects.filter(user=self.head).update(revoked_at=timezone.now())
+        reply = self.say(self.postback(ALICE, "m=broadcast"))
+        self.assertIn("สงวนสิทธิ์สำหรับ Supervisor", texts(reply))
+        self.assertNotIn("เปิด Broadcast", buttons(reply))
+
+    def test_new_received_tile_opens_scoped_inbox(self):
+        self.link(self.head, ALICE)
+        order = work_orders.create(self.director, "งานจากปุ่มใหม่", self.kae)
+        reply = self.say(self.postback(ALICE, "m=staff_inbox"))
+        self.assertIn(order.number, texts(reply))
+        self.assertIn("ดูรายละเอียด", buttons(reply))
+
     def test_a_received_order_is_acknowledged_and_finished_in_chat(self):
         self.link(self.head, ALICE)
         self.assertIn("ยังไม่มีงานสั่ง", texts(self.tile(A.WORK_ORDERS)))
@@ -86,7 +107,7 @@ class WorkTabTests(StaffChatTestCase):
         )
         self.assertIn(f"ดูงาน {order.number}", buttons([push.message]))
         reply = self.tile(A.WORK_ORDERS)
-        detail = self.press(ALICE, order.number, reply)
+        detail = self.press(ALICE, "ดูรายละเอียด", reply)
         self.assertIn("เช็กสต็อกหม้อแปลง", texts(detail))
         self.press(ALICE, "รับทราบ", detail)
         self.assertEqual(WorkOrder.objects.get().status, S.ACKNOWLEDGED)
@@ -132,7 +153,40 @@ class OrderTabTests(StaffChatTestCase):
     def test_the_order_tab_is_for_supervisors_only(self):
         member = make_staff("kaemember", (Role.STAFF, "กองอุปกรณ์ฯ"))
         self.link(member, ALICE)
-        self.assertIn("เฉพาะ Supervisor", texts(self.tile(A.ORDER_NEW)))
+        self.assertIn("Supervisor ระดับฝ่ายเท่านั้น", texts(self.tile(A.ORDER_NEW)))
+
+    def test_more_menu_contains_only_order_for_department_supervisor(self):
+        self.link(self.director, ALICE)
+        menu = self.say(self.postback(ALICE, "m=roles"))
+        self.assertEqual(set(buttons(menu)), {"สั่งงาน"})
+        self.press(ALICE, "สั่งงาน", menu)
+        self.assertIn("พิมพ์", texts(self.sent[-1]))
+
+    def test_division_supervisor_cannot_use_old_order_tile_or_typed_command(self):
+        self.link(self.head, ALICE)
+        self.assertEqual(buttons(self.say(self.postback(ALICE, "m=roles"))), {})
+        for reply in (self.tile(A.ORDER_NEW), self.type(ALICE, "สั่งงาน")):
+            self.assertIn("Supervisor ระดับฝ่ายเท่านั้น", texts(reply))
+        self.type(ALICE, "ให้ทั้งกอง กองอุปกรณ์ฯ ตรวจมิเตอร์")
+        self.type(ALICE, "ยืนยัน")
+        self.assertFalse(WorkOrder.objects.exists())
+
+    def test_the_department_forwards_an_order_after_picking_a_division_and_confirming(self):
+        other = work_orders.issuable(self.director).exclude(pk=self.kae.pk).first()
+        order = work_orders.create(self.director, "งานที่ส่งผิดกอง", self.kae, assignee=None)
+        self.link(self.head, BOB)
+        self.assertNotIn("ส่งต่อให้กอง", buttons(self.type(BOB, order.number)))
+        self.link(self.director, ALICE)
+        divisions = self.press(ALICE, "ส่งต่อให้กอง", self.type(ALICE, order.number))
+        self.assertNotIn(self.kae.code[:20], buttons(divisions))
+        confirm = self.press(ALICE, other.code[:20], divisions)
+        self.assertIn(f"ไป {other.code}", texts(confirm))
+        order.refresh_from_db()
+        self.assertEqual(order.division, self.kae)
+        self.press(ALICE, "ยืนยันส่งต่อ", confirm)
+        order.refresh_from_db()
+        self.assertEqual((order.division, order.status), (other, S.ASSIGNED))
+        self.assertIn(f"ถึง {other.code}", texts(self.sent[-1]))
 
     def test_typed_dates_read_thai_day_and_month(self):
         ahead = timezone.localdate() + timedelta(days=10)

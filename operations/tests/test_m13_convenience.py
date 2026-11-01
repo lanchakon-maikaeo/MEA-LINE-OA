@@ -149,7 +149,7 @@ class SimpleServiceTests(menu_tests.MenuTestCase):
         draft = conversation.ConversationDraft.objects.get(status="open")
         self.assertEqual((draft.kind, draft.data["topic"]), ("problem", "transformer"))
 
-    def test_anonymous_system_problem_keeps_anonymity_and_location_step(self):
+    def test_anonymous_system_problem_keeps_anonymity_and_goes_to_the_summary(self):
         from operations import identity, line_menu_catalog, options
 
         line_menu_catalog.sync()
@@ -163,7 +163,7 @@ class SimpleServiceTests(menu_tests.MenuTestCase):
         draft = conversation.ConversationDraft.objects.get(identity=line, status="open")
         self.assertTrue(draft.data["anonymous"])
         self.assertTrue(draft.requester.is_anonymous)
-        self.assertEqual(draft.step, "location")
+        self.assertEqual(draft.step, "summary")  # no location step (31 ต.ค. 2569)
 
 
 class MaterialGroupTests(registry_tests.RegistryTestCase):
@@ -203,12 +203,11 @@ class MaterialGroupTests(registry_tests.RegistryTestCase):
 
 
 class AdminButtonsTests(admin_tests.AdminLineTests):
-    def test_rich_menu_role_navigation_exposes_admin_controls_only_to_admins(self):
+    def test_more_menu_does_not_include_deferred_admin_controls(self):
         self.link(self.admin, ALICE)
         self.link(self.head, BOB)
         choices = buttons(self.say(self.postback(ALICE, "m=roles")))
-        self.assertIn("แอดมิน", choices)
-        self.assertLessEqual(len(choices), 8)
+        self.assertEqual(choices, {})
         self.assertNotIn("แอดมิน", buttons(self.say(self.postback(BOB, "m=roles"))))
 
     def test_approval_button_and_role_wizard_require_current_admin_rights(self):
@@ -257,12 +256,12 @@ class StaffButtonsTests(staff_tests.StaffChatTestCase):
     def test_rich_menu_shortcuts_open_personal_cases_and_the_current_roles_menu(self):
         self.link(self.head, ALICE)
         roles = self.say(self.postback(ALICE, "m=roles"))
-        self.assertIn("งานที่ฉันสั่ง", buttons(roles))
+        self.assertEqual(buttons(roles), {})
         tracking = self.say(self.postback(ALICE, "m=mine"))
         self.assertIn("เรื่องที่ยังไม่จบ", texts(tracking))
         self.assertNotIn("งานที่ฉันสั่ง", buttons(tracking))
         self.assertIn("เรื่องที่ยังไม่จบ", texts(self.type(ALICE, "ติดตามเรื่องของฉัน")))
-        self.assertIn("งานที่ฉันสั่ง", buttons(self.type(ALICE, "เมนูตามสิทธิ์")))
+        self.assertEqual(buttons(self.type(ALICE, "เมนูตามสิทธิ์")), {})
 
     def test_personal_tracking_hides_other_staff_reports_in_the_same_division(self):
         member = make_staff("personal-member", (Role.STAFF, self.kae.code))
@@ -289,15 +288,18 @@ class StaffButtonsTests(staff_tests.StaffChatTestCase):
         self.assertNotIn(cases[BOB].number, buttons(mine))
 
     def test_staff_order_list_pages_and_supervisor_cancel_button(self):
-        self.link(self.head, ALICE)
-        orders = [work_orders.create(self.head, f"งาน {n}", self.kae, self.head) for n in range(7)]
+        self.link(self.director, ALICE)
+        orders = [
+            work_orders.create(self.director, f"งาน {n}", self.kae, self.head) for n in range(7)
+        ]
         self.type(ALICE, "งานของกอง")
         first = self.press(ALICE, "งานที่ฉันสั่ง")
         self.assertEqual(sum(label.startswith("T") for label in buttons(first)), 5)
         second = self.press(ALICE, "ถัดไป")
         self.assertEqual(sum(label.startswith("T") for label in buttons(second)), 2)
         self.assertIn(orders[-1].number, texts(first) + texts(second))
-        self.press(ALICE, "สั่งงานใหม่")
+        menu = self.say(self.postback(ALICE, "m=roles"))
+        self.press(ALICE, "สั่งงาน", menu)
         with patch("operations.staff_orders_chat.extract", return_value=None):
             summary = self.type(ALICE, "ให้ทั้งกอง กองอุปกรณ์ฯ ตรวจมิเตอร์")
         self.press(ALICE, "ยกเลิก")
@@ -305,12 +307,14 @@ class StaffButtonsTests(staff_tests.StaffChatTestCase):
         self.assertEqual(WorkOrder.objects.count(), 7)
 
     def test_supervisor_picks_recipient_then_confirms(self):
-        self.link(self.head, ALICE)
+        self.link(self.director, ALICE)
         self.type(ALICE, "สั่งงาน")
         with patch("operations.staff_orders_chat.extract", return_value=None):
             self.type(ALICE, "ตรวจมิเตอร์")
-            self.press(ALICE, "เลือกผู้รับ")
-            self.press(ALICE, "กองอุปกรณ์ฯ")
+            choices = self.press(ALICE, "เลือกผู้รับ")
+            while "กองอุปกรณ์ฯ" not in buttons(choices):
+                choices = self.press(ALICE, "ถัดไป", choices)
+            self.press(ALICE, "กองอุปกรณ์ฯ", choices)
             summary = self.press(ALICE, f"{self.head.pk} {work_orders.name_of(self.head)}"[:20])
         self.assertIn("ยืนยัน", buttons(summary))
         self.press(ALICE, "ยืนยัน")
@@ -319,7 +323,7 @@ class StaffButtonsTests(staff_tests.StaffChatTestCase):
     def test_assign_person_pages_and_cancellation_without_reason(self):
         self.link(self.head, ALICE)
         people = [make_staff(f"member-{n}", (Role.STAFF, self.kae.code)) for n in range(7)]
-        order = work_orders.create(self.head, "ตรวจอุปกรณ์", self.kae)
+        order = work_orders.create(self.director, "ตรวจอุปกรณ์", self.kae)
         self.type(ALICE, order.number)
         reply = self.press(ALICE, "มอบให้คนในกอง")
         label = f"{people[-1].pk} {work_orders.name_of(people[-1])}"[:20]

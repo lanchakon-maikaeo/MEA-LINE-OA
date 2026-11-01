@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>ปุ่มประกาศถึงกอง</title>
+<style>
+  * { margin: 0; }
+  body { width: 2500px; height: 1686px; overflow: hidden; background: #001028; }
+  .menu { position: relative; width: 2500px; height: 1686px; background-size: 2500px 1686px; }
+  /* Covers the old icon and label of the bottom-left work tile; edges fade into the starfield. */
+  .patch { position: absolute; left: 345px; top: 1030px; width: 560px; height: 455px; background: rgb(0,16,40);
+    filter: blur(14px); }
+  .icon { position: absolute; left: 520px; top: 1062px; width: 210px; height: 210px; }
+  .label { position: absolute; left: 0; width: 1250px; top: 1350px; text-align: center; color: #fff;
+    font-family: "Thonburi", sans-serif; font-weight: 700; font-size: 82px;
+    text-shadow: 0 0 18px rgba(120,170,255,.35); }
+</style>
+</head>
+<body>
+<div class="menu" id="menu">
+  <div class="patch"></div>
+  <svg class="icon" viewBox="0 0 64 64" fill="none" stroke="#E8B48C" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 26h8l22-12v36L18 38h-8a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3z"/>
+    <path d="M18 26v12"/>
+    <path d="M14 38l4 14h6l-3-14"/>
+    <path d="M47 24c3 2 4.5 5 4.5 8s-1.5 6-4.5 8"/>
+    <path d="M52 17c5 4 8 9.5 8 15s-3 11-8 15"/>
+  </svg>
+  <div class="label">ประกาศถึงกอง</div>
+</div>
+<script>
+  document.getElementById("menu").style.backgroundImage = "url(" + (location.hash.slice(1) || "staff-work") + ".jpg)";
+</script>
+</body>
+</html>

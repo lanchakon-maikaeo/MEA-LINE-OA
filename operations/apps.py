@@ -6,11 +6,18 @@ class OperationsConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
 
     def ready(self):
-        from django.contrib.auth.signals import user_logged_in
+        from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
 
+        from operations import access_log
         from operations.middleware import record_login_time
 
         user_logged_in.connect(record_login_time, dispatch_uid="operations.record_login_time")
+        # Log การใช้งาน (31 Oct 2569 Q14, Q15): sign-ins, sign-outs and failed sign-ins.
+        user_logged_in.connect(access_log.record_login, dispatch_uid="operations.audit_login")
+        user_logged_out.connect(access_log.record_logout, dispatch_uid="operations.audit_logout")
+        user_login_failed.connect(
+            access_log.record_login_failed, dispatch_uid="operations.audit_login_failed"
+        )
 
         from django.db.models.signals import post_migrate
 

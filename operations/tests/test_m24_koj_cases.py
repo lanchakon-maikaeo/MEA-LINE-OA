@@ -48,7 +48,10 @@ class FilingTests(KojCaseTestCase):
         )
         self.press(ALICE, "เลขที่ใบเบิก")
         reply = self.type(ALICE, "I/69.01.01.001.69.01.001")  # a กอจ. number keeps its dots
-        self.assertIn("รายละเอียดอุปกรณ์ที่เบิก", texts(reply))
+        # 30 ต.ค. 2569: the summary comes right after the number, as in กคว.
+        self.assertIn("เพิ่มรายละเอียด", buttons(reply))
+        reply = self.press(ALICE, "เพิ่มรายละเอียด")
+        self.assertIn("รายละเอียดเพิ่มเติม", texts(reply))
         reply = self.type(ALICE, "3 เฟส 500 kVA 1 ลูก ใช้ติดตั้งงานใหม่")
         for line in (
             "สรุปเรื่อง: การเบิก",
@@ -67,6 +70,30 @@ class FilingTests(KojCaseTestCase):
         self.assertEqual(case.intake_data["group"], "transformer")
         self.assertIn("transformer", units.case_groups(case))
 
+    def test_a_number_repeats_only_in_the_same_division(self):
+        # 30 ต.ค. 2569 Q1: a กอจ. slip was warned of a กคว. case with the same number.
+        self.track("มิเตอร์", "ติดตามใบเบิก", number="12345678")
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        kcw = Case.objects.get()
+
+        def file():
+            self.open_koj()
+            self.press(ALICE, "RMU")
+            self.press(ALICE, "ติดตามใบเบิก")
+            self.press(ALICE, "เลขที่ใบเบิก")
+            return self.type(ALICE, "12345678")
+
+        reply = file()
+        self.assertIn("ส่งถึง: กอจ.", texts(reply))
+        self.assertNotIn("คุณเคยส่งเลขนี้", texts(reply))
+        self.press(ALICE, "ยืนยันส่งเรื่อง")
+        koj = Case.objects.exclude(pk=kcw.pk).get()
+        self.assertEqual(koj.owner_division, self.koj)
+        self.assertNotIn("staff_notes", koj.intake_data)
+        reply = file()
+        self.assertIn(f"หมายเหตุ: คุณเคยส่งเลขนี้ในเรื่อง {koj.number} ซึ่งยังไม่ปิด", texts(reply))
+        self.assertNotIn(kcw.number, texts(reply))
+
     def test_a_unit_takes_the_group_its_button_names(self):
         section = Section.objects.create(division=self.koj, name="แผนกหม้อแปลงและคาปาซิเตอร์ ทดสอบ")
         UnitWork.objects.create(division=self.koj, section=section, kind="return", group="lv_cap")
@@ -76,8 +103,7 @@ class FilingTests(KojCaseTestCase):
         self.press(ALICE, "ติดตามใบส่งคืน")
         reply = self.press(ALICE, "ใบโอนขอคืน")
         self.assertEqual(texts(reply), "กรุณาพิมพ์เลขใบโอนขอคืน")
-        self.type(ALICE, "TR-2569-0042")
-        reply = self.type(ALICE, "50 kVAR 2 ชุด ชำรุด")
+        reply = self.type(ALICE, "TR-2569-0042")
         self.assertIn("ใบโอนขอคืน: TR-2569-0042", texts(reply))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()

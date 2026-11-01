@@ -13,6 +13,7 @@ from operations.contracts import ErrorCode, fail
 from operations.models import (
     AckClock,
     AuthorityGrant,
+    Case,
     Decision,
     Division,
     EquipmentType,
@@ -294,7 +295,17 @@ def set_priority(ctx, case, payload, reason, target):
     exception_holder = ctx.requester is None and policy.has_authority(
         ctx.user, A.PRIORITY_EXCEPTION, case.owner_division_id
     )
-    if ctx.requester is not None or not (_member(ctx, case.owner_division_id) or exception_holder):
+    from operations import approvals
+
+    department_acceptance = (
+        ctx.scope is not None
+        and ctx.scope.is_department_supervisor
+        and case.status == Case.Status.AWAITING_APPROVAL
+        and approvals.whole(case)
+    )
+    if ctx.requester is not None or not (
+        _member(ctx, case.owner_division_id) or exception_holder or department_acceptance
+    ):
         fail(ErrorCode.FORBIDDEN, "Only staff of the owner division can set the priority.")
     value = payload.get("priority")
     if value not in policy.PRIORITIES:
@@ -456,8 +467,11 @@ def set_sap_number(ctx, case, payload, reason, target):
 
 def admin_send(ctx, case, payload, reason, target):
     """ADR 0030 Q11, Q18: an admin names the division and it takes the case at once; a case the
-    admins held is theirs no longer."""
-    if ctx.requester is not None or not (ctx.scope.is_admin or ctx.scope.is_support):
+    admins held is theirs no longer. ADR 0039: a Supervisor ระดับฝ่าย sends too."""
+    scope = ctx.scope
+    if ctx.requester is not None or not (
+        scope.is_admin or scope.is_support or scope.is_department_supervisor
+    ):
         fail(ErrorCode.FORBIDDEN, "เฉพาะแอดมินส่งเรื่องให้กองได้")
     division = _division(payload.get("division"))
     if division.pk == case.owner_division_id and not case.held_by_admin:

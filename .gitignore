@@ -53,7 +53,12 @@ archive/
 !Docs/adr/0030-problem-tile-requester-picks-the-division.md
 !Docs/adr/0031-org-chart-decides-unit-owner-and-line-alerts.md
 !Docs/adr/0032-the-system-tracks-slips-and-hides-the-old-stock-work.md
+!Docs/adr/0037-free-chat-answers-with-tools-and-guides.md
+!Docs/adr/0038-one-ai-configuration-version-for-every-task.md
+!Docs/adr/0039-department-sees-every-division-and-viewers-only-read.md
+!Docs/adr/0040-supervisor-line-work-and-broadcast.md
 !Docs/koj-tracking-setup.md
+!Docs/broadcast-mini-app-setup.md
 
 !operations/line_assets/*.jpg
 

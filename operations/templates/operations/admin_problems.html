@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
-    <span class="eyebrow">แอดมิน</span>
+    <span class="eyebrow">{% if may_send %}แอดมินและ Supervisor ระดับฝ่าย{% else %}ดูได้อย่างเดียว{% endif %}</span>
     <h1>ปัญหาและข้อเสนอแนะ</h1>
     <p class="lede">เรื่องแจ้งปัญหาและข้อเสนอแนะทุกช่องทาง ใหม่สุดก่อน แท็บรอแอดมินคือเรื่องที่ผู้แจ้งเลือก "ปัญหาการใช้งานหรืออื่นๆ" แอดมินตอบเองในหน้าเรื่อง หรือติ๊กแล้วส่งให้กอง ผู้แจ้งไม่ระบุตัวตนแสดงเป็นรหัสแทนตัว</p>
   </div>
@@ -55,6 +55,7 @@
 </form>
 {% endif %}
 
+{% if may_send %}
 <form method="post" action="{% url 'admin-problems-send' %}" id="bulk-send" class="bulk-bar mb-18" data-bulk>
   {% csrf_token %}
   <input type="hidden" name="tab" value="{{ tab }}">
@@ -70,14 +71,15 @@
   <input id="send-reason" name="reason" placeholder="เหตุผล" required maxlength="500">
   <button class="btn btn--sm" type="submit" data-bulk-submit data-label="ส่งให้กอง ({n} เรื่อง)" data-empty="ติ๊กเรื่องที่จะส่งก่อน">ส่งให้กอง</button>
 </form>
+{% endif %}
 
-<p class="muted">{{ matching }} เรื่อง · ไฟล์ CSV ใช้ตัวกรองเดียวกัน ไม่มีชื่อ รหัสแทนตัว ข้อความที่แจ้ง พิกัด หรือชื่อเจ้าหน้าที่ และทุกการดาวน์โหลดถูกบันทึก</p>
+<p class="muted">{{ matching }} เรื่อง · ไฟล์ CSV มีทุกเรื่องตามตัวกรองนี้ พร้อมข้อความที่แจ้งเต็ม ๆ ผู้แจ้งไม่ระบุตัวตนยังแสดงแค่รหัสแทนตัว และระบบบันทึกทุกครั้งที่มีคนดาวน์โหลด</p>
 <div class="table-wrap"><table class="table--cards">
   <thead><tr><th scope="col"><span class="visually-hidden">เลือก</span></th><th scope="col">เลขเรื่อง</th><th scope="col">หัวข้อ</th><th scope="col">ข้อความที่แจ้ง</th><th scope="col">ผู้แจ้ง</th><th scope="col">ช่องทาง</th><th scope="col">วันเวลาแจ้ง</th><th scope="col">กองเจ้าภาพ</th><th scope="col">สถานะ</th></tr></thead>
   <tbody data-more data-more-noun="เรื่อง">
   {% for row in rows %}{% with case=row.case %}
     <tr>
-      <td>{% if not row.ended %}<input type="checkbox" name="case" value="{{ case.number }}" form="bulk-send" aria-label="เลือก {{ case.number }}">{% endif %}</td>
+      <td>{% if may_send and not row.ended %}<input type="checkbox" name="case" value="{{ case.number }}" form="bulk-send" aria-label="เลือก {{ case.number }}">{% endif %}</td>
       <td class="nowrap"><a href="{% url 'case-detail' case.number %}">{{ case.number }}</a></td>
       <td class="cell--wide" data-label="หัวข้อ">{{ row.topic }}</td>
       <td class="cell--wide" data-label="ข้อความที่แจ้ง">{{ case.description|truncatechars:120 }}</td>

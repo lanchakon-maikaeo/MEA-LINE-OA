@@ -33,6 +33,8 @@ EVENT_SHEET_STATUS_AI = "conversation.sheet_status_ai_requested"  # ADR 0027: à¸
 # One owner per event type (E.6: no second dispatcher competes for the same work).
 DJANGO_TYPES = frozenset(
     {
+        "broadcast.prepare",
+        "broadcast.send_batch",
         EVENT_CONVERSATION,
         EVENT_CASE_SUBMITTED,
         EVENT_DECISION,
@@ -44,6 +46,8 @@ DJANGO_TYPES = frozenset(
 )
 N8N_TYPES = frozenset({EVENT_NOTIFICATION, EVENT_AI, EVENT_TRIAGE_AI})
 MAX_ATTEMPTS = {
+    "broadcast.prepare": 5,
+    "broadcast.send_batch": 64,
     EVENT_NOTIFICATION: 8,
     EVENT_AI: 2,
     EVENT_TRIAGE_AI: 2,

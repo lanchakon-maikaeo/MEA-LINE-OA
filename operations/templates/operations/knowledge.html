@@ -1,0 +1,58 @@
+{% extends "operations/base.html" %}
+{% load ui %}
+{% block title %}เอกสารความรู้ · DED Center{% endblock %}
+{% block page_class %}page--reading{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">ตอบอิสระ</span>
+    <h1>เอกสารความรู้</h1>
+    <p class="lede">ข้อความที่ไม่เป็นความลับ เช่น ขั้นตอนหรือรายการเอกสารที่ต้องใช้ ให้บอทค้นมาตอบคำถามในแชต ระบบไม่รับเอกสารที่มีข้อมูลส่วนบุคคล แอดมินคนละคนกับผู้อัปโหลดต้องรับรองก่อน เอกสารจึงถูกส่งไป Pinecone ถ้าเลิกใช้ ระบบลบออกจาก Pinecone ด้วย</p>
+  </div>
+</div>
+<section class="section" aria-labelledby="kn-state">
+  <ul>
+    <li>การเชื่อม Pinecone: {% if connected %}เปิดอยู่{% elif docs_option %}เปิดในตัวเลือกระบบแล้ว แต่ยังไม่ได้ตั้งคีย์หรือ host ของ index{% else %}ปิด บอทยังไม่ค้นเอกสาร{% endif %}</li>
+  </ul>
+</section>
+<section class="section" aria-labelledby="kn-list">
+  <div class="section-head"><h2 id="kn-list">เอกสาร</h2></div>
+  <div class="table-wrap"><table class="table--cards">
+    <thead><tr><th scope="col">ชื่อ</th><th scope="col">สถานะ</th><th scope="col">ผู้อัปโหลด</th><th scope="col">Pinecone</th><th scope="col"></th></tr></thead>
+    <tbody>
+    {% for d in docs %}
+      <tr>
+        <td><details class="fold"><summary><span class="fold__title">{{ d.title }}</span><span class="fold__sub">ฉบับ {{ d.revision }}</span></summary><div class="fold__body"><p class="pre-line">{{ d.text }}</p></div></details></td>
+        <td class="cell--wide" data-label="สถานะ">{{ d.get_status_display }}{% if d.approved_by %}<br><span class="muted">รับรองโดย {{ d.approved_by.username }}</span>{% endif %}</td>
+        <td class="cell--wide" data-label="ผู้อัปโหลด">{{ d.uploaded_by.username }} · {{ d.uploaded_at|thai_datetime }}</td>
+        <td class="cell--wide" data-label="Pinecone">{% if d.synced_at %}ส่งแล้ว {{ d.chunks }} ส่วน{% elif d.sync_error %}{{ d.sync_error }}{% else %}ยังไม่ส่ง{% endif %}</td>
+        <td class="cell--wide">{% if is_admin %}
+          <form method="post" class="inline">
+            {% csrf_token %}<input type="hidden" name="doc" value="{{ d.pk }}">
+            <input name="reason" maxlength="500" placeholder="เหตุผล" aria-label="เหตุผล">
+            {% if d.status == 'draft' and d.uploaded_by_id != request.user.pk %}<button class="btn btn--sm" type="submit" name="op" value="approve">รับรอง</button>{% endif %}
+            {% if d.status != 'retired' %}<button class="btn btn--sm btn--ghost" type="submit" name="op" value="retire">เลิกใช้</button>{% endif %}
+          </form>{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5">ยังไม่มีเอกสาร</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+<section class="section" aria-labelledby="kn-new">
+  <details class="fold">
+  <summary><span class="fold__title" id="kn-new">อัปโหลดเอกสาร</span></summary>
+  <div class="fold__body">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}<input type="hidden" name="op" value="upload">
+    <div class="field"><label for="kn-title">ชื่อเอกสาร</label><input id="kn-title" name="title" maxlength="200" required></div>
+    <div class="field"><label for="kn-text">เนื้อหา</label><textarea id="kn-text" name="text" rows="8" maxlength="{{ max_text }}"></textarea></div>
+    <div class="field"><label for="kn-file">หรือไฟล์ .txt .md หรือ .pdf (ระบบอ่านเฉพาะตัวอักษรใน PDF ไม่อ่านภาพสแกน)</label><input id="kn-file" name="file" type="file" accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"></div>
+    <div class="field"><label for="kn-reason">เหตุผล</label><input id="kn-reason" name="reason" maxlength="500"></div>
+    <button class="btn btn--sm" type="submit">อัปโหลด</button>
+  </form>
+  </div>
+  </details>
+</section>
+{% endblock %}

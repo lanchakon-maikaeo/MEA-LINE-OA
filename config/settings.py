@@ -114,6 +114,9 @@ LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_AGE = 10 * 60 * 60
 
 # --- LINE intake (M03) ------------------------------------------------------------------------
+LINE_MINI_CHANNEL_ID = os.environ.get("LINE_MINI_CHANNEL_ID", "")
+LINE_LIFF_ID = os.environ.get("LINE_LIFF_ID", "")
+BROADCAST_MEDIA_BASE_URL = os.environ.get("BROADCAST_MEDIA_BASE_URL", "")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 # Outside production, replies go only to these LINE user IDs (one OA serves all environments)
@@ -156,24 +159,19 @@ AI_SECRET_KEY = os.environ.get("AI_SECRET_KEY", "")
 # the server, its standby and the owner's password manager, never in the database. Local and CI
 # derive one from SECRET_KEY (operations/sealing.py) so demos work without it.
 PII_SECRET_KEY = os.environ.get("PII_SECRET_KEY", "")
-AI_ALLOWED_HOSTS = frozenset(
-    h.strip().lower()
-    for h in os.environ.get("AI_ALLOWED_HOSTS", "thaillm.or.th,api.opentyphoon.ai").split(",")
-    if h.strip()
-)
-# Providers that enforce response_format json_schema (ThaiLLM's vLLM, checked 6 Oct 2569). Any
-# other host also gets the schema in the prompt, because OpenTyphoon accepts and ignores it.
-AI_SCHEMA_ENFORCED_HOSTS = frozenset(
-    h.strip().lower()
-    for h in os.environ.get("AI_SCHEMA_ENFORCED_HOSTS", "thaillm.or.th").split(",")
-    if h.strip()
-)
+# ADR 0038: the allowed provider hosts and which of them enforce response_format live with each
+# provider in the database (admin page), no longer in AI_ALLOWED_HOSTS/AI_SCHEMA_ENFORCED_HOSTS.
 # Public halves (base64, comma-separated) of the Ed25519 keys that sign evaluation evidence on the
 # machine that evaluates; production imports only evidence signed by one of them (24 Oct 2569).
 AI_EVIDENCE_PUBLIC_KEYS = tuple(
     k.strip() for k in os.environ.get("AI_EVIDENCE_PUBLIC_KEYS", "").split(",") if k.strip()
 )
 AI_TOTAL_BUDGET_SECONDS = 25
+# ADR 0037: Pinecone for เอกสารความรู้ (an index with integrated embedding whose text field is
+# chunk_text). Used only while ตัวเลือกระบบ free_chat_docs is on.
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
+PINECONE_INDEX_HOST = os.environ.get("PINECONE_INDEX_HOST", "")
+PINECONE_NAMESPACE = os.environ.get("PINECONE_NAMESPACE", "knowledge")
 AI_REPLY_FALLBACK_SECONDS = 35
 # Harness pipeline: start the next model in parallel when the current one is this slow.
 AI_HEDGE_AFTER_SECONDS = float(os.environ.get("AI_HEDGE_AFTER_SECONDS", "6"))

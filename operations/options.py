@@ -44,6 +44,9 @@ STAFF_LINK = "staff_line_link"
 STAFF_NOTIFY = "staff_notify"
 ORDER_REMIND = "order_remind_days"
 CHAT_ANSWERS = "chat_answers"
+FREE_CHAT_DAILY = "free_chat_daily"
+FREE_CHAT_DOCS = "free_chat_docs"
+FREE_CHAT_TUNING = "free_chat_tuning"
 CHAT_FOLLOWUP = "chat_followup"
 CHAT_TYPED = "chat_typed_steps"
 CHAT_MODE = "chat_mode"
@@ -298,8 +301,44 @@ OPTIONS = {
                 "คำสำคัญก่อน ไม่ตรงให้ AI เขียนคำตอบจากคลังและเรื่องของผู้แจ้งเอง",
                 "ระบบตรวจก่อนส่ง (ห้ามรับปาก ห้ามตัวเลขที่ไม่มีในข้อมูล ห้ามเรื่องของคนอื่น) ไม่ผ่านใช้ข้อความที่รับรองแทน",
             ),
+            (
+                "agent",
+                "คำสำคัญก่อน ไม่ตรงให้ AI ตอบอิสระด้วยเครื่องมือและความรู้ทั่วไป (ADR 0037)",
+                "AI ค้นเรื่องของผู้ถาม ผังหน่วยงาน เมนู และเอกสารความรู้ ไม่ให้ข้อมูลรายบุคคล "
+                "ระบบตรวจข้อมูลส่วนบุคคลก่อนส่ง ไม่ผ่านใช้ข้อความที่รับรองแทน",
+            ),
         ),
-        "AI ใช้ได้เมื่อมีรุ่น AI งานตอบแชตที่ผ่านการประเมินและเปิดใช้แล้ว ข้อความเรื่องการใช้ไฟฟ้าไม่ถึง AI",
+        "AI ใช้ได้เมื่อมีรุ่น AI งานตอบแชตที่ผ่านการประเมินและเปิดใช้แล้ว ระดับตอบอิสระต้องมีผลประเมินของงานนี้ด้วย "
+        "ข้อความเรื่องการใช้ไฟฟ้าไม่ถึง AI",
+    ),
+    FREE_CHAT_DAILY: Option(
+        "จำนวนคำถามที่ AI ตอบอิสระต่อบัญชี LINE ต่อวัน",
+        (("30", "30 คำถาม", ""), ("10", "10 คำถาม", ""), ("50", "50 คำถาม", "")),
+        "เกินแล้วตอบจากคลังคำตอบด้วยคำสำคัญอย่างเดียว กันโควตา AI หมดจนงานอ่านร่างใช้ไม่ได้",
+    ),
+    FREE_CHAT_DOCS: Option(
+        "การค้นเอกสารความรู้บน Pinecone เมื่อ AI ตอบอิสระ",
+        (
+            ("off", "ปิด: ไม่ส่งอะไรไป Pinecone", ""),
+            (
+                "on",
+                "เปิด: ส่งเอกสารที่รับรองแล้ว และคำถามที่ปิดข้อมูลส่วนบุคคลแล้ว",
+                "ต้องตั้งคีย์และ host ของ index ไว้ในค่าระบบก่อน ใช้แผน Starter ที่ไม่ผูกบัตร",
+            ),
+        ),
+        "ADR 0037 Q21: ปิดไว้จนกว่าจะมีเอกสารจริงและบัญชี Pinecone",
+    ),
+    FREE_CHAT_TUNING: Option(
+        "ให้ AI ปรับคำแนะนำเฉพาะเรื่องเองทุกคืน",
+        (
+            (
+                "on",
+                "เปิด: AI ปรับจากคำถามที่ผู้ใช้ 3 คนขึ้นไปถามภายใน 7 วัน",
+                "ทุกฉบับต้องผ่านกฎและชุดตรวจก่อนใช้ และย้อนกลับได้ในหน้าคำแนะนำ",
+            ),
+            ("off", "ปิด: แอดมินแก้เองเท่านั้น", ""),
+        ),
+        "ADR 0037 Q23: แกนของ prompt ไม่ถูกแตะ AI ปรับได้เฉพาะคำแนะนำเฉพาะเรื่อง",
     ),
     CHAT_FOLLOWUP: Option(
         "คำถามต่อหลัง AI เติมร่างจากข้อความ",
@@ -631,33 +670,46 @@ OPTIONS = {
 
 
 # ADR 0028: the step a requester sees in LINE for each open status; closed, rejected and
-# cancelled are fixed (เสร็จแล้ว, and no step bar for the other two).
+# cancelled are fixed (เสร็จสิ้น, and no step bar for the other two).
 STEP_PREFIX = "requester_step:"
 STEP_CHOICES = {
     "received": ("รับเรื่องแล้ว", "แถบขั้น ●○○○"),
     "working": ("กำลังดำเนินการ", "แถบขั้น ●●○○"),
     "need_you": ("รอข้อมูลจากคุณ", "แถบขั้น ●●●○"),
-    "done_confirm": ("เสร็จแล้ว รอคุณยืนยัน", "แถบขั้น ●●●● พร้อมปุ่มยืนยัน"),
+    "done_confirm": ("เสร็จสิ้น รอคุณยืนยัน", "แถบขั้น ●●●● พร้อมปุ่มยืนยัน"),
 }
 STEP_DEFAULTS = (
-    ("submitted", "รอคัดกรอง", "received"),
-    ("triage", "กำลังคัดกรอง", "received"),
-    ("awaiting_approval", "รอกองรับเรื่อง", "received"),
-    ("awaiting_execution", "รอดำเนินการ", "received"),
-    ("in_progress", "กำลังดำเนินการ", "working"),
-    ("on_hold", "พักเรื่อง", "working"),
-    ("awaiting_info", "รอข้อมูลเพิ่ม", "need_you"),
-    ("awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย) ยืนยัน", "done_confirm"),
+    ("submitted", "รอคัดกรอง", "received", "ADR 0028"),
+    ("triage", "กำลังคัดกรอง", "received", "ADR 0028"),
+    ("awaiting_approval", "รอกองรับเรื่อง", "working", "30 ต.ค. 2569"),
+    ("awaiting_execution", "รอดำเนินการ", "working", "30 ต.ค. 2569"),
+    ("in_progress", "กำลังดำเนินการ", "working", "ADR 0028"),
+    ("on_hold", "พักเรื่อง", "working", "ADR 0028"),
+    ("awaiting_info", "รอข้อมูลเพิ่ม", "need_you", "ADR 0028"),
+    ("awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย) ยืนยัน", "done_confirm", "ADR 0028"),
 )
-for _status, _label, _default in STEP_DEFAULTS:
+for _status, _label, _default, _agreed in STEP_DEFAULTS:
     OPTIONS[STEP_PREFIX + _status] = Option(
         f"ขั้นที่ผู้แจ้งเห็นใน LINE: สถานะ{_label}",
         (
-            (_default, STEP_CHOICES[_default][0], "ค่าที่ตกลงไว้ (ADR 0028)"),
+            (_default, STEP_CHOICES[_default][0], f"ค่าที่ตกลงไว้ ({_agreed})"),
             *((v, title, bar) for v, (title, bar) in STEP_CHOICES.items() if v != _default),
         ),
         "ผู้แจ้งเห็นขั้นนี้ใน เรื่องของฉัน พร้อมสถานะจริงเป็นบรรทัดรอง",
     )
+
+# 30 ต.ค. 2569: a case waiting for its division reads กำลังดำเนินการ to the LINE user; staff
+# pages keep รอกองรับเรื่อง and its queue. รอดำเนินการ is then at the same step, so the bar
+# never goes back once the division takes the case.
+LINE_AWAITING = "line_awaiting_approval"
+OPTIONS[LINE_AWAITING] = Option(
+    "สถานะที่ผู้ใช้ LINE เห็นเมื่อเรื่องรอกองรับเรื่อง",
+    (
+        ("working", "กำลังดำเนินการ", "ค่าที่ตกลงไว้ (30 ต.ค. 2569)"),
+        ("real", "รอกองรับเรื่อง", "คำเดียวกับหน้าเว็บเจ้าหน้าที่"),
+    ),
+    "ใช้ในข้อความหลังส่งเรื่อง ใน เรื่องของฉัน และในผลค้นเรื่อง หน้าเว็บเจ้าหน้าที่ยังเห็นรอกองรับเรื่อง",
+)
 
 
 def get(key):
@@ -717,8 +769,9 @@ def change(actor, key, value, reason):
 def rows():
     """(key, option, current value, stored row or None) for the settings page."""
     stored = {row.key: row for row in SystemOption.objects.select_related("updated_by")}
-    # Historical settings remain readable for migrations, but cannot override ADR 0019.
-    retired = {REGISTRATION_CHECK, EMAIL_TYPED}
+    # Historical settings remain readable for migrations, but cannot override ADR 0019; LINE
+    # registration asks no location since 31 ต.ค. 2569, whatever the stored value.
+    retired = {REGISTRATION_CHECK, EMAIL_TYPED, REGISTRATION_LOCATION}
     return [
         (key, option, get(key), stored.get(key))
         for key, option in OPTIONS.items()

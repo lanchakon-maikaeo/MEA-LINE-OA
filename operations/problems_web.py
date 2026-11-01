@@ -12,15 +12,21 @@ and when, with a CSV download. Their answers:
 ADR 0030 (28 Oct 2569): the page is a tab after คิวงาน for admins. Its first sub-tab holds the
 cases nobody picked a division for (ปัญหาการใช้งานหรืออื่นๆ); admins tick cases, or every case
 the filters match, and send them to one division with one reason after confirming the count.
+
+ADR 0039 (31 Oct 2569): a Supervisor ระดับฝ่าย opens the page and sends as admins do; a
+ผู้ดูข้อมูลระดับฝ่าย only reads it. The CSV carries every row the filters match and what the
+page shows, with the full text; an anonymous reporter is still only their รหัสแทนตัว.
 """
 
 import csv
 import io
 import uuid
 from datetime import date
+from functools import wraps
 
-from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
@@ -30,10 +36,9 @@ from django.utils import timezone
 from django.utils.http import urlencode
 from django.views.decorators.http import require_POST, require_safe
 
-from operations import identity, reports, services, workflow
+from operations import identity, problem_pick, reports, services, workflow
 from operations.contracts import Actor, CommandFailed
 from operations.models import Case, Division, RoleGrant
-from operations.views import admin_required
 
 PER_PAGE = 50
 NO_TOPIC = "none"
@@ -44,6 +49,8 @@ RECORDED_LATER = 60  # seconds between the real report time and the record worth
 HEADER = (
     "เลขเรื่อง",
     "หัวข้อ",
+    "ข้อความที่แจ้ง",
+    "ผู้แจ้ง",
     "ประเภทผู้แจ้ง",
     "หน่วยงาน (เขต/ฝ่าย)",
     "ช่องทาง",
@@ -55,6 +62,27 @@ HEADER = (
     "สถานะ",
     "วันที่ปิด",
 )
+
+
+def _department_required(may_send=False):
+    """ADR 0039: ฝ่าย reads the page; admins and Supervisor ระดับฝ่าย also send."""
+
+    def decorate(view):
+        @login_required
+        @wraps(view)
+        def wrapper(request, *args, **kwargs):
+            scope = identity.staff_scope(request.user)
+            if not (_may_send(scope) if may_send else scope.sees_department):
+                raise PermissionDenied
+            return view(request, *args, **kwargs)
+
+        return wrapper
+
+    return decorate
+
+
+def _may_send(scope):
+    return scope.is_admin or scope.is_support or scope.is_department_supervisor
 
 
 def _chosen(query):
@@ -85,8 +113,9 @@ def _waiting():
 
 
 def _cases(chosen, tab="all"):
-    """Problem and suggestion cases matching the filters, newest real report time first."""
+    """Cases from the ปัญหา/ข้อเสนอแนะ tile matching the filters, newest real report first."""
     cases = (_waiting() if tab == "waiting" else Case.objects).filter(kind=Case.Kind.PROBLEM)
+    cases = cases.filter(problem_pick.from_tile())  # 31 Oct 2569 Q12: the tile's cases only
     cases = cases.annotate(reported=Coalesce("reported_at", "submitted_at"))
     if chosen.get("topic") == NO_TOPIC:
         cases = cases.filter(topic="")
@@ -128,20 +157,22 @@ def _staff_name(user):
     return (profile.display_name if profile else "") or user.username
 
 
-def _row(case):
-    requester = case.requester
-    link = ""
+def _reporter(requester):
     if requester.is_anonymous:
-        reporter = f"ไม่ระบุตัวตน #{requester.alias}" if requester.alias else "ไม่ระบุตัวตน"
-    elif requester.is_internal:
-        reporter = f"{requester.display_name} · ผู้แจ้งภายใน"
-    else:
-        reporter = f"{requester.display_name} · {requester.district.name}"
-        link = reverse("admin-requester-detail", args=[requester.pk])
+        return f"ไม่ระบุตัวตน #{requester.alias}" if requester.alias else "ไม่ระบุตัวตน"
+    if requester.is_internal:
+        return f"{requester.display_name} · ผู้แจ้งภายใน"
+    return f"{requester.display_name} · {requester.district.name}"
+
+
+def _row(case, admin=True):
+    requester = case.requester
+    named = not (requester.is_anonymous or requester.is_internal)
+    link = reverse("admin-requester-detail", args=[requester.pk]) if admin and named else ""
     return {
         "case": case,
         "topic": _topic(case),
-        "reporter": reporter,
+        "reporter": _reporter(requester),
         "reporter_link": link,
         "on_behalf": _staff_name(case.submitted_by) if case.submitted_by_id else "",
         "reported": case.reported_at or case.submitted_at,
@@ -178,6 +209,7 @@ def _tab(query):
 
 
 def _page(request, query, pending=None):
+    scope = identity.staff_scope(request.user)
     chosen, tab = _chosen(query), _tab(query)
     cases = _cases(chosen, tab)
     page = Paginator(cases, PER_PAGE).get_page(query.get("page"))
@@ -188,7 +220,8 @@ def _page(request, query, pending=None):
         "operations/admin_problems.html",
         {
             "page": page,
-            "rows": [_row(case) for case in page],
+            "rows": [_row(case, scope.is_admin) for case in page],
+            "may_send": _may_send(scope),
             "chosen": chosen,
             "filters": _filters(),
             "query": filters,
@@ -206,7 +239,7 @@ def _page(request, query, pending=None):
     )
 
 
-@admin_required
+@_department_required()
 @require_safe
 def problems(request):
     return _page(request, request.GET)
@@ -223,7 +256,7 @@ def _to_send(post):
     return list(cases.select_related("owner_division")[: SEND_MAX + 1])
 
 
-@admin_required
+@_department_required(may_send=True)
 @require_POST
 def problems_send(request):
     """ส่งให้กอง for many cases: the first post shows the count to confirm, the second sends
@@ -294,17 +327,15 @@ def _staff_divisions(users):
     return {user: " ".join(sorted(codes)) for user, codes in found.items()}
 
 
-@admin_required
+@_department_required()
 @require_safe
 def problems_csv(request):
-    """The list as CSV without personal data (Q4, Q6, Q7): no name, code, typed text,
-    location or staff name. Formula-safe, with a BOM for Excel, and audited."""
+    """Every row the filters match, with what the page shows (ADR 0039, replacing the 14 Oct
+    Q4, Q6, Q7 list without personal data); an anonymous reporter stays a รหัสแทนตัว.
+    Formula-safe, with a BOM for Excel, and audited."""
     now = timezone.now()
     chosen = _chosen(request.GET)
-    limit = settings.EXPORT_MAX_ROWS
-    cases = list(_cases(chosen)[: limit + 1])
-    truncated = len(cases) > limit
-    cases = cases[:limit]
+    cases = list(_cases(chosen))
     divisions = _staff_divisions({c.submitted_by_id for c in cases if c.submitted_by_id})
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -317,10 +348,12 @@ def problems_csv(request):
                 for value in (
                     case.number,
                     _topic(case),
+                    case.description,
+                    _reporter(case.requester),
                     _reporter_kind(case.requester),
                     case.district.name,
                     case.get_channel_display(),
-                    "ใช่" if on_behalf else "ไม่ใช่",
+                    _staff_name(case.submitted_by) if on_behalf else "",
                     divisions.get(case.submitted_by_id, "") if on_behalf else "",
                     reports._when(case.reported_at or case.submitted_at),
                     reports._when(case.submitted_at),
@@ -330,15 +363,8 @@ def problems_csv(request):
                 )
             ]
         )
-    if truncated:
-        writer.writerow([f"ตัดที่ {limit:,} แถว ใช้ตัวกรองให้แคบลงเพื่อส่งออกส่วนที่เหลือ"])
     identity.audit(
-        request.user,
-        "cases.problems_exported",
-        request.user,
-        filters=chosen,
-        rows=len(cases),
-        truncated=truncated,
+        request.user, "cases.problems_exported", request.user, filters=chosen, rows=len(cases)
     )
     stamp = timezone.localtime(now).strftime("%Y%m%d-%H%M")
     response = HttpResponse("﻿" + buffer.getvalue(), content_type="text/csv; charset=utf-8")

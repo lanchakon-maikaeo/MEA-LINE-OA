@@ -51,8 +51,12 @@ def clamd_scan(data, chunk=64 * 1024):
             (settings.CLAMAV_HOST, settings.CLAMAV_PORT), timeout=30
         ) as conn:
             conn.sendall(b"zINSTREAM\0")
-            for start in range(0, len(data), chunk):
-                part = data[start : start + chunk]
+            parts = (
+                iter(lambda: data.read(chunk), b"")
+                if hasattr(data, "read")
+                else (data[start : start + chunk] for start in range(0, len(data), chunk))
+            )
+            for part in parts:
                 conn.sendall(struct.pack(">I", len(part)) + part)
             conn.sendall(struct.pack(">I", 0))
             response = b""

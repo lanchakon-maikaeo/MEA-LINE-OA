@@ -26,6 +26,12 @@ class Command(BaseCommand):
             raise CommandError("Unknown or inactive user.")
         raw = sys.stdin.buffer.read() if file == "-" else Path(file).read_bytes()
         try:
+            if ai_evidence.is_release(raw):
+                label = ai_evidence.import_release(actor, raw, reason)
+                self.stdout.write(
+                    f"Release {label} imported; next: connection test, then a switch by the owner."
+                )
+                return
             version, warning = ai_evidence.import_evidence(actor, raw, reason)
         except (PermissionDenied, ValidationError) as exc:
             raise CommandError("; ".join(getattr(exc, "messages", [str(exc)]))) from exc

@@ -26,6 +26,7 @@ from operations import (
     approvals,
     casepage,
     charts,
+    employees,
     identity,
     options,
     policy,
@@ -45,6 +46,7 @@ from operations import (
 )
 from operations.contracts import Actor, CommandFailed, ErrorCode
 from operations.models import (
+    VIEWER_ROLES,
     AuthorityGrant,
     Case,
     District,
@@ -56,7 +58,7 @@ from operations.models import (
 )
 
 ADMIN_URLS = ("admin-",)
-REFERENCE_URLS = {"pii", "routing-words", "duties"}
+REFERENCE_URLS = {"pii", "routing-words", "duties", "knowledge"}
 ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
 ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
 # ADR 0030 Q12: ปัญหาและข้อเสนอแนะ is a tab of its own after คิวงาน, for admins only.
@@ -102,14 +104,14 @@ def navigation(request):
     # ทุกกอง it kept showing the division opened before).
     code = match.kwargs.get("code") if match else None
     remembered = request.session.get("division", "")
-    all_queue = scope.is_admin and (
+    all_queue = scope.sees_department and (
         name in ALL_QUEUE_URLS or (not code and remembered == ALL_QUEUE)
     )
     current = "" if all_queue or remembered == ALL_QUEUE else remembered
     return {
         "nav": {
             "scope": scope,
-            "divisions": queues.own_divisions(scope) if scope.has_any_access else [],
+            "divisions": queues.own_divisions(scope) if scope.may_read else [],
             "section": section,
             "url_name": name,
             "current": "" if name in ALL_QUEUE_URLS else (code or current),
@@ -123,7 +125,7 @@ def navigation(request):
             # ADR 0033: a ผู้ดูแลชีท who is not an admin reaches the sheets from the top menu.
             "sheets": not scope.is_admin and sheet_access.may_open(user),
             "admin": admin_menu,
-            "admin_waiting": _admin_waiting() if scope.is_admin else 0,
+            "admin_waiting": _admin_waiting() if scope.sees_department else 0,
         }
     }
 
@@ -142,7 +144,7 @@ def _scope(request):
 def _division_or_404(scope, code):
     division = Division.objects.filter(code=code, is_active=True).first()
     # Unknown and out-of-scope divisions look the same, so URLs reveal nothing.
-    if division is None or not identity.can_access_division(scope, division.pk):
+    if division is None or not identity.may_read_division(scope, division.pk):
         raise Http404
     return division
 
@@ -156,7 +158,7 @@ def _is_htmx(request):
 def start(request):
     """Where a sign-in lands (round 2 Q9): one division goes straight to its queue."""
     scope = _scope(request)
-    divisions = queues.own_divisions(scope) if scope.has_any_access else []
+    divisions = queues.own_divisions(scope) if scope.may_read else []
     if not scope.is_admin and len(divisions) == 1:
         return redirect("division-detail", code=divisions[0].code)
     return redirect("console")
@@ -169,7 +171,7 @@ def home(request):
     attention now, four headline figures, the daily trend, each division's work in one table,
     and where the open cases sit. Every figure still opens the cases behind it."""
     scope = _scope(request)
-    if not scope.has_any_access:
+    if not scope.may_read:
         return render(request, "operations/console.html", {"scope": scope, "cards": []})
     context = _report_context(request)
     link = _report_link(context["chosen"], context["days"])
@@ -302,7 +304,7 @@ def _queue(request, division, admin_all=False):
         ],
         "districts": District.objects.order_by("name"),
         "sections": list(division.sections.filter(is_active=True)) if division else [],
-        "may_order": division.pk in scope.overseen if division else bool(scope.overseen),
+        "may_order": scope.is_department_supervisor,
     }
     context["registry_count"] = _registry_count(request.user, division, admin_all)
     if _is_htmx(request):
@@ -317,6 +319,7 @@ def _members(division):
     the organisation splits the division's work."""
     grants = (
         RoleGrant.objects.filter(division=division, revoked_at__isnull=True, user__is_active=True)
+        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: viewers are not members
         .select_related("user__staff_profile")
         .order_by("user__username", "role")
     )
@@ -368,9 +371,9 @@ def division_queue(request, code):
 @require_safe
 def all_queue(request):
     """The admin's every-division view (read-only for divisions they are not in; ผู้ช่วยเหลือระบบ
-    acts in all of them)."""
+    acts in all of them). ADR 0039: ฝ่าย has it too."""
     scope = _scope(request)
-    if not (scope.is_admin or scope.is_support):
+    if not scope.sees_department:
         raise PermissionDenied
     return _queue(request, None, admin_all=True)
 
@@ -406,7 +409,7 @@ def tour_where(request):
     kind = request.GET.get("kind", "")
     if kind not in Case.Kind.values:
         kind = ""
-    divisions = queues.own_divisions(scope) if scope.has_any_access else []
+    divisions = queues.own_divisions(scope) if scope.may_read else []
     current = request.session.get("division", "")
     divisions.sort(key=lambda d: d.code != current)
     visible = queues.visible(request.user)
@@ -448,7 +451,7 @@ def _visible_case(request, number):
 @require_safe
 def case_detail(request, number):
     scope = _scope(request)
-    if not scope.has_any_access:
+    if not scope.may_read:
         raise Http404
     case = _visible_case(request, number)
     if scope.is_admin and case.owner_division_id not in scope.division_roles:
@@ -477,6 +480,9 @@ def case_detail(request, number):
             "hints": web_actions.hints(st, offers),
             "can_upload": uploads.may_upload(st),
             "panel": warehouse_web.case_panel(request.user, case),
+            # Zero trust (31 ต.ค. 2569 Q2): a typed name is not checked against the roster.
+            "unverified": not (case.requester.is_anonymous or case.requester.is_internal)
+            and employees.identity_state(case.requester) != "verified",
         },
     )
 
@@ -607,7 +613,7 @@ def case_action(request, number, action):
 @require_safe
 def case_revision(request, number):
     """Round 1 Q15: polled every 30 s; a banner (never a reload) when the case changed."""
-    if not _scope(request).has_any_access:
+    if not _scope(request).may_read:
         raise Http404
     case = _visible_case(request, number)
     try:
@@ -623,7 +629,7 @@ def case_revision(request, number):
 @require_safe
 def case_search(request):
     scope = _scope(request)
-    if not scope.has_any_access:
+    if not scope.may_read:
         raise Http404
     query = (request.GET.get("q") or "").strip().upper()[:20]
     rows = []
@@ -787,7 +793,7 @@ def division_export(request, code):
 @login_required
 @require_safe
 def all_export(request):
-    if not _scope(request).is_admin:
+    if not _scope(request).sees_department:
         raise PermissionDenied
     return _export(request, None, admin_all=True)
 
@@ -795,14 +801,14 @@ def all_export(request):
 def _report_scope(request):
     """(scope, divisions, chosen division or None for every division, days) of a report page."""
     scope = _scope(request)
-    if not scope.has_any_access:
+    if not scope.may_read:
         raise Http404
     divisions = queues.own_divisions(scope)
     code = request.GET.get("division", "")
     chosen = next((d for d in divisions if d.code == code), None)
     if code and chosen is None:
         raise Http404
-    if chosen is None and not scope.is_admin and divisions:
+    if chosen is None and not scope.sees_department and divisions:
         chosen = divisions[0]
     return scope, divisions, chosen, reports.period(request.GET.get("days"))
 

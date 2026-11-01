@@ -14,8 +14,12 @@ from operations.tests.test_m10_web import WebTestCase
 
 
 class MixedQueueTests(WebTestCase):
+    def setUp(self):
+        super().setUp()
+        self.director = make_staff("director", (Role.DEPARTMENT_SUPERVISOR, None))
+
     def order(self, **extra):
-        return work_orders.create(self.supervisor, "ตรวจมิเตอร์", self.mtr, **extra)
+        return work_orders.create(self.director, "ตรวจมิเตอร์", self.mtr, **extra)
 
     def numbers(self, page):
         return [(row.order or row.case).number for row in page.context["rows"]]
@@ -45,8 +49,7 @@ class MixedQueueTests(WebTestCase):
         line.refresh_from_db()
         web = self.order()
         other_division = Division.objects.get(code="SIM-TRF")
-        other_head = make_staff("trfhead", (Role.SUPERVISOR, other_division.code))
-        other = work_orders.create(other_head, "ตรวจหม้อแปลง", other_division)
+        other = work_orders.create(self.director, "ตรวจหม้อแปลง", other_division)
         work_orders.act(self.meter, line, "start")
         for user in (self.meter, self.supervisor, self.admin):
             with self.subTest(user=user.username):
@@ -55,8 +58,8 @@ class MixedQueueTests(WebTestCase):
                 self.assertEqual(set(self.numbers(page)), {case.number, line.number, web.number})
                 self.assertEqual(page.context["pager"]["total"], 3)
                 self.assertEqual(dict((key, n) for key, _, n in page.context["tabs"])["host"], 3)
-                self.assertContains(page, "สั่งโดย Supervisor · ผ่าน LINE")
-                self.assertContains(page, "สั่งโดย Supervisor · ผ่าน เว็บ")
+                self.assertContains(page, "สั่งโดย Director · ผ่าน LINE")
+                self.assertContains(page, "สั่งโดย Director · ผ่าน เว็บ")
                 for arrived in (case.submitted_at, line.created_at, web.created_at):
                     self.assertContains(page, f"เข้า {thai_short(arrived)} น.")
                 self.assertContains(page, reverse("order-detail", args=[line.number]))
@@ -173,8 +176,8 @@ class MixedQueueTests(WebTestCase):
             },
         )
         self.assertContains(client.get(reverse("queue-all"), {"overdue": 1}), late.number)
-        self.supervisor.staff_profile.display_name = "=HYPERLINK(1)"
-        self.supervisor.staff_profile.save()
+        self.director.staff_profile.display_name = "=HYPERLINK(1)"
+        self.director.staff_profile.save()
         exported = client.get(reverse("queue-all-export")).content.decode("utf-8-sig")
         rows = list(csv.DictReader(io.StringIO(exported)))
         row = next(r for r in rows if r["เลขเรื่อง"] == line.number)

@@ -71,6 +71,7 @@
     if (/SMG|AMR/.test(label)) return "system";
     if (/ใช้ไฟฟ้า/.test(label)) return "usage";
     if (/ปัญหา|ข้อเสนอ/.test(label)) return "chat";
+    if (/Broadcast/.test(label)) return "broadcast";
     if (/งาน|สั่ง/.test(label)) return "task";
     if (/ติดตาม|เรื่องของฉัน/.test(label)) return "track";
     return "grid";
@@ -102,7 +103,10 @@
     ctx.strokeStyle = accent;
     ctx.shadowColor = accent;
     ctx.shadowBlur = 6;
-    if (type === "meter") {
+    if (type === "broadcast") {
+      strokePath(ctx, "M -55 -28 H -18 L 55 -73 V 73 L -18 28 H -55 Z M -18 -28 V 28 M -46 28 L -30 83 H -5 L -20 29");
+      strokePath(ctx, "M 77 -38 Q 112 0 77 38 M 97 -60 Q 151 0 97 60");
+    } else if (type === "meter") {
       drawMeter(ctx);
     } else if (type === "transformer") {
       strokePath(ctx, "M -85 -4 H 85 V 70 H -85 Z M -85 8 H -108 V 58 H -85");
@@ -217,7 +221,12 @@
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = "700 90px MenuThai, sans-serif";
-    ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h * 0.415);
+    var textX = s.x + s.w / 2;
+    if (s.label === "เมนูเพิ่มเติม") {
+      drawIcon(ctx, "grid", textX - 300, s.y + s.h * 0.415, 0.5, INK);
+      textX += 70;
+    }
+    ctx.fillText(s.label, textX, s.y + s.h * 0.415);
   }
 
   function drawTab(ctx, s) {
@@ -241,13 +250,14 @@
     var ctx = canvas.getContext("2d");
     ctx.fillStyle = "#06172a";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    var hasBar = shapes.some(function (s) { return s.place === "bar"; });
+    var columns = shapes.filter(function (s) { return s.place === "tile"; }).length === 2 ? 2 : 3;
+    if (!shapes.some(function (s) { return s.place === "bar"; })) columns = 2;
     var tileIndex = 0, barIndex = 0;
     shapes.forEach(function (s) {
       if (!s.label) return;
       if (s.place === "tab") drawTab(ctx, s);
       else if (s.place === "bar") drawBar(ctx, s, artwork, barIndex++);
-      else drawTile(ctx, s, artwork, tileIndex++, hasBar ? 3 : 2);
+      else drawTile(ctx, s, artwork, tileIndex++, columns);
     });
     canvas.dataset.menuRendered = "true";
   }

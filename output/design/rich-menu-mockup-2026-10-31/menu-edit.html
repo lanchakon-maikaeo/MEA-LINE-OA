@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>แก้ชื่อปุ่มเมนู</title>
+<style>
+  * { margin: 0; }
+  body { width: 2500px; height: 1686px; overflow: hidden; background: #001028; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="2500" height="1686"></canvas>
+<script>
+// Draft only: redraws labels on the released menu pictures. Open as menu-edit.html#<page>.
+const page = location.hash.slice(1) || "staff-work";
+const TH = '"Thonburi", sans-serif';
+const LATIN = '"Helvetica Neue", "Helvetica", sans-serif';
+// The work tab's old label box, per menu with 2 tabs (staff) or 3 tabs (supervisor).
+const WORK_TAB = page.startsWith("sup") ? { x0: 1093, x1: 1399 } : { x0: 1719, x1: 2025 };
+const MEGAPHONE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="210" height="210" fill="none" stroke="#E8B48C" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M10 26h8l22-12v36L18 38h-8a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3z"/><path d="M18 26v12"/>
+  <path d="M14 38l4 14h6l-3-14"/><path d="M47 24c3 2 4.5 5 4.5 8s-1.5 6-4.5 8"/><path d="M52 17c5 4 8 9.5 8 15s-3 11-8 15"/></svg>`;
+
+const ctx = document.getElementById("c").getContext("2d");
+
+function load(src) {
+  return new Promise((ok) => { const i = new Image(); i.onload = () => ok(i); i.src = src; });
+}
+
+// A font size whose rendering of `sample` is `width` px wide, so new labels match the old ones.
+function fit(sample, width, family) {
+  ctx.font = `bold 100px ${family}`;
+  return Math.round(100 * width / ctx.measureText(sample).width);
+}
+
+function label(text, cx, baseline, size, family, glow) {
+  ctx.save();
+  ctx.font = `bold ${size}px ${family}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#fff";
+  if (glow) { ctx.shadowColor = "rgba(120,170,255,.35)"; ctx.shadowBlur = 18; }
+  ctx.fillText(text, cx, baseline);
+  ctx.restore();
+}
+
+// Tile interiors are a dark starfield: cover with the tile colour and soft edges.
+function tilePatch(x, y, w, h) {
+  ctx.save();
+  ctx.filter = "blur(14px)";
+  ctx.fillStyle = "rgb(0,16,40)";
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
+(async () => {
+  const img = await load(page + ".jpg");
+  ctx.drawImage(img, 0, 0);
+
+  // Tab: the tab is a vertical gradient, so stretch one clean column over the old text.
+  const tabPad = 40, col = WORK_TAB.x0 - 60;
+  ctx.drawImage(img, col, 40, 1, 150, WORK_TAB.x0 - tabPad, 40, WORK_TAB.x1 - WORK_TAB.x0 + 2 * tabPad, 150);
+  // The released pictures use a looped Thai face, so match the old label's width in Thonburi.
+  const tabSize = fit("งานของกอง", WORK_TAB.x1 - WORK_TAB.x0, TH);
+  label("งานของกอง/ฝ่าย", (WORK_TAB.x0 + WORK_TAB.x1) / 2, 134, tabSize, TH, false);
+
+  if (page.endsWith("-work")) {
+    const tileSize = fit("งานที่มอบให้ฉัน", 2129 - 1615, TH);
+    // Top right tile: งานที่มอบให้ฉัน → งานสั่งที่ได้รับ
+    tilePatch(1560, 600, 630, 140);
+    label("งานสั่งที่ได้รับ", 1872, 717, tileSize, TH, true);
+    // Bottom left tile: new icon and Broadcast
+    tilePatch(345, 1030, 560, 455);
+    ctx.drawImage(await load("data:image/svg+xml;charset=utf-8," + encodeURIComponent(MEGAPHONE)), 520, 1062);
+    label("Broadcast", 621, 1445, Math.round(tileSize * 0.95), LATIN, true);
+  }
+  document.title = "done";
+})();
+</script>
+</body>
+</html>

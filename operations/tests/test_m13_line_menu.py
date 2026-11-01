@@ -169,6 +169,28 @@ class StaffMenuTests(MenuTestCase):
             return {"richMenuId": "menu-of-" + path.rsplit("/", 1)[1]}
         return {}
 
+    @override_settings(LINE_LIFF_ID="2012304618-AbCd1234")
+    def test_supervisor_work_layout_and_direct_mini_app_link(self):
+        menu = line_menu.rich_menu("sup-work")
+        self.assertEqual(len(menu["areas"]), 5)
+        left, right, extra = menu["areas"][2:]
+        self.assertEqual(left["bounds"], {"x": 0, "y": 230, "width": 1250, "height": 1170})
+        self.assertEqual(
+            right["action"], {"type": "uri", "uri": "https://miniapp.line.me/2012304618-AbCd1234"}
+        )
+        self.assertEqual(extra["bounds"], {"x": 0, "y": 1400, "width": 2500, "height": 286})
+        self.assertEqual(extra["action"]["data"], "m=roles")
+        self.assertEqual(line_menu.drawing()["pages"]["sup-work"][1]["label"], "งานของกอง/ฝ่าย")
+
+    @override_settings(LINE_LIFF_ID="", STAFF_WEB_BASE_URL="https://ded.example.test")
+    def test_broadcast_link_falls_back_to_web_when_mini_is_not_configured(self):
+        self.assertEqual(line_menu.broadcast_url(), "https://ded.example.test/broadcasts/")
+        with override_settings(STAFF_WEB_BASE_URL="http://localhost:8000"):
+            self.assertEqual(line_menu.broadcast_url(), "")
+            self.assertEqual(
+                line_menu.rich_menu("sup-work")["areas"][3]["action"]["data"], "m=broadcast"
+            )
+
     def test_staff_pages_switch_tabs_and_the_user_menu_has_none(self):
         from operations import line_menu_catalog
 
@@ -177,7 +199,7 @@ class StaffMenuTests(MenuTestCase):
         switches = [a["action"] for a in menu["areas"] if a["action"]["type"] == "richmenuswitch"]
         self.assertEqual(
             [s["richMenuAliasId"] for s in switches],
-            ["faoj-sup-report", "faoj-sup-work", "faoj-sup-order"],
+            ["faoj-sup-report", "faoj-sup-work"],
         )
         tiles = [a for a in menu["areas"] if a["action"]["type"] == "postback"]
         self.assertEqual(len(tiles), 4)
@@ -225,6 +247,13 @@ class StaffMenuTests(MenuTestCase):
                             "เรื่องของฉัน",
                             "ติดตามเลขเรื่อง",
                         ],
+                    )
+                elif page == "sup-work":
+                    self.assertEqual(nav[0]["data"], "m=staff_inbox")
+                    self.assertEqual(nav[-1]["data"], "m=roles")
+                    self.assertEqual(
+                        [box["label"] for box in drawing[page][2:]],
+                        ["งานสั่งที่ได้รับ", "Broadcast", "เมนูเพิ่มเติม"],
                     )
                 else:
                     self.assertEqual(len(nav), 4)

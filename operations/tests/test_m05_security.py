@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.test import Client, override_settings
+from django.test import override_settings
 from django.utils import timezone
 
 from operations import ai, ai_chat, ai_harness
@@ -533,22 +533,10 @@ class ScreeningAndFieldTests(support.AITestCase):
         self.assertEqual(self.llm.screen_calls[0]["body"]["temperature"], 0)
         with self.assertRaises(ValidationError):
             ai.create_version(self.dev, self.profiles[:1], screen_profile=self.profiles[2])
-        client = Client()
-        client.force_login(self.dev)
-        client.post(
-            "/console/admin/ai/version/",
-            {
-                "primary": self.profiles[0].pk,
-                "few_shot": 0,
-                "pipeline": "harness",
-                "screen_profile": self.profiles[1].pk,
-            },
+        made = ai.create_version(
+            self.dev, self.profiles[:1], pipeline="harness", screen_profile=self.profiles[1]
         )
-        made = AIConfigVersion.objects.order_by("-number").first()
         self.assertEqual(made.screen_profile, self.profiles[1])
-        self.assertIn(
-            "คัดกรองข้อความด้วย: fallback-a", client.get("/console/admin/ai/").content.decode()
-        )
 
     def test_a_lone_message_is_never_silenced_by_a_software_word(self):
         version = self.harness()

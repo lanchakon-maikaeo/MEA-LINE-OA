@@ -122,7 +122,9 @@ def system_only(ctx, case, payload, reason, target):
 
 
 def may_approve(user, case):
-    return policy.has_authority(user, A.WITHDRAWAL_APPROVAL, case.owner_division_id)
+    return (
+        whole(case) and identity.staff_scope(user).is_department_supervisor
+    ) or policy.has_authority(user, A.WITHDRAWAL_APPROVAL, case.owner_division_id)
 
 
 def whole(case):
@@ -145,6 +147,8 @@ def approve_case(ctx, case, payload, reason, target):
 
 
 def deny_case(ctx, case, payload, reason, target):
+    if not policy.has_authority(ctx.user, A.WITHDRAWAL_APPROVAL, case.owner_division_id):
+        fail(ErrorCode.FORBIDDEN, "ไม่มีอำนาจปฏิเสธเรื่องของกองนี้")
     _check(ctx, case)
     if not reason:
         fail(ErrorCode.VALIDATION_ERROR, "บอกเหตุผลที่ไม่รับเรื่อง")

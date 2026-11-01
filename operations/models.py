@@ -141,14 +141,24 @@ class Role(models.TextChoices):
     INSPECTOR = "inspector", "ผู้ตรวจสภาพ"
     RESOLVER = "resolver", "ผู้แก้ปัญหา"
     SUPERVISOR = "supervisor", "Supervisor ของกอง"
+    # ADR 0039: sees what a Supervisor of the scope sees and does nothing.
+    DIVISION_VIEWER = "division_viewer", "ผู้ดูข้อมูลของกอง"
+    DEPARTMENT_VIEWER = "department_viewer", "ผู้ดูข้อมูลระดับฝ่าย"
 
 
 GLOBAL_ROLES = frozenset(
-    {Role.ADMIN, Role.DEVELOPER_ADMIN, Role.SYSTEM_SUPPORT, Role.DEPARTMENT_SUPERVISOR}
+    {
+        Role.ADMIN,
+        Role.DEVELOPER_ADMIN,
+        Role.SYSTEM_SUPPORT,
+        Role.DEPARTMENT_SUPERVISOR,
+        Role.DEPARTMENT_VIEWER,
+    }
 )
 DIVISION_ROLES = frozenset(set(Role) - GLOBAL_ROLES)
+VIEWER_ROLES = frozenset({Role.DIVISION_VIEWER, Role.DEPARTMENT_VIEWER})
 # What a member does when the division's work is not split (16 Oct 2569 Q3).
-MEMBER_ROLES = frozenset(DIVISION_ROLES - {Role.SUPERVISOR})
+MEMBER_ROLES = frozenset(DIVISION_ROLES - {Role.SUPERVISOR, Role.DIVISION_VIEWER})
 # The duties a split division hands out one by one; merged into สมาชิกกอง on 16 Oct 2569.
 DUTY_ROLES = frozenset(MEMBER_ROLES - {Role.STAFF})
 
@@ -1126,20 +1136,70 @@ class LineQuotaSnapshot(models.Model):
 
 
 class AICredential(models.Model):
-    """Provider endpoint and API key. The key is Fernet-encrypted and never shown again."""
+    """ผู้ให้บริการ AI (ADR 0038): endpoint, API key and the defaults its models get. The key is
+    Fernet-encrypted and never shown again; a provider may wait without a key."""
 
     name = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=100, blank=True)
     base_url = models.URLField(max_length=200)
-    encrypted_key = models.TextField()
-    key_hint = models.CharField(max_length=8)
+    encrypted_key = models.TextField(blank=True)
+    key_hint = models.CharField(max_length=8, blank=True)
+    key_url = models.URLField(max_length=200, blank=True)
+    notice = models.CharField(max_length=200, blank=True)
+    # Replaces AI_SCHEMA_ENFORCED_HOSTS: the provider enforces response_format json_schema.
+    enforces_schema = models.BooleanField(default=False, db_default=False)
+    # timeout_seconds, max_tokens and temperature for the profiles of this provider's models.
+    defaults = models.JSONField(default=dict, blank=True)
+    is_hidden = models.BooleanField(default=False, db_default=False)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    check_ok = models.BooleanField(null=True, blank=True)
+    check_detail = models.CharField(max_length=100, blank=True)
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     rotated_at = models.DateTimeField(null=True, blank=True)
 
+    @property
+    def has_key(self):
+        return bool(self.encrypted_key)
+
+    @property
+    def title(self):
+        return self.label or self.name
+
     def __str__(self):
-        return f"{self.name} (••••{self.key_hint})"
+        return f"{self.title} (••••{self.key_hint})" if self.has_key else self.title
+
+
+class AIModel(models.Model):
+    """A model a provider offers, as the admin page lists it (ADR 0038 Q6). Its call settings
+    live in AIProfile rows; a model that ever served in a version is hidden, never deleted."""
+
+    provider = models.ForeignKey(AICredential, on_delete=models.PROTECT, related_name="models")
+    model_id = models.CharField(max_length=100)
+    label = models.CharField(max_length=100, blank=True)
+    position = models.PositiveSmallIntegerField(default=0)
+    is_hidden = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["provider_id", "position", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "model_id"], name="ai_model_once_per_provider"
+            )
+        ]
+
+    @property
+    def title(self):
+        return self.label or self.model_id
+
+    def __str__(self):
+        return self.title
 
 
 class AIProfile(AppendOnlyModel):
@@ -1198,6 +1258,9 @@ class AIConfigVersion(models.Model):
         HARNESS = "harness", "Harness (กรองคำสั่งแฝง + ตัวตรวจ + แก้ 1 รอบ + hedge)"
 
     number = models.PositiveIntegerField(unique=True)
+    # ADR 0038: the CalVer label (2026.10.31.1) shared by one version per task, made on the
+    # evaluating machine and kept on import. Blank for the earlier per-task versions.
+    release = models.CharField(max_length=16, blank=True, default="", db_index=True)
     # Each task has its own evaluation gate and its own active version (ADR 0002).
     task = models.CharField(max_length=16, choices=Task.choices, default=Task.EXTRACT)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.CANDIDATE)
@@ -1241,13 +1304,22 @@ class AIConfigVersion(models.Model):
                 fields=["task"], condition=Q(status="active"), name="ai_single_active_per_task"
             ),
             models.CheckConstraint(name="ai_few_shot_bounds", condition=Q(few_shot__lte=5)),
+            models.UniqueConstraint(
+                fields=["release", "task"],
+                condition=~Q(release=""),
+                name="ai_one_version_per_task_per_release",
+            ),
         ]
 
     def chain(self):
         return [entry.profile for entry in self.entries.select_related("profile__credential")]
 
+    @property
+    def label(self):
+        return self.release or f"v{self.number}"
+
     def __str__(self):
-        return f"v{self.number}"
+        return self.label
 
 
 class AIConfigEntry(models.Model):
@@ -1304,6 +1376,7 @@ class AIEvalJob(models.Model):
         RUNNING = "running", "กำลังประเมิน"
         DONE = "done", "เสร็จ"
         FAILED = "failed", "ล้มเหลว"
+        WAITING = "waiting", "รอโควตา"
 
     version = models.ForeignKey(AIConfigVersion, on_delete=models.PROTECT, related_name="eval_jobs")
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
@@ -1315,13 +1388,15 @@ class AIEvalJob(models.Model):
     finished_at = models.DateTimeField(null=True, blank=True)
     passed = models.BooleanField(null=True)
     error = models.CharField(max_length=200, blank=True)
+    # A waiting job (the provider answered HTTP 429) runs again from this time (ADR 0038 Q20).
+    retry_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-pk"]
         constraints = [
             models.UniqueConstraint(
                 fields=["version"],
-                condition=Q(status__in=["queued", "running"]),
+                condition=Q(status__in=["queued", "running", "waiting"]),
                 name="ai_one_open_eval_per_version",
             )
         ]
@@ -2898,6 +2973,9 @@ class UnansweredQuestion(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     handled_at = models.DateTimeField(null=True, blank=True)
+    # ADR 0037 Q31: who asked, only as keyed hashes of registered LINE accounts with the day,
+    # so the nightly tuning counts people (at least 3 in 7 days) without knowing who they are.
+    askers = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-last_at"]
@@ -2905,6 +2983,89 @@ class UnansweredQuestion(models.Model):
 
     def __str__(self):
         return self.text[:60]
+
+
+class KnowledgeDoc(models.Model):
+    """เอกสารความรู้ (ADR 0037 Q9, Q25): text that is not secret, uploaded by staff, that the free
+    chat agent may search. Personal data is refused at upload; another admin approves it, and only
+    then does it reach Pinecone. Retiring it removes it from Pinecone again."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "รอรับรอง"
+        APPROVED = "approved", "รับรองแล้ว ใช้ตอบได้"
+        RETIRED = "retired", "เลิกใช้"
+
+    title = models.CharField(max_length=200)
+    text = models.TextField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    revision = models.PositiveIntegerField(default=1)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    chunks = models.PositiveIntegerField(default=0)  # records in Pinecone
+    synced_at = models.DateTimeField(null=True, blank=True)
+    sync_error = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self):
+        return self.title
+
+
+class ChatGuide(models.Model):
+    """คำแนะนำเฉพาะเรื่อง (ADR 0037 Q22, Q23, Q30 to Q32): one sub-prompt per topic that the free
+    chat agent reads after its locked core. Admins edit it with a reason and the AI tunes it each
+    night; every version is kept, passes rules and a small check suite before it is used, and an
+    admin rolls back to any earlier one."""
+
+    class Topic(models.TextChoices):
+        ORG_UNITS = "org_units", "ผังหน่วยงาน"
+        MY_CASES = "my_cases", "เรื่องของฉัน"
+        HOW_TO_FILE = "how_to_file", "วิธีส่งเรื่อง"
+        GENERAL = "general", "ความรู้ทั่วไป"
+        TONE = "tone", "น้ำเสียง"
+
+    class Status(models.TextChoices):
+        CANDIDATE = "candidate", "รอชุดตรวจ"
+        ACTIVE = "active", "ใช้อยู่"
+        REFUSED = "refused", "ไม่ผ่าน"
+        RETIRED = "retired", "ฉบับก่อน"
+
+    class Source(models.TextChoices):
+        SEED = "seed", "ฉบับเริ่มต้น"
+        ADMIN = "admin", "แอดมินแก้"
+        AI = "ai", "AI ปรับเอง"
+
+    topic = models.CharField(max_length=16, choices=Topic.choices)
+    number = models.PositiveIntegerField()
+    text = models.TextField(max_length=800)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CANDIDATE)
+    source = models.CharField(max_length=8, choices=Source.choices)
+    reason = models.TextField(blank=True)
+    check_result = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["topic", "-number"]
+        constraints = [
+            models.UniqueConstraint(fields=["topic", "number"], name="chat_guide_number"),
+            models.UniqueConstraint(
+                fields=["topic"], condition=models.Q(status="active"), name="chat_guide_one_active"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_topic_display()} ฉบับ {self.number}"
 
 
 # --- หน้าที่ของกอง and the routing AI (ADR 0013) ---------------------------------------------------
@@ -3462,3 +3623,112 @@ class CaseMessage(models.Model):
     class Meta:
         ordering = ["created_at", "pk"]
         indexes = [models.Index(fields=["case", "status"])]
+
+
+# ADR 0040: one campaign and delivery ledger for the web and LINE Mini App.
+class BroadcastSegment(models.Model):
+    name = models.CharField(max_length=100)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    criteria = models.JSONField(default=dict)
+    revision = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class BroadcastCampaign(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "ร่าง"
+        PAUSED = "paused", "พักการส่งเพื่อแก้ไข"
+        SCHEDULED = "scheduled", "ตั้งเวลาส่งแล้ว"
+        QUEUED = "queued", "รอส่ง"
+        SENDING = "sending", "กำลังส่ง"
+        ACCEPTED = "accepted", "LINE รับคำขอแล้ว"
+        PARTIAL = "partial", "ส่งไม่ครบ"
+        HELD = "held", "พักการส่ง"
+        CANCELLED = "cancelled", "ยกเลิกแล้ว"
+
+    test_source = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="test_sends"
+    )
+    test_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    test_revision = models.PositiveIntegerField(null=True, blank=True)
+
+    title = models.CharField(max_length=100)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    revision = models.PositiveIntegerField(default=1)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    audience = models.CharField(
+        max_length=10, choices=[("all", "เพื่อนทั้งหมด"), ("segment", "กลุ่มผู้รับ")], default="all"
+    )
+    segment = models.ForeignKey(BroadcastSegment, null=True, blank=True, on_delete=models.PROTECT)
+    content = models.JSONField(default=dict)
+    messages = models.JSONField(default=list)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    recipient_count = models.PositiveIntegerField(null=True, blank=True)
+    detail = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["status", "scheduled_at"])]
+
+
+class BroadcastBatch(models.Model):
+    class Status(models.TextChoices):
+        RESERVED = "reserved", "สำรองโควตาแล้ว"
+        UNKNOWN = "unknown", "รอตรวจผลจาก LINE"
+        ACCEPTED = "accepted", "LINE รับคำขอแล้ว"
+        FAILED = "failed", "ส่งไม่สำเร็จ"
+
+    campaign = models.ForeignKey(
+        BroadcastCampaign, on_delete=models.PROTECT, related_name="batches"
+    )
+    sequence = models.PositiveIntegerField()
+    endpoint = models.CharField(max_length=16)
+    payload = models.JSONField()
+    retry_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    request_id = models.CharField(max_length=128, blank=True)
+    result = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.RESERVED)
+    recipient_count = models.PositiveIntegerField()
+    attempts = models.PositiveIntegerField(default=0)
+    first_attempt_at = models.DateTimeField(null=True, blank=True)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    lease_until = models.DateTimeField(null=True, blank=True)
+    detail = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["campaign", "sequence"], name="broadcast_batch_once")
+        ]
+
+
+class BroadcastMedia(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "รอตรวจไฟล์"
+        SCANNING = "scanning", "กำลังตรวจไฟล์"
+        CLEAN = "clean", "พร้อมใช้งาน"
+        REJECTED = "rejected", "ไม่ผ่านการตรวจไฟล์"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    name = models.CharField(max_length=200)
+    content_type = models.CharField(max_length=32)
+    size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    detail = models.CharField(max_length=200, blank=True)
+    next_scan_at = models.DateTimeField(default=timezone.now, db_index=True)
+    lease_token = models.UUIDField(null=True, blank=True)
+    storage_name = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)

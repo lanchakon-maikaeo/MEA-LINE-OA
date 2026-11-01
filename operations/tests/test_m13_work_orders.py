@@ -52,12 +52,14 @@ class OrderTestCase(OrgTestCase):
 
 
 class IssueTests(OrderTestCase):
-    def test_only_a_supervisor_issues_and_only_to_divisions_they_oversee(self):
+    def test_only_department_supervisors_issue_orders(self):
         with self.assertRaises(PermissionDenied):
             work_orders.create(self.kcw, "งานทดสอบ", self.kcw_division)
         with self.assertRaises(PermissionDenied):
             work_orders.create(self.head, "งานทดสอบ", self.ktf_division)
-        order = work_orders.create(self.head, "งานทดสอบ", self.kcw_division)
+        with self.assertRaises(PermissionDenied):
+            work_orders.create(self.head, "งานทดสอบ", self.kcw_division)
+        order = work_orders.create(self.director, "งานทดสอบ", self.kcw_division)
         self.assertRegex(order.number, r"^T\d\d-000001$")
         other = work_orders.create(self.director, "งานทดสอบ", self.ktf_division)
         self.assertEqual(other.number[-6:], "000002")
@@ -67,6 +69,32 @@ class IssueTests(OrderTestCase):
             work_orders.create(self.director, "  ", self.kcw_division)
         with self.assertRaises(ValidationError):
             work_orders.create(self.director, "งานทดสอบ", self.kcw_division, channel="unknown")
+
+    def test_web_creation_is_department_only_for_get_and_post(self):
+        for user in (self.head, self.kcw, self.admin):
+            with self.subTest(user=user.username):
+                client = Client()
+                client.force_login(user)
+                self.assertEqual(client.get(reverse("order-new")).status_code, 403)
+                page = client.get(reverse("division-detail", args=[self.kcw_division.code]))
+                self.assertNotContains(page, "สั่งงานถึงกองนี้")
+                response = client.post(
+                    reverse("order-new"),
+                    {"title": "งานที่ไม่มีสิทธิ์", "target": f"d:{self.kcw_division.pk}"},
+                )
+                self.assertEqual(response.status_code, 403)
+        self.assertFalse(WorkOrder.objects.exists())
+
+    def test_revoked_department_role_cannot_use_a_stale_user_to_create(self):
+        from operations.models import RoleGrant
+
+        self.assertTrue(work_orders.may_issue(self.director))
+        grant = RoleGrant.objects.get(user=self.director, role=Role.DEPARTMENT_SUPERVISOR)
+        identity.revoke_role(self.admin, grant, "ถอนสิทธิ์ทดสอบ")
+        self.assertFalse(work_orders.may_issue(self.director))
+        with self.assertRaises(PermissionDenied):
+            work_orders.create(self.director, "งานจากร่างเดิม", self.kcw_division)
+        self.assertFalse(WorkOrder.objects.exists())
 
     def test_division_work_goes_to_its_supervisor_and_person_work_to_the_person(self):
         self.order()
@@ -141,6 +169,50 @@ class FlowTests(OrderTestCase):
         self.assertEqual(self.notices("staff_order_new", self.ktf).count(), 1)
         order = work_orders.act(self.director, order, "cancel")
         self.assertEqual(order.status, S.CANCELLED)
+
+
+class ForwardTests(OrderTestCase):
+    """ADR 0040 Q2, Q7: the department moves open work to another division, unassigned."""
+
+    def test_the_department_forwards_open_work_and_the_destination_acknowledges_again(self):
+        order = work_orders.act(self.kcw, self.order(assignee=self.kcw), "acknowledge")
+        self.assertNotIn("forward", dict(work_orders.steps_for(self.head, order)))
+        with self.assertRaises(PermissionDenied):
+            work_orders.act(self.head, order, "forward", division=self.ktf_division)
+        with self.assertRaises(ValidationError):
+            work_orders.act(self.director, order, "forward", division=self.kcw_division)
+        order = work_orders.act(
+            self.director, order, "forward", division=self.ktf_division, assignee=self.kcw
+        )
+        self.assertEqual(
+            (order.status, order.division, order.assignee, order.acknowledged_at),
+            (S.ASSIGNED, self.ktf_division, None, None),
+        )
+        self.assertEqual(self.notices("staff_order_new", self.ktf).count(), 1)
+        whats = [row["what"] for row in work_orders.timeline(order)]
+        self.assertEqual(whats, ["สั่งงาน", "รับทราบ", "ส่งต่อให้กอง"])
+        order = work_orders.act(self.director, order, "cancel")
+        self.assertNotIn("forward", dict(work_orders.steps_for(self.director, order)))
+
+    def test_the_web_forwards_with_a_division_choice(self):
+        order = self.order()
+        head = Client()
+        head.force_login(self.head)
+        self.assertNotContains(head.get(reverse("order-detail", args=[order.number])), "ส่งต่อถึงกอง")
+        client = Client()
+        client.force_login(self.director)
+        page = client.get(reverse("order-detail", args=[order.number]))
+        self.assertContains(page, "ส่งต่อถึงกอง")
+        self.assertContains(page, f'<option value="{self.ktf_division.pk}">')
+        client.post(reverse("order-action", args=[order.number, "forward"]), {"division": ""})
+        order.refresh_from_db()
+        self.assertEqual(order.division, self.kcw_division)
+        client.post(
+            reverse("order-action", args=[order.number, "forward"]),
+            {"division": self.ktf_division.pk},
+        )
+        order.refresh_from_db()
+        self.assertEqual(order.division, self.ktf_division)
 
 
 class ReminderTests(OrderTestCase):

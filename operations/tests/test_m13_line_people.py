@@ -2,14 +2,13 @@
 
 Acceptance → tests: an employee ID with its proof approves a registration by itself when
 ตัวเลือกระบบ says so, and anything else still reaches a person (RegistrationTests); a LINE user
-who does not register may report a problem or suggestion with a location (AnonymousTests); staff
+who does not register may report a problem or suggestion, with no location (AnonymousTests); staff
 link LINE with a web code or an employee check, see and do their division's work there, get only
 the important alerts without the requester's details, and lose the link when suspended
 (StaffLineTests).
 """
 
 import uuid
-from decimal import Decimal
 
 from django.test import Client, override_settings
 
@@ -18,6 +17,7 @@ from operations.models import (
     AuditEvent,
     Case,
     ChannelIdentity,
+    Conversation,
     District,
     Division,
     Employee,
@@ -134,41 +134,82 @@ class RegistrationTests(PeopleTestCase):
         self.assertIn("ระหว่างรอแจ้งปัญหา", texts(reply))
         self.assertEqual(RegistrationRequest.objects.get().status, "pending")
 
-    def test_a_location_is_kept_with_the_registration(self):
+    def test_registration_asks_no_location(self):
+        # 31 ต.ค. 2569: the step is gone, whatever the old option holds.
         options.change(None, options.REGISTRATION_LOCATION, "required", "ทดสอบ")
         self.register(BOB)
         self.press(BOB, "ใช้วิธีอื่น")
         reply = self.as_other(BOB, "ผู้ลงทะเบียน ทดสอบ")
-        items = [i["action"] for i in reply[-1]["quickReply"]["items"]]
-        self.assertEqual(items[0]["type"], "location")
-        self.say(self.location(BOB, 13.75, 100.52))
+        self.assertNotIn("ตำแหน่ง", texts(reply))
+        self.assertIn("ส่งคำขอให้แอดมินตรวจแล้ว", texts(reply))
         registration = RegistrationRequest.objects.get(identity__external_id=BOB)
-        self.assertEqual(
-            (registration.latitude, registration.longitude),
-            (Decimal("13.750000"), Decimal("100.520000")),
+        self.assertEqual((registration.status, registration.latitude), ("pending", None))
+        page = Client()
+        page.force_login(self.admin)
+        self.assertNotContains(page.get("/console/admin/options/"), "ตำแหน่งของผู้ลงทะเบียน")
+
+    def test_a_registration_left_at_the_old_location_step_goes_on(self):
+        self.register(BOB)
+        Conversation.objects.filter(identity__external_id=BOB).update(
+            prompt="reg_location",
+            prompt_data={"name": "ผู้ลงทะเบียน ทดสอบ", "district": "D01", "checked": True},
         )
+        reply = self.say(self.location(BOB))
+        self.assertIn("ส่งคำขอให้แอดมินตรวจแล้ว", texts(reply))
+        registration = RegistrationRequest.objects.get(identity__external_id=BOB)
+        self.assertEqual((registration.status, registration.latitude), ("pending", None))
+
+
+class UnverifiedTagTests(PeopleTestCase):
+    """Zero trust (31 ต.ค. 2569 Q2): staff see which reporter names were not checked against
+    ทะเบียนพนักงาน; the reporter can still file."""
+
+    def page(self, requester):
+        result = services.submit_case(
+            services.Actor.for_requester(requester),
+            idempotency_key=uuid.uuid4().hex,
+            payload={"kind": "problem", "topic": "suggestion", "description": "ทดสอบป้าย"},
+        )
+        client = Client()
+        client.force_login(self.admin)
+        return client.get(f"/cases/{Case.objects.get(pk=result.case_id).number}/")
+
+    def test_a_typed_name_is_tagged_and_a_proved_employee_is_not(self):
+        line = ChannelIdentity.objects.create(channel="line", external_id=BOB)
+        outsider = identity.external_requester(line, "คนนอก ทดสอบ")
+        self.assertContains(self.page(outsider), "ยังไม่ยืนยันตัวตน")
+        options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")
+        self.register(ALICE)
+        self.type(ALICE, "SYN10001")
+        self.type(ALICE, "01/01/2530")
+        employee = ChannelIdentity.objects.get(external_id=ALICE).requester
+        page = self.page(employee)
+        self.assertContains(page, employee.display_name)
+        self.assertNotContains(page, "ยังไม่ยืนยันตัวตน")
 
 
 class AnonymousTests(PeopleTestCase):
-    def test_an_unregistered_user_reports_a_suggestion_with_a_location(self):
+    def test_an_unregistered_user_reports_a_suggestion_without_a_location(self):
+        # 31 ต.ค. 2569: no step asks for a location; one sent anyway is not kept.
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
         self.say(self.event(ALICE, "follow"))
-        self.press(ALICE, "ไม่ระบุตัวตน")
+        start = self.press(ALICE, "ไม่ระบุตัวตน")
+        self.assertNotIn("ตำแหน่ง", texts(start))
         self.press(ALICE, "ปัญหาการใช้งานหรืออื่นๆ")  # ADR 0030: the division carousel
-        reply = self.type(ALICE, "อยากให้มีที่จอดรถรับของ (ทดสอบ)")
-        self.assertEqual(reply[-1]["quickReply"]["items"][0]["action"]["type"], "location")
-        summary = self.say(self.location(ALICE))
+        summary = self.type(ALICE, "อยากให้มีที่จอดรถรับของ (ทดสอบ)")
         self.assertIn("แจ้งแบบไม่ระบุตัวตน", texts(summary))
+        self.assertIn("ระบบไม่ได้ใช้ตำแหน่ง", texts(self.say(self.location(ALICE))))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
         self.assertTrue(case.requester.is_anonymous)
-        self.assertEqual((case.owner_label, case.latitude), ("แอดมิน", Decimal("13.700000")))
+        self.assertEqual((case.owner_label, case.latitude), ("แอดมิน", None))
         self.assertEqual(ChannelIdentity.objects.get(external_id=ALICE).status, "pending")
         client = Client()
         client.force_login(self.admin)  # the admins hold it (ADR 0030)
         page = client.get(f"/cases/{case.number}/")
         self.assertContains(page, "ไม่ระบุตัวตน")
-        self.assertContains(page, "google.com/maps?q=13.700000,100.500000")
+        self.assertNotContains(page, "google.com/maps")
+        self.assertNotContains(page, "ยังไม่ยืนยันตัวตน")  # no name is shown at all
 
     def test_anonymous_reporters_cannot_withdraw_and_are_limited(self):
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
@@ -186,13 +227,10 @@ class AnonymousTests(PeopleTestCase):
                 },
             )
         problem = {"kind": "problem", "topic": "suggestion", "description": "ทดสอบ"}
+        for n in range(3):  # no location needed (31 ต.ค. 2569)
+            services.submit_case(actor, idempotency_key=f"anon-report-{n}", payload=problem)
         with self.assertRaises(services.CommandFailed):
-            services.submit_case(actor, idempotency_key="anon-no-location", payload=problem)
-        located = {**problem, "latitude": "13.7", "longitude": "100.5"}
-        for n in range(3):
-            services.submit_case(actor, idempotency_key=f"anon-report-{n}", payload=located)
-        with self.assertRaises(services.CommandFailed):
-            services.submit_case(actor, idempotency_key="anon-report-over", payload=located)
+            services.submit_case(actor, idempotency_key="anon-report-over", payload=problem)
 
 
 @override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
@@ -304,3 +342,4 @@ class StaffLineTests(PeopleTestCase):
         self.assertTrue(case.requester.is_internal)
         self.assertEqual(case.requester.division.code, "กองอุปกรณ์ฯ")
         self.assertEqual((case.topic, case.owner_division.code), ("general", "กองอุปกรณ์ฯ"))
+        self.assertEqual(case.menu_label, "ปัญหา/ข้อเสนอแนะ")  # 31 Oct 2569 Q13: on the tab

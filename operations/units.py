@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from operations import identity, workflow
 from operations.models import (
+    VIEWER_ROLES,
     Case,
     ChannelIdentity,
     Division,
@@ -316,6 +317,7 @@ def preview(division, kind, group, today=None):
             for g in RoleGrant.objects.filter(
                 division=division, revoked_at__isnull=True, user__is_active=True
             )
+            .exclude(role__in=VIEWER_ROLES)  # ADR 0039: viewers get no alerts
             .select_related("user__staff_profile")
             .distinct()
             if has_line(g.user)
@@ -509,9 +511,11 @@ def roster_row(profile):
 
 
 def _check_member(user, unit):
-    held = RoleGrant.objects.filter(
-        user=user, division=unit.division, revoked_at__isnull=True
-    ).exists()
+    held = (
+        RoleGrant.objects.filter(user=user, division=unit.division, revoked_at__isnull=True)
+        .exclude(role__in=VIEWER_ROLES)
+        .exists()
+    )
     if not held:
         raise ValidationError(f"บัญชีนี้ไม่มีบทบาทใน {short(unit.division)} จึงย้ายเข้าไม่ได้")
 

@@ -23,6 +23,7 @@ from django.utils.dateparse import parse_datetime
 
 from operations import identity, orchestration, servicetime, workflow
 from operations.models import (
+    VIEWER_ROLES,
     AckClock,
     AIConfigVersion,
     AITriageRun,
@@ -1323,9 +1324,11 @@ def active_grants(user, activity, now=None):
     ).exclude(valid_until__lte=now)
     if identity.work_is_split():
         return grants.filter(member_of__isnull=True)
-    memberships = RoleGrant.objects.filter(
-        user=user, revoked_at__isnull=True, division__is_active=True
-    ).values("division")
+    memberships = (
+        RoleGrant.objects.filter(user=user, revoked_at__isnull=True, division__is_active=True)
+        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: a viewer holds no authority
+        .values("division")
+    )
     return grants.filter(Q(member_of__isnull=True) | Q(member_of__in=memberships))
 
 

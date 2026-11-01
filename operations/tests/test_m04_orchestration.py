@@ -389,8 +389,8 @@ class SendingTests(OrchestrationTestCase):
         self.assertEqual(len(self.pushes), 1)
         with override_settings(APP_ENV="production"):
             self.assertEqual(notifications.budget_state().budget, 300)
-            LineQuotaSnapshot.objects.create(
-                month=notifications.month_key(timezone.now()), quota=200
+            LineQuotaSnapshot.objects.update_or_create(
+                month=notifications.month_key(timezone.now()), defaults={"quota": 200}
             )
             self.assertEqual(notifications.budget_state().budget, 200)
 

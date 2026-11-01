@@ -17,6 +17,7 @@ import sys
 import time
 import uuid
 from collections import Counter
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +25,7 @@ from types import SimpleNamespace
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, transaction
+from django.db.models import Q
 from django.test import override_settings
 from django.utils import timezone
 
@@ -1488,59 +1490,113 @@ def request_eval(actor, version):
     return job
 
 
+# A job that saw HTTP 429 waits this long before it runs again (ADR 0038 Q20).
+# shortcut: a fixed wait, not the provider's quota reset time; read Retry-After if it matters.
+QUOTA_WAIT = timedelta(minutes=30)
+
+
+def _gate_report(version):
+    """The task's own evaluation; the answer member of a release also plays ตอบอิสระ."""
+    task = version.task
+    if task == AIConfigVersion.Task.TRIAGE:
+        from operations import ai_triage
+
+        return ai_triage.run_gate(version), None
+    if task == AIConfigVersion.Task.ANSWER:
+        from operations import ai_answer, free_chat_eval
+
+        report = ai_answer.run_gate(version)
+        return report, (free_chat_eval.run_gate(version) if version.release else None)
+    if task == AIConfigVersion.Task.ROUTING:
+        from operations import ai_routing
+
+        return ai_routing.run_gate(version), None
+    if task == AIConfigVersion.Task.KEYWORDS:
+        from operations import ai_keywords
+
+        return ai_keywords.run_gate(version), None
+    if task == AIConfigVersion.Task.SHEET_STATUS:
+        from operations import ai_sheet_status
+
+        return ai_sheet_status.run_gate(version), None
+    return run_gate(version), None
+
+
 def run_next_job():
-    """Run the oldest queued evaluation on the gate sets and record it for activation."""
+    """Run the oldest queued evaluation on the gate sets and record it for activation.
+    A release member tests its connection first; a task with nothing to evaluate yet is
+    recorded as not ready, and a run that met HTTP 429 is not recorded but waits (ADR 0038)."""
+    now = timezone.now()
     with transaction.atomic():
         job = (
             AIEvalJob.objects.select_for_update(skip_locked=True)
-            .filter(status=AIEvalJob.Status.QUEUED)
+            .filter(
+                Q(status=AIEvalJob.Status.QUEUED)
+                | Q(status=AIEvalJob.Status.WAITING, retry_at__lte=now)
+            )
             .select_related("version", "requested_by")
             .order_by("pk")
             .first()
         )
         if job is None:
             return None
-        job.status, job.started_at = AIEvalJob.Status.RUNNING, timezone.now()
+        job.status, job.started_at = AIEvalJob.Status.RUNNING, now
         job.save(update_fields=["status", "started_at"])
+    version, hits = job.version, ai.quota_hits()
+    status, passed, error, retry_at = AIEvalJob.Status.DONE, None, "", None
     try:
-        if job.version.task == AIConfigVersion.Task.TRIAGE:
-            from operations import ai_triage
+        if version.release:
+            from operations import ai_release
 
-            report = ai_triage.run_gate(job.version)
-        elif job.version.task == AIConfigVersion.Task.ANSWER:
-            from operations import ai_answer
-
-            report = ai_answer.run_gate(job.version)
-        elif job.version.task == AIConfigVersion.Task.ROUTING:
-            from operations import ai_routing
-
-            report = ai_routing.run_gate(job.version)
-        elif job.version.task == AIConfigVersion.Task.KEYWORDS:
-            from operations import ai_keywords
-
-            report = ai_keywords.run_gate(job.version)
-        elif job.version.task == AIConfigVersion.Task.SHEET_STATUS:
-            from operations import ai_sheet_status
-
-            report = ai_sheet_status.run_gate(job.version)
+            if not ai_release.tested(version):
+                ai_release.test(job.requested_by, version.release)
+                version.refresh_from_db()
+        if version.release and not version.test_passed:
+            error = "connection test failed"
         else:
-            report = run_gate(job.version)
-        version = ai.record_eval(job.version, report)
-        status, passed, error = AIEvalJob.Status.DONE, version.eval_passed, ""
+            report, free_chat = _gate_report(version)
+            if ai.quota_hits() == hits:
+                version = ai.record_eval(version, report)
+                if free_chat is not None:
+                    from operations import free_chat_eval
+
+                    free_chat_eval.record(version, free_chat)
+                    version.refresh_from_db()
+                passed = version.eval_passed
+    except ValidationError as exc:
+        if not version.release:
+            logger.exception("AI evaluation job %s failed", job.pk)
+            status, error = AIEvalJob.Status.FAILED, "ValidationError"
+        else:
+            # Nothing to evaluate yet (no duties, no active policy): the task stays off.
+            message = "; ".join(exc.messages)[:200]
+            AIConfigVersion.objects.filter(pk=version.pk).update(
+                eval_passed=None, eval_result={"not_ready": message, "at": now.isoformat()}
+            )
+            error = f"not ready: {message}"
     except Exception as exc:  # noqa: BLE001 - recorded on the job; the worker keeps running
         logger.exception("AI evaluation job %s failed", job.pk)
         status, passed, error = AIEvalJob.Status.FAILED, None, type(exc).__name__
+    if ai.quota_hits() != hits:
+        status, passed, error = AIEvalJob.Status.WAITING, None, "HTTP 429"
+        retry_at = timezone.now() + QUOTA_WAIT
     AIEvalJob.objects.filter(pk=job.pk).update(
-        status=status, passed=passed, error=error[:200], finished_at=timezone.now()
-    )
-    identity.audit(
-        job.requested_by,
-        "ai.version_evaluated",
-        job.version,
-        number=job.version.number,
-        gate=job.version.eval_result.get("gate") if passed is not None else None,
+        status=status,
         passed=passed,
+        error=error[:200],
+        retry_at=retry_at,
+        finished_at=None if retry_at else timezone.now(),
     )
+    version.refresh_from_db()
+    if status != AIEvalJob.Status.WAITING:
+        identity.audit(
+            job.requested_by,
+            "ai.version_evaluated",
+            version,
+            number=version.number,
+            gate=version.eval_result.get("gate") if passed is not None else None,
+            passed=passed,
+        )
     job.refresh_from_db()
     return job
 

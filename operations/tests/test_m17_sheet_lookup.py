@@ -183,7 +183,7 @@ class OwnReportTests(LookupChatTestCase):
             [["123456", "", "", "7654321"], ["", "๐๑๒๓๔๕๖", "123456"]],
         )
 
-    def test_the_users_own_reports_show_without_typing(self):
+    def test_the_users_own_reports_show_then_a_ui_number_is_asked(self):
         reply = self.ask_status("ตรวจสอบปัญหา")
         said = texts(reply)
         self.assertIn("รายการที่แจ้งด้วยรหัสพนักงาน 0123456 ทั้งหมด 3 รายการ", said)
@@ -191,19 +191,22 @@ class OwnReportTests(LookupChatTestCase):
         self.assertIn("2. เลข UI ไม่ได้กรอก: แจ้ง บษ", said)
         self.assertIn("3. เลข UI 90000002, 90000003: Breaker Off", said)
         self.assertNotIn("90000009", said)  # someone else's report
-        self.assertFalse(ConversationDraft.objects.filter(status="open", step="flow").exists())
+        # 30 ต.ค. 2569 Q4: the same step then takes a เลข UI
+        self.assertTrue(said.endswith("พิมพ์เลข UI ที่ต้องการตรวจสอบ เช่น 12345678"), said)
+        self.assertTrue(ConversationDraft.objects.filter(status="open", step="flow").exists())
+        self.assertIn("ออนไลน์", texts(self.type(ALICE, "90000009")))
 
-    def test_without_a_verified_employee_id_nothing_shows(self):
+    def test_without_a_verified_employee_id_a_ui_number_is_asked(self):
         Requester.objects.filter(pk=self.requester.pk).update(employee_link="name")
         reply = self.ask_status("ตรวจสอบปัญหา")
-        self.assertIn("ต้องยืนยันรหัสพนักงานก่อน", texts(reply))
-        self.assertNotIn("90000001", texts(reply))
+        self.assertEqual(texts(reply), "พิมพ์เลข UI ที่ต้องการตรวจสอบ เช่น 12345678")
+        self.assertIn("กำลังดำเนินการ", texts(self.type(ALICE, "90000001")))
 
-    def test_no_rows_point_to_the_ui_lookup(self):
+    def test_no_rows_ask_a_ui_number_at_once(self):
         Employee.objects.filter(employee_id="0123456").update(employee_id="999")
         reply = self.ask_status("ตรวจสอบปัญหา")
-        self.assertIn("ยังไม่พบรายการที่แจ้งด้วยรหัสพนักงาน 999", texts(reply))
-        self.assertIn("ตรวจด้วยเลข UI ได้ที่ FAQ", texts(reply))
+        self.assertEqual(texts(reply), "พิมพ์เลข UI ที่ต้องการตรวจสอบ เช่น 12345678")
+        self.assertNotIn("FAQ", texts(reply))
 
 
 class LookupChatTests(LookupChatTestCase):

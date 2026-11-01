@@ -45,6 +45,7 @@ from operations.models import (
     ConversationMessage,
     Decision,
     District,
+    Division,
     EquipmentType,
     LineMenuItem,
     PostbackToken,
@@ -164,6 +165,7 @@ TOPIC_FIELD_LABELS = {
     "system": {"description": "ปัญหาที่พบ", "impact": "ข้อมูลเพิ่มเติม"},
 }
 MENU = [("ส่งเรื่องใหม่", "m=new"), ("เรื่องของฉัน", "m=mine"), ("ติดตามเรื่อง", "m=track")]
+CONTACT_HINT = "หากต้องการส่งข้อความถึงเจ้าหน้าที่ กด เรื่องของฉัน เลือกเรื่อง แล้วกด ติดต่อเจ้าหน้าที่"
 MENU_WORDS = {label: data for label, data in MENU}
 MENU_WORDS.update({"บริการ": "m=home", "ติดตามเรื่องของฉัน": "m=mine", "เมนูตามสิทธิ์": "m=roles"})
 MENU_WORDS.update(
@@ -203,14 +205,9 @@ def _fit(label, limit):
     return label if len(label) <= limit else label[: limit - 1] + "…"
 
 
-LOCATION = "@location"  # a quick reply that opens LINE's location picker
-
-
 def _postback(label, data, display=None):
     """A quick reply; `display` is what shows in the chat when the label had to be shortened
     (25 Oct 2569 Q3: "ทบทวนหน่วยไฟฟ้า" for ทบทวนหน่วยไฟฟ้าจากการร้องเรียน)."""
-    if data == LOCATION:
-        return {"type": "action", "action": {"type": "location", "label": _fit(label, 20)}}
     if data.startswith("https://") or data.startswith("http://"):
         return {"type": "action", "action": {"type": "uri", "label": _fit(label, 20), "uri": data}}
     return {
@@ -561,6 +558,21 @@ def _staff_turn(turn):
     if data.startswith("tab="):
         return True  # a rich menu tab switch (richmenuswitch): LINE changes the menu itself
     user = staff_line.staff_of(turn.identity)
+    if data in {"m=broadcast", "m=staff_inbox"} or command == "Broadcast":
+        from operations import identity, line_menu, staff_inbox
+
+        if user is None or not identity.staff_scope(user).overseen:
+            turn.say("รายการนี้สงวนสิทธิ์สำหรับ Supervisor กรุณาตรวจสอบการเชื่อมบัญชีเจ้าหน้าที่")
+        elif data == "m=staff_inbox":
+            turn.set_prompt()
+            staff_inbox.show(turn, user)
+        else:
+            url = line_menu.broadcast_url()
+            if url:
+                turn.say("กรุณาเปิดหน้าประกาศข่าวสารเพื่อเลือกผู้รับและจัดทำข้อความ", [("เปิด Broadcast", url)])
+            else:
+                turn.say("ยังไม่ได้ตั้งค่าหน้าประกาศข่าวสาร กรุณาติดต่อผู้ดูแลระบบ")
+        return True
     if user is None:
         return False
     if (
@@ -696,6 +708,22 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
         if not revision or revision != turn.conversation.prompt_data.get("prompt_revision"):
             turn.say("ปุ่มนี้เป็นขั้นตอนเก่า ใช้ข้อความหรือปุ่มล่าสุดแทน")
             return True
+    if action in {"staff_inbox", "staff_inbox_divisions"}:
+        from operations import staff_inbox
+
+        if action == "staff_inbox_divisions":
+            staff_inbox.choose_division(
+                turn, user, value.get("status", "waiting"), value.get("page", 1)
+            )
+        else:
+            staff_inbox.show(
+                turn,
+                user,
+                value.get("status", "waiting"),
+                value.get("division"),
+                value.get("page", 1),
+            )
+        return True
     if action == "staff_list":
         staff_work.list_page(turn, user, value.get("kind", "group"), value.get("page", 1))
         return True
@@ -732,6 +760,10 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
                 person=person,
                 skip_reason=value.get("skip_reason", False),
                 page=value.get("page", 1),
+                division=Division.objects.filter(pk=value["division"], is_active=True).first()
+                if value.get("division")
+                else None,
+                confirmed=value.get("confirm", False),
             )
         return True
     if action == "staff_ow_start":
@@ -934,12 +966,7 @@ def _registration(turn):
 
         turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
         return
-    if prompt == "reg_location":
-        location = _event_location(turn)
-        if location is not None:
-            return _registration_next(turn, {**data, "location": list(location)})
-        if token is not None and token.action == "reg_skip_location":
-            return _registration_next(turn, {**data, "location": None})
+    if prompt == "reg_location":  # left at the location step removed 31 ต.ค. 2569: go on
         return _registration_next(turn, data)
     if prompt == "reg_name" and text:
         text = " ".join(text.split())
@@ -983,7 +1010,7 @@ def _ask_kind(turn, lead):
 
 def _other_path(turn, data):
     """อื่น ๆ or ใช้วิธีอื่น: the name (when not given yet) and the unit, for a person to approve."""
-    data = {k: v for k, v in data.items() if k in ("name", "district", "location")}
+    data = {k: v for k, v in data.items() if k in ("name", "district")}
     if data.get("name") and data.get("district"):
         return _registration_next(turn, {**data, "checked": True})
     turn.set_prompt("reg_name", checked=True)
@@ -1202,8 +1229,9 @@ def _ask_district(turn, name, **data):
 
 
 def _registration_next(turn, data):
-    """The next registration step (ADR 0010): an employee check and a location when
-    ตัวเลือกระบบ asks for them, then the request, approved at once when the check allows."""
+    """The next registration step (ADR 0010): an employee check when ตัวเลือกระบบ asks for
+    one, then the request, approved at once when the check allows. No location is asked
+    (31 ต.ค. 2569)."""
     from operations import employees, options
 
     check = options.get(options.REGISTRATION_CHECK)
@@ -1213,14 +1241,6 @@ def _registration_next(turn, data):
             "ยืนยันตัวตนด้วยรหัสพนักงาน\nพิมพ์รหัสพนักงานของคุณ หรือกด 'ใช้วิธีอื่น' ให้เจ้าหน้าที่ตรวจแทน",
             [turn.button("ใช้วิธีอื่น", "reg_other")],
         )
-        return
-    where = options.get(options.REGISTRATION_LOCATION)
-    if where != "off" and "location" not in data:
-        turn.set_prompt("reg_location", **data)
-        quick = [("ส่งตำแหน่ง", LOCATION)]
-        if where == "optional":
-            quick.append(turn.button("ข้าม", "reg_skip_location"))
-        turn.say("ส่งตำแหน่งที่คุณอยู่ตอนนี้ ใช้ประกอบการยืนยันตัวตนเท่านั้น", quick)
         return
     from operations.models import Employee
 
@@ -1234,7 +1254,6 @@ def _registration_next(turn, data):
         data.get("name", ""),
         data.get("district", ""),
         employee=employee,
-        location=tuple(data["location"]) if data.get("location") else None,
         verified_by=method,
     )
     turn.set_prompt()
@@ -1285,12 +1304,12 @@ def _registration_check(turn, data, proof):
 
 
 def _start_anonymous(turn):
-    """แจ้งแบบไม่ระบุตัวตน: a problem or suggestion draft that ends with a location."""
+    """แจ้งแบบไม่ระบุตัวตน: a problem or suggestion draft; no location (31 ต.ค. 2569)."""
     turn.set_prompt()
     turn.requester = identity_services.anonymous_requester(turn.identity)
     turn.anonymous = True
     draft = _new_draft(turn)
-    turn.say("แจ้งได้โดยไม่ต้องบอกชื่อ เจ้าหน้าที่จะไม่เห็นว่าใครแจ้ง แต่ต้องส่งตำแหน่งที่พบเรื่อง")
+    turn.say("แจ้งได้โดยไม่ต้องบอกชื่อ เจ้าหน้าที่จะไม่เห็นว่าใครแจ้ง")
     _ask(turn, draft)
 
 
@@ -1350,13 +1369,9 @@ def _requester_turn(turn):
         answers.emergency(turn, text)  # hazard words: the guidance at once, then carry on
     message_type = (turn.event.get("message") or {}).get("type")
     if turn.inbox.event_type == "message" and message_type in {"image", "file"}:
-        return _attachment(turn, draft)
-    location = _event_location(turn)
-    if location is not None:
-        if draft is not None and draft.step == "location":
-            draft.data = dict(draft.data, location=list(location))
-            return _set(turn, draft, "summary")
-        turn.say("ได้รับตำแหน่งแล้ว แต่ตอนนี้ยังไม่ได้ขอ")
+        return _attachment(turn, draft, chat if turn.conversation.prompt == "case_chat" else None)
+    if _event_location(turn) is not None:  # no step asks for one (31 ต.ค. 2569)
+        turn.say("ระบบไม่ได้ใช้ตำแหน่ง")
         return _reprompt(turn, draft)
 
     data = (turn.event.get("postback") or {}).get("data", "")
@@ -1437,7 +1452,10 @@ def _free_text(turn, draft, text, message=None):
         ):
             # ADR 0032 Q15, Q19: without AI the program says it; with AI, ai_chat.apply refuses.
             return slip_refusal(turn, text)
-        if use_ai and agent_chat.enabled():
+        from operations import free_chat
+
+        # ADR 0037 Q14: a question meets the keywords of คลังคำตอบ before ตอบอิสระ.
+        if use_ai and agent_chat.enabled() and not free_chat.wanted(turn, draft, text):
             return ai_chat.queue(turn, draft, text, message)
         found = answers.keyword_answer(turn, draft, text)  # คลังคำตอบ ก (ADR 0012)
         if found is not None:
@@ -1451,11 +1469,20 @@ def _free_text(turn, draft, text, message=None):
     if turn.conversation.prompt == "track" and text:
         turn.say("ไม่พบเรื่องที่มีเลขนี้ในเรื่องของคุณ พิมพ์เลขเรื่อง เช่น W69-000001 หรือเลข SAP")
         return
+    hint = ""
     if text and draft is None and not turn.conversation.prompt and not _open_drafts(turn).exists():
         from operations import questions  # local: questions reads answers, which read this module
 
         questions.record(turn, text)  # คำถามที่บอทตอบไม่ได้ (Q11)
-    _reprompt(turn, draft)
+        open_case = (
+            turn.requester is not None
+            and Case.objects.filter(requester=turn.requester)
+            .exclude(status__in=workflow.TERMINAL)
+            .exists()
+        )
+        if open_case:  # ADR 0036 Q1: typed text joins no case unasked, so say how to reach staff
+            hint = CONTACT_HINT
+    _reprompt(turn, draft, hint)
 
 
 def _updates(turn):
@@ -1778,10 +1805,12 @@ def _pick_division(turn, draft, code):
     if code not in dict(problem_pick.choices()):
         return _ask(turn, draft)
     data = draft.data
-    keep = {k: data[k] for k in ("anonymous", "location", "menu_label") if data.get(k)}
+    keep = {k: data[k] for k in ("anonymous", "menu_label") if data.get(k)}
     fields = data["fields"] if data.get("topic") == Case.Topic.GENERAL else {}
     held = code == problem_pick.ADMIN
     draft.data = {
+        # 31 Oct 2569 Q13: every carousel pick (staff's แจ้งปัญหา too) is the tile's case.
+        "menu_label": problem_pick.TILE,
         **keep,
         "lines": [],
         "fields": fields,
@@ -2186,14 +2215,15 @@ def _menu(turn, text):
     turn.say(text, [*buttons, *[turn.button(label, "staff_menu") for label, _ in extra]])
 
 
-def _reprompt(turn, draft):
+def _reprompt(turn, draft, hint=""):
     """Ask the current question again (free text is kept, never guessed into a field)."""
     if draft is not None:
         return _ask(turn, draft)
     drafts = list(_open_drafts(turn)[:10])
     if drafts:
         return _choose_draft(turn, drafts)
-    _menu(turn, "เลือกบริการจากเมนูด้านล่าง หรือพิมพ์เรื่องที่ต้องการแจ้งได้เลย")
+    text = "เลือกบริการจากเมนูด้านล่าง หรือพิมพ์เรื่องที่ต้องการแจ้งได้เลย"
+    _menu(turn, f"{text}\n{hint}" if hint else text)
 
 
 # --- Status replies ---------------------------------------------------------------------------
@@ -2209,7 +2239,7 @@ def _when(moment):
 
 
 def _status_label(case, label=None):
-    label = label or case.get_status_display()
+    label = label or requester_steps.status_word(case)
     if case.kind == K.WITHDRAWAL:
         from operations import fulfilment
 
@@ -2320,19 +2350,14 @@ def _case_detail(turn, number):
         turn.say(f"ไม่พบเรื่อง {number} ในเรื่องของคุณ")
         return
     files = case.attachments.count()
-    sap = (
-        f"\n{typed_lines.sap_label(case.kind, case.topic)}: {case.sap_number}"
-        if case.sap_number and typed_lines.sap_label(case.kind, case.topic)
-        else ""
-    )
+    sap_label = typed_lines.sap_label(case.kind, case.topic, case.sap_kind)
+    sap = f"\n{sap_label}: {case.sap_number}" if case.sap_number and sap_label else ""
     if case.meters:
         sap += f"\nเครื่องวัดฯ: {usage_meters.describe(case.meters)}"
-    bar = requester_steps.bar(case.status)
-    step = (
-        f"{bar} {requester_steps.label(case)}\nสถานะในระบบ: {_status_label(case)}"
-        if bar
-        else f"สถานะ: {_status_label(case)}"
-    )
+    bar, status = requester_steps.bar(case.status), _status_label(case)
+    step = f"{bar} {requester_steps.label(case)}" if bar else f"สถานะ: {status}"
+    if bar and status != requester_steps.label(case):  # Q5 30 ต.ค. 2569: no line said twice
+        step += f"\nสถานะในระบบ: {status}"
     owner = problem_pick.ADMIN_TARGET if case.held_by_admin else case.owner_division.name
     text = (
         f"เรื่อง {case.number}\nประเภท: {_kind_label(case.kind, case.topic)}{sap}\n"
@@ -2348,6 +2373,14 @@ def _case_detail(turn, number):
         buttons.append(turn.button("ตอบเจ้าหน้าที่", "case_reply", {"case": str(case.pk)}))
         if len(notices) > 1:
             buttons.append(turn.button("ดูข้อความก่อนหน้า", "case_notices", {"case": str(case.pk)}))
+    elif (
+        turn.requester is not None
+        and case.requester_id == turn.requester.pk
+        and case.status not in workflow.TERMINAL
+        and case.status != Case.Status.AWAITING_INFO
+    ):
+        # ADR 0036 Q1: the requester opens the case chat from its card; typing alone never does.
+        buttons.append(turn.button("ติดต่อเจ้าหน้าที่", "case_reply", {"case": str(case.pk)}))
     from operations import case_chat, warehouse  # local: both build on this module
 
     stage_lines = warehouse.status_lines(case)
@@ -2692,8 +2725,8 @@ def _ask_question(turn, draft):
         if not required:
             buttons.append(b("ข้าม", "skip_field", draft=draft))
         turn.say(question, buttons or None)
-    elif step == "location":
-        turn.say("กด 'ส่งตำแหน่ง' แล้วเลือกจุดที่พบเรื่องนี้", [("ส่งตำแหน่ง", LOCATION)])
+    elif step == "location":  # a draft left at the step removed 31 ต.ค. 2569
+        return _set(turn, draft, _next_field(draft))
     elif step == "sap":
         label = typed_lines.sap_label(draft.kind, draft.data.get("topic"))
         if draft.data.get("topic") != Case.Topic.REPAIR:
@@ -2819,8 +2852,6 @@ def _summary(draft):
     for name in sorted(data["fields"], key=lambda n: asked.index(n) if n in asked else len(asked)):
         if data["fields"][name]:
             lines.append(f"{labels[name]}: {data['fields'][name]}")
-    if data.get("location"):
-        lines.append("ตำแหน่ง: ส่งแล้ว")
     if data.get("anonymous"):
         lines.append("แจ้งแบบไม่ระบุตัวตน")
     files = list(draft.attachments.all())
@@ -2894,8 +2925,6 @@ def _next_field(draft):
     for name, _, _ in _fields(draft):
         if name not in filled:
             return f"field:{name}"
-    if draft.data.get("anonymous") and not draft.data.get("location"):
-        return "location"
     # 23 Oct 2569: a division that follows SAP slips needs the slip's number, and the same
     # typed fields as its own menu (ตัวเลือกระบบ sap_line_entry), before the summary.
     if _sap_missing(draft):
@@ -3582,7 +3611,6 @@ CHOICE_HINTS = {
     "kind": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
     "topic": "แตะชื่อกองด้านบน หรือพิมพ์ชื่อกอง",
     "category": "เลือกจากปุ่มด้านล่าง หรือพิมพ์เลขข้อ",
-    "location": "กด 'ส่งตำแหน่ง' ด้านล่าง",
 }
 
 
@@ -3591,8 +3619,6 @@ def _payload(draft):
     payload = {"kind": draft.kind, "lines": data["lines"]}
     if data.get("topic"):
         payload["topic"] = data["topic"]
-    if data.get("location"):
-        payload["latitude"], payload["longitude"] = data["location"]
     if data.get("division"):
         payload["division_code"] = data["division"]
     elif data.get("hold_for_admin"):
@@ -3646,12 +3672,12 @@ def _confirm(turn, draft):
         # ADR 0008: one request with items of several divisions becomes one case per division.
         text = (
             f"ยื่นเรื่องแล้ว แยกเป็น {len(numbers)} เรื่องตามกองที่ดูแลของ\n"
-            f"เลขเรื่อง: {', '.join(numbers)}\nสถานะ: {case.get_status_display()}\n"
+            f"เลขเรื่อง: {', '.join(numbers)}\nสถานะ: {requester_steps.status_word(case)}\n"
             "ยืนยันรับของแยกตามเรื่อง ติดตามได้จากเมนู 'ติดตามเรื่อง'"
         )
     else:
         text = (
-            f"ยื่นเรื่องแล้ว\nเลขเรื่อง: {case.number}\nสถานะ: {case.get_status_display()}\n"
+            f"ยื่นเรื่องแล้ว\nเลขเรื่อง: {case.number}\nสถานะ: {requester_steps.status_word(case)}\n"
             "ติดตามได้จากเมนู 'ติดตามเรื่อง'"
         )
     if remaining:
@@ -3676,7 +3702,7 @@ def _confirm(turn, draft):
 # --- Attachments ---------------------------------------------------------------------------
 
 
-def _attachment(turn, draft):
+def _attachment(turn, draft, chat=None):
     message = turn.event.get("message") or {}
     image_set = message.get("imageSet") or {}
     quiet = image_set and image_set.get("index", 1) < image_set.get("total", 1)
@@ -3697,21 +3723,23 @@ def _attachment(turn, draft):
         turn.say(f"แนบไฟล์ได้ไม่เกิน {settings.ATTACHMENTS_PER_DRAFT} ไฟล์ต่อเรื่อง")
         return
     waiting = _awaiting_info(turn, draft)
+    # ADR 0036 Q2: while the requester chats about a case, a photo or file joins that case.
+    chatting = chat if draft is None and not waiting else None
+    case = waiting[0] if waiting else chatting
     attachment = Attachment.objects.create(
         identity=turn.identity,
         inbox=turn.inbox,
         line_message_id=str(message.get("id", "")),
-        draft=None if waiting else draft,
-        case=waiting[0] if waiting else None,  # a file sent after an information request
+        draft=None if case else draft,
+        case=case,  # a file sent after an information request, or in a case chat
         declared_name=str(message.get("fileName", ""))[:200],
     )
     if quiet:
         return
-    if waiting:
-        case = waiting[0]
+    if case is not None:
         identity_services.audit(
             None,
-            "case.info_file_received",
+            "case.chat_file_received" if chatting else "case.info_file_received",
             case,
             actor_label=f"requester:{turn.requester.pk}",
             number=case.number,
@@ -3722,10 +3750,12 @@ def _attachment(turn, draft):
             if len(waiting) > 1
             else ""
         )
+        from operations import case_chat  # local: case_chat builds on this module
+
         turn.say(
             f"ได้รับไฟล์แล้ว แนบกับเรื่อง {case.number}\n"
             f"เจ้าหน้าที่จะเห็นเมื่อระบบตรวจความปลอดภัยของไฟล์เสร็จ{more}",
-            MENU,
+            [(case_chat.END_LABEL, case_chat.END_POSTBACK)] if chatting else MENU,
         )
         return
     if draft is None:

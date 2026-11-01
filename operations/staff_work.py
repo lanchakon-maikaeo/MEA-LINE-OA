@@ -24,6 +24,8 @@ CHAT_KINDS = {"text", "textarea", "select", "radio", "number"}
 ORDER_NUMBER = re.compile(r"^T\d{2}-\d{6}$")
 # LINE buttons hold 20 characters; these steps get a shorter name in chat.
 SHORT_LABELS = {
+    "approve": "ยืนยันรับเรื่อง",
+    "admin_send": "ส่งต่อให้กอง",
     "complete_triage": "คัดกรองเสร็จ",
     "set_priority": "ยืนยันระดับ",
     "request_info": "ขอข้อมูลเพิ่ม",
@@ -60,30 +62,20 @@ def _case_line(case):
 
 
 def navigation(turn, user):
-    """Less frequent actions stay in chat, within the linked account's current role."""
-    actions = {A.WORK_DUE, A.WORK_FIND, A.OPEN_WEB}
+    """The approved extra menu contains only department-level order creation."""
+    quick = []
     if work_orders.may_issue(user):
-        actions |= {A.ORDER_ISSUED, A.ORDER_LATE, A.ORDER_TODAY}
-    rows = LineMenuItem.objects.filter(
-        action__in=actions, place=LineMenuItem.Place.TILE, is_active=True
-    ).order_by("tab", "position", "pk")
-    seen, quick = set(), []
-    for item in rows:
-        if item.action not in seen:
-            seen.add(item.action)
-            quick.append((item.label, f"m=item&id={item.pk}"))
-    if identity.staff_scope(user).is_admin:
-        from operations.admin_line import nav_button
-
-        quick.append(nav_button(turn, "แอดมิน", "home"))
-    quick.append(("บริการ", "m=home"))
-    turn.say("เลือกการดำเนินการตามสิทธิ์", quick)
+        quick.append(turn.button("สั่งงาน", "staff_ow_start"))
+    turn.say("กรุณาเลือกการดำเนินการ" if quick else "ขณะนี้ไม่มีเมนูเพิ่มเติมสำหรับสิทธิ์ของท่าน", quick)
 
 
 def handle_item(turn, user, item):
     """A tap on a งานของกอง or สั่งงาน button of the rich menu."""
-    if item.tab == T.ORDER and not work_orders.may_issue(user):
-        turn.say("เมนูสั่งงานใช้ได้เฉพาะ Supervisor", [web_button()])
+    if item.action == A.ORDER_NEW and not work_orders.may_issue(user):
+        turn.say("การสั่งงานสงวนสิทธิ์สำหรับ Supervisor ระดับฝ่ายเท่านั้น", [web_button()])
+        return
+    if item.tab == T.ORDER and not identity.staff_scope(user).overseen:
+        turn.say("เมนูนี้สงวนสิทธิ์สำหรับ Supervisor เท่านั้น", [web_button()])
         return
     turn.set_prompt()
     {
@@ -119,6 +111,10 @@ def list_button(turn, label, kind, page=1):
 def list_page(turn, user, kind="group", page=1):
     from django.core.paginator import Paginator
 
+    if kind == "received":
+        from operations import staff_inbox
+
+        return staff_inbox.show(turn, user)
     scope = identity.staff_scope(user)
     cases = queues.visible(user).select_related("owner_division")
     action, key = "staff_case", "case"
@@ -160,10 +156,9 @@ def list_page(turn, user, kind="group", page=1):
         if 1 <= number <= rows.paginator.num_pages:
             quick.append(list_button(turn, label, kind, number))
     quick += [list_button(turn, "งานของฉัน", "mine"), list_button(turn, "งานสั่งที่ได้รับ", "received")]
-    if work_orders.may_issue(user):
+    if scope.overseen:
         quick += [
             list_button(turn, "งานที่ฉันสั่ง", "issued"),
-            turn.button("สั่งงานใหม่", "staff_ow_start"),
         ]
     if kind in {"due_cases", "late"}:
         quick.append(
@@ -315,18 +310,24 @@ def order_detail(turn, user, order):
         else:
             buttons.append(turn.button(label, "staff_os", {"order": str(order.pk), "step": name}))
     buttons.append(("เปิดในเว็บ", web(f"/orders/{order.number}/")))
-    turn.say(
-        "\n".join(rows),
-        [
-            *buttons[:11],
-            turn.button("กลับรายการ", "staff_list", {"kind": "group"}),
-            turn.button("หน้าหลัก", "staff_menu"),
-        ],
-    )
+    from operations import staff_inbox
+
+    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับรายการ", "staff_inbox")])
 
 
-def order_step(turn, user, order, step, text="", person=None, skip_reason=False, page=1):
-    """One step of a งานสั่ง; steps that need words or a person ask first."""
+def order_step(
+    turn,
+    user,
+    order,
+    step,
+    text="",
+    person=None,
+    skip_reason=False,
+    page=1,
+    division=None,
+    confirmed=False,
+):
+    """One step of a งานสั่ง; steps that need words, a person or a division ask first."""
     from django.core.exceptions import PermissionDenied, ValidationError
 
     if (
@@ -384,6 +385,9 @@ def order_step(turn, user, order, step, text="", person=None, skip_reason=False,
             quick,
         )
         return
+    if step == "forward" and not confirmed:
+        _forward_ask(turn, user, order, division, page)
+        return
     try:
         order = work_orders.act(
             user,
@@ -392,6 +396,7 @@ def order_step(turn, user, order, step, text="", person=None, skip_reason=False,
             reason=text if step in ("send_back", "cancel") else "",
             result=text if step == "done" else "",
             assignee=person,
+            division=division,
         )
     except PermissionDenied:
         turn.set_prompt()
@@ -402,6 +407,38 @@ def order_step(turn, user, order, step, text="", person=None, skip_reason=False,
         return
     turn.set_prompt()
     order_detail(turn, user, order)
+
+
+def _forward_ask(turn, user, order, division, page):
+    """ADR 0040 Q2: the department picks the division, then confirms before the order moves."""
+    from django.core.paginator import Paginator
+
+    if "forward" not in dict(work_orders.steps_for(user, order)):
+        turn.say("ทำขั้นนี้ไม่ได้แล้ว อาจมีคนทำไปก่อน")
+        return
+    key = {"order": str(order.pk), "step": "forward"}
+    back = turn.button("กลับงาน", "staff_order", {"order": str(order.pk)})
+    if division is not None:
+        turn.say(
+            f"ยืนยันส่งต่องาน {order.number} จาก {order.division.code} ไป {division.code}\n"
+            "งานจะไม่มีผู้รับผิดชอบจนกว่ากองปลายทางจะมอบหมาย",
+            [
+                turn.button(
+                    "ยืนยันส่งต่อ", "staff_os", {**key, "division": division.pk, "confirm": True}
+                ),
+                back,
+            ],
+        )
+        return
+    rows = Paginator(work_orders.issuable(user).exclude(pk=order.division_id), 9).get_page(page)
+    quick = [turn.button(d.code[:20], "staff_os", {**key, "division": d.pk}) for d in rows]
+    for label, number in (("ย้อนกลับ", rows.number - 1), ("ถัดไป", rows.number + 1)):
+        if 1 <= number <= rows.paginator.num_pages:
+            quick.append(turn.button(label, "staff_os", {**key, "page": number}))
+    quick.append(back)
+    turn.say(
+        f"ส่งต่องาน {order.number} ให้กองใด · หน้า {rows.number}/{rows.paginator.num_pages}", quick
+    )
 
 
 # Thai calendar date parser retained for callers of staff_work._typed_date.
@@ -503,7 +540,10 @@ def case_detail(turn, user, case):
     buttons = []
     if options.get(options.STAFF_LINE_ACTIONS) == "act":
         st = web_actions.situation(user, case)
-        for offer in web_actions.available(user, case, st)[:10]:
+        offers = web_actions.available(user, case, st)
+        priority = {"approve": 0, "admin_send": 1, "assign": 2}
+        offers.sort(key=lambda offer: priority.get(offer.name, 3))
+        for offer in offers[:10]:
             form = web_actions.build_form(offer.name, st, {})
             label = SHORT_LABELS.get(offer.name, offer.label)
             if _askable(form) is not None:
@@ -516,14 +556,9 @@ def case_detail(turn, user, case):
                 shown = f"{label} (เว็บ)" if len(label) <= 14 else label
                 buttons.append((shown, web(path)))
     buttons.append(("เปิดในเว็บ", web(f"/cases/{case.number}/")))
-    turn.say(
-        "\n".join(rows),
-        [
-            *buttons[:11],
-            turn.button("กลับรายการ", "staff_list", {"kind": "group"}),
-            turn.button("หน้าหลัก", "staff_menu"),
-        ],
-    )
+    from operations import staff_inbox
+
+    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับรายการ", "staff_inbox")])
 
 
 def step_start(turn, user, case, action):
