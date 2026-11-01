@@ -24,6 +24,7 @@ class ReleaseTests(TestCase):
         self.created = 0
         self.fail_alias = False
         self.verify = True
+        self.friend = True
 
     def api(self, path, data=None, **kwargs):
         method = kwargs.get("method", "POST" if data is not None else "GET")
@@ -48,6 +49,8 @@ class ReleaseTests(TestCase):
             self.aliases[data.get("richMenuAliasId", path.rsplit("/", 1)[-1])] = data["richMenuId"]
         if path.startswith("/v2/bot/user/test-viewer/richmenu/"):
             self.links["test-viewer"] = path.rsplit("/", 1)[-1]
+        if path == "/v2/bot/profile/test-viewer" and not self.friend:
+            raise line_api.LineApiError(404, "Not found")
         if path == "/v2/bot/user/test-viewer/richmenu":
             return {"richMenuId": self.links.get("test-viewer") if self.verify else "old-menu"}
         return {}
@@ -129,6 +132,15 @@ class ReleaseTests(TestCase):
                 line_menu.publish(None, self.images, "verify")
         self.assertNotIn(("/v2/bot/richmenu/old-menu", "DELETE"), self.calls)
         self.assertEqual(LineMenuRelease.objects.get().status, "partial")
+
+    def test_a_line_that_left_the_oa_no_longer_holds_the_release_back(self):
+        # 1 Nov 2569: one blocked LINE kept releases 6-8 partial and the old menus alive.
+        self.verify, self.friend = False, False
+        with patch.object(line_api, "call", side_effect=self.api):
+            line_menu.publish(None, self.images, "verify")
+        self.assertEqual(LineMenuRelease.objects.get().status, "complete")
+        self.assertIn(("/v2/bot/richmenu/old-menu", "DELETE"), self.calls)
+        self.assertFalse(ChannelIdentity.objects.get(external_id="test-viewer").is_following)
 
     def test_guest_image_matches_guest_actions_and_every_image_fits(self):
         labels = [a["action"]["displayText"] for a in line_menu.rich_menu("user")["areas"]]

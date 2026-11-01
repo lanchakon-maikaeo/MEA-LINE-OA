@@ -5,6 +5,7 @@ on:
     branches: [main]
 permissions:
   contents: read
+  actions: read # the push to main reads the pull request run of the same tree
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -33,19 +34,43 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 2
+      # A merge into main whose tree is byte for byte the tree its pull request already passed
+      # (reports/ci.json of that run) is not tested again, so Release starts within a minute.
+      - name: Reuse the pull request run of this exact tree
+        id: reuse
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr_head=$(git rev-parse -q --verify 'HEAD^2') || exit 0
+          tree=$(git rev-parse 'HEAD^{tree}')
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$pr_head&event=pull_request&status=success" --jq '.workflow_runs[].id') || exit 0
+          for run in $runs; do
+            rm -rf previous
+            gh run download "$run" -n foundation-reports -D previous || continue
+            if python3 -c 'import json, sys; r = json.load(open("previous/ci.json")); sys.exit(not (r.pop("tree", "") == sys.argv[1] and r and not any(r.values())))' "$tree"; then
+              echo "::notice::Tree $tree passed every stage in pull request run $run; not tested again."
+              echo "reuse=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        if: steps.reuse.outputs.reuse != 'true'
         with:
           python-version: "3.13"
       - name: Install locked dependencies and browser
+        if: steps.reuse.outputs.reuse != 'true'
         run: |
           python -m pip install uv==0.10.11
           python -m uv sync --locked
           python -m uv run --locked playwright install --with-deps chromium
           python -c 'import os, secrets; open(os.environ["GITHUB_ENV"], "a").write("DJANGO_SECRET_KEY=" + secrets.token_urlsafe(64) + "\n")'
       - name: Checks, PostgreSQL tests, Chromium smoke and security
+        if: steps.reuse.outputs.reuse != 'true'
         run: make ci
       - name: Collect reports even on failure
-        if: always()
+        if: always() && steps.reuse.outputs.reuse != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: foundation-reports

@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
@@ -12,7 +13,8 @@ def require_demo_database(app_env, database):
     """Shared boundary for demo writes, database reset, and test database creation."""
     if (
         app_env not in {"local", "ci"}
-        or database["NAME"] not in DEMO_DATABASES
+        # manage.py test --parallel clones test_mea_ci into test_mea_ci_1, _2, ...
+        or re.sub(r"^(test_.+)_\d+$", r"\1", database["NAME"]) not in DEMO_DATABASES
         or database["HOST"] not in LOCAL_DB_HOSTS
         or database["ENGINE"] != "django.db.backends.postgresql"
     ):
