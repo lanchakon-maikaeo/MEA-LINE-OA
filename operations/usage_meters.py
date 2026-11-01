@@ -35,6 +35,20 @@ def match_district(text):
     return None
 
 
+def district_in(text):
+    """The district a requester's words name (1 Nov 2569: กตฟ. types it among the details): a
+    part between commas or lines, else one word of it; None when none is a district's name."""
+    districts = {}
+    for district in District.objects.filter(is_active=True).order_by("code"):
+        districts.setdefault(name_key(district.name), district)
+    parts = [p for p in re.split(r"[,\n]", str(text or "")) if p.strip()]
+    for piece in [*parts, *(w for p in parts for w in p.split())]:
+        found = districts.get(name_key(piece))
+        if found is not None:
+            return found
+    return None
+
+
 # Words that show a meter is a customer's (Q10): with the policy's usage words (ลักใช้ไฟ,
 # ไฟแพง, …, admin-editable) and a district named in the message.
 CUSTOMER_WORDS = (
@@ -87,8 +101,8 @@ def clean(raw):
         district = entry.get("district")
         if not number:
             raise ValueError("หมายเลขเครื่องวัดใช้ตัวอักษร ตัวเลข หรือขีด 4 ถึง 20 ตัว")
-        if not isinstance(district, str) or not 1 <= len(district) <= 16:
-            raise ValueError("เครื่องวัดแต่ละเครื่องต้องมีเขต")
+        if not isinstance(district, str) or len(district) > 16:
+            raise ValueError("เขตของเครื่องวัดไม่ถูกต้อง")  # "" since 1 Nov 2569: not typed
         meters.append({"number": number, "district": district})
     if len({m["number"] for m in meters}) != len(meters):
         raise ValueError("หมายเลขเครื่องวัดซ้ำกัน")
@@ -96,8 +110,11 @@ def clean(raw):
 
 
 def describe(meters):
-    """For the summary and the case page: "12345678 (เขตบางเขน), 87654321 (เขตบางนา)"."""
+    """For the summary and the case page: "12345678 (เขตบางเขน), 87654321" (no district typed)."""
     names = dict(District.objects.values_list("code", "name"))
     return ", ".join(
-        f"{m['number']} ({short(names.get(m['district'], m['district']))})" for m in meters
+        f"{m['number']} ({short(names.get(m['district'], m['district']))})"
+        if m["district"]
+        else m["number"]
+        for m in meters
     )

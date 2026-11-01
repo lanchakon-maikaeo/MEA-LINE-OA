@@ -22,7 +22,6 @@ from operations.models import (
     Calendar,
     CalendarSlot,
     Case,
-    ChannelIdentity,
     ConversationDraft,
     LineFlow,
     Role,
@@ -432,12 +431,14 @@ class OtherButtonTests(FlowTestCase):
         tile = LineMenuItem.objects.get(place="tile", tab="report", label=label, is_active=True)
         return self.say(self.postback(user, f"m=item&id={tile.pk}"))
 
-    def test_usage_takes_the_report_in_one_message(self):
-        # ADR 0035: meters, district and what was found in one message, filed as before.
+    def test_usage_asks_the_meter_then_shows_the_summary(self):
+        # 1 Nov 2569 (ADR 0035): only the meter numbers are asked; the summary offers
+        # ยืนยันส่งเรื่อง, แก้ไข and เพิ่มรายละเอียด, and the district is read from the details.
         from operations.models import District
 
         district = District.objects.filter(is_active=True).exclude(code="D00").first()
-        short = district.name.replace("การไฟฟ้านครหลวง", "").replace("เขต", "")
+        name = district.name.replace("การไฟฟ้านครหลวง", "")
+        short = name.replace("เขต", "")
         self.publish("ตรวจสอบการใช้ไฟฟ้า")
         reply = self.open("ตรวจสอบการใช้ไฟฟ้า")
         self.assertIn("เครื่องวัดฯ ผิดปกติ", buttons(reply))
@@ -445,45 +446,59 @@ class OtherButtonTests(FlowTestCase):
         reply = self.press(ALICE, "เครื่องวัดฯ ผิดปกติ")
         self.assertEqual(
             texts(reply),
-            "กรุณาพิมพ์รายละเอียด\nหมายเลขเครื่องวัดฯ, การไฟฟ้าเขต, ลักษณะที่พบ\n"
-            "เช่น 12345678, วัดเลียบ, PLS ถูกแกะ",
+            "กรุณาพิมพ์หมายเลขเครื่องวัดฯ\nหากมีหลายเครื่องคั่นด้วย , เช่น 12345678, 12345679",
         )
-        self.assertIn("เป็นตัวเลข 8 หลัก", texts(self.type(ALICE, "1234567, วัดเลียบ, x")))
-        reply = self.type(ALICE, f"12345678 12345679, {short}, PLS ถูกแกะ")
+        self.assertIn("เป็นตัวเลข 8 หลัก", texts(self.type(ALICE, "1234567")))
+        reply = self.type(ALICE, "12345678 12345679")
         for line in (
             "เรื่อง: เครื่องวัดฯ ผิดปกติ",
             "หมายเลขเครื่องวัดฯ: 12345678, 12345679",
-            f"การไฟฟ้าเขต: {district.name.replace('การไฟฟ้านครหลวง', '')}",
-            "ลักษณะที่พบ: PLS ถูกแกะ",
+            "การไฟฟ้าเขต: ไม่ระบุ",
+            "รายละเอียด: ไม่ระบุ",
         ):
             self.assertIn(line, texts(reply))
-        self.press(ALICE, "แก้ไข")
-        reply = self.press(ALICE, "ลักษณะที่พบ")  # Q19: one answer at a time
-        reply = self.type(ALICE, "PLS ถูกแกะ ซีลขาด")
-        self.assertIn("ลักษณะที่พบ: PLS ถูกแกะ ซีลขาด", texts(reply))
+        self.assertEqual(list(buttons(reply))[:3], ["ยืนยันส่งเรื่อง", "แก้ไข", "เพิ่มรายละเอียด"])
+        reply = self.press(ALICE, "เพิ่มรายละเอียด")
+        self.assertIn("กรุณาพิมพ์การไฟฟ้าเขตและลักษณะที่พบ", texts(reply))
+        reply = self.type(ALICE, f"{short} PLS ถูกแกะ")
+        self.assertIn(f"การไฟฟ้าเขต: {name}", texts(reply))
+        self.assertIn(f"รายละเอียด: {short} PLS ถูกแกะ", texts(reply))
+        reply = self.press(ALICE, "แก้ไข")
+        self.assertEqual(list(buttons(reply))[:3], ["หมายเลขเครื่องวัดฯ", "รายละเอียด", "กลับไปที่สรุป"])
+        self.press(ALICE, "หมายเลขเครื่องวัดฯ")
+        reply = self.type(ALICE, "87654321")
+        self.assertIn("หมายเลขเครื่องวัดฯ: 87654321", texts(reply))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
         self.assertEqual((case.topic, case.owner_division.code), ("usage", "กตฟ."))
-        self.assertEqual([m["number"] for m in case.meters], ["12345678", "12345679"])
-        self.assertEqual({m["district"] for m in case.meters}, {district.code})
-        self.assertIn("PLS ถูกแกะ ซีลขาด", case.description)
+        self.assertEqual(case.meters, [{"number": "87654321", "district": district.code}])
+        self.assertIn(f"{short} PLS ถูกแกะ", case.description)
 
-    def test_usage_asks_only_what_the_message_left_out(self):
+    def test_usage_files_without_a_district(self):
+        # 1 Nov 2569: a district that is not in the details is ไม่ระบุ; nothing asks for it.
         self.publish("ตรวจสอบการใช้ไฟฟ้า")
         self.open("ตรวจสอบการใช้ไฟฟ้า")
         self.press(ALICE, "ร้องเรียนไฟแพง")
+        self.type(ALICE, "12345678")
+        self.press(ALICE, "เพิ่มรายละเอียด")
         reply = self.type(ALICE, "บิลเดือนนี้สูงผิดปกติ")
-        self.assertIn("กรุณาพิมพ์หมายเลขเครื่องวัดฯ", texts(reply))
-        reply = self.type(ALICE, "12345678")
-        self.assertIn("กรุณาพิมพ์การไฟฟ้าเขต", texts(reply))  # the found text was given
-        mine = ChannelIdentity.objects.get(external_id=ALICE).requester.district
-        name = mine.name.replace("การไฟฟ้านครหลวง", "")
-        self.assertIn(name, buttons(reply))  # Q17: the requester's own district, one tap
-        reply = self.press(ALICE, name)
-        self.assertIn(f"การไฟฟ้าเขต: {name}", texts(reply))
-        self.assertIn("ลักษณะที่พบ: บิลเดือนนี้สูงผิดปกติ", texts(reply))
+        self.assertIn("การไฟฟ้าเขต: ไม่ระบุ", texts(reply))
+        self.assertIn("รายละเอียด: บิลเดือนนี้สูงผิดปกติ", texts(reply))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
-        self.assertEqual(Case.objects.get().meters[0]["district"], mine.code)
+        self.assertEqual(Case.objects.get().meters, [{"number": "12345678", "district": ""}])
+
+    def test_back_to_the_summary_keeps_the_details(self):
+        # 1 Nov 2569 (Q14): กลับไปที่สรุป goes back without removing what was typed.
+        self.publish("ตรวจสอบการใช้ไฟฟ้า")
+        self.open("ตรวจสอบการใช้ไฟฟ้า")
+        self.press(ALICE, "เครื่องวัดฯ ชำรุด")
+        self.type(ALICE, "12345678")
+        self.press(ALICE, "เพิ่มรายละเอียด")
+        self.type(ALICE, "ฝาครอบแตก")
+        self.press(ALICE, "แก้ไข")
+        self.press(ALICE, "รายละเอียด")
+        reply = self.press(ALICE, "กลับไปที่สรุป")
+        self.assertIn("รายละเอียด: ฝาครอบแตก", texts(reply))
 
     # The กคอ. tile asks the job first since the กคอ. grill (Q3): test_m18_kko_flow.
 

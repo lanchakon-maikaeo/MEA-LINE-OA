@@ -151,6 +151,25 @@ class SeedTests(FlowTestCase):
             (LineFlowVersion.objects.count(), DivisionSchedule.objects.count()), before
         )
 
+    def test_replace_draft_opens_a_draft_over_a_published_flow(self):
+        # 1 Nov 2569: production had the 28 ต.ค. กตฟ. flow published and no draft, so the
+        # 30 ต.ค. fixture (ADR 0035) never reached it. It comes in as a draft to publish.
+        from operations.management.commands.seed_line_flows import FIXTURES
+
+        flow = LineFlow.objects.get(key="usage")
+        old = line_flows.draft_of(flow)
+        old.graph["nodes"][1]["title"] = "รุ่น 28 ต.ค."
+        old.save(update_fields=["graph"])
+        line_flows.publish(self.admin, old, "รุ่นที่ production มีอยู่")
+        call_command("seed_line_flows", division="กตฟ.", replace_draft=True, stdout=StringIO())
+        fixture = json.loads((FIXTURES / "line_flow_usage_v1.json").read_text(encoding="utf-8"))
+        draft = line_flows.draft_of(flow)
+        self.assertEqual(draft.number, 2)
+        self.assertEqual(draft.graph, line_flows.clean_graph(fixture["graph"]))
+        published = flow.versions.get(status=LineFlowVersion.Status.PUBLISHED)
+        self.assertEqual(published.number, 1)
+        self.assertEqual(published.graph["nodes"][1]["title"], "รุ่น 28 ต.ค.")
+
 
 class WebTests(FlowTestCase):
     def setUp(self):

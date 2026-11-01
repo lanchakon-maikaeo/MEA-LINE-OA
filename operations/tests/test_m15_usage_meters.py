@@ -114,7 +114,7 @@ class DistrictTests(UsageTestCase):
 
 
 class SubmissionTests(UsageTestCase):
-    def test_a_line_usage_report_needs_a_meter_with_a_known_district(self):
+    def test_a_line_usage_report_needs_a_meter_and_a_known_district_if_any(self):
         with self.assertRaises(CommandFailed):
             self.report(None)
         with self.assertRaises(CommandFailed):
@@ -123,6 +123,9 @@ class SubmissionTests(UsageTestCase):
             self.report([{"number": "1", "district": "D14"}], key="usage-003")
         case = self.report([{"number": "12345678", "district": "D14"}], key="usage-004")
         self.assertEqual(case.meters, [{"number": "12345678", "district": "D14"}])
+        # 1 Nov 2569: the LINE flow files a meter whose district was not typed.
+        case = self.report([{"number": "12345679", "district": ""}], key="usage-006")
+        self.assertEqual(usage_meters.describe(case.meters), "12345679")
 
     def test_only_a_usage_report_lists_meters(self):
         with self.assertRaises(CommandFailed):

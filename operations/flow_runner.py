@@ -102,7 +102,7 @@ GROUP_LABELS = {
 VALUE_LABELS = {
     "equipment_name": "อุปกรณ์",
     "meter_numbers": "หมายเลขเครื่องวัดฯ",
-    "district_name": "เขต",
+    "district_name": "การไฟฟ้าเขต",
     "ct_size": "ขนาด CT",
     "vt_size": "ขนาด VT",
     "details": "รายละเอียด",
@@ -233,11 +233,11 @@ def branch_target(graph, box, values):
 
 
 def _does(button, what):
-    """A summary button's own job: do=edit (แก้ไข) or do=restart (กรอกใหม่)."""
+    """A button's own job: do=edit (แก้ไข), do=restart (กรอกใหม่) or do=back (กลับไปที่สรุป)."""
     found = assign({}, button.get("set")).get("do")
     if found:
         return found == what
-    return {"edit": "แก้ไข", "restart": "กรอกใหม่"}[what] in button["label"]
+    return {"edit": "แก้ไข", "restart": "กรอกใหม่", "back": "กลับไปที่สรุป"}[what] in button["label"]
 
 
 # --- Starting, moving, showing ---------------------------------------------------------------
@@ -590,9 +590,10 @@ def summary(draft, graph, box):
             if check["ok"]
             else f"ตัวคูณ: {check['given']} (คำนวณได้ {check['computed'] or 'ไม่ได้'} ให้เจ้าหน้าที่ตรวจ)"
         )
+    unset = set(box["config"].get("unset", "").split("|"))  # 1 Nov 2569: shown as ไม่ระบุ
     for key in ("equipment_name", "meter_numbers", "district_name"):
-        if values.get(key):
-            value = values[key]
+        if values.get(key) or key in unset:
+            value = values.get(key) or "ไม่ระบุ"
             label = _label(graph, state, key)
             lines.append(f"{label}: {', '.join(value) if isinstance(value, list) else value}")
     for key in (
@@ -604,7 +605,7 @@ def summary(draft, graph, box):
         "condition_reason",
         "impact",
     ):
-        value = values.get(key)
+        value = values.get(key) or ("ไม่ระบุ" if key in unset else "")
         if value:
             label = values.get("tools_label") if key == "tools" else None
             label = label or _label(graph, state, key)
@@ -727,7 +728,8 @@ def on_button(turn, draft, value):
         ):
             return _finish(turn, draft, "ต้องยืนยันตัวตนพนักงานก่อนติดตามใบเบิกหรือใบส่งคืน")
         if box["kind"] == "ask":  # ข้าม on a question that may be skipped
-            values.pop(box["config"].get("field", ""), None)
+            if not _does(button, "back"):  # 1 Nov 2569 Q14: กลับไปที่สรุป keeps the answer
+                values.pop(box["config"].get("field", ""), None)
             _answered(state, box)
             if state.get("editing"):
                 return _back_to_summary(turn, draft, state)
@@ -740,6 +742,18 @@ def on_button(turn, draft, value):
         return conversation._ask(turn, draft)
     _save(turn, draft, state)
     return _go(turn, draft, target)
+
+
+def _district_in(values, text):
+    """1 Nov 2569: กตฟ. types the meter's district among the details; ไม่ระบุ when none is named."""
+    from operations import usage_meters  # local: usage_meters reads the districts
+
+    found = usage_meters.district_in(text)
+    if found is None:
+        values.pop("district", None)
+        values.pop("district_name", None)
+    else:
+        values["district"], values["district_name"] = found.code, usage_meters.short(found.name)
 
 
 def _own_district(turn):
@@ -859,6 +873,8 @@ def on_text(turn, draft, text):
         values[field] = value
         if rule == "district":
             values[f"{field}_name"] = shown  # the code is kept, the name is shown
+    if config.get("district"):
+        _district_in(values, value)
     if rule == "tracking":
         values.pop("no_number", None)  # a number typed after all
     if rule in ("multiplier", "size") and values.get("multiplier"):

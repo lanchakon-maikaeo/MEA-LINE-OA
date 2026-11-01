@@ -416,8 +416,9 @@ def _check_sap(submission, fields, requester, routes, intake):
 
 def _check_meters(submission, fields, intake):
     """เรื่องการใช้ไฟฟ้า (25 Oct 2569 Q11): each meter's district must be an active district, and
-    a LINE report names at least one meter."""
-    codes = {m["district"] for m in submission.meters}
+    a LINE report names at least one meter. A meter may have no district (1 Nov 2569: the LINE
+    flow reads it from the details, which may not name it)."""
+    codes = {m["district"] for m in submission.meters if m["district"]}
     known = set(
         District.objects.filter(code__in=codes, is_active=True).values_list("code", flat=True)
     )
@@ -429,7 +430,7 @@ def _check_meters(submission, fields, intake):
         and intake is None
         and not submission.meters
     ):
-        fail(ErrorCode.VALIDATION_ERROR, "ระบุหมายเลขเครื่องวัดและเขตก่อนส่งเรื่อง")
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุหมายเลขเครื่องวัดก่อนส่งเรื่อง")
 
 
 def _submission_requester(ctx, submission, intake):
