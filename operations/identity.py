@@ -51,7 +51,7 @@ class StaffScope:
     # ADR 0007: acts for every division with every role; bound by no separation of duties.
     is_support: bool = False
     # 16 Oct 2569 Q5: divisions this person supervises (assigns work, sees every case); a
-    # Supervisor ระดับฝ่าย supervises every active division without being a member of it.
+    # แอดมินฝ่าย supervises every active division without being a member of it.
     overseen: frozenset[int] = frozenset()
     is_department_supervisor: bool = False
     # ADR 0039: divisions this person only reads (ผู้ดูข้อมูลของกอง, or every active division
@@ -346,7 +346,7 @@ def grant_role(actor, user, role, division=None, reason=""):
         raise ValidationError("Division roles need an active division.")
     if role in DUTY_ROLES and not work_is_split():
         raise ValidationError(
-            "ตอนนี้สมาชิกกองทำได้ทุกขั้นตอน ให้บทบาทสมาชิกกองหรือ Supervisor แทน "
+            "ตอนนี้สมาชิกกองทำได้ทุกขั้นตอน ให้บทบาทสมาชิกกองหรือแอดมินกองแทน "
             "(ถ้าจะแยกหน้าที่ย่อย เปลี่ยนตัวเลือกระบบ หน้าที่ในกอง ก่อน)"
         )
     locked = _lock_active_admins()

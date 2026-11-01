@@ -17,9 +17,16 @@ FILTERS = {
 WAITING = (Case.Status.SUBMITTED, Case.Status.TRIAGE, Case.Status.AWAITING_APPROVAL)
 
 
+def picks_division(scope):
+    """แอดมินฝ่าย and the system's admins see every กอง and may narrow the list to one."""
+    return scope.is_department_supervisor or scope.is_admin or scope.is_support
+
+
 def sources(user, status="waiting", division=None):
     scope = identity.staff_scope(user)
     divisions = set(scope.division_roles) | set(scope.overseen)
+    if picks_division(scope):
+        divisions |= set(Division.objects.filter(is_active=True).values_list("pk", flat=True))
     if division is not None:
         divisions &= {division}
     cases = queues.visible(user).filter(owner_division_id__in=divisions)
@@ -148,7 +155,7 @@ def show(turn, user, status="waiting", division=None, page=1):
     for label, number in (("ย้อนกลับ", rows.number - 1), ("ถัดไป", rows.number + 1)):
         if 1 <= number <= rows.paginator.num_pages:
             quick.append(turn.button(label, "staff_inbox", {**state, "page": number}))
-    if identity.staff_scope(user).is_department_supervisor:
+    if picks_division(identity.staff_scope(user)):
         quick.append(turn.button("เลือกกอง/ศูนย์", "staff_inbox_divisions", {"status": status}))
     turn.set_prompt()
     turn.say(
@@ -171,7 +178,7 @@ def show(turn, user, status="waiting", division=None, page=1):
 
 
 def choose_division(turn, user, status="waiting", page=1):
-    if not identity.staff_scope(user).is_department_supervisor:
+    if not picks_division(identity.staff_scope(user)):
         return show(turn, user)
     rows = Paginator(
         Division.objects.filter(is_active=True, is_synthetic=False).order_by("code"), 9

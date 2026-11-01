@@ -238,6 +238,6 @@
   };
   (async () => {
     try { await bootstrap(); if(config.campaign_id) await details(config.campaign_id); else await history(); }
-    catch { if(config.liff_id && window.liff) await run(lineLogin); else $('login-help').textContent = 'กรุณาเข้าสู่ระบบด้วยบัญชี Supervisor เพื่อดำเนินการ'; }
+    catch { if(config.liff_id && window.liff) await run(lineLogin); else $('login-help').textContent = 'กรุณาเข้าสู่ระบบด้วยบัญชีแอดมินกองหรือแอดมินฝ่ายเพื่อดำเนินการ'; }
   })();
 })();

@@ -179,12 +179,12 @@ def navigate(turn, user, value):
     elif view == "roles":
         quick = [
             nav_button(turn, label, "divisions", requester=value["requester"], role=role)
-            for role, label in [("สมาชิกกอง", "สมาชิกกอง"), ("supervisor", "Supervisor กอง")]
+            for role, label in [("สมาชิกกอง", "สมาชิกกอง"), ("supervisor", "แอดมินกอง")]
         ]
         quick.append(
             nav_button(
                 turn,
-                "Supervisor ฝ่าย",
+                "แอดมินฝ่าย",
                 "confirm",
                 command=f"เพิ่มสิทธิ์ {value['requester']} supervisorฝ่าย -",
             )
@@ -270,7 +270,7 @@ def handle(turn, user, command, token):
             division = Division.objects.filter(code=code, is_active=True).first()
             if role == Role.DEPARTMENT_SUPERVISOR:
                 if code != "-":
-                    turn.say("Supervisor ฝ่ายใช้ - แทนกอง")
+                    turn.say("แอดมินฝ่ายใช้ - แทนกอง")
                     return True
                 division = None
             elif division is None:

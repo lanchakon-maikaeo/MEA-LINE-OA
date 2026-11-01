@@ -66,16 +66,16 @@ def navigation(turn, user):
     quick = []
     if work_orders.may_issue(user):
         quick.append(turn.button("สั่งงาน", "staff_ow_start"))
-    turn.say("กรุณาเลือกการดำเนินการ" if quick else "ขณะนี้ไม่มีเมนูเพิ่มเติมสำหรับสิทธิ์ของท่าน", quick)
+    turn.say("กรุณาเลือกการดำเนินการ" if quick else "ไม่มีเมนูเพิ่มเติมในขณะนี้", quick)
 
 
 def handle_item(turn, user, item):
     """A tap on a งานของกอง or สั่งงาน button of the rich menu."""
     if item.action == A.ORDER_NEW and not work_orders.may_issue(user):
-        turn.say("การสั่งงานสงวนสิทธิ์สำหรับ Supervisor ระดับฝ่ายเท่านั้น", [web_button()])
+        turn.say("การสั่งงานสงวนสิทธิ์สำหรับ แอดมินฝ่ายเท่านั้น", [web_button()])
         return
     if item.tab == T.ORDER and not identity.staff_scope(user).overseen:
-        turn.say("เมนูนี้สงวนสิทธิ์สำหรับ Supervisor เท่านั้น", [web_button()])
+        turn.say("เมนูนี้สงวนสิทธิ์สำหรับแอดมินกองและแอดมินฝ่ายเท่านั้น", [web_button()])
         return
     turn.set_prompt()
     {

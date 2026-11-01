@@ -1,6 +1,6 @@
 """งานสั่ง (16 Oct 2569 Q6, Q7, Q14): work a Supervisor gives a division or one of its members.
 
-Only a Supervisor issues one: the Supervisor ระดับฝ่าย for any division, a Supervisor ของกอง for
+Only a Supervisor issues one: the แอดมินฝ่าย for any division, a แอดมินกอง for
 their own. มอบหมาย → รับทราบ → กำลังทำ → เสร็จ; the person or division doing it may send it back
 with a reason, and a Supervisor closes or cancels it. The doer is told when it is assigned, the
 issuer when it is acknowledged, done or sent back, and the doer once near the due date and once
@@ -150,7 +150,7 @@ def _check_target(division, assignee):
 
 def _require_issuer(actor, division):
     if division.pk not in identity.staff_scope(actor).overseen:
-        raise PermissionDenied("เฉพาะ Supervisor ของกองนี้หรือ Supervisor ระดับฝ่ายสั่งงานได้")
+        raise PermissionDenied("เฉพาะ แอดมินกองนี้หรือ แอดมินฝ่ายสั่งงานได้")
 
 
 def _number(now):
@@ -181,7 +181,7 @@ def create(
 ):
     """A new งานสั่ง; the doer is told at once (Q14)."""
     if not may_issue(actor):
-        raise PermissionDenied("การสั่งงานสงวนสิทธิ์สำหรับ Supervisor ระดับฝ่ายเท่านั้น")
+        raise PermissionDenied("การสั่งงานสงวนสิทธิ์สำหรับ แอดมินฝ่ายเท่านั้น")
     title = " ".join((title or "").split())
     if not title:
         raise ValidationError("บอกว่าให้ทำอะไร")

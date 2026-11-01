@@ -561,9 +561,16 @@ def _staff_turn(turn):
     if data in {"m=broadcast", "m=staff_inbox"} or command == "Broadcast":
         from operations import identity, line_menu, staff_inbox
 
-        if user is None or not identity.staff_scope(user).overseen:
-            turn.say("รายการนี้สงวนสิทธิ์สำหรับ Supervisor กรุณาตรวจสอบการเชื่อมบัญชีเจ้าหน้าที่")
-        elif data == "m=staff_inbox":
+        inbox = data == "m=staff_inbox"
+        if user is None or not (
+            line_menu.has_work_tab(user) if inbox else identity.staff_scope(user).overseen
+        ):
+            turn.say(
+                "รายการนี้สงวนสิทธิ์สำหรับแอดมิน กรุณาตรวจสอบการเชื่อมบัญชีเจ้าหน้าที่"
+                if inbox
+                else "Broadcast สงวนสิทธิ์สำหรับแอดมินกองและแอดมินฝ่าย"
+            )
+        elif inbox:
             turn.set_prompt()
             staff_inbox.show(turn, user)
         else:

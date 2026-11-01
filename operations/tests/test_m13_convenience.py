@@ -222,7 +222,7 @@ class AdminButtonsTests(admin_tests.AdminLineTests):
         requester = self.verified_employee()
         self.type(ALICE, f"ดูผู้ใช้ {requester.pk}")
         self.press(ALICE, "เพิ่มสิทธิ์")
-        choices = self.press(ALICE, "Supervisor กอง")
+        choices = self.press(ALICE, "แอดมินกอง")
         while "กองอุปกรณ์ฯ" not in buttons(choices):
             choices = self.press(ALICE, "ถัดไป")
         summary = self.press(ALICE, "กองอุปกรณ์ฯ")

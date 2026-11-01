@@ -467,7 +467,7 @@ def set_sap_number(ctx, case, payload, reason, target):
 
 def admin_send(ctx, case, payload, reason, target):
     """ADR 0030 Q11, Q18: an admin names the division and it takes the case at once; a case the
-    admins held is theirs no longer. ADR 0039: a Supervisor ระดับฝ่าย sends too."""
+    admins held is theirs no longer. ADR 0039: a แอดมินฝ่าย sends too."""
     scope = ctx.scope
     if ctx.requester is not None or not (
         scope.is_admin or scope.is_support or scope.is_department_supervisor
