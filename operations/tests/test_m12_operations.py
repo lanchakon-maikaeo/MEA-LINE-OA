@@ -460,6 +460,18 @@ class AutoDeployTests(SimpleTestCase):
             check=False,
         )
 
+    def test_deploy_clears_old_images_before_it_pulls(self):
+        # 1 Nov 2026: old images filled the root disk, which the FAOJ_ROOT check never sees.
+        for name in ("django.env", "app.secret.env", "migrate.secret.env", "db.secret.env"):
+            (self.root / "env" / name).write_text("")
+        (self.root / "env/n8n.secret.env").write_text("")
+        (self.root / "tls/db").mkdir(parents=True)
+        (self.root / "tls/db/server.key").write_text("")
+        result = self.faoj("staging", "deploy", "registry.example/app@sha256:" + "a" * 64)
+        self.assertIn("could not remove old images", result.stderr)
+        calls = (self.root / "docker.log").read_text().splitlines()
+        self.assertEqual(calls, ["image prune -af --filter until=24h"])  # stopped before any pull
+
     def test_staging_is_off_until_switched_on_with_a_reason(self):
         self.assertTrue(self.faoj("staging", "auto-deploy", "status").stdout.startswith("off"))
         check = self.faoj("staging", "auto-deploy", "check")
