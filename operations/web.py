@@ -1047,7 +1047,7 @@ def case_new(request):
                     f"{number} ({owners[number]})" for number in numbers
                 )
             else:
-                text = f"บันทึกเรื่อง {numbers[0]} แทนผู้แจ้งแล้ว เข้าคิวคัดกรองของ {owners[numbers[0]]}"
+                text = f"บันทึกเรื่อง {numbers[0]} แทนผู้แจ้งแล้ว ส่งถึง {owners[numbers[0]]}"
             # K15: staff of any division may file, but open only their own division's cases.
             # Show the first case this account can open; otherwise stay on a new form.
             visible = set(

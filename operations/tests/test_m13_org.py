@@ -269,7 +269,7 @@ class OwnerDeskTests(OrgTestCase):
         case = Case.objects.get(intake_note=form["intake_note"])
         self.assertEqual(case.owner_division.code, "กคว.")
         self.assertRedirects(response, "/cases/new/")
-        self.assertContains(response, f"บันทึกเรื่อง {case.number} แทนผู้แจ้งแล้ว เข้าคิวคัดกรองของ กคว.")
+        self.assertContains(response, f"บันทึกเรื่อง {case.number} แทนผู้แจ้งแล้ว ส่งถึง กคว.")
         self.assertContains(response, "บัญชีนี้จึงเปิดดูไม่ได้")
         split = {
             **form,
