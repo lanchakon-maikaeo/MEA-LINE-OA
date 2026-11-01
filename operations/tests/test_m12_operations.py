@@ -467,6 +467,12 @@ class AutoDeployTests(SimpleTestCase):
         (self.root / "env/n8n.secret.env").write_text("")
         (self.root / "tls/db").mkdir(parents=True)
         (self.root / "tls/db/server.key").write_text("")
+        # The disk checks read this runner's /tmp, often under 15% free on CI: report room instead.
+        python = self.root / "bin/python3"
+        python.write_text(
+            '#!/bin/sh\ncase "$*" in *disk_usage*) echo 50;; *) exec /usr/bin/python3 "$@";; esac\n'
+        )
+        python.chmod(0o755)
         result = self.faoj("staging", "deploy", "registry.example/app@sha256:" + "a" * 64)
         self.assertIn("could not remove old images", result.stderr)
         calls = (self.root / "docker.log").read_text().splitlines()
