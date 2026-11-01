@@ -56,6 +56,17 @@ def _linked_menu(user_id):
         return None
 
 
+def _is_friend(user_id):
+    """LINE accepts a link for an account that blocked or left the OA but keeps no menu for it."""
+    try:
+        line_api.call(f"/v2/bot/profile/{user_id}")
+    except line_api.LineApiError as exc:
+        if exc.status != 404:
+            raise
+        return False
+    return True
+
+
 def _allowed_menu_ids(release, page):
     role = page.partition("-")[0]
     tabs = line_menu.ROLE_TABS.get(role)
@@ -158,7 +169,12 @@ def publish(actor, images, reason):
                     line_api.call(f"{target}/{release.menus[page]}", method="POST")
                     linked = _linked_menu(user_id)
                 if linked not in allowed:
-                    unverified += 1
+                    if _is_friend(user_id):
+                        unverified += 1
+                    else:  # its unfollow never reached us; it must not hold every release back
+                        ChannelIdentity.objects.filter(channel="line", external_id=user_id).update(
+                            is_following=False
+                        )
             if unverified:
                 raise ValidationError(f"ยังตรวจยืนยันเมนูไม่ได้ {unverified} บัญชี เก็บเมนูเก่าไว้และจะลองใหม่")
             for old in release.previous.get("menus", []):
