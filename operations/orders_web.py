@@ -55,7 +55,7 @@ def _targets(user):
         choices = [(f"d:{division.pk}", f"{division.code} ทั้งกอง")]
         choices += [
             (f"u:{division.pk}:{person.pk}", f"{division.code} · {work_orders.name_of(person)}")
-            for person in work_orders.members(division.pk)
+            for person in work_orders.recipients(division.pk)
         ]
         groups.append((division, choices))
     return groups

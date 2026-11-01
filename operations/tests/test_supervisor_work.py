@@ -48,19 +48,17 @@ class InboxTests(WebTestCase):
         _, rows = staff_inbox.page_for(self.supervisor, "all", other.owner_division_id)
         self.assertEqual(rows, [])
 
-    def test_inbox_waiting_filter_and_pagination(self):
+    def test_inbox_pages_ten_rows(self):
         from operations import staff_inbox, work_orders
 
         director = make_staff("department", (Role.DEPARTMENT_SUPERVISOR, None))
-        for number in range(7):
+        for number in range(12):
             work_orders.create(director, f"งาน {number}", self.mtr)
         page, first = staff_inbox.page_for(director)
         _, second = staff_inbox.page_for(director, page=2)
-        self.assertEqual(page.paginator.count, 7)
-        self.assertEqual((len(first), len(second)), (5, 2))
+        self.assertEqual(page.paginator.count, 12)
+        self.assertEqual((len(first), len(second)), (10, 2))  # ADR 0042 Q4: 10 rows a page
         self.assertFalse({r.pk for _, r in first} & {r.pk for _, r in second})
-        _, active = staff_inbox.page_for(director, "active")
-        self.assertEqual(active, [])
 
 
 class DepartmentTransferTests(WebTestCase):

@@ -1,18 +1,25 @@
 """ผังหน่วยงาน page (ADR 0031): admins only see and change it (Q17). One card per กอง, แผนก and
 กลุ่มงาน shows its people, the งานที่หน่วยรับ with their ผู้รับผิดชอบประจำงาน, and its
-ผู้รับแจ้ง. "ลองดูว่าเด้งไปใคร" answers what a new case would do (Q10)."""
+ผู้รับแจ้ง. (ADR 0042 took off "ลองดูว่าเด้งไปใคร" and the page's explanations.)
+
+ADR 0041: above the cards, a tree of the people registered in LINE by the roster's สายงาน ›
+ฝ่าย › กอง › แผนก › กลุ่มงาน; it grows as people register, and a click on a person changes
+their unit or role."""
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
-from operations import koj_tracking, units
+from operations import identity, koj_tracking, roster, units
 from operations.koj_models import KojRecipient
 from operations.models import (
     VIEWER_ROLES,
     ChannelIdentity,
     Division,
+    Employee,
+    Requester,
+    Role,
     RoleGrant,
     Section,
     StaffProfile,
@@ -35,12 +42,6 @@ def admin_page(request):
         Division.objects.filter(is_active=True, kind=Division.Kind.DIVISION).order_by("code")
     )
     chart = _chart(divisions)
-    result = None
-    asked = request.GET
-    if asked.get("division") and asked.get("kind") and asked.get("group"):
-        division = next((d for d in divisions if str(d.pk) == asked["division"]), None)
-        if division is not None:
-            result = units.preview(division, asked["kind"], asked["group"])
     return render(
         request,
         "operations/admin_org.html",
@@ -49,10 +50,11 @@ def admin_page(request):
             "divisions": divisions,
             "kinds": list(units.KIND_SHORT.items()),
             "groups": units.group_choices(),
-            "asked": asked,
-            "result": result,
             "unplaced": _unplaced(),
             "owner_slots": range(MAX_OWNERS),
+            "tree": _tree(),
+            "paths": roster.unit_paths(),
+            "picks": [(r, identity.role_label(r)) for r in identity.PICKS],
         },
     )
 
@@ -183,6 +185,87 @@ def _chart(divisions):
     return out
 
 
+ROOT = "ผู้ว่าการ"
+
+
+def _tree():
+    """The registered people (a LINE OA user tied to the roster) by their roster path. Empty
+    levels are skipped and a level named like its parent (สายงาน รผง. › ฝ่าย รผง.) is one node.
+    A system กอง or แผนก links to its card below."""
+    link = Requester.EmployeeLink
+    requesters = (
+        Requester.objects.filter(
+            status=Requester.Status.ACTIVE,
+            is_anonymous=False,
+            employee_link__in=[link.VERIFIED, link.ADMIN],
+            channelidentity__status=ChannelIdentity.Status.ACTIVE,
+        )
+        .select_related("employee__division")
+        .distinct()
+    )
+    users = dict(
+        StaffProfile.objects.filter(
+            employee_id__in=[r.employee.employee_id for r in requesters], user__is_active=True
+        ).values_list("employee_id", "user_id")
+    )
+    roles = dict(
+        RoleGrant.objects.filter(user_id__in=users.values(), revoked_at__isnull=True)
+        .exclude(role=Role.SYSTEM_SUPPORT)
+        .values_list("user_id", "role")
+    )
+    sections = {}
+    root = {"label": ROOT, "children": {}, "people": [], "anchor": "", "count": 0}
+    for requester in sorted(requesters, key=lambda r: r.display_name):
+        employee = requester.employee
+        node, names = root, [ROOT]
+        steps = [(employee.line_of_work, ""), (employee.department, "")]
+        division = employee.division
+        if division is not None:
+            steps.append((f"{units.short(division)} : {division.name}", f"d{division.pk}"))
+            if division.pk not in sections:
+                sections[division.pk] = list(division.sections.filter(is_active=True))
+            hit = next(
+                (
+                    x
+                    for x in sections[division.pk]
+                    if roster.same_unit(employee.section_name, x.name)
+                ),
+                None,
+            )
+            steps.append((employee.section_name, f"s{hit.pk}" if hit else ""))
+        else:
+            steps += [(employee.division_name, ""), (employee.section_name, "")]
+        steps.append((employee.work_group, ""))
+        node["count"] += 1
+        for label, anchor in steps:
+            if not label or label == names[-1]:
+                continue
+            names.append(label)
+            node = node["children"].setdefault(
+                label, {"label": label, "children": {}, "people": [], "anchor": anchor, "count": 0}
+            )
+            node["count"] += 1
+        role = roles.get(users.get(employee.employee_id), identity.EMPLOYEE)
+        node["people"].append(
+            {
+                "employee": employee,
+                "name": requester.display_name,
+                "role": role,
+                "role_label": identity.role_label(role),
+                "in_picks": role in identity.PICKS,
+                "path": roster.path_of(employee),
+            }
+        )
+
+    def listed(node):
+        node["children"] = [listed(c) for c in node["children"].values()]
+        return node
+
+    root = listed(root)
+    root["top"] = {"people": root["people"], "children": []}  # people at the root itself
+    return root
+
+
 def _key(division_id, section_id, group_id):
     if group_id:
         return f"g{group_id}"
@@ -308,9 +391,41 @@ def _act(request):
         elif action == "koj":
             koj_tracking.set_group(actor, data.get("group"), data.getlist("person"))
             messages.success(request, "บันทึกผู้รับแจ้งงานติดตาม กอจ. แล้ว")
+        elif action == "set_person":
+            anchor = "#org-tree"
+            _set_person(request, get_object_or_404(Employee, pk=data.get("employee")))
     except ValidationError as exc:
         messages.error(request, "; ".join(exc.messages))
     return anchor
+
+
+def _set_person(request, employee):
+    """ADR 0041: a click on a person in the tree changes their unit, their role, or both."""
+    data, actor, reason = request.POST, request.user, request.POST.get("reason", "")
+    changed = []
+    path = " ".join(data.get("path", "").split())
+    if path and path != roster.path_of(employee):
+        roster.move_employee(actor, employee, path, reason)
+        changed.append(f"ย้ายไปยัง {path}")
+    role = data.get("role", "")
+    requester = Requester.objects.filter(
+        employee=employee, status=Requester.Status.ACTIVE, is_anonymous=False
+    ).first()
+    if role and requester is not None:
+        profile = StaffProfile.objects.filter(employee_id=employee.employee_id).first()
+        held = (
+            RoleGrant.objects.filter(user_id=profile.user_id, revoked_at__isnull=True)
+            .exclude(role=Role.SYSTEM_SUPPORT)
+            .values_list("role", flat=True)
+            .first()
+            if profile
+            else None
+        ) or identity.EMPLOYEE
+        if role != held:
+            identity.grant_requester_role(actor, requester, role, None, reason)
+            changed.append(f"กำหนดบทบาทเป็น{identity.role_label(role)}")
+    name = employee.name or employee.employee_id
+    messages.success(request, f"{name}: {' · '.join(changed)}" if changed else "ไม่มีการเปลี่ยนแปลง")
 
 
 def _pk(key, kind):

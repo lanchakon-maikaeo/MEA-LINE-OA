@@ -6,42 +6,23 @@
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน · กองและการส่งงาน</span>
     <h1>ผังหน่วยงาน</h1>
-    <p class="lede">หน้านี้บอกว่าใครอยู่หน่วยไหน แต่ละหน่วยรับงานอะไร เรื่องใหม่ระบบมอบให้ใคร และเรื่องสำคัญจะส่ง LINE หาใคร แก้ได้ที่การ์ดของแต่ละหน่วย และระบบเก็บประวัติทุกครั้งที่แก้</p>
   </div>
 </div>
 
-<section class="section org-try" aria-labelledby="org-try">
-  <div class="section-head"><h2 id="org-try">ลองดูว่าเด้งไปใคร</h2></div>
-  <form class="org-try__form" method="get" action="#org-try">
-    <div class="field"><label for="try-division">กอง</label>
-      <select id="try-division" name="division" required>{% for d in divisions %}<option value="{{ d.pk }}"{% if asked.division == d.pk|stringformat:"s" %} selected{% endif %}>{{ d.short_name|default:d.code }} · {{ d.name }}</option>{% endfor %}</select></div>
-    <div class="field"><label for="try-kind">ประเภทเรื่อง</label>
-      <select id="try-kind" name="kind" required>{% for value, label in kinds %}<option value="{{ value }}"{% if asked.kind == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-    <div class="field"><label for="try-group">ของหรือหัวข้อ</label>
-      <select id="try-group" name="group" required>{% for value, label in groups %}<option value="{{ value }}"{% if asked.group == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-    <button class="btn btn--sm" type="submit">ลองดู</button>
-  </form>
-  {% if result %}
-  <ol class="org-steps" aria-label="ผลของ {{ result.label }}">
-    <li class="org-steps__item">
-      <span class="org-steps__n" aria-hidden="true">1</span>
-      <div><strong>หน่วยที่รับ</strong>
-        <p>{% if result.work %}{{ result.label }} เป็นงานของ <span class="org-pill">{{ result.unit.path }}</span>{% else %}ยังไม่มีหน่วยไหนใน {{ result.unit.label }} รับ{{ result.label }} เรื่องจะอยู่ระดับกอง และยังไม่มีแผนก{% endif %}</p></div>
-    </li>
-    <li class="org-steps__item">
-      <span class="org-steps__n" aria-hidden="true">2</span>
-      <div><strong>ผู้รับผิดชอบ</strong>
-        <p>{% if result.pick.person %}ระบบมอบให้ <strong>{{ result.pick.person.staff_profile.display_name|default:result.pick.person.username }}</strong> ทันทีที่เรื่องเข้า{% else %}ยังไม่มี เรื่องจะรอคนในกองกดรับงาน{% endif %}</p>
-        {% for note in result.pick.notes %}<p class="muted">{{ note }}</p>{% endfor %}</div>
-    </li>
-    <li class="org-steps__item">
-      <span class="org-steps__n" aria-hidden="true">3</span>
-      <div><strong>LINE ถ้าเป็นเรื่องสำคัญ</strong>
-        {% if result.line %}<ul class="org-steps__people">{% for user, why in result.line %}<li><strong>{{ user.staff_profile.display_name|default:user.username }}</strong> <span class="muted">{{ why }}</span></li>{% endfor %}</ul>
-        {% else %}<p>ไม่มีใครในกองนี้ผูก LINE ไว้ ระบบจึงส่งได้แค่อีเมล</p>{% endif %}
-        <p class="muted">เรื่องธรรมดาไม่ส่ง LINE ผู้รับผิดชอบดูได้จากงานของฉัน</p></div>
-    </li>
-  </ol>
+<section class="section" id="org-tree" aria-labelledby="org-tree-h">
+  <div class="section-head"><h2 id="org-tree-h">ผังบุคลากรที่ลงทะเบียน LINE</h2><span class="muted">{{ tree.count }} คน</span></div>
+  {% if tree.count %}
+  <div class="org-tree">
+    <div class="org-tree__root">{{ tree.label }}</div>
+    {% if tree.people %}{% include "operations/_org_tree.html" with node=tree.top %}{% endif %}
+    {% if tree.children %}<ul class="org-tree__lines">{% for line in tree.children %}<li class="org-tree__line">
+      <div class="org-node org-node--line"><span>{{ line.label }}</span><span class="org-node__n">{{ line.count }}</span></div>
+      {% include "operations/_org_tree.html" with node=line %}
+    </li>{% endfor %}</ul>{% endif %}
+  </div>
+  <datalist id="org-paths">{% for path in paths %}<option value="{{ path }}"></option>{% endfor %}</datalist>
+  {% else %}
+  <p>ยังไม่มีผู้ใช้ LINE ที่ผูกกับทะเบียนพนักงาน</p>
   {% endif %}
 </section>
 

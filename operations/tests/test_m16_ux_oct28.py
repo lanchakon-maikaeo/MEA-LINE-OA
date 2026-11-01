@@ -52,7 +52,7 @@ class WarehousePageTests(WorkTestCase):
         self.client.force_login(self.kcw)
 
     def test_a_case_awaiting_approval_waits_in_its_own_tab_and_takes_no_stage(self):
-        waiting = self.withdraw("4500100001", approve=False)
+        waiting = self.older_waiting("4500100001")
         ready = self.withdraw("4500100002", meter="12345679")
         page = self.client.get("/divisions/กคว./warehouse/")
         self.assertContains(page, ready.number)
@@ -166,7 +166,7 @@ class CombinedCalendarTests(WorkTestCase):
 
 class QueueTests(WorkTestCase):
     def test_rows_name_the_item_and_the_approve_bar_offers_select_all(self):
-        case = self.withdraw("4500100005", approve=False)
+        case = self.older_waiting("4500100005")
         self.assertNotIn("—", queues.summary_text(case))
         approver = Client()
         approver.force_login(self.approver)

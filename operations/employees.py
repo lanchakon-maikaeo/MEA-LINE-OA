@@ -6,8 +6,9 @@ list as CSV; the proof value (for example a birth date) is kept only as a keyed 
 of this table does not leak the values. Failed checks are counted per LINE account and stop
 after MAX_FAILED a day, so the list cannot be guessed through LINE.
 
-23 Oct 2569: the list has no names. A verified employee is shown by the employee ID (`label`),
-and a LINE OA user is tied to the list only by proving the ID or by an admin.
+23 Oct 2569: the list had no names. 1 Nov 2569 (ADR 0041): it keeps the first name only; a
+verified employee is shown by it, or by the employee ID when the list has none (`label`). A
+LINE OA user is still tied to the list only by proving the ID or by an admin.
 """
 
 import csv
@@ -25,17 +26,16 @@ from django.utils import timezone
 from operations.models import AuditEvent, District, Division, Employee, Requester
 
 MAX_FAILED = 3  # failed checks per LINE account per 24 hours
-# A "name" column in a file is never read (23 Oct 2569).
-COLUMNS = ("employee_id", "district_code", "division_code", "position", "check")
+COLUMNS = ("employee_id", "name", "district_code", "division_code", "position", "check")
 DEFAULT_LABEL = "ข้อมูลยืนยันตัวตน"
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
-# How a verified employee is shown instead of a name, in LINE, on cases and staff accounts.
+# How a verified employee without a name in the list is shown.
 LABEL = "พนักงาน {}"
 LABELLED = re.compile(r"^พนักงาน \S+$")
 
 
 def label(employee):
-    return LABEL.format(employee.employee_id)
+    return employee.name or LABEL.format(employee.employee_id)
 
 
 def normalise(value):
@@ -77,7 +77,7 @@ def has_directory():
 @transaction.atomic
 def import_csv(actor, data, check_label_text, deactivate_missing=False, synthetic=False):
     """Admin only (actor None = manage.py). Upserts by employee_id; returns a summary."""
-    from operations import identity
+    from operations import identity, roster
 
     if actor is not None:
         identity.require_admin(actor)
@@ -118,6 +118,7 @@ def import_csv(actor, data, check_label_text, deactivate_missing=False, syntheti
                 "district": districts.get(district_code),
                 "division": divisions.get(division_code),
                 "position": (row.get("position") or "").strip()[:200],
+                "name": roster.first_name(row.get("name")),
                 "check_label": label,
                 "check_hash": digest(proof),
                 "is_active": True,

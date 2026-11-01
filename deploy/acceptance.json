@@ -94,10 +94,10 @@
     },
     {
       "id": "A08",
-      "need": "admin scope: แอดมินเห็นทุกกองแบบมี audit สิทธิ์ผู้พัฒนาแยก และ export ทุกกองเฉพาะแอดมิน",
+      "need": "admin scope: แอดมินทำได้ทุกกองแบบมี audit มีบทบาทเดียว (ADR 0041) และ export ทุกกองเฉพาะแอดมิน",
       "tests": [
-        "test_m01_identity.StaffScopeTests.test_admin_sees_every_division_but_developer_rights_are_separate",
-        "test_m01_identity.AdminGuardTests.test_account_management_cannot_bypass_developer_role",
+        "test_m01_identity.StaffScopeTests.test_admin_does_all_a_department_admin_does_and_the_ai_settings",
+        "test_m01_identity.AdminGuardTests.test_one_role_replaces_the_others",
         "test_m10_web.ScopeTests.test_admin_switches_to_every_division_and_views_are_audited",
         "test_m10_web.ExportTests.test_every_division_export_is_admin_only"
       ]

@@ -88,10 +88,9 @@ class Command(DemoCommand):
             if extract is None:
                 raise CommandError("No active extraction version; pass --model.")
             return extract, ai_answer.active_version()
-        # A throwaway developer-admin inside the rolled-back transaction makes the candidates.
+        # A throwaway admin inside the rolled-back transaction makes the candidates.
         dev = get_user_model().objects.create_user(username="walkthrough-dev")
         StaffProfile.objects.create(user=dev, display_name="Walkthrough")
-        RoleGrant.objects.create(user=dev, role=Role.DEVELOPER_ADMIN)
         RoleGrant.objects.create(user=dev, role=Role.ADMIN)
         model = AIModel.objects.select_related("provider").filter(model_id=model_id).first()
         if model is None or not model.provider.has_key:

@@ -113,18 +113,18 @@ class WorkTabTests(StaffChatTestCase):
         order = work_orders.create(self.director, "งานจากปุ่มใหม่", self.kae)
         reply = self.say(self.postback(ALICE, "m=staff_inbox"))
         self.assertIn(order.number, texts(reply))
-        self.assertIn("ดูรายละเอียด", buttons(reply))
+        self.assertIn(order.number, buttons(reply))  # ADR 0042 Q4: one row per order
 
     def test_a_received_order_is_acknowledged_and_finished_in_chat(self):
         self.link(self.head, ALICE)
-        self.assertIn("ยังไม่มีงานสั่ง", texts(self.tile(A.WORK_ORDERS)))
+        self.assertIn("ไม่มีงานในรายการนี้", texts(self.tile(A.WORK_ORDERS)))
         order = work_orders.create(self.director, "เช็กสต็อกหม้อแปลง (ทดสอบ)", self.kae)
         push = NotificationDelivery.objects.get(
             recipient_user=self.head, channel=NotificationDelivery.Channel.LINE_PUSH
         )
         self.assertIn(f"ดูงาน {order.number}", buttons([push.message]))
         reply = self.tile(A.WORK_ORDERS)
-        detail = self.press(ALICE, "ดูรายละเอียด", reply)
+        detail = self.press(ALICE, order.number, reply)
         self.assertIn("เช็กสต็อกหม้อแปลง", texts(detail))
         self.press(ALICE, "รับทราบ", detail)
         self.assertEqual(WorkOrder.objects.get().status, S.ACKNOWLEDGED)
@@ -156,7 +156,7 @@ class OrderTabTests(StaffChatTestCase):
         self.link(self.director, ALICE)
         self.tile(A.ORDER_NEW)
         summary = self.type(ALICE, "ให้ทั้งกอง กองอุปกรณ์ฯ ตรวจนับเครื่องมือพรุ่งนี้ ด่วน")
-        self.assertIn("ตรวจก่อนสั่งงาน", texts(summary))
+        self.assertIn("ตรวจสอบร่างคำสั่งงาน", texts(summary))
         self.assertFalse(WorkOrder.objects.exists())
         self.type(ALICE, "ยืนยัน")
         order = WorkOrder.objects.get()
@@ -170,20 +170,20 @@ class OrderTabTests(StaffChatTestCase):
     def test_the_order_tab_is_for_supervisors_only(self):
         member = make_staff("kaemember", (Role.STAFF, "กองอุปกรณ์ฯ"))
         self.link(member, ALICE)
-        self.assertIn("แอดมินฝ่ายเท่านั้น", texts(self.tile(A.ORDER_NEW)))
+        self.assertIn("สงวนสิทธิ์สำหรับแอดมินฝ่าย", texts(self.tile(A.ORDER_NEW)))
 
     def test_more_menu_contains_only_order_for_department_supervisor(self):
         self.link(self.director, ALICE)
         menu = self.say(self.postback(ALICE, "m=roles"))
         self.assertEqual(set(buttons(menu)), {"สั่งงาน"})
         self.press(ALICE, "สั่งงาน", menu)
-        self.assertIn("พิมพ์", texts(self.sent[-1]))
+        self.assertIn("โปรดเลือกกอง", texts(self.sent[-1]))  # ADR 0042 Q1
 
     def test_division_supervisor_cannot_use_old_order_tile_or_typed_command(self):
         self.link(self.head, ALICE)
         self.assertEqual(buttons(self.say(self.postback(ALICE, "m=roles"))), {})
         for reply in (self.tile(A.ORDER_NEW), self.type(ALICE, "สั่งงาน")):
-            self.assertIn("แอดมินฝ่ายเท่านั้น", texts(reply))
+            self.assertIn("สงวนสิทธิ์สำหรับแอดมินฝ่าย", texts(reply))
         self.type(ALICE, "ให้ทั้งกอง กองอุปกรณ์ฯ ตรวจมิเตอร์")
         self.type(ALICE, "ยืนยัน")
         self.assertFalse(WorkOrder.objects.exists())
@@ -203,7 +203,7 @@ class OrderTabTests(StaffChatTestCase):
         self.press(ALICE, "ยืนยันส่งต่อ", confirm)
         order.refresh_from_db()
         self.assertEqual((order.division, order.status), (other, S.ASSIGNED))
-        self.assertIn(f"ถึง {other.code}", texts(self.sent[-1]))
+        self.assertIn(f"ผู้รับงาน: {other.code}", texts(self.sent[-1]))
 
     def test_typed_dates_read_thai_day_and_month(self):
         ahead = timezone.localdate() + timedelta(days=10)

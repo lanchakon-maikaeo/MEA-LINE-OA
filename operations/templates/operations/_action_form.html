@@ -1,5 +1,5 @@
 {% load ui %}<section class="action-form{% if demo %} action-form--demo{% endif %}" aria-labelledby="af-title" data-tour="action-form"{% if demo %} data-demo{% endif %}>
-  {% if demo %}<p class="demo-ribbon">{% icon "spark" "sm" %} ตัวอย่างฟอร์มสำหรับสาธิต · ลองกรอกดูได้ แต่ระบบจะไม่บันทึก</p>{% endif %}
+  {% if demo %}<p class="demo-ribbon">{% icon "spark" "sm" %} แบบฟอร์มตัวอย่างสำหรับการสาธิต · ทดลองกรอกได้ โดยระบบจะไม่บันทึกข้อมูล</p>{% endif %}
   <div class="action-form__head">
     <div>
       <span class="eyebrow">{{ case.number }} · {{ case.get_status_display }}</span>

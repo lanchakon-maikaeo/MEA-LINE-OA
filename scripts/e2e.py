@@ -281,18 +281,13 @@ def journeys(browser, base_url, password):
 
 
 def take_case(page, section=None):
-    """Owner division (ADR 0025, ADR 0032): optionally name the แผนก, take the case at P3."""
+    """Owner division (ADR 0032, ADR 0042 Q10): the case is already in progress; optionally name
+    the แผนก, then set the level at P3."""
+    expect(page.locator(".case-head__title")).to_contain_text("กำลังดำเนินการ")
     if section:
         act(page, "ระบุแผนก", [lambda f: f.locator("[name=section]").select_option(label=section)])
         expect(page.locator("dl.facts dd").first).to_contain_text(section)
-    act(
-        page,
-        "รับเรื่อง",
-        [
-            lambda f: f.locator("[name=priority]").select_option("P3"),
-            lambda f: f.locator("[name=reason]").fill(f"e2e {RUN}: ระดับที่ตกลงในการทดสอบ"),
-        ],
-    )
+    act(page, "ตั้งระดับความเร่งด่วน", [lambda f: f.locator("[name=priority]").select_option("P3")])
 
 
 def answer_for_district(page):
@@ -332,7 +327,7 @@ def real_structure(browser, base_url, password):
     open_case(kae, base_url, fuses)
     take_case(kae, section="แผนกซ่อมสร้างอุปกรณ์ไฟฟ้า")
     # ADR 0032: the slip is issued in SAP, so no issue step shows; the case waits for the slip.
-    expect(kae.locator(".case-head__title")).to_contain_text("รอดำเนินการ")
+    expect(kae.locator(".case-head__title")).to_contain_text("กำลังดำเนินการ")
     expect(kae.locator("#actions")).not_to_contain_text("บันทึกการจ่ายของ")
     kae.screenshot(path="reports/e2e-real-withdrawal.png", full_page=True)
     kae.context.close()
@@ -365,7 +360,7 @@ def real_structure(browser, base_url, password):
     # K15: the rules give a meter to กคว.; กตฟ. files it and stays on a page it may open.
     submit_case(ktf, base_url, "withdrawal", [("MTR_SYN_A", "1", "")], purpose="ขอมิเตอร์")
     assert ktf.url.endswith("/cases/new/"), ktf.url
-    expect(ktf.locator(".notice--success")).to_contain_text("เข้าคิวคัดกรองของ กคว.")
+    expect(ktf.locator(".notice--success")).to_contain_text("ส่งถึง กคว.")
     expect(ktf.locator(".notice--success")).to_contain_text("บัญชีนี้จึงเปิดดูไม่ได้")
     ktf.goto(base_url + "/reports/")
     expect(ktf.get_by_text("แผนกตรวจสอบการใช้ไฟฟ้า 1").first).to_be_visible()

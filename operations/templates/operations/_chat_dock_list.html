@@ -1,0 +1,8 @@
+{% load ui %}<div data-total="{{ total }}" data-latest="{{ latest }}">
+{% if items %}<ul class="dock-list">
+  {% for i in items %}<li><button type="button" class="dock-row" data-dock-open="{{ i.case.number }}" data-thread="{% url 'case-chat-thread' i.case.number %}" data-post="{% url 'case-chat' i.case.number %}" data-title="{{ i.case.number }} · {{ i.case.district.name }}">
+    <span class="dock-row__num">{{ i.case.number }}</span><span class="dock-row__time">{{ i.last.created_at|thai_short }}</span>
+    <span class="dock-row__text">{% if i.last.direction == "staff" %}เจ้าหน้าที่: {% endif %}{{ i.last.text }}</span>{% if i.unread %}<span class="dock-row__count" aria-label="ยังไม่ได้ตอบ {{ i.unread }} ข้อความ">{{ i.unread }}</span>{% endif %}
+  </button></li>{% endfor %}
+</ul>{% else %}<p class="chat__empty">ไม่มีข้อความจากผู้แจ้งภายใน 7 วันที่ผ่านมา</p>{% endif %}
+</div>

@@ -71,7 +71,8 @@ class IssueTests(OrderTestCase):
             work_orders.create(self.director, "งานทดสอบ", self.kcw_division, channel="unknown")
 
     def test_web_creation_is_department_only_for_get_and_post(self):
-        for user in (self.head, self.kcw, self.admin):
+        # ADR 0041: แอดมินระบบ does what a แอดมินฝ่าย does, so it may issue too.
+        for user in (self.head, self.kcw):
             with self.subTest(user=user.username):
                 client = Client()
                 client.force_login(user)
@@ -118,7 +119,9 @@ class IssueTests(OrderTestCase):
         self.assertEqual(order.channel, WorkOrder.Channel.WEB)
         line = self.notices("staff_order_new", self.kcw2).get(channel=N.Channel.LINE_PUSH)
         self.assertIn(order.number, line.text)
-        self.assertIn(f"/orders/{order.number}/", line.text)
+        # ADR 0041: LINE gets a button and no web link.
+        self.assertNotIn("/orders/", line.text)
+        self.assertIn(f"ดูงาน {order.number}", str(line.message))
 
 
 class FlowTests(OrderTestCase):

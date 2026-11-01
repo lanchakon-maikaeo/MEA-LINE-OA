@@ -265,15 +265,15 @@ class StaffMenuTests(MenuTestCase):
                     self.assertEqual(drawing[page][1]["label"], "งานของกอง/ฝ่าย")
 
     def test_the_work_tab_follows_admin_roles(self):
-        # 1 Nov 2569: แอดมินกอง/ฝ่าย get the tab with Broadcast, the system's admins get it
-        # without Broadcast, and สมาชิกกอง keep everyone's menu.
-        people = {
-            "user": make_staff("tabmember", (Role.STAFF, "กองอุปกรณ์ฯ")),
-            "sup-report": make_staff("tabhead", (Role.SUPERVISOR, "กองอุปกรณ์ฯ")),
-            "staff-report": make_staff("tabadmin", (Role.ADMIN, None)),
-        }
-        for page, user in people.items():
-            with self.subTest(page=page):
+        # ADR 0041: แอดมินกอง/ฝ่าย and the system's admins share one menu with Broadcast;
+        # สมาชิกกอง keep everyone's menu.
+        people = [
+            ("user", make_staff("tabmember", (Role.STAFF, "กองอุปกรณ์ฯ"))),
+            ("sup-report", make_staff("tabhead", (Role.SUPERVISOR, "กองอุปกรณ์ฯ"))),
+            ("sup-report", make_staff("tabadmin", (Role.ADMIN, None))),
+        ]
+        for page, user in people:
+            with self.subTest(user=user.username):
                 line = ChannelIdentity(channel="line", external_id="U" + "a" * 32, staff_user=user)
                 self.assertEqual(line_menu.page_for_identity(line), page)
 

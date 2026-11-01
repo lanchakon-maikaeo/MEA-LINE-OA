@@ -1,8 +1,8 @@
 """นำ flow ร่างแรกและตารางรถของกองเข้าระบบ (ADR 0023, grill กคว. 27 ต.ค. 2569, grill กคอ.).
 
 Safe to run again: a flow that already has a version keeps it, and a truck table only fills in
-what is missing. --replace-draft puts the fixture into a flow's draft (nothing published
-changes); a flow without a tile gets the fixture's.
+what is missing. --replace-draft puts the fixture into a flow's draft, opening one when the
+flow has none (nothing published changes); a flow without a tile gets the fixture's.
 """
 
 import json
@@ -92,6 +92,12 @@ class Command(BaseCommand):
                 )
             graph = line_flows.clean_graph(data["graph"])
             draft = line_flows.draft_of(flow)
+            if options["replace_draft"] and draft is None and flow.versions.exists():
+                # 1 Nov 2569: a published flow has no draft, and the fixture never reached it.
+                last = flow.versions.order_by("-number").values_list("number", flat=True).first()
+                draft = LineFlowVersion.objects.create(
+                    flow=flow, number=last + 1, created_by=actor, updated_by=actor
+                )
             if options["replace_draft"] and draft is not None:
                 draft.graph, draft.checks = graph, line_flows.check(graph)
                 draft.note = data["note"]

@@ -1,5 +1,5 @@
-"""ไม่มีขั้นคัดกรอง (ADR 0025): a new case of any kind waits for the owner division's approval
-at once; an emergency problem report starts without waiting; whoever holds the division's
+"""ไม่มีขั้นคัดกรอง (ADR 0025): a new case of any kind starts in its owner division at once
+(ADR 0042 Q10); for cases filed earlier that still wait, whoever holds the division's
 approval authority approves a case without item rows as a whole and sets the level in the same
 form, or many at once from the queue; not approving needs a reason; cases already waiting for
 screening move to approval; queues show the newest first with emergencies on top."""
@@ -47,13 +47,19 @@ class NoScreeningTestCase(FlowTestCase):
         )
         return Case.objects.get(pk=result.case_id)
 
+    def waiting(self, case):
+        """A case filed before ADR 0042 Q10 still waits for its division to accept it."""
+        Case.objects.filter(pk=case.pk).update(status=Case.Status.AWAITING_APPROVAL)
+        case.refresh_from_db()
+        return case
+
 
 class StatusTests(NoScreeningTestCase):
-    def test_every_kind_waits_for_approval_and_an_emergency_starts_at_once(self):
+    def test_every_kind_starts_in_its_division_at_once(self):
         case = self.withdraw("4500100001")
-        self.assertEqual(case.status, "awaiting_approval")
+        self.assertEqual(case.status, "in_progress")
         quiet = self.problem("ขอสอบถามการลงโปรแกรมอ่านมิเตอร์")
-        self.assertEqual(quiet.status, "awaiting_approval")
+        self.assertEqual(quiet.status, "in_progress")
         hazard = self.problem("สายไฟขาดห้อย มีประกายไฟ")
         self.assertEqual(hazard.status, "in_progress")
         self.assertEqual(
@@ -73,7 +79,7 @@ class StatusTests(NoScreeningTestCase):
 
 class ApprovalTests(NoScreeningTestCase):
     def test_a_whole_case_is_approved_with_its_level_in_one_form(self):
-        case = self.problem("ขอสอบถามการลงโปรแกรมอ่านมิเตอร์")
+        case = self.waiting(self.problem("ขอสอบถามการลงโปรแกรมอ่านมิเตอร์"))
         client = Client()
         client.force_login(self.approver)
         page = client.get(f"/cases/{case.number}/act/approve/").content.decode()
@@ -94,7 +100,7 @@ class ApprovalTests(NoScreeningTestCase):
         self.assertEqual(policy.state_for(case).confirmed_priority, "P2")
 
     def test_not_approving_needs_a_reason_and_staff_without_authority_cannot(self):
-        case = self.withdraw("4500100003")
+        case = self.waiting(self.withdraw("4500100003"))
         with self.assertRaises(CommandFailed):
             services.perform_action(
                 Actor.staff(self.approver),
@@ -115,7 +121,7 @@ class ApprovalTests(NoScreeningTestCase):
         case.refresh_from_db()
         self.assertEqual(case.status, "rejected")
         clerk = make_staff("kcw-no-authority", (Role.STAFF, "กคว."))
-        other = self.withdraw("4500100004")
+        other = self.waiting(self.withdraw("4500100004"))
         with self.assertRaises(CommandFailed):
             services.perform_action(
                 Actor.staff(clerk),
@@ -127,7 +133,8 @@ class ApprovalTests(NoScreeningTestCase):
             )
 
     def test_many_are_approved_from_the_queue(self):
-        first, second = self.withdraw("4500100005"), self.withdraw("4500100006")
+        first = self.waiting(self.withdraw("4500100005"))
+        second = self.waiting(self.withdraw("4500100006"))
         client = Client()
         client.force_login(self.approver)
         page = client.get("/divisions/กคว./").content.decode()

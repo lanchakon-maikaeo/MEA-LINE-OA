@@ -1,6 +1,6 @@
 {
- "version": "line-flow-usage-v2",
- "note": "ADR 0035 (29 ต.ค. 2569): กดปุ่มแล้วกรอกรายละเอียดในข้อความเดียว ขาดส่วนไหนถามแค่ส่วนนั้น",
+ "version": "line-flow-usage-v3",
+ "note": "ADR 0035 (29 ต.ค. 2569, ปรับ 1 พ.ย. 2569): กดปุ่มแล้วพิมพ์หมายเลขเครื่องวัดฯ อย่างเดียว แล้วขึ้นสรุปทันที ปุ่มเพิ่มรายละเอียดสำหรับการไฟฟ้าเขตและลักษณะที่พบ เขตที่ไม่ได้พิมพ์ขึ้นว่าไม่ระบุ",
  "flow": {
   "key": "usage",
   "name": "ตรวจสอบการใช้ไฟฟ้า",
@@ -23,8 +23,8 @@
    {
     "id": "c1",
     "kind": "message",
-    "title": "ตรวจสอบการใช้ไฟฟ้า",
-    "text": "เลือกเรื่องที่ต้องการ",
+    "title": "กรุณาเลือกเรื่องที่ต้องการแจ้ง",
+    "text": "",
     "buttons": [
      {
       "id": "c1.b0",
@@ -68,72 +68,24 @@
     "w": 260
    },
    {
-    "id": "report",
+    "id": "meters",
     "kind": "ask",
-    "title": "กรุณาพิมพ์รายละเอียด",
-    "text": "หมายเลขเครื่องวัดฯ, การไฟฟ้าเขต, ลักษณะที่พบ\nเช่น 12345678, วัดเลียบ, PLS ถูกแกะ",
+    "title": "กรุณาพิมพ์หมายเลขเครื่องวัดฯ",
+    "text": "หากมีหลายเครื่องคั่นด้วย , เช่น 12345678, 12345679",
     "buttons": [],
     "config": {
-     "field": "report",
-     "rule": "usage_report",
-     "no_edit": "1"
+     "field": "meter_numbers",
+     "rule": "meters_8"
     },
     "x": 680,
     "y": 40,
     "w": 260
    },
    {
-    "id": "meters",
-    "kind": "ask",
-    "title": "หมายเลขเครื่องวัดฯ",
-    "text": "กรุณาพิมพ์หมายเลขเครื่องวัดฯ หากมีหลายเครื่องคั่นด้วย ,\nเช่น 12345678, 12345679",
-    "buttons": [],
-    "config": {
-     "field": "meter_numbers",
-     "rule": "meters_8",
-     "only_missing": "1"
-    },
-    "x": 1020,
-    "y": 40,
-    "w": 260
-   },
-   {
-    "id": "district",
-    "kind": "ask",
-    "title": "กรุณาพิมพ์การไฟฟ้าเขต",
-    "text": "เช่น วัดเลียบ",
-    "buttons": [],
-    "config": {
-     "field": "district",
-     "rule": "district",
-     "only_missing": "1",
-     "label": "การไฟฟ้าเขต"
-    },
-    "x": 1020,
-    "y": 220,
-    "w": 260
-   },
-   {
-    "id": "found",
-    "kind": "ask",
-    "title": "กรุณาพิมพ์ลักษณะที่พบ",
-    "text": "เช่น PLS ถูกแกะ",
-    "buttons": [],
-    "config": {
-     "field": "description",
-     "rule": "text",
-     "only_missing": "1",
-     "label": "ลักษณะที่พบ"
-    },
-    "x": 1020,
-    "y": 400,
-    "w": 260
-   },
-   {
     "id": "sum",
     "kind": "summary",
     "title": "สรุปเรื่อง: ตรวจสอบการใช้ไฟฟ้า",
-    "text": "เรื่อง: เครื่องวัดฯ ผิดปกติ\nหมายเลขเครื่องวัดฯ: 12345678\nการไฟฟ้าเขต: เขตวัดเลียบ\nลักษณะที่พบ: PLS ถูกแกะ",
+    "text": "เรื่อง: เครื่องวัดฯ ผิดปกติ\nหมายเลขเครื่องวัดฯ: 12345678\nการไฟฟ้าเขต: เขตวัดเลียบ\nรายละเอียด: วัดเลียบ PLS ถูกแกะ",
     "buttons": [
      {
       "id": "sum.b0",
@@ -148,11 +100,44 @@
       "full": "",
       "note": "แก้ข้อมูลที่พิมพ์ แล้วกลับมาที่สรุป",
       "set": "do=edit"
+     },
+     {
+      "id": "sum.b2",
+      "label": "เพิ่มรายละเอียด",
+      "full": "",
+      "note": "พิมพ์สิ่งที่ต้องการแจ้งเพิ่ม แล้วกลับมาที่สรุป",
+      "set": ""
      }
     ],
-    "config": {},
-    "x": 1640,
+    "config": {
+     "unset": "district_name|details"
+    },
+    "x": 1320,
     "y": 40,
+    "w": 260
+   },
+   {
+    "id": "more",
+    "kind": "ask",
+    "title": "รายละเอียดเพิ่มเติม",
+    "text": "กรุณาพิมพ์การไฟฟ้าเขตและลักษณะที่พบ เช่น วัดเลียบ PLS ถูกแกะ",
+    "buttons": [
+     {
+      "id": "more.b0",
+      "label": "กลับไปที่สรุป",
+      "full": "",
+      "note": "",
+      "set": ""
+     }
+    ],
+    "config": {
+     "field": "details",
+     "rule": "text",
+     "optional": "1",
+     "district": "1"
+    },
+    "x": 1320,
+    "y": 260,
     "w": 260
    },
    {
@@ -166,7 +151,7 @@
      "topic": "usage",
      "division": "กตฟ."
     },
-    "x": 1960,
+    "x": 1640,
     "y": 40,
     "w": 260
    },
@@ -177,7 +162,7 @@
     "text": "ติดตามความคืบหน้าได้ที่เรื่องของฉัน",
     "buttons": [],
     "config": {},
-    "x": 2280,
+    "x": 1960,
     "y": 40,
     "w": 260
    }
@@ -194,76 +179,76 @@
     "id": "e2",
     "from": "c1",
     "port": "c1.b0",
-    "to": "report",
+    "to": "meters",
     "label": ""
    },
    {
     "id": "e3",
     "from": "c1",
     "port": "c1.b1",
-    "to": "report",
+    "to": "meters",
     "label": ""
    },
    {
     "id": "e4",
     "from": "c1",
     "port": "c1.b2",
-    "to": "report",
+    "to": "meters",
     "label": ""
    },
    {
     "id": "e5",
     "from": "c1",
     "port": "c1.b3",
-    "to": "report",
+    "to": "meters",
     "label": ""
    },
    {
     "id": "e6",
     "from": "c1",
     "port": "c1.b4",
-    "to": "report",
+    "to": "meters",
     "label": ""
    },
    {
-    "id": "e12",
+    "id": "e7",
+    "from": "meters",
+    "port": null,
+    "to": "sum",
+    "label": ""
+   },
+   {
+    "id": "e8",
     "from": "sum",
     "port": "sum.b0",
     "to": "case",
     "label": ""
    },
    {
-    "id": "e13",
+    "id": "e9",
     "from": "case",
     "port": null,
     "to": "done",
     "label": ""
    },
    {
-    "id": "e14",
-    "from": "report",
-    "port": null,
-    "to": "meters",
+    "id": "e10",
+    "from": "sum",
+    "port": "sum.b2",
+    "to": "more",
     "label": ""
    },
    {
-    "id": "e15",
-    "from": "meters",
+    "id": "e11",
+    "from": "more",
     "port": null,
-    "to": "district",
+    "to": "sum",
     "label": ""
    },
    {
-    "id": "e16",
-    "from": "district",
-    "port": null,
-    "to": "found",
-    "label": ""
-   },
-   {
-    "id": "e17",
-    "from": "found",
-    "port": null,
+    "id": "e12",
+    "from": "more",
+    "port": "more.b0",
     "to": "sum",
     "label": ""
    }

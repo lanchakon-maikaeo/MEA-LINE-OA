@@ -119,11 +119,11 @@ class ReleaseTests(TestCase):
             release = LineMenuRelease.objects.get()
             self.links["test-viewer"] = release.menus["sup-order"]
             with patch.object(
-                line_menu_release, "audience", return_value={"test-viewer": "staff-work"}
+                line_menu_release, "audience", return_value={"test-viewer": "employee-report"}
             ):
                 line_menu.publish(None, self.images, "supervisor revoked")
 
-        self.assertEqual(self.links["test-viewer"], release.menus["staff-work"])
+        self.assertEqual(self.links["test-viewer"], release.menus["employee-report"])
 
     def test_accepted_but_unverified_link_keeps_old_menu(self):
         self.verify = False

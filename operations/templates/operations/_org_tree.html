@@ -1,0 +1,17 @@
+{# ADR 0041: one node of the tree of registered people; recursive. #}
+{% if node.people %}<ul class="org-people org-tree__people">{% for p in node.people %}<li>
+  <details class="org-who">
+    <summary class="org-person" title="{{ p.employee.position|default:'ไม่ระบุตำแหน่ง' }}">{{ p.name }}{% if p.role != "employee" %}<span class="org-who__role">{{ p.role_label }}</span>{% endif %}</summary>
+    <form class="org-who__form" method="post">{% csrf_token %}<input type="hidden" name="action" value="set_person"><input type="hidden" name="employee" value="{{ p.employee.pk }}">
+      <p class="org-who__pos">{{ p.employee.position|default:"ไม่ระบุตำแหน่ง" }} · รหัส {{ p.employee.employee_id }}</p>
+      <div class="field"><label for="tp-{{ p.employee.pk }}">หน่วย</label><input id="tp-{{ p.employee.pk }}" name="path" list="org-paths" value="{{ p.path }}" autocomplete="off"></div>
+      <div class="field"><label for="tr-{{ p.employee.pk }}">บทบาท</label><select id="tr-{{ p.employee.pk }}" name="role">{% if not p.in_picks %}<option value="" selected>{{ p.role_label }} (คงเดิม)</option>{% endif %}{% for value, label in picks %}<option value="{{ value }}"{% if value == p.role %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="tw-{{ p.employee.pk }}">เหตุผล (ไม่บังคับ)</label><input id="tw-{{ p.employee.pk }}" name="reason" maxlength="500"></div>
+      <button class="btn btn--sm" type="submit">บันทึก</button>
+    </form>
+  </details>
+</li>{% endfor %}</ul>{% endif %}
+{% if node.children %}<ul class="org-branch">{% for c in node.children %}<li>
+  <div class="org-node">{% if c.anchor %}<a href="#u-{{ c.anchor }}">{{ c.label }}</a>{% else %}<span>{{ c.label }}</span>{% endif %}<span class="org-node__n">{{ c.count }}</span></div>
+  {% include "operations/_org_tree.html" with node=c %}
+</li>{% endfor %}</ul>{% endif %}

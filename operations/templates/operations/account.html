@@ -15,7 +15,7 @@
   <dl class="kv">
     <div><dt>ชื่อผู้ใช้</dt><dd>{{ user.username }}</dd></div>
     <div><dt>อีเมล</dt><dd>{{ user.email|default:"ยังไม่ได้ตั้ง" }}<br><span class="muted">ใช้รับการแจ้งเตือนเจ้าหน้าที่ แก้ได้โดยแอดมินระบบ</span></dd></div>
-    <div><dt>บทบาทระดับระบบ</dt><dd>{% if scope.is_admin %}แอดมินระบบ{% if scope.is_developer_admin %} · แอดมินผู้พัฒนา{% endif %}{% else %}-{% endif %}</dd></div>
+    <div><dt>บทบาทระดับระบบ</dt><dd>{% if scope.is_admin %}แอดมินระบบ{% else %}-{% endif %}</dd></div>
     <div><dt>สังกัด</dt><dd>{{ user|unit_path }}<br><span class="muted">กอง แผนก และกลุ่มงาน แก้ได้โดยแอดมินระบบ</span></dd></div>
   </dl>
 </section>

@@ -35,10 +35,9 @@
   </fieldset>
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'grant' %}">
-  <fieldset><legend>เพิ่มบทบาท</legend>{% csrf_token %}
-{% if work_split %}<p class="helptext">ตอนนี้แยกหน้าที่ย่อยในกอง แต่ละคนทำได้เฉพาะหน้าที่ที่ได้รับ</p>
-    {% else %}<p class="helptext">สมาชิกกองทำได้ทุกขั้นตอนของกองและมีอำนาจของกองติดมาด้วย แอดมินกองสั่งงานและมอบงานในกองนั้นได้เพิ่ม ส่วน แอดมินฝ่ายดูแลทุกกอง (เว้นช่องกองว่าง)</p>{% endif %}
-    {{ grant_form.as_p }}<button type="submit">เพิ่ม</button></fieldset>
+  <fieldset><legend>กำหนดบทบาท</legend>{% csrf_token %}
+    <p class="helptext">หนึ่งคนมีบทบาทเดียว บทบาทใหม่แทนบทบาทเดิม เจ้าหน้าที่ไม่มีงานในกอง สมาชิกกองทำได้ทุกขั้นตอนของกอง แอดมินกองมอบงานในกองนั้นได้เพิ่ม แอดมินฝ่ายดูแลและสั่งงานทุกกอง แอดมินระบบทำได้ทุกอย่าง ถ้าไม่เลือกกอง บทบาทระดับกองใช้กองในสังกัด</p>
+    {{ grant_form.as_p }}<button type="submit">กำหนดบทบาท</button></fieldset>
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'employee-id' %}">
   <fieldset><legend>รหัสพนักงาน (ใช้เชื่อม LINE ด้วยการยืนยันกับทะเบียนพนักงาน)</legend>{% csrf_token %}

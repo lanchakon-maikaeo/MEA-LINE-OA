@@ -60,7 +60,6 @@ CATCH_UP_APOLOGY = "catch_up_apology"
 REGISTRY_ACCESS = "registry_access"
 OLD_STOCK = "old_stock_work"
 SAP_LINE_ENTRY = "sap_line_entry"
-AI_EDITORS = "ai_editors"
 EMAIL_METHODS = "employee_email_methods"
 EMAIL_TYPED = "employee_email_typed"
 CODE_MINUTES = "email_code_minutes"
@@ -548,17 +547,6 @@ OPTIONS = {
             ),
         ),
     ),
-    AI_EDITORS: Option(
-        "ใครเปลี่ยนการตั้งค่า AI ได้ (เปิดใช้รุ่น ประเมิน โมเดล credential)",
-        (
-            (
-                "developer",
-                "แอดมินผู้พัฒนาเท่านั้น",
-                "แอดมินทั่วไปเปิดหน้า AI ดูได้อย่างเดียว (15 ต.ค. 2569)",
-            ),
-            ("admin", "แอดมินทุกคน", "ทุกการเปิดใช้ยังต้องผ่านการประเมินก่อนเหมือนเดิม"),
-        ),
-    ),
     EMAIL_METHODS: Option(
         "พนักงานยืนยันตัวตนใน LINE ด้วยอีเมลในทะเบียนอย่างไร (หลังพิมพ์รหัสพนักงาน)",
         (
@@ -771,7 +759,8 @@ def rows():
     stored = {row.key: row for row in SystemOption.objects.select_related("updated_by")}
     # Historical settings remain readable for migrations, but cannot override ADR 0019; LINE
     # registration asks no location since 31 ต.ค. 2569, whatever the stored value.
-    retired = {REGISTRATION_CHECK, EMAIL_TYPED, REGISTRATION_LOCATION}
+    # ADR 0041: one role per person leaves no duties to split; only the SIM test world does.
+    retired = {REGISTRATION_CHECK, EMAIL_TYPED, REGISTRATION_LOCATION, DIVISION_WORK}
     return [
         (key, option, get(key), stored.get(key))
         for key, option in OPTIONS.items()

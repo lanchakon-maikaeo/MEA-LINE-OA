@@ -100,6 +100,7 @@ urlpatterns = [
     path("cases/<str:number>/act/<slug:action>/", web.case_action, name="case-action"),
     path("cases/<str:number>/files/", web.case_upload, name="case-upload"),
     path("cases/<str:number>/chat/", warehouse_web.case_chat_post, name="case-chat"),
+    path("chat/", warehouse_web.chat_dock, name="chat-dock"),
     path(
         "cases/<str:number>/chat/thread/",
         warehouse_web.case_chat_thread,
@@ -140,6 +141,11 @@ urlpatterns = [
     path("console/admin/problems.csv", problems_web.problems_csv, name="admin-problems-csv"),
     path("console/admin/problems/send/", problems_web.problems_send, name="admin-problems-send"),
     path("console/admin/requesters/new/", views.admin_requester_new, name="admin-requester-new"),
+    path(
+        "console/admin/requesters/bulk/",
+        views.admin_requesters_bulk,
+        name="admin-requesters-bulk",
+    ),
     path(
         "console/admin/requesters/<int:pk>/",
         views.admin_requester_detail,

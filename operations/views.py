@@ -35,6 +35,7 @@ from operations import (
     queues,
     roster,
     sealing,
+    units,
 )
 from operations.models import (
     DUTY_ROLES,
@@ -274,8 +275,8 @@ def admin_user_action(request, pk, action):
         if form.is_valid():
             _run(
                 request,
-                lambda: identity.grant_role(actor, target, **form.cleaned_data),
-                "เพิ่มบทบาทแล้ว",
+                lambda: identity.set_role(actor, target, **form.cleaned_data),
+                "ตั้งบทบาทแล้ว",
             )
         else:
             messages.error(request, "ข้อมูลบทบาทไม่ถูกต้อง")
@@ -395,8 +396,9 @@ def admin_registrations(request):
         .select_related("district", "division", "employee")
         .order_by("-approved_at")
     )
-    requesters = _requester_rows(people.exclude(status=Requester.Status.REVOKED)[:100])
+    requesters = _requester_rows(people.exclude(status=Requester.Status.REVOKED)[:500])
     revoked = _requester_rows(people.filter(status=Requester.Status.REVOKED)[:100])
+    kongs = sorted({row["kong"] for row in requesters if row["kong"] and row["kong"] != units.NA})
     is_admin = identity.staff_scope(request.user).is_admin
     pending = list(pending)
     if is_admin and pending:
@@ -436,7 +438,13 @@ def admin_registrations(request):
                     [c for c in Requester.Status.choices if c[0] != Requester.Status.REVOKED],
                 ),
                 ("identity", "ตัวตน", employees.IDENTITY_STATES),
+                ("kong", "กอง", [(k.replace(" ", ""), k) for k in kongs]),
+                ("role", "บทบาท", [(r, identity.role_label(r)) for r in identity.PICKS]),
             ],
+            "picks": [(r, identity.role_label(r)) for r in identity.PICKS],
+            "divisions": Division.objects.filter(
+                is_active=True, kind=Division.Kind.DIVISION
+            ).order_by("code"),
             "requester_form": forms.RequesterCreateForm(),
         },
     )
@@ -468,9 +476,10 @@ def _earlier_requesters(pending):
 
 def _requester_rows(requesters):
     """What the requester list says about each person (user, 14 Oct 2569): how we know who they
-    are, their position from ทะเบียนพนักงาน, and their role in the system."""
+    are, their roster place and their one role (ADR 0041, Q9: short, N/A where a level is
+    missing)."""
     requesters = list(requesters)
-    roles = identity.requester_roles(requesters)
+    grants = identity.requester_grants(requesters)
     lines = defaultdict(list)
     for line in ChannelIdentity.objects.filter(requester__in=requesters):
         lines[line.requester_id].append(line)
@@ -494,27 +503,28 @@ def _requester_rows(requesters):
         else:
             proof = f"ยืนยันรหัสพนักงาน {employee.employee_id}"
         state = employees.identity_state(requester)
+        held = grants[requester.pk]
+        if held:
+            role = held[0].role
+            label = identity.role_label(role)
+        elif state == "verified" and not requester.is_external:
+            role, label = identity.EMPLOYEE, "เจ้าหน้าที่"
+        else:
+            role, label = "", "ผู้ใช้ LINE OA"
+        path = roster.employee_path(employee)
         rows.append(
             {
                 "requester": requester,
                 "state": state,
                 "proof": proof,
                 "channel": channel,
-                # ตำแหน่ง · ฝ่าย (15 ต.ค. 2569 Q15); a closed roster row is flagged (Q29).
-                "position": roster.employee_unit(employee) if employee else "",
+                "position": employee.position if employee else "",
+                "path": path,
+                "kong": path[1] if path else "",
+                # A closed roster row is flagged (15 ต.ค. 2569 Q29).
                 "stale": employee is not None and not employee.is_active,
-                "role": " · ".join(
-                    [
-                        (
-                            "เจ้าหน้าที่ · เบิก/คืนได้"
-                            if state == "verified" and not requester.is_external
-                            else "ผู้ใช้ LINE OA (ภายใน)"
-                            if requester.is_internal
-                            else "ผู้ใช้ LINE OA"
-                        ),
-                        *roles[requester.pk],
-                    ]
-                ),
+                "role": label,
+                "role_key": role,
                 "where": requester.division.code
                 if requester.is_internal and requester.division_id
                 else requester.district.name,
@@ -523,7 +533,6 @@ def _requester_rows(requesters):
     return rows
 
 
-REQUESTER_MESSAGES = 300  # newest messages on one page
 REQUESTER_HISTORY = {
     "requester.employee_access_restored": "ระบบให้สิทธิ์เบิก/คืนแก่พนักงานที่ยืนยันแล้ว",
     "registration.approved": "รับรองการลงทะเบียน",
@@ -612,36 +621,59 @@ def admin_requester_detail(request, pk):
 @admin_required
 @require_safe
 def admin_requester_messages(request, pk):
-    """What the person typed in LINE as this requester, never what the same LINE account typed
-    while reporting anonymously (ADR 0010). Admins only, and every opening is audited."""
+    """The person's LINE chat as they saw it (ADR 0042 Q9), never what the same LINE account
+    did while reporting anonymously (ADR 0010). Admins only, and every opening is audited."""
+    from operations import line_history
+
     requester = get_object_or_404(Requester, pk=pk, is_anonymous=False)
-    rows = ConversationMessage.objects.filter(requester=requester)
-    total = rows.count()
-    shown = list(
-        rows.select_related("case", "draft__case").order_by("-created_at", "-pk")[
-            :REQUESTER_MESSAGES
-        ]
-    )
-    for message in shown:
-        # A case or draft of another requester (an anonymous one of the same LINE account) is
-        # never named here, so this page cannot tell who reported it.
-        draft = message.draft if message.draft and message.draft.requester_id == pk else None
-        if message.case and message.case.requester_id == pk:
-            message.about, message.about_case = "ตอบที่ขอข้อมูลเพิ่มของเรื่อง", message.case
-        elif draft is not None and draft.case is not None:
-            message.about, message.about_case = "ร่างที่ยื่นเป็นเรื่อง", draft.case
-        elif draft is not None:
-            kind = f" {draft.get_kind_display()}" if draft.kind else ""
-            message.about = f"ร่างเรื่อง{kind} ({draft.get_status_display()})"
-            message.about_case = None
-        else:
-            message.about, message.about_case = "ข้อความทั่วไป", None
-    identity.audit(request.user, "requester.messages_viewed", requester, shown=len(shown))
+    items = line_history.timeline(requester)
+    identity.audit(request.user, "requester.messages_viewed", requester, shown=len(items))
     return render(
         request,
         "operations/admin_requester_messages.html",
-        {"requester": requester, "rows": shown, "total": total},
+        {"requester": requester, "items": items},
     )
+
+
+@admin_required
+@require_POST
+def admin_requesters_bulk(request):
+    """ADR 0041 (Q8): one role, a suspension or a re-opening for many LINE OA users at once.
+    Each person is done on their own, so one refusal does not stop the rest."""
+    data, actor = request.POST, request.user
+    action, role, reason = data.get("action", ""), data.get("role", ""), data.get("reason", "")
+    ids = [int(x) for x in data.getlist("ids") if x.isdigit()]
+    chosen = data.get("division", "")
+    division = (
+        Division.objects.filter(pk=int(chosen), is_active=True).first()
+        if chosen.isdigit()
+        else None
+    )
+    if not ids:
+        messages.error(request, "โปรดเลือกผู้ใช้อย่างน้อยหนึ่งราย")
+        return redirect("admin-registrations")
+    if action == "role" and role not in identity.PICKS:
+        messages.error(request, "โปรดเลือกบทบาท")
+        return redirect("admin-registrations")
+    done, failed = 0, []
+    for requester in Requester.objects.filter(pk__in=ids, is_anonymous=False).order_by("pk"):
+        try:
+            if action == "role":
+                identity.grant_requester_role(actor, requester, role, division, reason)
+            elif action in {"suspend", "activate"}:
+                identity.set_requester_active(actor, requester, action == "activate", reason)
+            else:
+                raise ValidationError("ไม่รู้จักคำสั่งนี้")
+            done += 1
+        except (ValidationError, PermissionDenied) as exc:
+            failed.append(
+                f"{requester.display_name}: {'; '.join(getattr(exc, 'messages', [str(exc)]))}"
+            )
+    if done:
+        messages.success(request, f"ดำเนินการเรียบร้อยแล้ว {done} ราย")
+    if failed:
+        messages.error(request, f"ดำเนินการไม่ได้ {len(failed)} ราย · " + " | ".join(failed[:10]))
+    return redirect("admin-registrations")
 
 
 @admin_required
@@ -671,7 +703,7 @@ def admin_requester_action(request, pk, action):
             _run(
                 request,
                 lambda: identity.grant_requester_role(actor, requester, **form.cleaned_data),
-                "เพิ่มสิทธิ์เจ้าหน้าที่ให้ผู้ใช้ LINE แล้ว",
+                "ตั้งบทบาทแล้ว",
             )
         else:
             messages.error(request, "ข้อมูลบทบาทไม่ถูกต้อง")
@@ -1280,8 +1312,8 @@ def _staged(value):
 def admin_employees(request):
     """ทะเบียนพนักงาน (15 ต.ค. 2569 Q10, Q27–Q29): the owner uploads the organisation's roster
     (.xlsx or .csv); a preview shows which column is which field and which unit each department
-    is, then the import. The file's names are never read (23 Oct 2569) and e-mails never
-    leave this page; no AI reads the file."""
+    is, then the import. Only first names are kept (ADR 0041) and e-mails never leave this
+    page; no AI reads the file."""
     upload, columns = None, None
     if request.method == "POST":
         action = request.POST.get("action")
@@ -1322,7 +1354,7 @@ def admin_employees(request):
                 messages.info(
                     request,
                     f"เพิ่ม {summary['created']} แก้ {summary['updated']} ปิด {summary['closed']} คน · "
-                    f"มีอีเมล {summary['emails']} คน",
+                    f"มีอีเมล {summary['emails']} คน · เพิ่มแผนก/กลุ่มงาน {summary['new_units']} หน่วย",
                 )
                 return redirect("admin-employees")
     elif request.GET.get("upload"):

@@ -4,7 +4,6 @@ from django import forms
 from django.contrib.auth import get_user_model
 
 from operations.models import (
-    DUTY_ROLES,
     AIConfigVersion,
     AICredential,
     AIProfile,
@@ -12,7 +11,6 @@ from operations.models import (
     District,
     Division,
     EquipmentType,
-    Role,
 )
 
 REASON = forms.CharField(label="เหตุผล", max_length=500, widget=forms.TextInput, required=False)
@@ -25,23 +23,22 @@ class StaffCreateForm(forms.Form):
 
 
 class GrantRoleForm(forms.Form):
+    """The one role of a person (ADR 0041); a กอง role without a กอง takes their สังกัด."""
+
     role = forms.ChoiceField(label="บทบาท")
     division = forms.ModelChoiceField(
-        label="กอง (เว้นว่างสำหรับบทบาทระดับระบบและ แอดมินฝ่าย)",
+        label="กอง (เว้นว่าง = กองในสังกัด)",
         queryset=Division.objects.filter(is_active=True),
         required=False,
     )
     reason = forms.CharField(label="เหตุผล", max_length=500, required=False)
 
     def __init__(self, *args, **kwargs):
-        from operations import identity  # local: identity reads options at request time
+        from operations import identity
 
         super().__init__(*args, **kwargs)
-        # ผู้ช่วยเหลือระบบ is granted on the host only (ADR 0007); the old duties are offered
-        # only while the organisation splits a division's work (16 Oct 2569 Q3).
-        hidden = {Role.SYSTEM_SUPPORT} | (set() if identity.work_is_split() else DUTY_ROLES)
         self.fields["role"].choices = [("", "เลือกบทบาท")] + [
-            c for c in Role.choices if c[0] not in hidden
+            (r, identity.role_label(r)) for r in identity.PICKS
         ]
 
 

@@ -694,6 +694,36 @@ class Scenario:
     needs_ai: bool = False
 
 
+def order(r, w):
+    """ADR 0041: a แอดมินฝ่าย orders work in LINE on cards, picking the กอง then the person."""
+    from django.utils import timezone as tz
+
+    from operations import staff_orders_chat
+    from operations.models import Division
+
+    director = _user("sim-director", [])
+    RoleGrant.objects.get_or_create(user=director, role=Role.DEPARTMENT_SUPERVISOR, division=None)
+    StaffProfile.objects.filter(user=director).update(display_name="ผอ.จำลอง")
+    head = _user("sim-eqp-head", [(Role.SUPERVISOR, "SIM-EQP")])
+    StaffProfile.objects.filter(user=head).update(
+        display_name="สมศักดิ์", division=Division.objects.get(code="SIM-EQP")
+    )
+    ChannelIdentity.objects.filter(channel=LINE, external_id=r.user_id).update(
+        staff_user=director, staff_linked_at=tz.now()
+    )
+    eqp = Division.objects.get(code="SIM-EQP")
+    r.type("สั่งงาน", "แอดมินฝ่ายพิมพ์ สั่งงาน ระบบเปิดการ์ดให้เลือกกอง (อื่นๆ คือแอดมินฝ่ายคนอื่น)")
+    r.tap("SIM-EQP", "เลือกกอง ระบบแสดงแอดมินกองของกองนั้น และปุ่มสั่งทั้งกอง")
+    head.refresh_from_db()
+    r.tap(staff_orders_chat.who(head, eqp), "เลือกผู้รับ ระบบขอให้พิมพ์รายละเอียดงาน")
+    r.type(
+        "ตรวจนับอุปกรณ์คงคลังและรายงานผล",
+        "พิมพ์รายละเอียด ระบบสรุปร่างเป็นการ์ด เลือกวันกำหนดได้จากปฏิทินของ LINE ในการ์ด",
+    )
+    r.tap("เปลี่ยนเป็นด่วน", "กดเปลี่ยนความเร่งด่วนในการ์ด การ์ดสรุปใหม่แสดงทันที")
+    r.tap("ยืนยัน", "สั่งงานแล้ว ผู้รับได้ LINE พร้อมปุ่มดูงาน ไม่มีลิงก์เปิดเว็บ")
+
+
 SCENARIOS = [
     Scenario(
         "register",
@@ -732,6 +762,12 @@ SCENARIOS = [
         "แจ้งปัญหาเร่งด่วน",
         "มีควันและกลิ่นไหม้ ได้คำแนะนำทันที โต้แย้งผลครั้งแรก แล้วยอมรับผล",
         problem,
+    ),
+    Scenario(
+        "order",
+        "แอดมินฝ่ายสั่งงาน",
+        "เลือกกอง เลือกแอดมินกอง พิมพ์รายละเอียด ตั้งความเร่งด่วนในการ์ด แล้วยืนยัน",
+        order,
     ),
 ]
 

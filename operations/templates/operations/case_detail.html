@@ -1,7 +1,7 @@
 {% extends "operations/base.html" %}
 {% load static ui units_ui %}
 {% block title %}{{ case.number }} · DED Center{% endblock %}
-{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}"><script src="{% static 'operations/case_chat.js' %}" defer></script>{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}">{% endblock %}
 {% block page_id %}case{% endblock %}
 {% block page_kind %}{{ case.kind }}{% endblock %}
 {% block content %}

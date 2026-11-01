@@ -1388,14 +1388,6 @@ body:has(.ov-page) .footer { border-top: 0; }
 .unit-path__sep { color: var(--stone); }
 
 /* ผังหน่วยงาน (ADR 0031) */
-.org-try__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 var(--s-18); align-items: end; }
-.org-try__form .btn { margin-bottom: var(--s-18); }
-.org-steps { list-style: none; margin: var(--s-12) 0 0; padding: 0; display: grid; gap: var(--s-12); }
-.org-steps__item { display: grid; grid-template-columns: 36px 1fr; gap: var(--s-12); padding: var(--s-18); border-radius: 18px; background: var(--cloud); }
-.org-steps__item p { margin: var(--s-4) 0 0; }
-.org-steps__n { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-full); background: var(--ink); color: var(--on-primary); font-weight: 700; }
-.org-steps__people { margin: var(--s-4) 0 0; padding-left: var(--s-18); }
-.org-pill { display: inline-block; padding: 0 var(--s-8); border-radius: var(--r-full); background: var(--canvas); font-weight: 600; }
 .org-inline { display: flex; flex-wrap: wrap; gap: var(--s-8); align-items: center; }
 .org-inline select { min-width: 200px; }
 .org-jump { display: flex; flex-wrap: wrap; gap: var(--s-8); margin: 0 0 var(--s-24); }
@@ -1475,3 +1467,117 @@ body:has(.ov-page) .footer { border-top: 0; }
 .task-rows form { margin: 0; display: flex; gap: var(--s-8); align-items: center; }
 /* ADR 0039: a viewer's read-only form keeps the form's layout. */
 fieldset.stack { border: 0; padding: 0; margin: 0; min-width: 0; }
+
+/* ADR 0041: the tree of people registered in LINE, drawn like the organisation's own chart. */
+.org-tree { --org-accent: #ef6c1a; --org-accent-soft: #fdeadb; --org-root: #8a1c25; overflow-x: auto; padding-bottom: var(--s-12); }
+.org-tree__root { width: fit-content; margin: 0 auto; padding: var(--s-8) var(--s-30); border-radius: 6px; background: var(--org-root); color: var(--on-primary); font-weight: 700; position: relative; }
+.org-tree__root::after { content: ""; position: absolute; top: 100%; left: 50%; height: var(--s-18); border-left: 1px solid var(--hairline); }
+.org-tree > .org-tree__people { justify-content: center; margin: var(--s-8) 0 0; }
+.org-tree__lines { list-style: none; display: flex; align-items: flex-start; gap: var(--s-18); width: max-content; min-width: 100%; margin: var(--s-18) 0 0; padding: var(--s-18) 0 0; border-top: 1px solid var(--hairline); }
+.org-tree__line { position: relative; flex: 0 0 auto; min-width: 200px; max-width: 300px; }
+.org-tree__line::before { content: ""; position: absolute; top: calc(-1 * var(--s-18)); left: var(--s-18); height: var(--s-18); border-left: 1px solid var(--hairline); }
+.org-node { display: inline-flex; align-items: baseline; gap: var(--s-8); max-width: 100%; padding: 3px var(--s-8); border-radius: 4px; background: var(--cloud); font-size: 13px; line-height: 1.4; }
+.org-node a { color: inherit; text-decoration-color: var(--hairline); }
+.org-node__n { flex: none; font-size: 11px; color: var(--mute); }
+.org-node--line { display: flex; justify-content: space-between; padding: var(--s-8) var(--s-12); background: var(--org-accent); color: var(--on-primary); font-weight: 600; }
+.org-node--line .org-node__n { color: var(--on-primary); opacity: .85; }
+.org-tree__line > .org-branch > li > .org-node { background: var(--org-accent-soft); font-weight: 600; }
+.org-branch { list-style: none; margin: 0; padding: 0 0 0 var(--s-12); }
+.org-branch > li { position: relative; padding: var(--s-8) 0 0 var(--s-12); border-left: 1px solid var(--hairline); }
+.org-branch > li:last-child { border-left-color: transparent; }
+.org-branch > li::before { content: ""; position: absolute; top: 0; left: -1px; width: var(--s-12); height: 20px; border-left: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); }
+.org-tree__people { margin: var(--s-4) 0 0; gap: var(--s-4); }
+.org-who > summary { cursor: pointer; list-style: none; min-height: 26px; font-size: 13px; }
+.org-who > summary::-webkit-details-marker { display: none; }
+.org-who[open] > summary { background: var(--ink); color: var(--on-primary); }
+.org-who__role { font-size: 11px; color: var(--mute); }
+.org-who[open] .org-who__role { color: var(--on-primary); opacity: .8; }
+.org-who__form { width: 260px; margin-top: var(--s-4); padding: var(--s-12); border: 1px solid var(--hairline-soft); border-radius: 12px; background: var(--canvas); }
+.org-who__pos { margin: 0 0 var(--s-8); font-size: 12px; color: var(--mute); }
+
+/* ADR 0041 (Q9): a person in one short row — name, position, the four roster levels. */
+.person-sub { display: block; margin-top: 2px; font-size: 13px; font-weight: 400; color: var(--mute); }
+.unit-path { display: inline-flex; flex-wrap: wrap; gap: 0 4px; font-size: 14px; }
+.unit-path > span + span::before { content: "›"; margin-right: 4px; color: var(--stone); }
+.unit-path__na { color: var(--stone); }
+.people-bulk { padding: var(--s-12); border-radius: 14px; background: var(--cloud); }
+.people-bulk input[name=reason] { flex: 1 1 180px; min-width: 0; }
+.people-table .cell--pick { width: 36px; }
+.people-table .cell--pick input { width: 18px; height: 18px; accent-color: var(--ink); }
+@media (max-width: 767px) {
+  .people-table tr > .cell--pick { grid-column: 3; grid-row: 1; text-align: right; }
+}
+
+/* หน้าต่างแชตลอย (Q15; ADR 0028 แบบ A; ADR 0042 Q8 on every staff page): a round button that
+   unfolds into a chat card above it, listing the cases with messages, then one case's thread. */
+.chatwin { position: fixed; right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.chatwin .chatwin__toggle { position: relative; width: 60px; height: 60px; min-height: 60px; padding: 0; border-radius: 50%; background: var(--ink); color: var(--on-primary); box-shadow: 0 10px 28px rgba(17,17,17,.24); display: grid; place-items: center; transition: transform .15s ease; }
+.chatwin .chatwin__toggle:hover { transform: translateY(-2px); }
+.chatwin__toggle .icon { width: 26px; height: 26px; }
+.chatwin.is-open .chatwin__toggle { background: var(--charcoal); }
+.chatwin__dot { position: absolute; top: -4px; right: -4px; background: var(--danger); color: #fff; border-radius: 999px; font-size: 11.5px; line-height: 20px; padding: 0 7px; border: 2px solid var(--canvas); }
+.chatwin__panel { width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 120px)); background: var(--canvas); border: 1px solid var(--hairline-soft); border-radius: 22px; box-shadow: 0 16px 48px rgba(17,17,17,.18); display: flex; flex-direction: column; overflow: hidden; transform-origin: bottom right; animation: chatwin-pop .18s ease-out; }
+.chatwin__panel[hidden] { display: none; }
+@keyframes chatwin-pop { from { transform: scale(.94); opacity: .4; } to { transform: none; opacity: 1; } }
+.chatwin__head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 14px; border-bottom: 1px solid var(--hairline-soft); }
+.chatwin__avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--cloud-deep); display: grid; place-items: center; flex: none; }
+.chatwin__avatar .icon { width: 18px; height: 18px; }
+.chatwin__title { flex: 1; min-width: 0; display: grid; line-height: 1.35; }
+.chatwin__title strong { font-size: 14.5px; }
+.chatwin__title span { font-size: 12.5px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chatwin .chatwin__close { background: transparent; color: var(--ink); min-height: 34px; width: 34px; padding: 0; font-size: 22px; border-radius: 50%; }
+.chatwin .chatwin__close:hover { background: var(--cloud); }
+.chatwin__hint { font-size: 12px; color: var(--mute); padding: 6px 14px; margin: 0; background: var(--cloud); }
+.chatwin__body { flex: 1; overflow-y: auto; background: var(--canvas); padding: 14px; }
+.chat__list { display: flex; flex-direction: column; gap: 10px; }
+.chatwin .chat__msg { max-width: 80%; }
+.chatwin .chat__bubble { background: var(--cloud); border-radius: 18px; border-bottom-left-radius: 6px; padding: 9px 13px; }
+.chatwin .chat__msg--staff .chat__bubble { background: var(--ink); color: var(--on-primary); border-radius: 18px; border-bottom-right-radius: 6px; }
+.chatwin .chat__meta { color: var(--mute); }
+.chat__strip { align-self: center; max-width: 92%; text-align: center; font-size: 12.5px; color: var(--ash); background: var(--cloud); border: 1px solid var(--hairline-soft); border-radius: 12px; padding: 6px 12px; }
+.chat__strip strong { color: var(--ink); font-weight: 600; }
+.chat__strip-text { display: block; color: var(--ink); margin-top: 2px; }
+.chat__empty { color: var(--mute); font-size: 13px; }
+.chat__msg.is-faint { opacity: .6; }
+.chatwin__form { border-top: 1px solid var(--hairline-soft); padding: 10px; display: grid; gap: 6px; }
+.chatwin__send { display: flex; gap: 8px; align-items: flex-end; }
+.chatwin__send textarea { flex: 1; min-height: 42px; max-height: 120px; border-radius: 21px; padding: 9px 14px; resize: none; background: var(--cloud); }
+.chatwin .chatwin__sendbtn { width: 42px; height: 42px; min-height: 42px; padding: 0; border-radius: 50%; flex: none; display: grid; place-items: center; }
+.chatwin__sendbtn .icon { width: 18px; height: 18px; }
+@media (max-width: 600px) {
+  .chatwin { right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .chatwin.is-open { inset: 0; gap: 0; }
+  .chatwin.is-open .chatwin__panel { width: 100%; height: 100%; border-radius: 0; border: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .chatwin.is-open .chatwin__toggle { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .chatwin__panel { animation: none; } .chatwin .chatwin__toggle { transition: none; } }
+.chatwin__back { background: transparent; color: var(--ink); min-height: 34px; width: 34px; padding: 0; font-size: 20px; border-radius: 50%; }
+.chatwin__back:hover { background: var(--cloud); }
+.chatwin__thread { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.chatwin__thread[hidden] { display: none; }
+.dock-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.dock-row { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--s-8); width: 100%; min-height: 0; padding: 10px 6px; border: 0; border-bottom: 1px solid var(--hairline-soft); border-radius: 0; background: transparent; color: var(--ink); text-align: left; font-weight: 400; }
+.dock-row:hover { background: var(--cloud); }
+.dock-row__num { font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+.dock-row__time { font-size: 12px; color: var(--mute); text-align: right; }
+.dock-row__text { grid-column: 1; font-size: 13px; color: var(--ash); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-row__count { grid-column: 2; justify-self: end; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 11.5px; line-height: 20px; text-align: center; }
+
+/* ADR 0042 Q9: one requester's LINE chat, drawn like LINE (their messages green on the right). */
+.linechat { max-width: 560px; margin: 0 auto var(--s-24); padding: var(--s-12) var(--s-12) var(--s-18); border-radius: 18px; background: #8cabd8; display: flex; flex-direction: column; gap: 8px; }
+.linechat__day { align-self: center; margin: 6px 0; padding: 2px 10px; border-radius: 999px; background: rgba(0, 0, 0, .18); color: #fff; font-size: 12px; }
+.linechat__sys { align-self: center; color: #fff; font-size: 12px; }
+.linechat__row { display: flex; align-items: flex-end; gap: 6px; }
+.linechat__row--me { justify-content: flex-end; }
+.linechat__avatar { flex: none; align-self: flex-start; width: 32px; height: 32px; border-radius: 50%; background: #16804a; color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+.linechat__bubble { max-width: 75%; padding: 8px 12px; border-radius: 18px; border-top-left-radius: 4px; background: #fff; color: #111; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.linechat__bubble--me { border-radius: 18px; border-top-right-radius: 4px; background: #9be27c; }
+.linechat__bubble.is-tap { font-weight: 600; }
+.linechat__time { flex: none; color: rgba(255, 255, 255, .9); font-size: 11px; }
+.linechat__cards { display: flex; gap: 8px; max-width: 80%; overflow-x: auto; }
+.linechat__card { flex: none; width: 230px; padding: 12px; border-radius: 14px; background: #fff; display: grid; gap: 4px; align-content: start; font-size: 13px; }
+.linechat__card p { margin: 0; overflow-wrap: anywhere; }
+.linechat__card-title { font-weight: 700; font-size: 14px; }
+.linechat__btn { display: block; margin-top: 4px; padding: 6px 8px; border-radius: 8px; background: #f2f2f2; text-align: center; color: #16804a; font-weight: 600; }
+.linechat__quick { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 38px; }
+.linechat__quick span { padding: 4px 10px; border: 1px solid rgba(255, 255, 255, .9); border-radius: 999px; background: rgba(255, 255, 255, .85); font-size: 12px; color: #111; }

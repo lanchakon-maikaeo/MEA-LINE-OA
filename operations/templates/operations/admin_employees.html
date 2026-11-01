@@ -5,7 +5,7 @@
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
     <h1>ทะเบียนพนักงาน</h1>
-    <p class="lede">ใช้ยืนยันตัวตนตอนลงทะเบียนทาง LINE และแสดงตำแหน่งกับฝ่ายของผู้ใช้ LINE OA ไฟล์ไม่ผ่าน AI อีเมลเก็บแบบเข้ารหัส และระบบไม่อ่านคอลัมน์ชื่อ-สกุลและเบอร์โทร</p>
+    <p class="lede">ใช้ยืนยันตัวตนตอนลงทะเบียนทาง LINE และแสดงตำแหน่งกับฝ่ายของผู้ใช้ LINE OA ไฟล์ไม่ผ่าน AI ระบบเก็บชื่อต้นอย่างเดียว (ไม่เก็บคำนำหน้าและนามสกุล) อีเมลเก็บแบบเข้ารหัส และไม่อ่านเบอร์โทร</p>
   </div>
 </div>
 <dl class="facts">
@@ -41,7 +41,13 @@
       <div><dt>รหัสซ้ำ</dt><dd class="num">{{ preview.duplicates|length }}{% if preview.duplicates %} <span class="muted">(ใช้แถวแรก)</span>{% endif %}</dd></div>
       <div><dt>อีเมลรูปแบบไม่ถูก</dt><dd class="num">{{ preview.bad_email }} <span class="muted">(นำเข้าโดยไม่มีอีเมล)</span></dd></div>
       <div><dt>ในระบบตอนนี้</dt><dd class="num">{{ preview.existing }} คน</dd></div>
+      <div><dt>อยู่ในกองของระบบ</dt><dd class="num">{{ preview.in_divisions }} คน <span class="muted">(สังกัดตามไฟล์)</span></dd></div>
     </dl>
+    {% if preview.new_units %}
+    <details class="disclosure"><summary>จะเพิ่มแผนกและกลุ่มงาน {{ preview.new_units|length }} หน่วย</summary>
+      <div class="disclosure__body"><ul>{% for unit in preview.new_units %}<li>{{ unit }}</li>{% endfor %}</ul></div>
+    </details>
+    {% endif %}
 
     {% if preview.units %}
     <h3 class="mt-18">จับคู่ฝ่ายกับหน่วยงาน (เขต/ฝ่าย)หรือหน่วยงาน</h3>
@@ -72,7 +78,7 @@
 
 <section class="section" aria-labelledby="emp-import">
   <div class="section-head"><h2 id="emp-import">{% if preview %}เลือกไฟล์อื่น{% else %}นำเข้าทะเบียนพนักงาน{% endif %}</h2></div>
-  <p class="muted">ไฟล์ .xlsx หรือ .csv ไม่เกิน 10 MB แผ่นงานแรก หัวคอลัมน์เช่น รหัสพนักงาน ตำแหน่ง สายงาน ฝ่าย กอง แผนก กลุ่มงาน อีเมล ถ้าไฟล์มีคอลัมน์ชื่อ-สกุล ระบบไม่อ่าน ระบบอ่านไฟล์แล้วให้ตรวจก่อน ยังไม่บันทึกอะไรจนกว่าจะกดนำเข้า ไฟล์ที่ตรวจไว้ลบเองใน 1 ชั่วโมง</p>
+  <p class="muted">ไฟล์ .xlsx หรือ .csv ไม่เกิน 10 MB แผ่นงานแรก หัวคอลัมน์เช่น รหัสพนักงาน ชื่อ-สกุล ตำแหน่ง สายงาน ฝ่าย กอง แผนก กลุ่มงาน อีเมล ระบบเก็บชื่อต้นอย่างเดียว ไฟล์เป็นตัวตั้งสังกัดของคนที่ผูกกับทะเบียนทุกครั้งที่นำเข้า ระบบอ่านไฟล์แล้วให้ตรวจก่อน ยังไม่บันทึกอะไรจนกว่าจะกดนำเข้า ไฟล์ที่ตรวจไว้ลบเองใน 1 ชั่วโมง</p>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}<input type="hidden" name="action" value="upload">
     <div class="field"><label for="emp-file">ไฟล์</label><input id="emp-file" type="file" name="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></div>

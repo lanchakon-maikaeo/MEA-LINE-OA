@@ -1,6 +1,6 @@
 {% load ui %}
 {% if panel.warehouse or panel.milestones or panel.appointments %}
-<section class="section" aria-labelledby="s-warehouse">
+<section data-tour="stages" class="section" aria-labelledby="s-warehouse">
   <div class="section-head"><h2 id="s-warehouse">งานคลังและนัด</h2>{% if panel.warehouse %}<a class="btn btn--ghost btn--sm" href="{% url 'warehouse' case.owner_division.code %}">ไปหน้างานคลัง</a>{% endif %}</div>
   {% if panel.milestones %}<ol class="wh-steps">{% for m in panel.milestones %}<li><strong>{{ m.label }}</strong> {{ m.on|thai_date }}{% if m.planned_on %} · วันจ่าย {{ m.planned_on|thai_date }}{% endif %}{% if m.note %} · {{ m.note }}{% endif %} <span class="muted">{{ m.recorded_by.staff_profile.display_name|default:m.recorded_by.username }}</span></li>{% endfor %}</ol>{% elif panel.warehouse %}<p class="muted">ยังไม่ได้บันทึกขั้นงานคลัง</p>{% endif %}
   {% if panel.warehouse and case.status == "awaiting_approval" %}<p class="muted">เรื่องนี้ยังรอกองรับเรื่อง บันทึกขั้นงานคลังได้หลังกองรับเรื่องแล้ว</p>
@@ -36,31 +36,6 @@
   {% endfor %}
 </section>
 {% endif %}
-{% if panel.chat_any or panel.chat_open %}
-<div class="chatwin" id="chat" data-case="{{ case.number }}" data-last="{{ panel.chat_last }}">
-  <section class="chatwin__panel" id="chatwin-panel" aria-labelledby="chatwin-title" hidden>
-    <header class="chatwin__head">
-      <span class="chatwin__avatar" aria-hidden="true">{% icon "chat" %}</span>
-      <div class="chatwin__title">
-        <strong id="chatwin-title">คุยกับผู้แจ้ง</strong>
-        <span>{{ case.number }} · {{ case.district.name }}</span>
-      </div>
-      <button class="chatwin__close" type="button" aria-label="ปิดหน้าต่างแชต">×</button>
-    </header>
-    <p class="chatwin__hint" data-hint>{% if panel.chat_fresh %}ผู้แจ้งเพิ่งพิมพ์มา ส่งตอนนี้ถึงทันที{% else %}ข้อความจะถึงผู้แจ้งตอนเขาทักมาครั้งถัดไป{% endif %}</p>
-    <div class="chatwin__body" hx-get="{% url 'case-chat-thread' case.number %}" hx-trigger="every 10s" hx-swap="innerHTML">{% include "operations/_case_chat_thread.html" with items=panel.chat last=panel.chat_last fresh=panel.chat_fresh %}</div>
-    {% if panel.chat_open %}
-    <form method="post" action="{% url 'case-chat' case.number %}" class="chatwin__form">
-      {% csrf_token %}
-      {% if panel.chat_contact %}<label class="chatwin__contact">ชื่อและเบอร์ของคุณ (ต่อท้ายข้อความแรก)<input type="text" name="contact" value="{{ panel.chat_contact }}" maxlength="200" required></label>{% endif %}
-      <div class="chatwin__send">
-        <label class="visually-hidden" for="chat-text">ข้อความถึงผู้แจ้ง</label>
-        <textarea id="chat-text" name="text" rows="1" maxlength="2000" required placeholder="พิมพ์ข้อความ" title="Enter ส่ง Shift+Enter ขึ้นบรรทัด"></textarea>
-        <button class="chatwin__sendbtn" type="submit" aria-label="ส่งข้อความ">{% icon "send" %}</button>
-      </div>
-    </form>
-    {% else %}<p class="chatwin__hint">ผู้แจ้งเรื่องนี้ไม่ได้ใช้ LINE หรือคุณไม่ได้อยู่ในกองเจ้าภาพ</p>{% endif %}
-  </section>
-  <button class="chatwin__toggle" type="button" aria-expanded="false" aria-controls="chatwin-panel" aria-label="แชตกับผู้แจ้ง">{% icon "chat" %}<span class="chatwin__dot" hidden>ใหม่</span></button>
-</div>
+{% if panel.chat_any or panel.chat_open %}{# ADR 0042 Q8: the chat window of every page opens this case #}
+<span data-dock-case="{{ case.number }}" data-thread="{% url 'case-chat-thread' case.number %}" data-post="{% url 'case-chat' case.number %}" data-title="{{ case.number }} · {{ case.district.name }}" data-unread="{{ panel.chat_last }}" hidden></span>
 {% endif %}

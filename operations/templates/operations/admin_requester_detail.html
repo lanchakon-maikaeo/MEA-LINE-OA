@@ -13,7 +13,8 @@
 
 <dl class="facts">
   <div><dt>ตัวตน</dt><dd>{{ row.proof }}</dd></div>
-  <div><dt>ตำแหน่ง · ฝ่าย</dt><dd>{{ row.position|default:"ไม่ระบุ" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</dd></div>
+  <div><dt>ตำแหน่ง</dt><dd>{{ row.position|default:"ไม่ระบุ" }}{% if row.stale %} <span class="tag tag--alert">ไม่อยู่ในทะเบียนล่าสุด</span>{% endif %}</dd></div>
+  <div><dt>หน่วย</dt><dd>{% if row.path %}<span class="unit-path">{% for level in row.path %}<span{% if level == "N/A" %} class="unit-path__na"{% endif %}>{{ level }}</span>{% endfor %}</span>{% else %}N/A{% endif %}</dd></div>
   <div><dt>บทบาทในระบบ</dt><dd>{{ row.role }}</dd></div>
   <div><dt>ช่องทาง</dt><dd>{{ row.channel }}</dd></div>
   <div><dt>รับรองโดย</dt><dd>{{ requester.approved_by.staff_profile.display_name|default:requester.approved_by.username }} · {{ requester.approved_at|thai_datetime }}</dd></div>
@@ -29,9 +30,9 @@
 
 {% if managed and row.state == "verified" %}
 <section class="section" aria-labelledby="rq-role">
-  <details><summary id="rq-role">จัดการสิทธิ์เพิ่มเติม</summary><p>ระบบให้สิทธิ์สมาชิกกองตามทะเบียนอัตโนมัติแล้ว ถ้าไม่มีข้อมูลกองจะใช้งานในฐานะเจ้าหน้าที่ที่เบิก/คืนได้</p>
+  <details><summary id="rq-role">เปลี่ยนบทบาท</summary><p>หนึ่งคนมีบทบาทเดียว บทบาทใหม่แทนบทบาทเดิม เจ้าหน้าที่เบิก คืน และแจ้งเรื่องตามที่ลงทะเบียนได้อย่างเดียว ถ้าไม่เลือกกอง บทบาทระดับกองใช้กองในสังกัด</p>
   <form method="post" action="{% url 'admin-requester-action' requester.pk 'grant-role' %}">
-    {% csrf_token %}{{ grant_form.as_p }}<button type="submit">เพิ่มสิทธิ์</button>
+    {% csrf_token %}{{ grant_form.as_p }}<button type="submit">กำหนดบทบาท</button>
   </form></details>
 </section>
 {% endif %}

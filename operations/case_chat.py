@@ -1,25 +1,28 @@
 """การคุยกับเจ้าหน้าที่ในเรื่อง (ADR 0024, grill กคว. 27 ต.ค. 2569 Q37 ถึง Q39, Q54).
 
-Staff type on the case card; nothing is pushed. A message goes at once as a free LINE reply when
-the requester's last message is under 50 seconds old and its reply token is still unused, which
-is the case while they chat: in prompt "case_chat" the bot keeps quiet so staff can answer.
-Otherwise the message is held and goes out with the reply to the requester's next message. The
-first message of each staff member in a case carries how to reach them. The requester's typed
-answers join the case until they tap จบการคุย or 24 hours pass after the last staff message.
+Staff type on the case card or in the chat window of any staff page. A message goes as a free
+LINE reply when the requester's last message is under 50 seconds old and its reply token is
+still unused, which is the case while they chat: in prompt "case_chat" the bot keeps quiet so
+staff can answer. ADR 0042 Q7, Q8: otherwise it is pushed at once (it counts against the OA's
+monthly quota), and it reaches the requester exactly as typed, with a จบการคุย button only. The
+requester's typed answers join the case until they tap จบการคุย or 24 hours pass after the last
+staff message.
 """
 
+import uuid
 from datetime import datetime, timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from operations import identity
+from operations import identity, orchestration
 from operations.models import (
     CaseMessage,
     ChannelIdentity,
     Conversation,
-    StaffProfile,
+    NotificationDelivery,
+    OutboxEvent,
     WebhookInbox,
 )
 
@@ -59,31 +62,13 @@ def fresh_inbox(case, now=None):
     )
 
 
-def contact_of(user):
-    """What the user signed with last time, else their name (staff edit it on the card)."""
-    last = M.objects.filter(author=user).exclude(contact="").order_by("-created_at").first()
-    if last is not None:
-        return last.contact
-    profile = StaffProfile.objects.filter(user=user).first()
-    return profile.display_name if profile else user.get_username()
-
-
-def needs_contact(user, case):
-    return not M.objects.filter(case=case, author=user, direction=M.Direction.STAFF).exists()
-
-
 def _bubble(case, messages):
+    """The staff messages as typed (ADR 0042 Q8), with จบการคุย and any buttons they carry."""
     from operations import conversation  # local: conversation builds on this module
 
-    lines = [f"ข้อความจากเจ้าหน้าที่ เรื่อง {case.number}"]
-    for message in messages:
-        lines.append(message.text)
-        if message.contact:
-            lines.append(f"ติดต่อ: {message.contact}")
-    lines.append("พิมพ์ตอบในแชตนี้ได้เลย ข้อความจะเข้าเรื่องนี้")
     quick = next((m.quick for m in reversed(messages) if m.quick), [])
     return conversation.text_message(
-        "\n".join(lines), [*(tuple(q) for q in quick), (END_LABEL, END_POSTBACK)]
+        "\n".join(m.text for m in messages), [*(tuple(q) for q in quick), (END_LABEL, END_POSTBACK)]
     )
 
 
@@ -96,7 +81,7 @@ def _open_chat(found, case, now):
 
 @transaction.atomic
 def send(actor, case, text, contact=""):
-    """A staff message from the case card: sent now when it can go free, else held."""
+    """A staff message: a free reply when the requester just wrote, else a push at once."""
     scope = identity.staff_scope(actor)
     if not identity.can_access_division(scope, case.owner_division_id):
         raise PermissionDenied
@@ -108,19 +93,11 @@ def send(actor, case, text, contact=""):
     found = _identity(case)
     if found is None:
         raise ValidationError("ผู้แจ้งเรื่องนี้ไม่ได้แจ้งผ่าน LINE ส่งข้อความทางนี้ไม่ได้")
-    contact = " ".join(str(contact or "").split())[:200]
-    if needs_contact(actor, case) and not contact:
-        raise ValidationError("ข้อความแรกในเรื่องนี้ ใส่ชื่อและเบอร์ติดต่อของคุณด้วย")
     message = M.objects.create(
-        case=case,
-        direction=M.Direction.STAFF,
-        text=text,
-        author=actor,
-        contact=contact if needs_contact(actor, case) else "",
-        status=M.Status.HELD,
+        case=case, direction=M.Direction.STAFF, text=text, author=actor, status=M.Status.HELD
     )
     identity.audit(actor, "case.chat_sent", case, number=case.number)
-    return _try_now(case, found, message)
+    return _try_now(case, found, message, push=True)
 
 
 def send_system(actor, case, text, quick=None):
@@ -132,7 +109,8 @@ def send_system(actor, case, text, quick=None):
     message = M.objects.create(
         case=case,
         direction=M.Direction.STAFF,
-        text=text[:MAX_TEXT],
+        # a requester may have several cases, so the message names its case
+        text=(text if case.number in text else f"เรื่อง {case.number}\n{text}")[:MAX_TEXT],
         author=actor,
         quick=[list(q) for q in quick or []],
         status=M.Status.HELD,
@@ -140,20 +118,50 @@ def send_system(actor, case, text, quick=None):
     return _try_now(case, found, message)
 
 
-def _try_now(case, found, message):
+def _try_now(case, found, message, push=False):
     from operations import conversation  # local: conversation builds on this module
 
     inbox = fresh_inbox(case)
+    if inbox is None and not push:
+        return message
+    held = list(M.objects.filter(case=case, status=M.Status.HELD).order_by("created_at"))
+    now = timezone.now()
+    _open_chat(found, case, now)
+    M.objects.filter(pk__in=[m.pk for m in held]).update(
+        status=M.Status.SENT, sent_at=now, inbox=inbox
+    )
+    bubble = _bubble(case, held)
     if inbox is not None:
-        held = list(M.objects.filter(case=case, status=M.Status.HELD).order_by("created_at"))
-        now = timezone.now()
-        _open_chat(found, case, now)
-        M.objects.filter(pk__in=[m.pk for m in held]).update(
-            status=M.Status.SENT, sent_at=now, inbox=inbox
-        )
-        transaction.on_commit(lambda: conversation.send_reply(inbox.pk, [_bubble(case, held)]))
-        message.status = M.Status.SENT
+        transaction.on_commit(lambda: conversation.send_reply(inbox.pk, [bubble]))
+    else:
+        _push(case, found, bubble, now)
+    message.status = M.Status.SENT
     return message
+
+
+def _push(case, found, bubble, now):
+    """ADR 0042 Q7: the staff message goes now as a push, inside the monthly LINE budget."""
+    N = NotificationDelivery
+    delivery = N.objects.create(
+        kind="case_chat",
+        level=N.Level.NORMAL,
+        identity=found,
+        text=bubble["text"],
+        message=bubble,
+        case=case,
+        send_after=now,
+    )
+    OutboxEvent.objects.create(
+        event_type=orchestration.EVENT_NOTIFICATION,
+        subject_type="delivery",
+        subject_id=str(delivery.pk),
+        case=case,
+        case_revision=case.revision,
+        correlation_id=uuid.uuid4(),
+        payload={"delivery_id": delivery.pk, "kind": "case_chat", "level": N.Level.NORMAL},
+        occurred_at=now,
+        next_attempt_at=now,
+    )
 
 
 def deliver(turn):

@@ -1,10 +1,10 @@
-"""เรื่องใหม่เข้ารออนุมัติของกองเจ้าภาพทันที (ADR 0025, grill กคว. 27 ต.ค. 2569 Q13, Q18, Q23–Q26).
+"""เรื่องใหม่เข้ากองเจ้าภาพทันที (ADR 0025, grill กคว. 27 ต.ค. 2569 Q13, Q18, Q23–Q26; ADR 0042).
 
-With ตัวเลือกระบบ "screening" off (the default) a new case skips รอคัดกรอง: it waits for the
-owner division's approval, unless it still waits with the coordinator because no division was
-clear, or it is an emergency problem report, which starts at once. Whoever holds the approval
-authority of the owner division approves any kind; a case without item rows is approved as a
-whole, with the level in the same form. Withdrawals with rows keep the per-line approval.
+With ตัวเลือกระบบ "screening" off (the default) a new case skips รอคัดกรอง. Since 1 Nov 2569
+(ADR 0042 Q10) it skips รอกองรับเรื่อง too: once its owner division is known it starts work at
+once, and the division sets the level and the person with the usual buttons. A case whose
+division was not clear still waits with the coordinator, and starts when the coordinator sends
+it on.
 """
 
 from django.db import transaction
@@ -34,9 +34,9 @@ def first_status(case):
 
 
 def after_move(case):
-    """A case the coordinator sent on now waits for the new owner's approval."""
+    """A case the coordinator sent on starts work in the new owner division (ADR 0042 Q10)."""
     if no_screening() and case.status == S.SUBMITTED and first_status(case) != S.SUBMITTED:
-        case.status = S.AWAITING_APPROVAL
+        case.status = S.IN_PROGRESS
 
 
 def is_emergency(case):
@@ -44,16 +44,12 @@ def is_emergency(case):
     return EMERGENCY in (state.priority_floor, state.suggested_priority, state.confirmed_priority)
 
 
-def start_emergency(case):
-    """Q24: an emergency problem report does not wait for approval. Returns True if moved."""
+def start_at_once(case):
+    """ADR 0042 Q10: a new case does not wait for the division to accept it (Q24 did this for
+    emergency problem reports only). Returns True if moved."""
     from operations import services  # local: services calls this module
 
-    if not (
-        no_screening()
-        and case.kind == Case.Kind.PROBLEM
-        and case.status == S.AWAITING_APPROVAL
-        and is_emergency(case)
-    ):
+    if not (no_screening() and case.status == S.AWAITING_APPROVAL):
         return False
     with transaction.atomic():
         case = Case.objects.select_for_update().get(pk=case.pk)
@@ -63,13 +59,16 @@ def start_emergency(case):
         case.revision += 1
         case.updated_at = timezone.now()
         case.save(update_fields=["status", "revision", "updated_at"])
-        context = services._Context(label="ระบบ (เรื่องฉุกเฉิน)")
+        emergency = is_emergency(case)
+        context = services._Context(label="ระบบ (เรื่องฉุกเฉิน)" if emergency else "ระบบ")
         services._record(
             context,
             case,
             "start_work",
             S.AWAITING_APPROVAL,
-            "เรื่องฉุกเฉินเริ่มงานทันทีโดยไม่รอกองรับเรื่อง",
+            "เรื่องฉุกเฉินเริ่มงานทันที"
+            if emergency
+            else "ระบบรับเรื่องเข้ากองเจ้าภาพอัตโนมัติ กองกำหนดระดับความเร่งด่วนและผู้รับผิดชอบภายหลัง",
             {},
             services.EVENT_DECISION_RECORDED,
             None,

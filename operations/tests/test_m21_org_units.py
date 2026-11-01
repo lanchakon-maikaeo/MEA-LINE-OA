@@ -6,7 +6,7 @@ skipping people who are away or lost their role, and only cases the system assig
 themselves (AssignTests); important LINE alerts go to the person responsible, else the unit's
 ผู้รับแจ้งเรื่องสำคัญ from small to big, else the Supervisors (LineTests); the roster gives the
 สังกัด and a new กลุ่มงาน takes its people (RosterTests); the chart is admins' only and answers
-"ลองดูว่าเด้งไปใคร" (PageTests); registration asks for no location and the old lists moved onto
+the page (PageTests); registration asks for no location and the old lists moved onto
 the cards (MigrationTests).
 """
 
@@ -94,7 +94,7 @@ class AssignTests(UnitTestCase):
     def test_a_new_case_goes_to_the_work_owner_at_once(self):
         work = self.work(self.repair, self.kae)
         case = self.problem()
-        self.assertEqual(case.status, Case.Status.AWAITING_APPROVAL)
+        self.assertEqual(case.status, Case.Status.IN_PROGRESS)
         case.refresh_from_db()
         self.assertEqual((case.assignee, case.auto_assigned), (self.kae, True))
         self.assertEqual((case.section, case.unit_work), (self.repair, work))
@@ -223,7 +223,7 @@ class LineTests(UnitTestCase):
 
 
 class RosterTests(UnitTestCase):
-    def test_the_roster_gives_the_unit_once_and_a_new_group_takes_its_people(self):
+    def test_the_roster_gives_the_unit_and_a_new_group_takes_its_people(self):
         employee = Employee.objects.create(
             employee_id="E-1001",
             division=self.division,
@@ -240,17 +240,19 @@ class RosterTests(UnitTestCase):
         profile.refresh_from_db()
         self.assertEqual((joined, profile.work_group), (1, group))
         self.assertEqual(units.path_labels(profile), [KAE, "แผนกซ่อมบำรุงหม้อแปลง", "หจ."])
-        # An admin's move stays when the employee is verified again.
+        # ADR 0041 (Q3): the roster wins again; an admin's move lasts until then.
         units.move_person(self.admin, self.kae, units.Unit.of(division=self.division))
-        units.bind_from_roster(self.kae, employee)
         profile.refresh_from_db()
         self.assertIsNone(profile.section)
+        units.bind_from_roster(self.kae, employee)
+        profile.refresh_from_db()
+        self.assertEqual((profile.section, profile.work_group), (self.repair, group))
         with self.assertRaises(ValidationError):
             units.create_group(self.admin, self.repair, "กลุ่มงานหม้อแปลงจำหน่าย")
 
 
 class PageTests(UnitTestCase):
-    def test_admins_only_and_the_preview_names_who_gets_it(self):
+    def test_admins_only_see_and_change_the_chart(self):
         work = self.work(self.repair, self.kae)
         line(self.kae)
         client = Client()
@@ -261,12 +263,6 @@ class PageTests(UnitTestCase):
         self.assertIn("ผังหน่วยงาน", page)
         self.assertIn("ปัญหา/ข้อเสนอแนะ · หม้อแปลง", page)
         self.assertIn("ยังไม่ได้จัดหน่วย", page)
-        page = client.get(
-            "/console/admin/org/",
-            {"division": self.division.pk, "kind": "problem", "group": "transformer"},
-        ).content.decode()
-        self.assertIn("ระบบมอบให้ <strong>Kae</strong>", page)
-        self.assertIn("ผู้รับผิดชอบเรื่อง", page)
         response = client.post(
             "/console/admin/org/",
             {

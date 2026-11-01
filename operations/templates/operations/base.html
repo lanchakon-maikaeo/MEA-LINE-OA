@@ -123,5 +123,6 @@
       {% if app_env == "production" %}<span>กติกาและกรอบเวลาเป็นฉบับทดลองใช้ ยังไม่ใช่มาตรฐานบริการทางการ</span>{% endif %}
     </div>
   </footer>
+{% if nav.scope.may_read %}{% include "operations/_chat_dock.html" %}{% endif %}
 </body>
 </html>

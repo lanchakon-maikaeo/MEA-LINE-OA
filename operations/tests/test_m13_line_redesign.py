@@ -35,7 +35,7 @@ class StaffConfirmationTests(StaffChatTestCase):
         old = summary("งาน A")
         latest = summary("งาน B")
         reply = self.say(self.postback(ALICE, buttons(old)["ยืนยัน"]))
-        self.assertIn("ฉบับเก่า", texts(reply))
+        self.assertIn("หมดอายุแล้ว", texts(reply))
         self.assertFalse(WorkOrder.objects.exists())
         self.say(self.postback(ALICE, buttons(latest)["ยืนยัน"]))
         self.assertIn("งาน B", WorkOrder.objects.get().title)

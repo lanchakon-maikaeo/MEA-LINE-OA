@@ -1,0 +1,26 @@
+{% load static ui %}{# ADR 0042 Q8: the chat with requesters on every staff page (chat_dock.js) #}
+<div class="chatwin" id="chatdock" data-list="{% url 'chat-dock' %}">
+  <section class="chatwin__panel" id="chatdock-panel" aria-labelledby="chatdock-title" hidden>
+    <header class="chatwin__head">
+      <button class="chatwin__back" type="button" data-dock-back aria-label="กลับไปที่รายการสนทนา" hidden>‹</button>
+      <span class="chatwin__avatar" aria-hidden="true">{% icon "chat" %}</span>
+      <div class="chatwin__title"><strong id="chatdock-title">สนทนากับผู้แจ้ง</strong><span data-dock-sub>เรื่องที่มีการสนทนาภายใน 7 วัน</span></div>
+      <button class="chatwin__close" type="button" aria-label="ปิดหน้าต่างสนทนา">×</button>
+    </header>
+    <div class="chatwin__body" data-dock-list aria-live="polite"><p class="chat__empty">กำลังโหลดข้อมูล</p></div>
+    <div class="chatwin__thread" data-dock-thread hidden>
+      <div class="chatwin__body" data-dock-body></div>
+      {% if not nav.scope.read_only %}<form class="chatwin__form" data-dock-form method="post">
+        {% csrf_token %}
+        <div class="chatwin__send">
+          <label class="visually-hidden" for="chatdock-text">ข้อความถึงผู้แจ้ง</label>
+          <textarea id="chatdock-text" name="text" rows="1" maxlength="2000" required placeholder="พิมพ์ข้อความ" title="Enter ส่ง Shift+Enter ขึ้นบรรทัด"></textarea>
+          <button class="chatwin__sendbtn" type="submit" aria-label="ส่งข้อความ">{% icon "send" %}</button>
+        </div>
+        <p class="chatwin__hint" data-dock-status role="status" hidden></p>
+      </form>{% endif %}
+    </div>
+  </section>
+  <button class="chatwin__toggle" type="button" aria-expanded="false" aria-controls="chatdock-panel" aria-label="สนทนากับผู้แจ้ง">{% icon "chat" %}<span class="chatwin__dot" data-dock-dot hidden></span></button>
+</div>
+<script src="{% static 'operations/chat_dock.js' %}" defer></script>

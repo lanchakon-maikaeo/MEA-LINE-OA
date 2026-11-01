@@ -158,19 +158,17 @@ class PageTests(MonitoringTestCase):
         client.force_login(user)
         return client
 
-    def test_admins_look_and_only_the_ai_right_computes(self):
+    def test_admins_look_and_compute(self):
+        # ADR 0041: every แอดมินระบบ holds the AI right.
         self.assertEqual(
             self.client_for(self.staff).get("/console/admin/monitoring/").status_code, 403
         )
         page = self.client_for(self.admin).get("/console/admin/monitoring/")
         self.assertContains(page, "ติดตามระบบและ AI")
-        self.assertNotContains(page, "คำนวณตอนนี้")
-        self.assertEqual(
-            self.client_for(self.admin).post("/console/admin/monitoring/").status_code, 403
-        )
+        self.assertContains(page, "คำนวณตอนนี้")
         with self.assertRaises(PermissionDenied):
-            options.change(self.admin, options.MONITOR_ERROR, "0.05", "เข้มขึ้น")
-        page = self.client_for(self.dev).post("/console/admin/monitoring/", follow=True)
+            options.change(self.staff, options.MONITOR_ERROR, "0.05", "เข้มขึ้น")
+        page = self.client_for(self.admin).post("/console/admin/monitoring/", follow=True)
         self.assertContains(page, "คำนวณตัวเลขล่าสุดแล้ว")
         self.assertTrue(MonitoringDay.objects.filter(day=timezone.localdate()).exists())
         options.change(self.dev, options.MONITOR_ERROR, "0.05", "เข้มขึ้น")
@@ -282,7 +280,7 @@ class JudgeTests(MonitoringTestCase):
         self.assertTrue(good.passed)
         options.change(self.dev, options.MONITOR_JUDGE, "on", "ผ่านชุดตัวอย่างแล้ว")
         with self.assertRaises(PermissionDenied):
-            monitor_judge.request_calibration(self.admin)  # the AI right decides
+            monitor_judge.request_calibration(self.staff)  # the AI right decides
 
     def test_a_low_score_fails_evidentlys_test_and_text_stays_masked(self):
         self.calibrated(FakeJudge())

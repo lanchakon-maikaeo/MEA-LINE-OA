@@ -1901,7 +1901,7 @@ def _after_view(d, step, after, reply):
 
 
 def _after_action(d, step, after, reply):
-    if "บันทึกแล้ว" not in d.said(reply):
+    if "บันทึกเรียบร้อยแล้ว" not in d.said(reply):
         d.fail("staff", f"ทำขั้นใน LINE ไม่สำเร็จ: {d.said(reply)[:80]}")
 
 
