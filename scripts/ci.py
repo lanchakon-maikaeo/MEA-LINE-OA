@@ -12,5 +12,7 @@ for stage in stages:
         result = subprocess.run(["make", stage], stdout=log, stderr=subprocess.STDOUT, check=False)
     results[stage] = result.returncode
     print(f"{stage}: {'PASS' if result.returncode == 0 else 'FAIL'}", flush=True)
-Path("reports/ci.json").write_text(json.dumps(results, indent=2))
+# The tested tree lets the push to main reuse this run when the merge left the code unchanged.
+tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], capture_output=True, text=True).stdout
+Path("reports/ci.json").write_text(json.dumps({**results, "tree": tree.strip()}, indent=2))
 sys.exit(int(any(results.values())))

@@ -66,7 +66,7 @@ check:
 	$(RUN) python manage.py makemigrations --check --dry-run
 
 test:
-	$(RUN) python manage.py test --noinput
+	$(RUN) python manage.py test --noinput --parallel $(or $(PARALLEL),auto)
 
 test-module:
 	$(RUN) python manage.py test_module --module "$(MODULE)" --noinput

@@ -406,7 +406,9 @@ class PipelineTests(SimpleTestCase):
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             text = path.read_text()
             data = yaml.safe_load(text)
-            self.assertEqual(data["permissions"], {"contents": "read"}, path.name)
+            # CI also reads its own runs: main reuses the pull request run of the same tree.
+            extra = {"actions": "read"} if path.name == "ci.yml" else {}
+            self.assertEqual(data["permissions"], {"contents": "read", **extra}, path.name)
             self.assertNotIn("pull_request_target", text, path.name)
             for action in re.findall(r"uses:\s*(\S+)", text):
                 self.assertRegex(action, r"@[0-9a-f]{40}$", f"{path.name}: {action}")
