@@ -4,7 +4,7 @@ from django.test import Client
 from django.urls import reverse
 
 from operations import identity, work_orders
-from operations.models import LineMenuItem, Role, RoleGrant, WorkOrder
+from operations.models import LineMenuItem, Role, WorkOrder
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import ALICE, buttons, texts
 from operations.tests.test_m13_staff_chat import StaffChatTestCase
@@ -82,13 +82,10 @@ class TextOrderTests(StaffChatTestCase):
         self.assertFalse(WorkOrder.objects.exists())
 
     def test_revoking_supervisor_invalidates_confirmation(self):
-        identity.grant_role(self.admin, self.director, Role.SUPERVISOR, self.kae, "คงสิทธิ์กอง")
         with patch("operations.staff_orders_chat.extract", return_value=self.proposal()):
             summary = self.type(ALICE, "ให้ Kaehead กองอุปกรณ์ฯ ตรวจมิเตอร์")
-        grant = RoleGrant.objects.get(
-            user=self.director, role=Role.DEPARTMENT_SUPERVISOR, revoked_at=None
-        )
-        identity.revoke_role(self.admin, grant, "ถอนสิทธิ์")
+        # ADR 0041: the new role replaces แอดมินฝ่าย, so the old summary cannot issue.
+        identity.set_role(self.admin, self.director, Role.SUPERVISOR, self.kae, "คงสิทธิ์กอง")
         self.say(self.postback(ALICE, buttons(summary)["ยืนยัน"]))
         self.assertFalse(WorkOrder.objects.exists())
 
@@ -99,7 +96,7 @@ class TextOrderTests(StaffChatTestCase):
             self.type(ALICE, "ไม่กำหนดวัน")
             summary = self.type(ALICE, "ปกติ")
         self.assertIn("ไม่กำหนดวัน", texts(summary))
-        self.assertIn("ความเร่งด่วน: ปกติ", texts(summary))
+        self.assertIn("ความเร่งด่วน\nปกติ", texts(summary))
         self.say(self.postback(ALICE, buttons(old)["ยืนยัน"]))
         self.assertFalse(WorkOrder.objects.exists())
         self.say(self.postback(ALICE, buttons(summary)["ยืนยัน"]))

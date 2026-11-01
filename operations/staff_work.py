@@ -72,7 +72,7 @@ def navigation(turn, user):
 def handle_item(turn, user, item):
     """A tap on a งานของกอง or สั่งงาน button of the rich menu."""
     if item.action == A.ORDER_NEW and not work_orders.may_issue(user):
-        turn.say("การสั่งงานสงวนสิทธิ์สำหรับ แอดมินฝ่ายเท่านั้น", [web_button()])
+        turn.say("การสั่งงานสงวนสิทธิ์สำหรับแอดมินฝ่ายและแอดมินระบบ")
         return
     if item.tab == T.ORDER and not identity.staff_scope(user).overseen:
         turn.say("เมนูนี้สงวนสิทธิ์สำหรับแอดมินกองและแอดมินฝ่ายเท่านั้น", [web_button()])
@@ -144,7 +144,7 @@ def list_page(turn, user, kind="group", page=1):
         query = cases.filter(
             owner_division__in=work_orders.issuable(user), status__in=workflow.OPEN
         )
-        title, action = "เลือกเรื่องที่จะมอบ", "staff_assign_pick"
+        title, action = "เลือกเรื่องที่จะมอบหมาย", "staff_assign_pick"
     else:
         kind = "group"
         query = cases.filter(queues.tab_condition("host", None, user, turn.now))
@@ -269,7 +269,7 @@ def today_summary(turn, user):
 
 def assign_prompt(turn):
     turn.set_prompt("staff_assign")
-    turn.say("พิมพ์เลขเรื่องที่จะมอบให้คนในกอง (เช่น P69-000045)")
+    turn.say("โปรดระบุเลขเรื่องที่จะมอบหมายให้ผู้รับผิดชอบในกอง (เช่น P69-000045)")
 
 
 def assign_case(turn, user, text):
@@ -290,29 +290,28 @@ def order_detail(turn, user, order):
         f"งานสั่ง {order.number} · {order.get_status_display()}"
         + (" · ด่วน" if order.is_urgent else ""),
         order.title,
-        f"ถึง {order.division.code}"
+        f"ผู้รับงาน: {order.division.code}"
         + (f" · {work_orders.name_of(order.assignee)}" if order.assignee_id else " · ทั้งกอง"),
-        f"สั่งโดย {work_orders.name_of(order.issued_by)}",
+        f"ผู้สั่งงาน: {work_orders.name_of(order.issued_by)}",
     ]
     if order.due_on:
         late = order.due_on < today and order.status in WorkOrder.OPEN
         rows.append(f"{'เกินกำหนด' if late else 'กำหนด'} {order.due_on.day}/{order.due_on.month}")
-    if order.detail:
+    if order.detail and order.detail != order.title:
         rows.append(order.detail[:300])
     if order.result:
-        rows.append(f"ผลการทำ: {order.result[:300]}")
+        rows.append(f"ผลการดำเนินงาน: {order.result[:300]}")
     if order.reason and order.status in (WorkOrder.Status.SENT_BACK, WorkOrder.Status.CANCELLED):
         rows.append(f"เหตุผล: {order.reason[:300]}")
-    buttons = []
-    for name, label in work_orders.steps_for(user, order):
-        if name == "reassign":
-            buttons.append(("สั่งใหม่ในเว็บ", web(f"/orders/{order.number}/")))
-        else:
-            buttons.append(turn.button(label, "staff_os", {"order": str(order.pk), "step": name}))
-    buttons.append(("เปิดในเว็บ", web(f"/orders/{order.number}/")))
+    # ADR 0041: an order is handled in the chat; สั่งใหม่ stays a web step.
+    buttons = [
+        turn.button(label, "staff_os", {"order": str(order.pk), "step": name})
+        for name, label in work_orders.steps_for(user, order)
+        if name != "reassign"
+    ]
     from operations import staff_inbox
 
-    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับรายการ", "staff_inbox")])
+    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับไปที่รายการ", "staff_inbox")])
 
 
 def order_step(
@@ -337,11 +336,11 @@ def order_step(
     ):
         turn.set_prompt("staff_os_text", order=str(order.pk), step=step)
         turn.say(
-            "พิมพ์สั้น ๆ ว่าทำอะไรไปแล้ว"
+            "โปรดสรุปผลการดำเนินงาน"
             if step == "done"
-            else "พิมพ์เหตุผลที่ส่งกลับ"
+            else "โปรดระบุเหตุผลที่ส่งกลับ"
             if step == "send_back"
-            else "พิมพ์เหตุผลที่ยกเลิก",
+            else "โปรดระบุเหตุผลที่ยกเลิก",
             (
                 [
                     turn.button(
@@ -353,14 +352,14 @@ def order_step(
                 if step != "done"
                 else []
             )
-            + [turn.button("กลับงาน", "staff_order", {"order": str(order.pk)})],
+            + [turn.button("กลับไปที่งาน", "staff_order", {"order": str(order.pk)})],
         )
         return
     if step == "assign_person" and person is None:
         from django.core.paginator import Paginator
 
         if step not in dict(work_orders.steps_for(user, order)):
-            turn.say("ทำขั้นนี้ไม่ได้แล้ว อาจมีคนทำไปก่อน")
+            turn.say("ไม่สามารถดำเนินการขั้นตอนนี้ได้แล้ว อาจมีผู้ดำเนินการไปก่อน")
             return
         people = Paginator(work_orders.members(order.division_id), 5).get_page(page)
         quick = [
@@ -378,9 +377,9 @@ def order_step(
                         label, "staff_os", {"order": str(order.pk), "step": step, "page": number}
                     )
                 )
-        quick.append(turn.button("กลับงาน", "staff_order", {"order": str(order.pk)}))
+        quick.append(turn.button("กลับไปที่งาน", "staff_order", {"order": str(order.pk)}))
         turn.say(
-            f"มอบงาน {order.number} ให้ใครใน {order.division.code} · "
+            f"มอบหมายงาน {order.number} ให้ผู้ใดใน {order.division.code} · "
             f"หน้า {people.number}/{people.paginator.num_pages}",
             quick,
         )
@@ -400,7 +399,7 @@ def order_step(
         )
     except PermissionDenied:
         turn.set_prompt()
-        turn.say("ทำขั้นนี้ไม่ได้แล้ว อาจมีคนทำไปก่อน")
+        turn.say("ไม่สามารถดำเนินการขั้นตอนนี้ได้แล้ว อาจมีผู้ดำเนินการไปก่อน")
         return
     except ValidationError as exc:
         turn.say("; ".join(exc.messages))
@@ -414,10 +413,10 @@ def _forward_ask(turn, user, order, division, page):
     from django.core.paginator import Paginator
 
     if "forward" not in dict(work_orders.steps_for(user, order)):
-        turn.say("ทำขั้นนี้ไม่ได้แล้ว อาจมีคนทำไปก่อน")
+        turn.say("ไม่สามารถดำเนินการขั้นตอนนี้ได้แล้ว อาจมีผู้ดำเนินการไปก่อน")
         return
     key = {"order": str(order.pk), "step": "forward"}
-    back = turn.button("กลับงาน", "staff_order", {"order": str(order.pk)})
+    back = turn.button("กลับไปที่งาน", "staff_order", {"order": str(order.pk)})
     if division is not None:
         turn.say(
             f"ยืนยันส่งต่องาน {order.number} จาก {order.division.code} ไป {division.code}\n"
@@ -515,13 +514,36 @@ def _form(user, case, action):
     return web_actions.build_form(action, st, {}), offers[action], st
 
 
+def reporter(case):
+    """ADR 0042 Q5: who reported, from which unit and when; an anonymous reporter by the alias
+    only (ADR 0010)."""
+    from operations import roster, units
+
+    person = case.requester
+    if person.is_anonymous:
+        name = f"ผู้แจ้งไม่ระบุตัวตน{f' · {person.alias}' if person.alias else ''}"
+        unit = case.district.name
+    else:
+        name = person.display_name
+        path = [p for p in roster.employee_path(person.employee) if p != units.NA]
+        unit = " › ".join(path[:2]) if path else case.district.name
+    when = timezone.localtime(case.reported_at or case.submitted_at)
+    return [
+        f"ผู้แจ้ง: {name}",
+        f"หน่วยงาน: {unit}",
+        f"เวลาแจ้ง: {units.thai_date(when.date())} {when:%H:%M} น.",
+    ]
+
+
 def case_detail(turn, user, case):
-    """The case and every step this person may take: in chat when it fits, else its web form."""
+    """The case, who reported it, and every step this person may take in chat (ADR 0042 Q5:
+    no web links; a step that needs a long form stays on the web)."""
     from operations import web_actions
 
     level = case.triage.effective_priority if hasattr(case, "triage") else ""
     rows = [
         f"เรื่อง {case.number} · {case.get_kind_display()}",
+        *reporter(case),
         f"สถานะ: {case.get_status_display()} · ระดับ{queues.level_name(level)}",
         f"กอง {case.owner_division.code}"
         + (f" · ผู้รับผิดชอบ {work_orders.name_of(case.assignee)}" if case.assignee else ""),
@@ -545,33 +567,27 @@ def case_detail(turn, user, case):
         offers.sort(key=lambda offer: priority.get(offer.name, 3))
         for offer in offers[:10]:
             form = web_actions.build_form(offer.name, st, {})
-            label = SHORT_LABELS.get(offer.name, offer.label)
             if _askable(form) is not None:
+                label = SHORT_LABELS.get(offer.name, offer.label)
                 buttons.append(
                     turn.button(label, "staff_step", {"case": str(case.pk), "action": offer.name})
                 )
-            else:
-                # A long form opens on the web; the label says so when it fits.
-                path = reverse("case-action", args=[case.number, offer.name])
-                shown = f"{label} (เว็บ)" if len(label) <= 14 else label
-                buttons.append((shown, web(path)))
-    buttons.append(("เปิดในเว็บ", web(f"/cases/{case.number}/")))
     from operations import staff_inbox
 
-    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับรายการ", "staff_inbox")])
+    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับไปที่รายการ", "staff_inbox")])
 
 
 def step_start(turn, user, case, action):
     if options.get(options.STAFF_LINE_ACTIONS) != "act":
-        turn.say("ขั้นนี้ทำในเว็บ", [("เปิดในเว็บ", web(f"/cases/{case.number}/"))])
+        turn.say("ขั้นตอนนี้ดำเนินการได้ทางเว็บเท่านั้น")
         return
     form, offer, _ = _form(user, case, action)
     if form is None:
-        turn.say("ตอนนี้คุณทำขั้นนี้ในเรื่องนี้ไม่ได้")
+        turn.say("ท่านไม่สามารถดำเนินการขั้นตอนนี้ในเรื่องนี้ได้")
         return
     if _askable(form) is None:
         path = reverse("case-action", args=[case.number, action])
-        turn.say(f"{offer.label} ใช้ฟอร์มในเว็บ", [("เปิดฟอร์ม", web(path))])
+        turn.say(f"{offer.label} ต้องดำเนินการผ่านแบบฟอร์มบนเว็บ", [("เปิดฟอร์ม", web(path))])
         return
     turn.set_prompt(
         "staff_step", case=str(case.pk), action=action, revision=case.revision, values={}
@@ -595,7 +611,7 @@ def _ask_next(turn, user):
     case, form, offer, data = _state(turn, user)
     if form is None:
         turn.set_prompt()
-        turn.say("ขั้นนี้ทำไม่ได้แล้ว เรื่องอาจเปลี่ยนไป")
+        turn.say("ไม่สามารถดำเนินการขั้นตอนนี้ได้แล้ว สถานะของเรื่องอาจเปลี่ยนไป")
         return
     values = data.get("values", {})
     for f in _askable(form):
@@ -617,21 +633,21 @@ def _ask_next(turn, user):
                 + skip,
             )
         else:
-            turn.say(lead + "\nพิมพ์คำตอบ", skip)
+            turn.say(lead + "\nโปรดพิมพ์คำตอบ", skip)
         return
-    rows = [f"ตรวจก่อนบันทึก: {offer.label} เรื่อง {case.number}"]
+    rows = [f"โปรดตรวจสอบก่อนบันทึก: {offer.label} เรื่อง {case.number}"]
     for f in _askable(form):
         value = values.get(f.name, "")
         if value:
             shown = dict((str(v), lbl) for v, lbl in f.choices).get(value, value)
             rows.append(f"{f.label}: {shown}")
     if offer.irreversible:
-        rows.append("ขั้นนี้ย้อนกลับไม่ได้")
+        rows.append("ขั้นตอนนี้ไม่สามารถย้อนกลับได้")
     turn.say(
         "\n".join(rows),
         [
             turn.button("บันทึก", "staff_step_go"),
-            turn.button("แก้คำตอบ", "staff_step_back"),
+            turn.button("แก้ไขคำตอบ", "staff_step_back"),
             turn.button("ยกเลิก", "staff_step_cancel"),
         ],
     )
@@ -656,13 +672,13 @@ def step_answer(turn, user, value):
     case, form, _, data = _state(turn, user)
     if form is None:
         turn.set_prompt()
-        turn.say("ขั้นนี้ทำไม่ได้แล้ว เรื่องอาจเปลี่ยนไป")
+        turn.say("ไม่สามารถดำเนินการขั้นตอนนี้ได้แล้ว สถานะของเรื่องอาจเปลี่ยนไป")
         return
     values = dict(data.get("values", {}))
     for f in _askable(form):
         if f.name not in values:
             if f.required and not value:
-                turn.say("ข้อนี้ต้องตอบ")
+                turn.say("โปรดระบุข้อมูลในข้อนี้")
                 return
             values[f.name] = value[:2000]
             break
@@ -677,7 +693,7 @@ def step_go(turn, user):
     case, form, offer, data = _state(turn, user)
     turn.set_prompt()
     if form is None:
-        turn.say("ขั้นนี้ทำไม่ได้แล้ว เรื่องอาจเปลี่ยนไป")
+        turn.say("ไม่สามารถดำเนินการขั้นตอนนี้ได้แล้ว สถานะของเรื่องอาจเปลี่ยนไป")
         return
     post = _Post({k: v for k, v in data.get("values", {}).items() if v})
     if offer.irreversible:
@@ -695,10 +711,10 @@ def step_go(turn, user):
             payload=payload,
         )
     except CommandFailed as exc:
-        turn.say(f"บันทึกไม่ได้: {wording.thai(exc.message) or exc.message or exc.code}")
+        turn.say(f"ไม่สามารถบันทึกได้: {wording.thai(exc.message) or exc.message or exc.code}")
         return
     except Exception:  # noqa: BLE001 - a bad answer must not break the chat
-        turn.say("บันทึกไม่ได้ ลองทำในเว็บ", [("เปิดในเว็บ", web(f"/cases/{case.number}/"))])
+        turn.say("ไม่สามารถบันทึกได้ โปรดดำเนินการทางเว็บ")
         return
-    turn.say(f"บันทึกแล้ว: {offer.label} เรื่อง {case.number}")
+    turn.say(f"บันทึกเรียบร้อยแล้ว: {offer.label} เรื่อง {case.number}")
     case_detail(turn, user, Case.objects.get(pk=case.pk))

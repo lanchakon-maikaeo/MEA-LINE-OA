@@ -16,7 +16,6 @@ class Page:
     hint: str
     also: tuple = ()  # url names of the page's detail and action views
     badge: str = ""  # key of badges(): how many things wait on this page
-    developer: bool = False  # แอดมินผู้พัฒนา only
     stock: bool = False  # ADR 0032: only while ตัวเลือกระบบ old_stock_work is on
 
 
@@ -185,7 +184,7 @@ def menu(scope, url_name, waiting=None):
     for group in GROUPS:
         pages = []
         for page in group.pages:
-            if (page.developer and not scope.is_developer_admin) or (page.stock and not stock):
+            if page.stock and not stock:
                 continue
             is_current = url_name == page.url_name or url_name in page.also
             item = {

@@ -11,7 +11,7 @@ from operations import identity, line_api
 from operations.models import ChannelIdentity, Division, LineMenuItem, Requester
 
 NAME = "faoj-menu-v2"  # everyone's menu
-PREFIX = "faoj-"  # staff menus and their aliases: faoj-staff-work, faoj-sup-order, ...
+PREFIX = "faoj-"  # staff menus and their aliases: faoj-sup-work, faoj-sup-order, ...
 WIDTH, HEIGHT, BAR, TAB_H = 2500, 1686, 286, 230
 MAX_TILES, MAX_BAR = 6, 2
 MAX_IMAGE = 1024 * 1024  # LINE's limit for a rich menu picture
@@ -19,7 +19,7 @@ A = LineMenuItem.Action
 P = LineMenuItem.Place
 T = LineMenuItem.Tab
 # The tabs each role's menu shows, and every page that is published.
-ROLE_TABS = {"staff": (T.REPORT, T.WORK), "sup": (T.REPORT, T.WORK)}
+ROLE_TABS = {"sup": (T.REPORT, T.WORK)}
 # These remain the compact quick replies in chat.  The rich menu itself uses the six fixed
 # service tiles from the catalogue below, plus its two bottom actions.
 SERVICE_BUTTONS = (
@@ -28,23 +28,14 @@ SERVICE_BUTTONS = (
     ("แจ้งปัญหา", "m=problems"),
     ("ติดตามเรื่องของฉัน", "m=mine"),
 )
-PAGES = (
-    "user",
-    "employee-report",
-    "staff-report",
-    "staff-work",
-    "sup-report",
-    "sup-work",
-    "sup-order",
-)
+# ADR 0041: one set for every admin; แอดมินระบบ shares the แอดมินกอง/ฝ่าย pages.
+PAGES = ("user", "employee-report", "sup-report", "sup-work", "sup-order")
 PAGE_TITLES = {
     "user": "ทุกคน",
     "employee-report": "พนักงาน · บริการ",
-    "staff-report": "แอดมินระบบ · บริการ",
-    "staff-work": "แอดมินระบบ · งานของกอง/ฝ่าย",
-    "sup-report": "แอดมินกอง/ฝ่าย · บริการ",
-    "sup-work": "แอดมินกอง/ฝ่าย · งานของกอง/ฝ่าย",
-    "sup-order": "แอดมินกอง/ฝ่าย · สั่งงาน",
+    "sup-report": "แอดมิน · บริการ",
+    "sup-work": "แอดมิน · งานของกอง/ฝ่าย",
+    "sup-order": "แอดมิน · สั่งงาน",
 }
 logger = logging.getLogger(__name__)
 
@@ -118,17 +109,16 @@ def areas(page="user"):
         top = [{"item": item} for item in tiles(T.REPORT)]
         bottom = [{"item": item} for item in bar(T.REPORT)]
     elif tab == T.WORK:
-        # 1 Nov 2569: one work page for every admin; only แอดมินกอง/ฝ่าย add the Broadcast tile.
-        top = [{"item": None, "label": "งานสั่งที่ได้รับ", "postback": "m=staff_inbox"}]
-        if role == "sup":
-            url = broadcast_url()
-            top.append(
-                {
-                    "item": None,
-                    "label": "Broadcast",
-                    **({"uri": url} if url else {"postback": "m=broadcast"}),
-                }
-            )
+        # 1 Nov 2569: one work page for every admin, Broadcast included (ADR 0041).
+        url = broadcast_url()
+        top = [
+            {"item": None, "label": "งานสั่งที่ได้รับ", "postback": "m=staff_inbox"},
+            {
+                "item": None,
+                "label": "Broadcast",
+                **({"uri": url} if url else {"postback": "m=broadcast"}),
+            },
+        ]
         bottom = [{"item": None, "label": "เมนูเพิ่มเติม", "postback": "m=roles", "place": "bar"}]
     else:
         top = [{"item": item} for item in tiles(tab)[:3]]
@@ -277,7 +267,7 @@ def _picture(data):
 
 def staff_page(user):
     """The service grid is the default; admins switch to the work tab when needed."""
-    return "sup-report" if identity.staff_scope(user).overseen else "staff-report"
+    return "sup-report"
 
 
 def has_work_tab(user):

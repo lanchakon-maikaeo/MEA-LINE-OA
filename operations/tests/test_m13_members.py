@@ -75,7 +75,7 @@ class MemberTests(MemberTestCase):
         member = self.member("faoj", Division.objects.get(code="ฝอจ."))
         self.assertEqual(policy.routing_scope(member), "all")
 
-    def test_the_old_duties_are_offered_only_when_the_work_is_split(self):
+    def test_the_old_duties_are_never_offered(self):
         user = make_staff("dutyless")
         with self.assertRaises(ValidationError):
             identity.grant_role(self.admin, user, Role.APPROVER, self.kcw_division, "ผู้อนุมัติ")
@@ -84,10 +84,10 @@ class MemberTests(MemberTestCase):
         page = client.get(reverse("admin-user-detail", args=[user.pk]))
         self.assertNotContains(page, '<option value="approver"')
         self.assertContains(page, '<option value="department_supervisor"')
+        # ADR 0041: one role per person, so the picker never offers the old duties again.
         options.change(self.admin, options.DIVISION_WORK, "roles", "แยกหน้าที่อีกครั้ง")
-        identity.grant_role(self.admin, user, Role.APPROVER, self.kcw_division, "ผู้อนุมัติ")
         page = client.get(reverse("admin-user-detail", args=[user.pk]))
-        self.assertContains(page, '<option value="approver"')
+        self.assertNotContains(page, '<option value="approver"')
 
     def test_splitting_the_work_again_turns_membership_authority_off(self):
         member = self.member("member", self.kcw_division)

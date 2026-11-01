@@ -347,8 +347,8 @@ class ActionTests(WebTestCase):
         self.assertNotIn("issue", dict(self.offers(self.issuer, case)))
         self.act(self.approver, case, "approve", {"lines": [{"line_no": 1, "quantity": "3"}]})
         self.assertEqual(self.offers(self.issuer, case)[0], ("issue", True))
-        # Admins read every division but act only where they hold a role (round 2 Q3).
-        self.assertEqual(self.offers(self.admin, case), [])
+        # ADR 0041: แอดมินระบบ does what a แอดมินฝ่าย does: assign and send on.
+        self.assertEqual(self.offers(self.admin, case), [("assign", False), ("admin_send", False)])
 
     def test_approve_and_issue_through_the_forms(self):
         case = self.at_meter()
@@ -462,7 +462,7 @@ class ActionTests(WebTestCase):
         page = self.client_for(self.meter).get(
             f"/cases/{case.number}/act/approve/?demo=1", HTTP_HX_REQUEST="true"
         )
-        self.assertContains(page, "ตัวอย่างฟอร์มสำหรับสาธิต")
+        self.assertContains(page, "แบบฟอร์มตัวอย่างสำหรับการสาธิต")
         self.assertContains(page, 'name="line-1-quantity"')
         self.assertNotContains(page, 'name="revision"')
         self.assertNotContains(page, 'name="idempotency_key"')

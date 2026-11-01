@@ -11,11 +11,11 @@ from datetime import date, timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_safe
 
 from operations import calendars, case_chat, identity, queues, warehouse, workflow
 from operations.models import (
@@ -23,6 +23,7 @@ from operations.models import (
     Calendar,
     CalendarSlot,
     Case,
+    CaseMessage,
     CaseMilestone,
     District,
     Division,
@@ -501,23 +502,59 @@ def case_chat_thread(request, number):
     )
 
 
+DOCK_DAYS = 7  # the chat window lists cases with messages this recent
+DOCK_CASES = 20
+
+
+@login_required
+@require_safe
+def chat_dock(request):
+    """ADR 0042 Q8: the cases this person sees with chat in the last week, newest first, each
+    with the requester's messages since staff last answered."""
+    if not identity.staff_scope(request.user).may_read:
+        raise Http404
+    since = timezone.now() - timedelta(days=DOCK_DAYS)
+    rows = (
+        CaseMessage.objects.filter(case__in=queues.visible(request.user), created_at__gte=since)
+        .select_related("case__district")
+        .order_by("-created_at", "-pk")[:500]
+    )
+    found, latest = {}, 0
+    for message in rows:  # newest first
+        entry = found.setdefault(
+            message.case_id, {"case": message.case, "last": message, "unread": 0, "done": False}
+        )
+        if message.direction == CaseMessage.Direction.STAFF:
+            entry["done"] = True
+        else:
+            latest = max(latest, message.pk)
+            entry["unread"] += 0 if entry["done"] else 1
+    items = list(found.values())[:DOCK_CASES]
+    return render(
+        request,
+        "operations/_chat_dock_list.html",
+        {"items": items, "total": sum(i["unread"] for i in items), "latest": latest},
+    )
+
+
 @login_required
 @require_POST
 def case_chat_post(request, number):
     case = queues.visible(request.user).filter(number=number).first()
     if case is None:
         raise Http404
+    dock = request.headers.get("X-Dock") == "1"
     try:
-        message = case_chat.send(
-            request.user, case, request.POST.get("text", ""), request.POST.get("contact", "")
-        )
+        case_chat.send(request.user, case, request.POST.get("text", ""))
     except (ValidationError, PermissionDenied) as exc:
-        messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์ส่งข้อความในเรื่องนี้"])))
+        text = " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์ส่งข้อความในเรื่องนี้"]))
+        if dock:
+            return JsonResponse({"error": text}, status=400)
+        messages.error(request, text)
     else:
-        if message.status == message.Status.SENT:
-            messages.success(request, "ส่งถึงผู้แจ้งแล้ว")
-        else:
-            messages.success(request, "เก็บข้อความไว้ ผู้แจ้งจะได้รับตอนส่งข้อความมาครั้งถัดไป")
+        if dock:
+            return JsonResponse({"ok": True})
+        messages.success(request, "ส่งถึงผู้แจ้งแล้ว")
     return redirect(f"{reverse('case-detail', args=[case.number])}#chat")
 
 
@@ -625,7 +662,6 @@ def case_panel(user, case):
         "chat_last": case_chat.last_from_requester(chat),
         "chat_any": any(i["who"] != "status" for i in chat),  # strips alone open no window
         "chat_open": can_chat and case_chat._identity(case) is not None,
-        "chat_contact": case_chat.contact_of(user) if case_chat.needs_contact(user, case) else "",
         "chat_fresh": bool(can_chat and case_chat.fresh_inbox(case)),
         "milestones": list(case.milestones.select_related("recorded_by__staff_profile")),
         "appointments": open_appointments,

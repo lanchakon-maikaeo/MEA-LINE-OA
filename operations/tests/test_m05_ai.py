@@ -14,7 +14,7 @@ from django.core.management.base import CommandError
 from django.test import Client, override_settings
 from django.utils import timezone
 
-from operations import ai, ai_eval, ai_harness, ai_release, ai_screen, line_api, options, pii
+from operations import ai, ai_eval, ai_harness, ai_release, ai_screen, line_api, pii
 from operations.management.commands.run_worker import run_once
 from operations.models import (
     AIConfigVersion,
@@ -207,9 +207,9 @@ class ConfigurationTests(AITestCase):
         self.assertIsNotNone(stored.rotated_at)
         self.assertEqual(self.llm.calls[-1]["key"], RAW_KEY)  # earlier calls used the old key
 
-    def test_only_ai_editors_change_ai_configuration(self):
-        # 15 ต.ค. 2569 Q23: every admin looks; developer admins change unless ai_editors=admin.
-        for user in (self.admin, self.meter):
+    def test_only_admins_change_ai_configuration(self):
+        # ADR 0041: แอดมินผู้พัฒนา is gone; every แอดมินระบบ changes the AI settings.
+        for user in (self.meter,):
             with self.subTest(user=user.username):
                 with self.assertRaises(PermissionDenied):
                     ai.save_credential(
@@ -229,14 +229,6 @@ class ConfigurationTests(AITestCase):
         admin.force_login(self.admin)
         meter.force_login(self.meter)
         self.assertEqual(meter.get("/console/admin/ai/").status_code, 403)
-        page = admin.get("/console/admin/ai/")
-        self.assertContains(page, "ดูได้อย่างเดียว")
-        self.assertNotContains(page, "/console/admin/ai/provider_add/")
-        with self.assertRaises(CommandError):
-            call_command(
-                "import_ai_config", "--username", "admin", "--reason", "ลอง", stdout=StringIO()
-            )
-        options.change(None, options.AI_EDITORS, "admin", "ให้แอดมินทุกคนแก้การตั้งค่า AI")
         page = admin.get("/console/admin/ai/")
         self.assertNotContains(page, "ดูได้อย่างเดียว")
         self.assertContains(page, "/console/admin/ai/provider_add/")
@@ -1214,11 +1206,10 @@ class SwitchTests(AITestCase):
         self.assertEqual((event.reason, event.data["pipeline"]), ("", "harness"))
         client.post("/console/admin/ai/switch/", {"version": self.version.pk, "reason": "กลับ"})
         self.assertEqual(ai.active_version(), self.version)  # switching back is the same menu
-        for user in (self.admin, self.meter):
-            response = self.page(user).post(
-                "/console/admin/ai/switch/", {"version": ready.pk, "reason": "x"}
-            )
-            self.assertEqual(response.status_code, 403)
+        response = self.page(self.meter).post(
+            "/console/admin/ai/switch/", {"version": ready.pk, "reason": "x"}
+        )
+        self.assertEqual(response.status_code, 403)
 
     def test_web_evaluation_runs_in_the_worker_and_is_recorded(self):
         from operations.models import AIEvalJob
@@ -1247,7 +1238,7 @@ class SwitchTests(AITestCase):
         stuck.refresh_from_db()
         self.assertEqual((stuck.status, stuck.error), ("failed", "worker restarted"))
         self.assertEqual(
-            self.page(self.admin).post(f"/console/admin/ai/evaluate/{candidate.pk}/").status_code,
+            self.page(self.meter).post(f"/console/admin/ai/evaluate/{candidate.pk}/").status_code,
             403,
         )
 
@@ -1470,12 +1461,12 @@ class ProviderTests(AITestCase):
         with self.assertRaises(ValidationError):
             ai.update_provider(self.dev, self.gemini, "", {"max_tokens": 9000}, False, "ปรับ")
 
-    def test_viewers_cannot_touch_keys(self):
+    def test_non_admins_cannot_touch_keys(self):
         viewer = Client()
-        viewer.force_login(self.admin)
+        viewer.force_login(self.meter)
         response = viewer.post(f"/console/admin/ai/key/{self.gemini.pk}/", {"api_key": "x" * 20})
         self.assertEqual(response.status_code, 403)
-        self.assertNotContains(viewer.get("/console/admin/ai/"), "บันทึกคีย์")
+        self.assertEqual(viewer.get("/console/admin/ai/").status_code, 403)
 
 
 # --- รุ่นการตั้งค่า AI (ADR 0038) --------------------------------------------------------------

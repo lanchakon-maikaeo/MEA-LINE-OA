@@ -77,7 +77,7 @@ class RequesterListTests(RequesterTestCase):
         listing = self.client.get(LIST)
         self.assertContains(listing, "ยืนยันรหัสพนักงาน SYN10001")
         self.assertContains(listing, "พนักงานช่าง")
-        self.assertContains(listing, "ผู้ใช้ LINE OA · แอดมินระบบ")
+        self.assertContains(listing, '<td data-label="บทบาท">แอดมินระบบ</td>', html=False)
         self.assertContains(listing, page(verified.pk))
         self.assertContains(listing, page(staff.pk))
         self.assertNotContains(listing, page(anonymous.pk))
@@ -311,7 +311,8 @@ class MessagesTests(RequesterTestCase):
         self.assertContains(shown, "&lt;b&gt;ขอบคุณ&lt;/b&gt;")
         self.assertNotContains(shown, "อยากให้มีที่จอดรถรับของ")
         event = AuditEvent.objects.get(action="requester.messages_viewed")
-        self.assertEqual((event.actor, event.data["shown"]), (self.admin, 1))
+        # ADR 0042 Q9: what they typed and what the bot answered, as one LINE chat
+        self.assertEqual((event.actor, event.data["shown"]), (self.admin, 3))
 
     def test_the_migration_gives_old_messages_the_requester_they_were_typed_as(self):
         requester = self.anonymous_then_approved()

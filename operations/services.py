@@ -603,7 +603,7 @@ def submit_case(actor, *, idempotency_key, payload):
                 _record(ctx, case, "submit", "", "", data, EVENT_CASE_SUBMITTED, None, None)
             )
             policy.after_submit(case)
-            approvals.start_emergency(case)  # ADR 0025 Q24
+            approvals.start_at_once(case)  # ADR 0042 Q10
             units.assign_new(case)  # ADR 0031 Q20: the ผู้รับผิดชอบประจำงาน takes it at once
         first = dataclasses.replace(
             results[0],

@@ -66,6 +66,7 @@ STEPS = {
 
 
 def may_issue(user):
+    """แอดมินฝ่าย, and แอดมินระบบ who does all a แอดมินฝ่าย does (ADR 0041)."""
     return identity.staff_scope(user).is_department_supervisor
 
 
@@ -136,6 +137,26 @@ def members(division_id):
     return people
 
 
+def recipients(division_id):
+    """Who an order to this กอง may name (ADR 0041): its people, then the แอดมินฝ่าย and
+    แอดมินระบบ, who give each other work too."""
+    people = members(division_id)
+    seen = {u.pk for u in people}
+    for grant in (
+        RoleGrant.objects.filter(
+            role__in=[Role.DEPARTMENT_SUPERVISOR, Role.ADMIN],
+            revoked_at__isnull=True,
+            user__is_active=True,
+        )
+        .select_related("user__staff_profile")
+        .order_by("user__username")
+    ):
+        if grant.user_id not in seen:
+            seen.add(grant.user_id)
+            people.append(grant.user)
+    return people
+
+
 def name_of(user):
     profile = getattr(user, "staff_profile", None)
     return profile.display_name if profile else user.username
@@ -144,8 +165,8 @@ def name_of(user):
 def _check_target(division, assignee):
     if division is None or not division.is_active:
         raise ValidationError("เลือกกองที่ใช้งานอยู่")
-    if assignee is not None and assignee.pk not in {u.pk for u in members(division.pk)}:
-        raise ValidationError("คนที่เลือกต้องเป็นสมาชิกของกองนั้น")
+    if assignee is not None and assignee.pk not in {u.pk for u in recipients(division.pk)}:
+        raise ValidationError("ผู้รับงานที่เลือกต้องเป็นสมาชิกของกองนั้น แอดมินฝ่าย หรือแอดมินระบบ")
 
 
 def _require_issuer(actor, division):
@@ -181,7 +202,7 @@ def create(
 ):
     """A new งานสั่ง; the doer is told at once (Q14)."""
     if not may_issue(actor):
-        raise PermissionDenied("การสั่งงานสงวนสิทธิ์สำหรับ แอดมินฝ่ายเท่านั้น")
+        raise PermissionDenied("การสั่งงานสงวนสิทธิ์สำหรับแอดมินฝ่ายและแอดมินระบบ")
     title = " ".join((title or "").split())
     if not title:
         raise ValidationError("บอกว่าให้ทำอะไร")
@@ -351,7 +372,6 @@ def text(kind, order):
         rows.append("งานด่วน")
     if kind == "staff_order_back" and order.reason:
         rows.append(f"เหตุผล: {order.reason}")
-    rows.append(f"เปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}/orders/{order.number}/")
     return "\n".join(rows)
 
 
@@ -416,8 +436,10 @@ def _notify(kind, order, users, key):
                 )
             )
         if staff_email.enabled() and user.email:
+            # LINE gets a button instead (ADR 0041); the e-mail keeps the web link.
+            link = f"{body}\nเปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}/orders/{order.number}/"
             planned.append(
-                _deliver(N.Channel.EMAIL, kind, order, user, key, now, email=user.email, text=body)
+                _deliver(N.Channel.EMAIL, kind, order, user, key, now, email=user.email, text=link)
             )
     return [d for d in planned if d is not None]
 

@@ -104,7 +104,7 @@ class AdminLineTests(StaffChatTestCase):
         self.assertTrue(self.admin.staff_profile.notify_registrations)
         requester = self.verified_employee()
         response = client.get(f"/console/admin/requesters/{requester.pk}/")
-        self.assertContains(response, "จัดการสิทธิ์เพิ่มเติม")
+        self.assertContains(response, "เปลี่ยนบทบาท")
         response = client.post(
             f"/console/admin/requesters/{requester.pk}/grant-role/",
             {"role": Role.SUPERVISOR, "division": self.kae.pk, "reason": "แต่งตั้งหัวหน้า"},

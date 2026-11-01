@@ -33,7 +33,7 @@ class StatusTestCase(WorkTestCase):
 
 class FormTests(StatusTestCase):
     def test_a_status_form_carries_a_notice_and_an_internal_note(self):
-        self.assertEqual(self.case.status, S.AWAITING_EXECUTION)
+        self.assertEqual(self.case.status, S.IN_PROGRESS)
         form = self.client.get(f"/cases/{self.case.number}/act/hold/")
         self.assertContains(form, "ข้อความแจ้งสถานะ")
         self.assertContains(form, "บันทึกภายใน (ผู้แจ้งไม่เห็น)")
@@ -82,9 +82,10 @@ class LineTests(StatusTestCase):
         self.assertIn("กำลังดำเนินการ", listing)
 
     def test_a_case_waiting_for_its_division_reads_in_progress(self):
-        # 30 ต.ค. 2569: once the division takes it, รอดำเนินการ stays at the same step.
+        # 30 ต.ค. 2569: the division's own status stays at the same step.
         text = texts(self.type(ALICE, self.case.number))
-        self.assertIn("●●○○ กำลังดำเนินการ\nสถานะในระบบ: รอดำเนินการ", text)
+        self.assertIn("●●○○ กำลังดำเนินการ\n", text)  # ADR 0042 Q10: in progress at once
+        self.assertNotIn("สถานะในระบบ", text)
         # Q3, Q5: the LINE user reads กำลังดำเนินการ; staff pages keep รอกองรับเรื่อง.
         Case.objects.filter(pk=self.case.pk).update(status=S.AWAITING_APPROVAL)
         text = texts(self.type(ALICE, self.case.number))
@@ -134,7 +135,7 @@ class RuleTests(StatusTestCase):
         self.assertEqual(requester_steps.bar(S.ON_HOLD), "●●●○")
         refused = self.act("hold", reason="รอของ")
         self.assertContains(refused, "เขียนข้อความแจ้งสถานะถึงผู้แจ้งก่อนบันทึก", status_code=400)
-        self.assertEqual(self.case.status, S.AWAITING_EXECUTION)
+        self.assertEqual(self.case.status, S.IN_PROGRESS)
         self.act("hold", reason="รอของ", notice="รอคุณส่งรูปใบเบิก")
         self.assertEqual(self.case.status, S.ON_HOLD)
 

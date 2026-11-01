@@ -305,33 +305,6 @@ def line_people(division, work, assignee=None, section=None, with_reasons=False)
     return (found if with_reasons else heads) or None
 
 
-def preview(division, kind, group, today=None):
-    """Q10 ลองดูว่าเด้งไปใคร: what a new case of this kind and group would do."""
-    work = match(division.pk, kind, {group})
-    pick = responsible(work, today=today)
-    unit = start_unit(division, work)
-    people = line_people(division, work, pick.person, with_reasons=True)
-    if people is None:
-        everyone = [
-            g.user
-            for g in RoleGrant.objects.filter(
-                division=division, revoked_at__isnull=True, user__is_active=True
-            )
-            .exclude(role__in=VIEWER_ROLES)  # ADR 0039: viewers get no alerts
-            .select_related("user__staff_profile")
-            .distinct()
-            if has_line(g.user)
-        ]
-        people = [(u, f"ทุกคนใน {short(division)} ที่ผูก LINE (ไม่มีแอดมินกอง)") for u in everyone]
-    return {
-        "work": work,
-        "unit": unit,
-        "pick": pick,
-        "line": people,
-        "label": work_label(kind, group),
-    }
-
-
 # --- Assigning cases ------------------------------------------------------------------------
 
 
@@ -545,29 +518,32 @@ def move_person(actor, user, unit, reason=""):
 
 
 def bind_from_roster(user, employee):
-    """Q5: a verified employee gets the สังกัด the roster names, the first time only, so a move
-    by an admin stays. A แผนก or กลุ่มงาน the system does not know stays N/A."""
-    profile = getattr(user, "staff_profile", None)
-    if profile is None or profile.division_id or not employee.division_id:
+    """The สังกัด the roster names (1 Nov 2569 Q3: the file wins on every import; an admin's move
+    lasts until the next one). A level the system does not know stays N/A."""
+    profile = StaffProfile.objects.filter(user=user).first()
+    if profile is None:
         return
-    division = employee.division
-    section = _find(
-        Section.objects.filter(division=division, is_active=True), employee.section_name
-    )
-    group = None
+    division, section, group = employee.division, None, None
+    if division is not None:
+        section = _find(
+            Section.objects.filter(division=division, is_active=True), employee.section_name
+        )
     if section is not None:
         group = _find(
             WorkGroup.objects.filter(section=section, is_active=True), employee.work_group
         )
-    profile.division, profile.section, profile.work_group = division, section, group
-    profile.save(update_fields=["division", "section", "work_group"])
+    if (profile.division, profile.section, profile.work_group) != (division, section, group):
+        profile.division, profile.section, profile.work_group = division, section, group
+        profile.save(update_fields=["division", "section", "work_group"])
 
 
 def _find(rows, text):
+    from operations import roster  # local: roster builds on units through identity
+
     text = (text or "").strip()
     if not text:
         return None
-    return rows.filter(name=text).first() or rows.filter(code=text).first()
+    return next((u for u in rows if roster.same_unit(text, u.name) or text == u.code), None)
 
 
 @transaction.atomic

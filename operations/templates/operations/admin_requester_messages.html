@@ -1,28 +1,45 @@
 {% extends "operations/admin_base.html" %}
 {% load ui %}
-{% block title %}ข้อความของ {{ requester.display_name }} · แอดมิน · DED Center{% endblock %}
+{% block title %}ประวัติการสนทนาของ {{ requester.display_name }} · แอดมิน · DED Center{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน · ผู้ใช้ LINE OA</span>
-    <h1>ข้อความที่พิมพ์มา</h1>
-    <p class="lede">{{ requester.display_name }} · {{ total }} ข้อความ{% if total > rows|length %} แสดง {{ rows|length }} ข้อความล่าสุด{% endif %} · ไม่รวมข้อความตอนแจ้งแบบไม่ระบุตัวตน</p>
+    <h1>ประวัติการสนทนา LINE ของ {{ requester.display_name }}</h1>
+    <p class="lede">แสดงตามที่ผู้ใช้เห็นใน LINE ไม่รวมช่วงที่แจ้งแบบไม่ระบุตัวตน ระบบบันทึกการเปิดหน้านี้ไว้ในประวัติของผู้ใช้</p>
   </div>
   <div class="page-head__actions"><a class="btn btn--outline" href="{% url 'admin-requester-detail' requester.pk %}">กลับไปหน้าผู้ใช้รายนี้</a></div>
 </div>
-<p class="muted">การเปิดหน้านี้ถูกบันทึกไว้ในประวัติของผู้ใช้แล้ว ใหม่สุดอยู่บน</p>
-<div class="table-wrap"><table>
-  <thead><tr><th scope="col">เวลา</th><th scope="col">ข้อความ</th><th scope="col">เกี่ยวกับ</th></tr></thead>
-  <tbody>
-  {% for m in rows %}
-    <tr>
-      <td class="nowrap">{{ m.created_at|thai_datetime }}</td>
-      <td class="pre">{{ m.text }}</td>
-      <td>{{ m.about }}{% if m.about_case %} <a href="{% url 'case-detail' m.about_case.number %}">{{ m.about_case.number }}</a>{% endif %}</td>
-    </tr>
+{# ADR 0042 Q9: the requester's own messages on the right, the OA's on the left, as in LINE #}
+<div class="linechat" aria-label="ประวัติการสนทนา LINE">
+  {% for m in items %}
+    {% ifchanged m.at.date %}<div class="linechat__day">{{ m.at|thai_date }}</div>{% endifchanged %}
+    {% if m.kind == "system" %}
+    <div class="linechat__sys">{{ m.text }} · {{ m.at|time:"H:i" }}</div>
+    {% elif m.side == "me" %}
+    <div class="linechat__row linechat__row--me">
+      <span class="linechat__time">{{ m.at|time:"H:i" }}</span>
+      <div class="linechat__bubble linechat__bubble--me{% if m.kind == 'tap' %} is-tap{% endif %}">{{ m.text|linebreaksbr }}</div>
+    </div>
+    {% else %}
+    <div class="linechat__row">
+      <span class="linechat__avatar" aria-hidden="true">ฝอจ</span>
+      {% if m.kind == "cards" %}
+      <div class="linechat__cards">
+        {% for c in m.cards %}<div class="linechat__card">
+          {% for line in c.lines %}<p{% if forloop.first %} class="linechat__card-title"{% endif %}>{{ line }}</p>{% endfor %}
+          {% for b in c.buttons %}<span class="linechat__btn">{{ b }}</span>{% endfor %}
+        </div>{% endfor %}
+      </div>
+      {% else %}
+      <div class="linechat__bubble">{{ m.text|linebreaksbr }}</div>
+      {% endif %}
+      <span class="linechat__time">{% if m.push %}push · {% endif %}{{ m.at|time:"H:i" }}</span>
+    </div>
+    {% if m.quick %}<div class="linechat__quick" aria-label="ปุ่มลัด">{% for q in m.quick %}<span>{{ q }}</span>{% endfor %}</div>{% endif %}
+    {% endif %}
   {% empty %}
-    <tr><td colspan="3">ยังไม่มีข้อความ</td></tr>
+  <p class="linechat__sys">ยังไม่มีข้อความ</p>
   {% endfor %}
-  </tbody>
-</table></div>
+</div>
 {% endblock %}

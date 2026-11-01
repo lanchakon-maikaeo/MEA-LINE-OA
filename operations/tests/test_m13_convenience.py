@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client, override_settings
 
-from operations import conversation, registry, services, work_orders
+from operations import conversation, registry, services, staff_orders_chat, work_orders
 from operations.contracts import Actor
 from operations.models import (
     Attachment,
@@ -207,7 +207,7 @@ class AdminButtonsTests(admin_tests.AdminLineTests):
         self.link(self.admin, ALICE)
         self.link(self.head, BOB)
         choices = buttons(self.say(self.postback(ALICE, "m=roles")))
-        self.assertEqual(choices, {})
+        self.assertEqual(set(choices), {"สั่งงาน"})  # ADR 0041: แอดมินระบบ orders work too
         self.assertNotIn("แอดมิน", buttons(self.say(self.postback(BOB, "m=roles"))))
 
     def test_approval_button_and_role_wizard_require_current_admin_rights(self):
@@ -312,10 +312,8 @@ class StaffButtonsTests(staff_tests.StaffChatTestCase):
         with patch("operations.staff_orders_chat.extract", return_value=None):
             self.type(ALICE, "ตรวจมิเตอร์")
             choices = self.press(ALICE, "เลือกผู้รับ")
-            while "กองอุปกรณ์ฯ" not in buttons(choices):
-                choices = self.press(ALICE, "ถัดไป", choices)
             self.press(ALICE, "กองอุปกรณ์ฯ", choices)
-            summary = self.press(ALICE, f"{self.head.pk} {work_orders.name_of(self.head)}"[:20])
+            summary = self.press(ALICE, staff_orders_chat.who(self.head, self.kae))
         self.assertIn("ยืนยัน", buttons(summary))
         self.press(ALICE, "ยืนยัน")
         self.assertEqual(WorkOrder.objects.get().assignee, self.head)

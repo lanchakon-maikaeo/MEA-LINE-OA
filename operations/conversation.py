@@ -446,6 +446,7 @@ def _dispatch(inbox, event_override=None, allow_agent=True):
         turn.say("บัญชีผู้แจ้งของคุณถูกระงับ กรุณาติดต่อ ฝอจ.")
         return turn.replies, True
     turn.requester = requester
+    WebhookInbox.objects.filter(pk=inbox.pk).update(requester=requester)  # ADR 0042 Q9
     _requester_turn(turn)
     # Everything up to the end of this turn (including the user's own actions) has been seen.
     conversation.updates_seen_at = timezone.now()
@@ -720,13 +721,13 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
 
         if action == "staff_inbox_divisions":
             staff_inbox.choose_division(
-                turn, user, value.get("status", "waiting"), value.get("page", 1)
+                turn, user, value.get("status", "active"), value.get("page", 1)
             )
         else:
             staff_inbox.show(
                 turn,
                 user,
-                value.get("status", "waiting"),
+                value.get("status", "active"),
                 value.get("division"),
                 value.get("page", 1),
             )
@@ -3808,6 +3809,7 @@ def send_reply(inbox_id, messages):
         if not inbox.reply_token or inbox.reply_used_at is not None:
             return
         _remember_choices(inbox, messages)
+        inbox.replies = list(messages)  # ADR 0042 Q9: the admin's chat view shows them
         allowed, why = _may_send(inbox.source_user_id)
         if timezone.now() > inbox.reply_deadline:
             inbox.reply_status, inbox.reply_detail = S.EXPIRED, "deadline passed"
@@ -3816,7 +3818,7 @@ def send_reply(inbox_id, messages):
         else:
             inbox.reply_status = S.UNKNOWN
         inbox.reply_used_at = timezone.now()
-        inbox.save(update_fields=["reply_used_at", "reply_status", "reply_detail"])
+        inbox.save(update_fields=["reply_used_at", "reply_status", "reply_detail", "replies"])
         outcome, token = inbox.reply_status, inbox.reply_token
     if outcome == S.EXPIRED:
         _catch_up(inbox_id, messages)

@@ -95,19 +95,19 @@ class RegistrationTests(PeopleTestCase):
         self.assertEqual(registration.decided_by.username, identity.SYSTEM_USERNAME)
         self.assertTrue(AuditEvent.objects.filter(action="registration.auto_approved").exists())
 
-    def test_an_employee_is_shown_by_the_id_and_has_no_name_to_correct(self):
+    def test_an_employee_is_shown_by_the_first_name_and_has_no_name_to_correct(self):
         options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")
         self.register(ALICE)
         self.type(ALICE, "SYN20002")  # the roster gives no unit, so it is asked
         reply = self.type(ALICE, "06/06/2516")
-        self.assertIn("พนักงาน SYN20002", texts(reply))
+        self.assertIn("ผอ.จำลอง", texts(reply))  # ADR 0041: the roster's first name
         self.assertNotIn("แก้ชื่อ", buttons(reply))
         again = self.type(ALICE, "ไม่แน่ใจว่าอยู่หน่วยงานไหน")  # typed: the list again
         self.assertIn("เลือกหน่วยงาน", texts(again))
         self.assertNotIn("แก้ชื่อ", buttons(again))
         self.press(ALICE, District.objects.get(code="D01").name)
         requester = ChannelIdentity.objects.get(external_id=ALICE).requester
-        self.assertEqual(requester.display_name, "พนักงาน SYN20002")
+        self.assertEqual(requester.display_name, "ผอ.จำลอง")
         self.assertEqual(
             (requester.employee.employee_id, requester.employee_link), ("SYN20002", "verified")
         )

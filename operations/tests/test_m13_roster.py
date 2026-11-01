@@ -1,8 +1,9 @@
 """ทะเบียนพนักงานจากไฟล์ขององค์กร และการยืนยันตัวตนด้วยอีเมล (15 ต.ค. 2569 Q10–Q16, Q24–Q29).
 
 Acceptance → tests: the roster comes in from .csv or .xlsx through a preview that maps columns
-and ฝ่าย, never reads the name or phone columns (names left the roster, 23 Oct 2569) and keeps
-e-mails only hashed and sealed (ImportTests);
+and ฝ่าย, keeps the first name only (ADR 0041), never reads the phone columns and keeps
+e-mails only hashed and sealed (ImportTests); its กอง match the system's, missing แผนก and
+กลุ่มงาน are made, and linked people follow the file (OrgUnitTests);
 an employee registers in LINE with their ID and a code sent to the roster e-mail or the e-mail
 typed, approved by the system and logged with the method, while anything else still reaches a
 person (LineEmailTests).
@@ -99,7 +100,7 @@ class ImportTests(RosterTestCase):
         self.assertEqual(columns["employee_id"], "รหัสพนักงาน")
         self.assertEqual(columns["email"], "อีเมล")
         self.assertNotIn("เบอร์ภายใน", columns.values())
-        self.assertNotIn("ชื่อ-สกุล", columns.values())  # names are no field
+        self.assertEqual(columns["name"], "ชื่อ-สกุล")  # ADR 0041: the first name only
         view = roster.preview(headers, rows, columns)
         self.assertEqual(
             (view["usable"], view["duplicates"], view["incomplete"]), (2, ["510002"], [6])
@@ -125,13 +126,15 @@ class ImportTests(RosterTestCase):
         stored = str(list(Employee.objects.values()))
         self.assertNotIn("0811111111", stored)
         self.assertNotIn("1234", stored)
-        self.assertNotIn("ทดสอบ หนึ่ง", stored)
+        self.assertEqual((one.name, two.name), ("ทดสอบ", "ทดสอบ"))
+        self.assertNotIn("หนึ่ง", stored)  # the surname never reaches the database
+        self.assertNotIn("นางสาว", stored)
         self.assertFalse(RosterUpload.objects.exists())  # the staged file is gone
         event = AuditEvent.objects.get(action="employees.imported")
         self.assertNotIn("510001", str(event.data))
         self.assertNotIn("example.test", str(event.data))
         setting = RosterSetting.objects.get()
-        self.assertNotIn("name", setting.columns)
+        self.assertEqual(setting.columns["name"], "ชื่อ-สกุล")
         self.assertEqual(
             setting.units[roster.unit_key("ฝ่ายอุปกรณ์งานจำหน่าย (จำลอง)")], two.district.code
         )
@@ -156,7 +159,8 @@ class ImportTests(RosterTestCase):
         client.force_login(self.admin)
         page = client.get("/console/admin/registrations/")
         self.assertContains(page, "ไม่อยู่ในทะเบียนล่าสุด")
-        self.assertContains(page, "พนักงานช่าง 5 · ฝ่ายอุปกรณ์งานจำหน่าย (จำลอง)")
+        self.assertContains(page, "พนักงานช่าง 5")
+        self.assertContains(page, "<span>ฝ่ายอุปกรณ์งานจำหน่าย (จำลอง)</span>", html=False)
 
     def test_the_admin_page_reads_previews_and_imports(self):
         client = Client()
@@ -185,6 +189,98 @@ class ImportTests(RosterTestCase):
         self.assertFalse(sealing.available())
         with self.assertRaisesMessage(Exception, "PII_SECRET_KEY"):
             roster.stage(self.admin, "roster.csv", as_csv())
+
+
+class OrgUnitTests(RosterTestCase):
+    """ADR 0041: the file's กอง › แผนก › กลุ่มงาน become the system's units."""
+
+    def kcw_rows(self, section="แผนกทดสอบจำลอง", group="กลุ่มทดสอบจำลอง"):
+        name = Division.objects.get(code="กคว.").name
+        return [
+            ["520001", "นายสมมุติ ทดลองดี", "ช่าง 5", "รผก.", "ฝอจ.", name, section, group,
+             "", "", ""],
+            # The organisation's export cuts names at 40 letters.
+            ["520002", "น.ส.สมมุติ ทดลองดี", "ช่าง 4", "รผก.", "ฝอจ.", name[:20], section, "",
+             "", "", ""],
+        ]  # fmt: skip
+
+    def test_first_name_drops_the_title_and_the_surname(self):
+        self.assertEqual(roster.first_name(" นางสาวทดสอบ  หนึ่ง "), "ทดสอบ")
+        self.assertEqual(roster.first_name("น.ส.ก ข ณ อยุธยา"), "ก")
+        self.assertEqual(roster.first_name(""), "")
+
+    def test_the_file_makes_missing_units_under_a_matched_kong(self):
+        kcw = Division.objects.get(code="กคว.")
+        upload = roster.stage(self.admin, "roster.csv", as_csv(rows=self.kcw_rows()))
+        headers, rows = roster.opened(upload)
+        view = roster.preview(headers, rows, roster.guess_columns(headers))
+        self.assertEqual(view["in_divisions"], 2)
+        self.assertEqual(
+            view["new_units"], ["กคว. › แผนกทดสอบจำลอง", "แผนกทดสอบจำลอง › กลุ่มทดสอบจำลอง"]
+        )
+        self.assertFalse(
+            kcw.sections.filter(name="แผนกทดสอบจำลอง").exists()
+        )  # a preview makes nothing
+        self.assertEqual(self.load(as_csv(rows=self.kcw_rows()))["new_units"], 2)
+        section = kcw.sections.get(name="แผนกทดสอบจำลอง")
+        self.assertTrue(section.work_groups.filter(name="กลุ่มทดสอบจำลอง").exists())
+        self.assertEqual(Employee.objects.get(employee_id="520002").division, kcw)
+        self.assertEqual(self.load(as_csv(rows=self.kcw_rows()))["new_units"], 0)
+
+    def test_linked_people_follow_the_file(self):
+        from operations import identity
+        from operations.models import RoleGrant, StaffProfile
+
+        self.load(as_csv(rows=self.kcw_rows()))
+        user = make_staff("followme", (Role.STAFF, "กคว."))
+        StaffProfile.objects.filter(user=user).update(
+            employee_id="520001", display_name="พนักงาน 520001"
+        )
+        rows = self.kcw_rows()
+        rows[0][5] = Division.objects.get(code="กตฟ.").name
+        self.load(as_csv(rows=rows))
+        profile = StaffProfile.objects.get(user=user)
+        self.assertEqual((profile.display_name, profile.division.code), ("สมมุติ", "กตฟ."))
+        held = RoleGrant.objects.filter(user=user, revoked_at__isnull=True)
+        self.assertEqual([(g.role, g.division.code) for g in held.all()], [(Role.STAFF, "กตฟ.")])
+        rows[0][5] = "กองนอกระบบ"
+        self.load(as_csv(rows=rows))
+        self.assertFalse(held.exists())  # เจ้าหน้าที่ now
+        # A role the admin chose stays.
+        identity.set_role(self.admin, user, Role.DEPARTMENT_SUPERVISOR)
+        rows[0][5] = Division.objects.get(code="กคว.").name
+        self.load(as_csv(rows=rows))
+        self.assertEqual([g.role for g in held.all()], [Role.DEPARTMENT_SUPERVISOR])
+
+    def test_the_chart_shows_registered_people_and_many_get_a_role_at_once(self):
+        from operations.models import RoleGrant, StaffProfile
+
+        self.load(as_csv(rows=self.kcw_rows()))
+        requester = Requester.objects.create(
+            display_name="สมมุติ",
+            district=District.objects.get(code="D01"),
+            approved_by=self.admin,
+            employee=Employee.objects.get(employee_id="520001"),
+            employee_link=Requester.EmployeeLink.VERIFIED,
+        )
+        ChannelIdentity.objects.create(
+            channel="line", external_id=BOB, requester=requester, status="active"
+        )
+        client = Client()
+        client.force_login(self.admin)
+        page = client.get("/console/admin/org/")
+        self.assertContains(page, "ผังบุคลากรที่ลงทะเบียน LINE")
+        self.assertContains(page, "แผนกทดสอบจำลอง")
+        self.assertNotContains(page, "520002")  # not registered in LINE: not on the tree
+        client.post(
+            "/console/admin/requesters/bulk/",
+            {"ids": [requester.pk], "action": "role", "role": Role.SUPERVISOR},
+        )
+        user = StaffProfile.objects.get(employee_id="520001").user
+        held = RoleGrant.objects.filter(user=user, revoked_at__isnull=True)
+        self.assertEqual(
+            list(held.values_list("role", "division__code")), [(Role.SUPERVISOR, "กคว.")]
+        )
 
 
 class LineEmailTests(RosterTestCase):
@@ -221,7 +317,7 @@ class LineEmailTests(RosterTestCase):
         self.assertIn("ยืนยันตัวตนแล้ว", texts(self.type(ALICE, self.code())))
         registration = RegistrationRequest.objects.get()
         self.assertEqual((registration.status, registration.verified_by), ("approved", "otp"))
-        self.assertEqual(registration.submitted_name, "พนักงาน 510001")  # the ID, no name
+        self.assertEqual(registration.submitted_name, "ทดสอบ")  # ADR 0041: the first name
         self.assertEqual(registration.requested_district.code, "D01")
         self.assertNotEqual(EmailCode.objects.get().code_hash, self.code())
 

@@ -22,6 +22,7 @@ from operations.models import (
     Division,
     DivisionSchedule,
     Employee,
+    NotificationDelivery,
     Role,
 )
 from operations.tests.test_m02_cases import make_staff
@@ -48,18 +49,20 @@ class WorkTestCase(FlowTestCase):
             granted_by=cls.flow_admin,
         )
 
-    def withdraw(self, slip, meter="12345678", size="5(100)A", user=ALICE, approve=True):
+    def withdraw(self, slip, meter="12345678", size="5(100)A", user=ALICE):
         self.track("มิเตอร์", "ติดตามใบเบิก", number=slip, user=user)
         self.press(user, "เพิ่มรายละเอียด")  # 30 ต.ค. 2569: the summary comes right after the number
         self.type(user, f"มิเตอร์ {meter} ขนาด {size} 1 เครื่อง ใช้ติดตั้ง")
         self.press(user, "ยืนยันส่งเรื่อง")
         case = Case.objects.order_by("-submitted_at").first()
-        if approve:  # the warehouse records stages after the division approves (28 ต.ค. Q4)
-            from operations import approvals
+        self.assertEqual(case.status, Case.Status.IN_PROGRESS)  # ADR 0042 Q10: no acceptance step
+        return case
 
-            done, skipped = approvals.bulk_approve(self.approver, [case])
-            self.assertEqual((len(done), skipped), (1, []))
-            case.refresh_from_db()
+    def older_waiting(self, slip, **kwargs):
+        """A case filed before ADR 0042 Q10 still waits for its division to accept it."""
+        case = self.withdraw(slip, **kwargs)
+        Case.objects.filter(pk=case.pk).update(status=Case.Status.AWAITING_APPROVAL)
+        case.refresh_from_db()
         return case
 
 
@@ -248,24 +251,17 @@ class CalendarTests(WorkTestCase):
 
 
 class ChatTests(WorkTestCase):
-    def test_a_held_message_then_a_free_reply_while_the_requester_chats(self):
+    def test_a_message_goes_at_once_and_the_requester_answers_into_the_case(self):
         case = self.withdraw("4500060001")
         client = Client()
         client.force_login(self.kcw)
         page = client.get(f"/cases/{case.number}/")
-        self.assertContains(page, "คุยกับผู้แจ้ง")
-        r = client.post(f"/cases/{case.number}/chat/", {"text": "ใบเบิกขาดลายเซ็น"})
-        self.assertEqual(CaseMessage.objects.count(), 0)  # the first message needs a contact
-        self.assertEqual(r.status_code, 302)
-        sent = len(self.sent)
-        client.post(
-            f"/cases/{case.number}/chat/",
-            {"text": "ใบเบิกขาดลายเซ็น", "contact": "สมหญิง กคว. โทร 1234"},
-        )
-        self.assertEqual(len(self.sent), sent)  # nothing pushed
-        self.assertEqual(CaseMessage.objects.get().status, "held")
-        reply = self.type(ALICE, "สอบถามใบเบิกครับ")
-        self.assertIn("ใบเบิกขาดลายเซ็น\nติดต่อ: สมหญิง กคว. โทร 1234", texts(reply))
+        self.assertContains(page, "data-dock-case")  # the chat window opens this case
+        # ADR 0042 Q7, Q8: nobody wrote lately, so it is pushed now, exactly as typed.
+        client.post(f"/cases/{case.number}/chat/", {"text": "ใบเบิกขาดลายเซ็น"})
+        self.assertEqual(CaseMessage.objects.get().status, "sent")
+        push = NotificationDelivery.objects.get(kind="case_chat", case=case)
+        self.assertEqual(push.text, "ใบเบิกขาดลายเซ็น")
         self.assertEqual(Conversation.objects.get(identity__external_id=ALICE).prompt, "case_chat")
         sent = len(self.sent)
         self.type(ALICE, "จะส่งใบใหม่พรุ่งนี้")
@@ -275,8 +271,7 @@ class ChatTests(WorkTestCase):
         with self.captureOnCommitCallbacks(execute=True):
             message = case_chat.send(self.kcw, case, "รับทราบ ขอบคุณครับ")
         self.assertEqual(message.status, "sent")
-        self.assertIn("รับทราบ ขอบคุณครับ", texts(self.sent[-1]))
-        self.assertNotIn("ติดต่อ:", texts(self.sent[-1]))  # only the first message signs
+        self.assertEqual(texts(self.sent[-1]).strip(), "รับทราบ ขอบคุณครับ")
         reply = self.press(ALICE, "จบการคุย", self.sent[-1])
         self.assertIn("จบการคุยกับเจ้าหน้าที่แล้ว", texts(reply))
         self.assertEqual(Conversation.objects.get(identity__external_id=ALICE).prompt, "")
@@ -289,7 +284,7 @@ class ChatTests(WorkTestCase):
         row.prompt_data["until"] = (timezone.now() - timedelta(minutes=1)).isoformat()
         row.save(update_fields=["prompt_data"])
         self.type(ALICE, "เรื่องของฉัน")
-        self.assertFalse(CaseMessage.objects.filter(direction="requester").exists())
+        self.assertFalse(CaseMessage.objects.filter(text="เรื่องของฉัน").exists())
         from django.core.exceptions import PermissionDenied
 
         with self.assertRaises(PermissionDenied):

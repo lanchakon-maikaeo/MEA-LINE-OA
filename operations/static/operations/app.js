@@ -269,8 +269,12 @@
   document.addEventListener("htmx:afterSwap", function () { initMore(); });
 
   // Approve many at once (Q9): tick every waiting case on the page and count the ticks.
+  // ADR 0041: the same for LINE OA users; "all" ticks only the rows the filters show.
+  function bulkBoxes(form) {
+    return document.querySelectorAll('input[type=checkbox][form="' + form.id + '"]');
+  }
   function bulkState(form) {
-    var boxes = document.querySelectorAll('input[name=case][form="' + form.id + '"]');
+    var boxes = bulkBoxes(form);
     var ticked = Array.prototype.filter.call(boxes, function (b) { return b.checked; }).length;
     // ADR 0030: "every case the filters match" counts those instead of the ticks.
     var filtered = form.querySelector("[data-bulk-filtered]");
@@ -281,11 +285,12 @@
       all.indeterminate = ticked > 0 && ticked < boxes.length;
       all.disabled = boxes.length === 0;
     }
-    var submit = form.querySelector("[data-bulk-submit]");
-    if (submit) {
+    form.querySelectorAll("[data-bulk-submit]").forEach(function (submit) {
       submit.disabled = count === 0;
-      submit.textContent = count ? submit.getAttribute("data-label").replace("{n}", count) : submit.getAttribute("data-empty");
-    }
+      if (submit.hasAttribute("data-label")) submit.textContent = count ? submit.getAttribute("data-label").replace("{n}", count) : submit.getAttribute("data-empty");
+    });
+    var shown = form.querySelector("[data-bulk-count]");
+    if (shown) shown.textContent = count ? "เลือกแล้ว " + count + " ราย" : "ยังไม่ได้เลือกผู้ใช้";
   }
   function bulkForms() {
     document.querySelectorAll("form[data-bulk]").forEach(bulkState);
@@ -293,12 +298,11 @@
   document.addEventListener("change", function (event) {
     var target = event.target;
     if (target.matches && target.matches("[data-bulk-all]")) {
-      var form = target.closest("form");
-      document.querySelectorAll('input[name=case][form="' + form.id + '"]').forEach(function (b) {
-        b.checked = target.checked;
+      bulkBoxes(target.closest("form")).forEach(function (b) {
+        b.checked = target.checked && !b.closest("[hidden]");
       });
     }
-    if (target.matches && target.matches("[data-bulk-all], [data-bulk-filtered], input[name=case][form]")) bulkForms();
+    if (target.matches && target.matches("[data-bulk-all], [data-bulk-filtered], input[type=checkbox][form]")) bulkForms();
   });
   document.addEventListener("htmx:afterSwap", bulkForms);
 
@@ -448,5 +452,45 @@
       label.textContent = "คัดลอกแล้ว";
       setTimeout(function () { label.textContent = "คัดลอก"; }, 2000);
     });
+  });
+
+  // ADR 0041 (Q7): Back returns to the same spot of a list — its search, filters, the rows
+  // opened with "แสดงเพิ่มเติม" and the scroll — even when the browser loads the page again.
+  var backKey = "back:" + location.pathname + location.search;
+  function lists() { return document.querySelectorAll("[data-more], [data-list-items]"); }
+  window.addEventListener("pagehide", function () {
+    var state = { y: window.scrollY, fields: {}, more: [] };
+    document.querySelectorAll("[data-list] [data-list-search], [data-list] [data-list-filter]").forEach(function (el) {
+      if (el.id) state.fields[el.id] = el.value;
+    });
+    lists().forEach(function (box) { state.more.push(box.getAttribute("data-more-shown") || ""); });
+    try { sessionStorage.setItem(backKey, JSON.stringify(state)); } catch (e) { /* private window */ }
+  });
+  (function restore() {
+    var nav = window.performance && performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+    if (!nav || nav.type !== "back_forward") return;
+    var state = null;
+    try { state = JSON.parse(sessionStorage.getItem(backKey) || "null"); } catch (e) { return; }
+    if (!state) return;
+    Object.keys(state.fields).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.value = state.fields[id];
+    });
+    document.querySelectorAll("[data-list]").forEach(applyList);
+    lists().forEach(function (box, n) {
+      if (state.more[n]) { box.setAttribute("data-more-shown", state.more[n]); applyMore(box); }
+    });
+    window.scrollTo(0, state.y);
+  })();
+  // A link to the page we came from steps back instead, so that page comes back as it was.
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest && event.target.closest("a[href]");
+    if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (link.target || link.hasAttribute("download") || !document.referrer || history.length < 2) return;
+    var from = new URL(document.referrer), to = new URL(link.href, location.href);
+    if (from.origin !== location.origin || to.origin !== location.origin || to.hash) return;
+    if (from.pathname + from.search !== to.pathname + to.search) return;
+    event.preventDefault();
+    history.back();
   });
 })();

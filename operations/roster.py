@@ -6,9 +6,13 @@ removed by the import (or after an hour). The preview shows which file column is
 (guessed from the headers, chosen by the admin, remembered for next time), the rows that cannot
 be used, and every ฝ่าย that is no เขต/หน่วยงาน yet: the admin maps it to one, adds it as a new
 unit, or leaves it empty. Columns that are not mapped are never read, so the two phone columns
-stay in the file, and names are no field at all (user, 23 Oct 2569): a name column in the file
-is never read. E-mails are kept as a keyed hash and sealed, never in plain text; the audit trail
-holds counts only.
+stay in the file. E-mails are kept as a keyed hash and sealed, never in plain text; the audit
+trail holds counts only.
+
+User, 1 Nov 2569 (ADR 0041): the name comes back as the first name only; the title and the
+surname are cut before anything is saved. Each กอง is matched to the system's กอง, the แผนก and
+กลุ่มงาน under it are made when missing, and the people linked to the file follow it: their
+สังกัด, their name and a สมาชิกกอง role move with each import.
 """
 
 import csv
@@ -24,8 +28,20 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from operations import identity, sealing
-from operations.models import District, Employee, RosterSetting, RosterUpload
+from operations import employees, identity, sealing
+from operations.models import (
+    District,
+    Division,
+    Employee,
+    Requester,
+    Role,
+    RoleGrant,
+    RosterSetting,
+    RosterUpload,
+    Section,
+    StaffProfile,
+    WorkGroup,
+)
 
 MAX_BYTES = 10 * 1024 * 1024
 MAX_ROWS = 50_000
@@ -33,6 +49,7 @@ STAGED_FOR = timedelta(hours=1)
 # field: (label, header words that name it). Order is the preview's order.
 FIELDS = {
     "employee_id": ("รหัสพนักงาน", ("รหัสพนักงาน", "รหัส", "employeeid", "empid", "id")),
+    "name": ("ชื่อ (เก็บชื่อต้นอย่างเดียว)", ("ชื่อ-สกุล", "ชื่อ", "name")),
     "position": ("ตำแหน่ง", ("ตำแหน่ง", "position")),
     "line_of_work": ("สายงาน", ("สายงาน",)),
     "department": ("ฝ่าย (ใช้เป็นหน่วยงาน (เขต/ฝ่าย))", ("ฝ่าย", "department")),
@@ -44,6 +61,14 @@ FIELDS = {
 REQUIRED = ("employee_id",)
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 NEW_UNIT = "__new__"
+TITLE = re.compile(r"^(?:นางสาว|น\.ส\.|นาง|นาย)\s*")
+
+
+def first_name(text):
+    """The first name alone: the title and the surname share the file's cell and never reach
+    the database (user, 1 Nov 2569)."""
+    words = TITLE.sub("", " ".join(str(text or "").split())).split()
+    return words[0][:200] if words else ""
 
 
 def _header_key(text):
@@ -213,12 +238,81 @@ def districts_by_key():
     return {unit_key(d.name): d for d in District.objects.filter(is_active=True)}
 
 
+def same_unit(text, name):
+    """A unit name as the file writes it; the organisation's export cuts names at 40 letters."""
+    return bool(text) and (text == name or (len(text) >= 20 and name.startswith(text)))
+
+
+class OrgUnits:
+    """The file's กอง › แผนก › กลุ่มงาน as the system's units (user, 1 Nov 2569). A กอง matches
+    by name, ชื่อย่อ or code; a แผนก or กลุ่มงาน under it is made when missing (`make`), else
+    only listed in `new`. A row of the system's own ฝ่าย with no กอง may name a กอง-level unit
+    as its แผนก, as บท. (แผนกบริหารทั่วไป) does."""
+
+    def __init__(self, records, make=False):
+        self.make, self.new, self.found = make, [], {}
+        self.divisions = list(
+            Division.objects.filter(is_active=True, is_synthetic=False, kind=Division.Kind.DIVISION)
+        )
+        self.home = {
+            r.get("department") for r in records if self._division(r.get("division_name", ""))
+        }
+
+    def _division(self, text):
+        hits = [
+            d
+            for d in self.divisions
+            if text and (text in (d.code, d.short_name) or same_unit(text, d.name))
+        ]
+        return hits[0] if len(hits) == 1 else None
+
+    def of(self, record):
+        """(Division, Section, WorkGroup) of one row, None for a level the system lacks."""
+        text = record.get("division_name", "")
+        division = self._division(text)
+        section_name, group_name = record.get("section_name", ""), record.get("work_group", "")
+        if not text and record.get("department") in self.home:
+            division, section_name, group_name = self._division(section_name), "", ""
+        if division is None:
+            return None, None, None
+        section = self._child(Section, "division", division, section_name)
+        group = None
+        if section is not None:
+            group = self._child(WorkGroup, "section", section, group_name)
+        elif section_name and group_name and f"{section_name} › {group_name}" not in self.new:
+            self.new.append(f"{section_name} › {group_name}")  # a preview: the แผนก is new too
+        return division, section, group
+
+    def _child(self, model, field, parent, name):
+        key = (model, parent.pk, name)
+        if not name:
+            return None
+        if key not in self.found:
+            rows = model.objects.filter(**{field: parent})
+            hit = next((u for u in rows if same_unit(name, u.name) or name == u.code), None)
+            if hit is None:
+                from operations import units  # local: units builds on identity
+
+                self.new.append(f"{units.short(parent)} › {name}")
+                if self.make:
+                    hit = model.objects.create(**{field: parent, "name": name[:200]})
+            elif not hit.is_active and self.make:  # the file wins (Q3): a closed unit opens
+                hit.is_active = True
+                hit.save(update_fields=["is_active"])
+            self.found[key] = hit
+        return self.found[key]
+
+
 def preview(headers, rows, columns):
-    """What the import would do: usable rows, problems, and each ฝ่าย with its เขต/หน่วยงาน."""
+    """What the import would do: usable rows, problems, each ฝ่าย with its เขต/หน่วยงาน, and
+    the แผนก and กลุ่มงาน it would add."""
     missing = [FIELDS[f][0] for f in REQUIRED if not columns.get(f)]
     known, saved = districts_by_key(), _setting().units
     seen, duplicates, incomplete, bad_email, units = set(), [], [], 0, {}
-    for number, record in _records(headers, rows, columns):
+    records = list(_records(headers, rows, columns))
+    org = OrgUnits([r for _, r in records])
+    matched = 0
+    for number, record in records:
         employee_id = record.get("employee_id", "")
         if not employee_id:
             incomplete.append(number)
@@ -230,6 +324,7 @@ def preview(headers, rows, columns):
         email = record.get("email", "")
         if email and not EMAIL.match(normalise_email(email)):
             bad_email += 1
+        matched += org.of(record)[0] is not None
         department = record.get("department", "")
         if department:
             key = unit_key(department)
@@ -248,6 +343,8 @@ def preview(headers, rows, columns):
         "bad_email": bad_email,
         "units": sorted(units.values(), key=lambda u: (u["match"] is not None, -u["count"])),
         "existing": Employee.objects.filter(is_active=True, is_synthetic=False).count(),
+        "in_divisions": matched,
+        "new_units": org.new,
     }
 
 
@@ -265,9 +362,12 @@ def import_upload(actor, upload, columns, choices, deactivate_missing, reason):
     if any(not columns.get(f) for f in REQUIRED):
         raise ValidationError("เลือกคอลัมน์รหัสพนักงานก่อนนำเข้า")
     units = _units(actor, headers, rows, columns, choices, reason)
+    records = [r for _, r in _records(headers, rows, columns)]
+    org = OrgUnits(records, make=True)
+    names = dict(Employee.objects.values_list("employee_id", "name"))
     seen, created, updated, emails = set(), 0, 0, 0
     sealable = sealing.available()
-    for _, record in _records(headers, rows, columns):
+    for record in records:
         employee_id = record.get("employee_id", "")
         if not employee_id or employee_id in seen:
             continue
@@ -283,15 +383,19 @@ def import_upload(actor, upload, columns, choices, deactivate_missing, reason):
             "section_name": record.get("section_name", "")[:200],
             "work_group": record.get("work_group", "")[:200],
             "district": units.get(unit_key(record.get("department", ""))),
+            "division": org.of(record)[0],
             "email_hash": email_digest(email) if email else "",
             "email_sealed": sealing.seal(email) if email and sealable else "",
             "is_active": True,
             "is_synthetic": False,
         }
+        if "name" in columns:
+            values["name"] = first_name(record.get("name", ""))
         _, made = Employee.objects.update_or_create(employee_id=employee_id, defaults=values)
         created, updated = created + made, updated + (not made)
     if not seen:
         raise ValidationError("ไฟล์ไม่มีแถวที่มีรหัสพนักงาน")
+    follow(actor, seen, names, reason)
     closed = 0
     if deactivate_missing:
         closed = (
@@ -303,8 +407,14 @@ def import_upload(actor, upload, columns, choices, deactivate_missing, reason):
     setting.columns, setting.updated_by = columns, actor
     setting.save()
     upload.delete()
-    summary = {"created": created, "updated": updated, "closed": closed, "emails": emails}
-    # Counts only: e-mails never go to the audit trail.
+    summary = {
+        "created": created,
+        "updated": updated,
+        "closed": closed,
+        "emails": emails,
+        "new_units": len(org.new),
+    }
+    # Counts only: e-mails and names never go to the audit trail.
     identity.audit(actor, "employees.imported", setting, reason, **summary)
     return summary
 
@@ -349,7 +459,89 @@ def _new_unit(actor, text, reason):
     return district
 
 
-def employee_unit(employee):
-    """What the LINE OA user pages show for an employee: ตำแหน่ง · ฝ่าย."""
-    parts = [employee.position, employee.department or getattr(employee.district, "name", "")]
-    return " · ".join(p for p in parts if p)
+def follow(actor, employee_ids, old_names, reason):
+    """The people tied to the file follow it (Q3, Q7 of 1 Nov 2569): a staff account's สังกัด
+    and its สมาชิกกอง role move to the file's กอง (no กอง of the system: no role, so
+    เจ้าหน้าที่), and a name the system copied (the employee label or the old first name)
+    becomes the new first name. Roles an admin chose stay."""
+    from operations import units  # local: units builds on identity
+
+    rows = {
+        e.employee_id: e
+        for e in Employee.objects.filter(employee_id__in=employee_ids).select_related("division")
+    }
+
+    def renamed(current, employee):
+        copied = employees.LABELLED.match(current) or current == old_names.get(employee.employee_id)
+        return employee.name if employee.name and copied and current != employee.name else None
+
+    why = reason or "ตามทะเบียนพนักงานที่นำเข้า"
+    for profile in StaffProfile.objects.filter(employee_id__in=rows).select_related("user"):
+        employee, user = rows[profile.employee_id], profile.user
+        units.bind_from_roster(user, employee)
+        name = renamed(profile.display_name, employee)
+        if name:
+            StaffProfile.objects.filter(pk=profile.pk).update(display_name=name)
+        held = list(RoleGrant.objects.filter(user=user, revoked_at__isnull=True))
+        if not user.is_active or [g.role for g in held] != [Role.STAFF]:
+            continue
+        target = employee.division
+        if target is None:
+            identity.clear_roles(actor, user, why)
+        elif held[0].division_id != target.pk:
+            identity.grant_role(actor, user, Role.STAFF, target, why)
+    link = Requester.EmployeeLink
+    for requester in Requester.objects.filter(
+        employee__employee_id__in=rows, employee_link__in=[link.VERIFIED, link.ADMIN]
+    ).select_related("employee"):
+        name = renamed(requester.display_name, rows[requester.employee.employee_id])
+        if name:
+            Requester.objects.filter(pk=requester.pk).update(display_name=name)
+
+
+LEVELS = ("department", "division_name", "section_name", "work_group")
+PLACE = ("line_of_work", *LEVELS, "district_id", "division_id")
+
+
+def path_of(employee):
+    """ฝ่าย › กอง › แผนก › กลุ่มงาน as the file says it (the chart's picker)."""
+    return " › ".join(getattr(employee, f) for f in LEVELS if getattr(employee, f))
+
+
+def unit_paths():
+    """Every path the active roster has, each with the fields an employee placed there takes."""
+    rows = Employee.objects.filter(is_active=True, is_synthetic=False).values(*PLACE).distinct()
+    out = {}
+    for row in rows:
+        out.setdefault(" › ".join(row[f] for f in LEVELS if row[f]), row)
+    out.pop("", None)
+    return dict(sorted(out.items()))
+
+
+@transaction.atomic
+def move_employee(actor, employee, path, reason=""):
+    """An admin moves one person on the chart (1 Nov 2569 Q3): the roster row takes another
+    path of the file, and the person's สังกัด and สมาชิกกอง role follow, until the next import."""
+    identity.require_admin(actor)
+    place = unit_paths().get(" ".join((path or "").split()))
+    if place is None:
+        raise ValidationError("โปรดเลือกหน่วยจากรายการ")
+    employee = Employee.objects.select_for_update().get(pk=employee.pk)
+    before = path_of(employee)
+    for field, value in place.items():
+        setattr(employee, field, value)
+    employee.save(update_fields=[*PLACE[:5], "district", "division"])
+    identity.audit(actor, "employee.unit_changed", employee, reason, unit=path, previous=before)
+    follow(actor, [employee.employee_id], {}, reason)
+
+
+def employee_path(employee):
+    """Q9: ฝ่าย › กอง › แผนก › กลุ่มงาน, N/A where a level is missing; a กอง of the system by its
+    ชื่อย่อ."""
+    from operations import units  # local: units builds on identity
+
+    if employee is None:
+        return []
+    division = units.short(employee.division) if employee.division_id else employee.division_name
+    levels = (employee.department, division, employee.section_name, employee.work_group)
+    return [level or units.NA for level in levels]

@@ -83,11 +83,13 @@ def buttons(messages):
             # Location and link buttons carry no postback data (ADR 0010).
             found[action["label"]] = action.get("data") or action.get("uri") or action["type"]
         if message["type"] == "flex":
-            for bubble in message["contents"]["contents"]:
+            flex = message["contents"]
+            for bubble in flex["contents"] if flex["type"] == "carousel" else [flex]:
                 body = bubble["body"]
                 if body.get("action"):  # a bubble that is its own button (ADR 0030)
                     found[body["action"]["displayText"]] = body["action"]["data"]
-                for button in body["contents"]:
+                # ADR 0041: a card's buttons sit in its footer.
+                for button in body["contents"] + bubble.get("footer", {}).get("contents", []):
                     if "action" in button:
                         found[button["action"]["label"]] = button["action"].get("data") or button[
                             "action"

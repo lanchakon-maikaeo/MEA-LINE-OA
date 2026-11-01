@@ -46,7 +46,6 @@ User = get_user_model()
 class StaffScope:
     user_id: int | None
     is_admin: bool = False
-    is_developer_admin: bool = False
     division_roles: dict[int, frozenset[str]] = field(default_factory=dict)
     # ADR 0007: acts for every division with every role; bound by no separation of duties.
     is_support: bool = False
@@ -88,7 +87,9 @@ NO_SCOPE = StaffScope(user_id=None)
 
 
 def work_is_split():
-    """ตัวเลือก "หน้าที่ในกอง" (16 Oct 2569 Q3): False = every member does every step."""
+    """ตัวเลือก "หน้าที่ในกอง" (16 Oct 2569 Q3): False = every member does every step. ADR 0041
+    took it off the settings page (one role per person leaves no duties to split); only the
+    SIM test world still splits."""
     from operations import options  # local: options builds on models only
 
     return options.get(options.DIVISION_WORK) == "roles"
@@ -125,7 +126,8 @@ def staff_scope(user):
             roles.setdefault(division_id, set()).add(role)
     is_admin = Role.ADMIN in global_roles
     split = work_is_split() if roles else True
-    department = Role.DEPARTMENT_SUPERVISOR in global_roles
+    # ADR 0041: แอดมินระบบ does everything a แอดมินฝ่าย does, on top of the settings.
+    department = Role.DEPARTMENT_SUPERVISOR in global_roles or is_admin
     overseen = {d for d, r in roles.items() if Role.SUPERVISOR in r}
     viewer = Role.DEPARTMENT_VIEWER in global_roles
     if department or viewer:
@@ -135,8 +137,6 @@ def staff_scope(user):
     return StaffScope(
         user_id=user.pk,
         is_admin=is_admin,
-        # Developer-admin is an extra duty of an admin, never a standalone path.
-        is_developer_admin=is_admin and Role.DEVELOPER_ADMIN in global_roles,
         division_roles={division: _as_member(r, split) for division, r in roles.items()},
         is_support=Role.SYSTEM_SUPPORT in global_roles,
         overseen=frozenset(overseen),
@@ -225,20 +225,9 @@ def require_admin(user):
         raise PermissionDenied("Admin permission required.")
 
 
-def require_developer_admin(user):
-    if not staff_scope(user).is_developer_admin:
-        raise PermissionDenied("Developer-admin permission required.")
-
-
 def may_change_ai(user):
-    """ตัวเลือกระบบ ai_editors (15 ต.ค. 2569 Q23): developer admins, or every admin. Every admin
-    may open the AI page to look."""
-    from operations import options  # local: options builds on models only
-
-    scope = staff_scope(user)
-    if scope.is_developer_admin:
-        return True
-    return scope.is_admin and options.get(options.AI_EDITORS) == "admin"
+    """ADR 0041: แอดมินผู้พัฒนา is gone; every แอดมินระบบ changes the AI settings."""
+    return staff_scope(user).is_admin
 
 
 def require_ai_editor(user):
@@ -288,28 +277,19 @@ def _require_admin_locked(actor, locked):
 
 
 def _require_account_admin(actor, user, locked):
-    """A password reset or reactivation must not bypass the developer-role boundary."""
     _require_admin_locked(actor, locked)
-    if any(u == user.pk and role == Role.DEVELOPER_ADMIN for u, role, _ in locked):
-        if (actor.pk, Role.DEVELOPER_ADMIN, True) not in locked:
-            raise PermissionDenied("Only a developer-admin can manage this account.")
 
 
 def _ensure_admins_remain(locked, removing_user_id=None, removing_role=None):
-    """Raise if the change would leave no active admin or developer-admin."""
+    """Raise if the change would leave no active admin."""
     remaining = [
         (user_id, role)
         for user_id, role, active in locked
         if active
         and not (user_id == removing_user_id and (removing_role is None or role == removing_role))
     ]
-    admins = {user_id for user_id, role in remaining if role == Role.ADMIN}
-    developers = {u for u, role in remaining if role == Role.DEVELOPER_ADMIN and u in admins}
-    if not admins:
+    if not {user_id for user_id, role in remaining if role == Role.ADMIN}:
         raise ValidationError("Cannot remove the last active admin.")
-    had_developer = any(role == Role.DEVELOPER_ADMIN and active for _, role, active in locked)
-    if had_developer and not developers:
-        raise ValidationError("Cannot remove the last active developer-admin.")
 
 
 @transaction.atomic
@@ -331,13 +311,15 @@ def create_staff_user(actor, username, display_name, email=""):
 
 @transaction.atomic
 def grant_role(actor, user, role, division=None, reason=""):
+    """ADR 0041: one role per person. The new role replaces every other one the account holds
+    (ผู้ช่วยเหลือระบบ stays: it is no role an admin hands out)."""
     scope = staff_scope(actor)
     if not scope.is_admin:
         raise PermissionDenied("Admin permission required.")
     if role not in set(Role):
         raise ValidationError("Unknown role.")
-    if role == Role.DEVELOPER_ADMIN and not scope.is_developer_admin:
-        raise PermissionDenied("Only a developer-admin can grant developer-admin.")
+    if role == Role.DEVELOPER_ADMIN:
+        raise ValidationError("ยกเลิกบทบาทแอดมินผู้พัฒนาแล้ว แอดมินระบบมีสิทธิ์ครบทุกส่วน")
     if role == Role.SYSTEM_SUPPORT:
         raise PermissionDenied("ผู้ช่วยเหลือระบบให้ได้ด้วยคำสั่งบนเครื่องเท่านั้น (ADR 0007).")
     if role in GLOBAL_ROLES and division is not None:
@@ -345,14 +327,9 @@ def grant_role(actor, user, role, division=None, reason=""):
     if role in DIVISION_ROLES and (division is None or not division.is_active):
         raise ValidationError("Division roles need an active division.")
     if role in DUTY_ROLES and not work_is_split():
-        raise ValidationError(
-            "ตอนนี้สมาชิกกองทำได้ทุกขั้นตอน ให้บทบาทสมาชิกกองหรือแอดมินกองแทน "
-            "(ถ้าจะแยกหน้าที่ย่อย เปลี่ยนตัวเลือกระบบ หน้าที่ในกอง ก่อน)"
-        )
+        raise ValidationError("สมาชิกกองทำได้ทุกขั้นตอน ให้บทบาทสมาชิกกองหรือแอดมินกองแทน")
     locked = _lock_active_admins()
     _require_account_admin(actor, user, locked)
-    if role == Role.DEVELOPER_ADMIN and (actor.pk, Role.DEVELOPER_ADMIN, True) not in locked:
-        raise PermissionDenied("Only a developer-admin can grant developer-admin.")
     user = User.objects.select_for_update().get(pk=user.pk)
     if not user.is_active:
         raise ValidationError("Cannot grant roles to a suspended account.")
@@ -361,6 +338,11 @@ def grant_role(actor, user, role, division=None, reason=""):
     ).exists()
     if exists:
         raise ValidationError("Role is already granted.")
+    others = list(
+        RoleGrant.objects.filter(user=user, revoked_at__isnull=True).exclude(
+            role=Role.SYSTEM_SUPPORT
+        )
+    )
     grant = RoleGrant.objects.create(
         user=user, role=role, division=division, granted_by=actor, reason=reason.strip()
     )
@@ -372,10 +354,75 @@ def grant_role(actor, user, role, division=None, reason=""):
         role=role,
         division=division.code if division else None,
     )
+    # After the new grant, so a move within one กอง hands no case on (ADR 0031 Q24).
+    for other in others:
+        revoke_role(actor, other, reason or f"เปลี่ยนเป็น{Role(role).label}")
     if division is not None:
         sync_membership_authority(user, actor)
     _menu_follows(user)
     return grant
+
+
+EMPLOYEE = "employee"  # เจ้าหน้าที่ (ADR 0041): a pick that means no staff role
+# The one role an admin picks for a person, in the order the pickers show them.
+PICKS = (
+    EMPLOYEE,
+    Role.STAFF,
+    Role.SUPERVISOR,
+    Role.DIVISION_VIEWER,
+    Role.DEPARTMENT_SUPERVISOR,
+    Role.DEPARTMENT_VIEWER,
+    Role.ADMIN,
+)
+
+
+def role_label(role):
+    return "เจ้าหน้าที่" if role == EMPLOYEE else Role(role).label
+
+
+@transaction.atomic
+def set_role(actor, user, role, division=None, reason=""):
+    """The one role of an account (ADR 0041). A กอง role without a กอง takes the account's
+    สังกัด; asking for the role it already holds changes nothing."""
+    require_admin(actor)
+    if role not in PICKS:
+        raise ValidationError("โปรดเลือกบทบาทจากรายการ")
+    held = RoleGrant.objects.filter(user=user, revoked_at__isnull=True).exclude(
+        role=Role.SYSTEM_SUPPORT
+    )
+    if role == EMPLOYEE:
+        if held.exists():
+            clear_roles(actor, user, reason)
+        return None
+    if role in DIVISION_ROLES and division is None:
+        profile = StaffProfile.objects.filter(user=user).select_related("division").first()
+        division = profile.division if profile else None
+        if division is None:
+            raise ValidationError("บุคคลนี้ไม่มีกองในสังกัด โปรดเลือกกอง")
+    if role in GLOBAL_ROLES:
+        division = None
+    same = held.filter(role=role, division=division)
+    if not same.exists():
+        return grant_role(actor, user, role, division, reason)
+    for other in held.exclude(pk__in=same):
+        revoke_role(actor, other, reason or f"เปลี่ยนเป็น{Role(role).label}")
+    return None
+
+
+@transaction.atomic
+def clear_roles(actor, user, reason=""):
+    """เจ้าหน้าที่ (ADR 0041): no staff role; a verified employee still withdraws, returns and
+    reports from LINE as registered."""
+    require_admin(actor)
+    grants = list(
+        RoleGrant.objects.filter(user=user, revoked_at__isnull=True).exclude(
+            role=Role.SYSTEM_SUPPORT
+        )
+    )
+    if not grants:
+        raise ValidationError("บัญชีนี้เป็นเจ้าหน้าที่อยู่แล้ว")
+    for grant in grants:
+        revoke_role(actor, grant, reason or "เปลี่ยนเป็นเจ้าหน้าที่")
 
 
 def _menu_follows(user):
@@ -391,19 +438,14 @@ def revoke_role(actor, grant, reason):
     scope = staff_scope(actor)
     if not scope.is_admin:
         raise PermissionDenied("Admin permission required.")
-    if grant.role == Role.DEVELOPER_ADMIN and not scope.is_developer_admin:
-        raise PermissionDenied("Only a developer-admin can revoke developer-admin.")
     locked = _lock_active_admins()
     _require_admin_locked(actor, locked)
     grant = RoleGrant.objects.select_for_update().get(pk=grant.pk)
     _require_account_admin(actor, grant.user, locked)
     if grant.revoked_at is not None:
         raise ValidationError("Role is already revoked.")
-    if grant.role in GLOBAL_ROLES:
-        # Losing admin also ends developer-admin, so check both on admin removal.
-        _ensure_admins_remain(
-            locked, grant.user_id, None if grant.role == Role.ADMIN else grant.role
-        )
+    if grant.role == Role.ADMIN:
+        _ensure_admins_remain(locked, grant.user_id, Role.ADMIN)
     grant.revoked_at = timezone.now()
     grant.revoked_by = actor
     grant.reason = reason
@@ -747,7 +789,7 @@ def password_changed(user):
 
 
 @transaction.atomic
-def bootstrap_admin(username, display_name, password, developer=True):
+def bootstrap_admin(username, display_name, password):
     """First admin only: refuses while any active admin exists (recovery is a DB-owner task)."""
     _lock_active_admins()
     if RoleGrant.objects.filter(
@@ -756,9 +798,8 @@ def bootstrap_admin(username, display_name, password, developer=True):
         raise PermissionDenied("An active admin already exists; use the admin console.")
     user = User.objects.create_user(username=username, password=password)
     StaffProfile.objects.create(user=user, display_name=display_name)
-    roles = [Role.ADMIN] + ([Role.DEVELOPER_ADMIN] if developer else [])
-    for role in roles:
-        RoleGrant.objects.create(user=user, role=role, reason="bootstrap")
+    roles = [Role.ADMIN]
+    RoleGrant.objects.create(user=user, role=Role.ADMIN, reason="bootstrap")
     audit(None, "staff.bootstrap_admin", user, actor_label="system:bootstrap", roles=roles)
     return user
 
@@ -928,7 +969,14 @@ def provision_employee_staff(identity_row, employee, actor):
         raise ValidationError("LINE นี้เชื่อมกับพนักงานอีกคน ให้แอดมินตรวจ")
     if ChannelIdentity.objects.filter(staff_user=user).exclude(pk=identity_row.pk).exists():
         raise ValidationError("พนักงานนี้เชื่อม LINE อื่นแล้ว ให้แอดมินตรวจ")
-    if employee.division_id and employee.division.is_active:
+    # ADR 0041: one role; a person who holds one keeps it, others start as สมาชิกกอง of the
+    # roster's กอง, or as เจ้าหน้าที่ (no role) when the กอง is not in the system.
+    has_role = (
+        RoleGrant.objects.filter(user=user, revoked_at__isnull=True)
+        .exclude(role=Role.SYSTEM_SUPPORT)
+        .exists()
+    )
+    if employee.division_id and employee.division.is_active and not has_role:
         grant, created = RoleGrant.objects.get_or_create(
             user=user,
             role=Role.STAFF,
@@ -1006,13 +1054,9 @@ def grant_requester_role(actor, requester, role, division=None, reason=""):
     if len(lines) != 1:
         raise ValidationError("ต้องมีบัญชี LINE ที่ใช้งานได้เพียงบัญชีเดียว")
     user = provision_employee_staff(lines[0], requester.employee, actor)
-    if not (
-        role == Role.STAFF
-        and division is not None
-        and division == requester.employee.division
-        and division.is_active
-    ):
-        grant_role(actor, user, role, division, reason)
+    if role in DIVISION_ROLES and division is None:
+        division = requester.employee.division
+    set_role(actor, user, role, division, reason)
     requester.is_external = False
     requester.save(update_fields=["is_external"])
     audit(actor, "requester.staff_access", requester, reason, user=user.pk, role=role)
@@ -1422,7 +1466,7 @@ def _grant_label(grant):
     return f"{label} {grant.division.code}" if grant.division_id else label
 
 
-def requester_roles(requesters):
+def requester_grants(requesters):
     """Staff roles of the people on the requester list (user, 14 Oct 2569: "user, user และ
     admin"), by requester pk. A person is a staff account when it is linked to their LINE
     (ADR 0010), or holds the same employee ID that they proved or an admin set; a name match
@@ -1447,17 +1491,25 @@ def requester_roles(requesters):
     for user_id, employee_id in profiles:
         for requester_id in proven[employee_id]:
             users[requester_id].add(user_id)
-    grants = defaultdict(set)
+    grants = defaultdict(list)
     active = RoleGrant.objects.filter(
         user_id__in={u for ids in users.values() for u in ids},
         revoked_at__isnull=True,
         user__is_active=True,
     ).select_related("division")
     for grant in active:
-        grants[grant.user_id].add(_grant_label(grant))
+        grants[grant.user_id].append(grant)
     return {
-        requester.pk: sorted({label for u in users[requester.pk] for label in grants[u]})
+        requester.pk: [g for u in sorted(users[requester.pk]) for g in grants[u]]
         for requester in requesters
+    }
+
+
+def requester_roles(requesters):
+    """The role labels of requester_grants, by requester pk."""
+    return {
+        pk: sorted({_grant_label(g) for g in held})
+        for pk, held in requester_grants(requesters).items()
     }
 
 

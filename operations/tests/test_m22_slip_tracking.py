@@ -60,6 +60,12 @@ class WebTests(NoScreeningTestCase):
         )
         return Case.objects.get(pk=result.case_id)
 
+    def waiting(self, case):
+        """A case filed before ADR 0042 Q10 still waits for its division to accept it."""
+        Case.objects.filter(pk=case.pk).update(status=Case.Status.AWAITING_APPROVAL)
+        case.refresh_from_db()
+        return case
+
     def take(self, client, case, key):
         return client.post(
             f"/cases/{case.number}/act/approve/",
@@ -73,7 +79,7 @@ class WebTests(NoScreeningTestCase):
 
     def test_a_slip_case_is_taken_whole_and_the_stock_work_is_hidden(self):
         self.assertEqual(Case.Status.AWAITING_APPROVAL.label, "รอกองรับเรื่อง")
-        case = self.slip("4500103201")
+        case = self.waiting(self.slip("4500103201"))
         self.assertTrue(case.lines.exists())
         offers = {o.name: o.label for o in web_actions.available(self.approver, case)}
         self.assertEqual(offers["approve"], "รับเรื่อง")
@@ -100,7 +106,7 @@ class WebTests(NoScreeningTestCase):
         self.assertNotIn("คลังของ", client.get("/console/admin/").content.decode())
         options.change(None, options.OLD_STOCK, "on", "ทดสอบงานคลังเดิม")
         self.assertEqual(client.get("/console/admin/inventory/").status_code, 200)
-        case = self.slip("4500103202")
+        case = self.waiting(self.slip("4500103202"))
         approver = Client()
         approver.force_login(self.approver)
         form = approver.get(f"/cases/{case.number}/act/approve/").content.decode()

@@ -870,6 +870,12 @@ class WebhookInbox(models.Model):
     reply_used_at = models.DateTimeField(null=True, blank=True)
     reply_status = models.CharField(max_length=16, choices=ReplyStatus.choices, blank=True)
     reply_detail = models.CharField(max_length=200, blank=True)
+    # ADR 0042 Q9: what the bot answered, and the requester the person chatted as (empty while
+    # anonymous, ADR 0010), so the admin's chat view shows the whole LINE chat of one requester.
+    replies = models.JSONField(default=list, blank=True)
+    requester = models.ForeignKey(
+        "Requester", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     processed_at = models.DateTimeField(null=True, blank=True)
     error = models.CharField(max_length=200, blank=True)
@@ -2365,13 +2371,11 @@ class Employee(models.Model):
     15 ต.ค. 2569 (Q10, Q16): the organisation's roster columns. `district` is the ฝ่าย as a
     organisational unit (Q13); the e-mail is kept twice and never in plain text: a hash to compare
     what someone types, and sealed with the server's PII key to send a one-time code. Phone
-    columns are never read. 23 ต.ค. 2569: names are not read either; a verified employee is
-    shown by the employee ID (employees.label)."""
+    columns are never read. 1 Nov 2569 (ADR 0041): the first name is kept, never the surname
+    (employees.label); `division` is the file's กอง matched to the system's (roster.OrgUnits)."""
 
     employee_id = models.CharField(max_length=32, unique=True)
-    # Emptied and never read or written since 23 ต.ค. 2569; kept one release so the previous
-    # release still runs during a deploy, then dropped.
-    name = models.CharField(max_length=200, blank=True, default="", db_default="")
+    name = models.CharField(max_length=200, blank=True, default="", db_default="")  # first name
     district = models.ForeignKey(District, null=True, blank=True, on_delete=models.PROTECT)
     division = models.ForeignKey(Division, null=True, blank=True, on_delete=models.PROTECT)
     position = models.CharField(max_length=200, blank=True)

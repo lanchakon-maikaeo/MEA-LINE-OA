@@ -33,6 +33,7 @@ from operations import identity
 from operations.models import (
     District,
     Division,
+    Employee,
     EquipmentType,
     MaskCount,
     MaskedWord,
@@ -439,8 +440,8 @@ NAMES_SECONDS = 300  # rebuilt sooner whenever someone is added
 
 
 def known_names(stops=()):
-    """Requesters with a name and staff, rebuilt when either list grows. The roster has no
-    names (23 Oct 2569), and a verified employee's label (พนักงาน <รหัส>) is no name."""
+    """Requesters with a name, staff and the roster's first names (ADR 0041), rebuilt when a
+    list grows or a roster is imported. An employee label (พนักงาน <รหัส>) is no name."""
     key = (
         tuple(
             Requester.objects.filter(is_anonymous=False, is_internal=False)
@@ -448,6 +449,7 @@ def known_names(stops=()):
             .values()
         ),
         tuple(StaffProfile.objects.aggregate(n=Count("pk"), last=Max("pk")).values()),
+        tuple(Employee.objects.aggregate(n=Count("pk"), last=Max("imported_at")).values()),
     )
     now = time.monotonic()
     if _NAMES["key"] != key or now - _NAMES["at"] > NAMES_SECONDS:
@@ -463,6 +465,7 @@ def _build_names(stops):
             "display_name", flat=True
         ),
         *StaffProfile.objects.values_list("display_name", flat=True),
+        *Employee.objects.filter(is_active=True).exclude(name="").values_list("name", flat=True),
     ]
     full, first = set(), set()
     for value in values:

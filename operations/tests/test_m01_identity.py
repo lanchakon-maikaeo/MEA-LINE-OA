@@ -90,14 +90,15 @@ class StaffScopeTests(IdentityTestCase):
         visible = identity.filter_by_division(Division.objects.all(), scope, "pk")
         self.assertEqual(list(visible), [self.mtr])
 
-    def test_admin_sees_every_division_but_developer_rights_are_separate(self):
+    def test_admin_does_all_a_department_admin_does_and_the_ai_settings(self):
+        # ADR 0041: แอดมินผู้พัฒนา is gone; แอดมินระบบ does everything.
         scope = identity.staff_scope(self.admin)
         self.assertTrue(identity.can_access_division(scope, self.trf.pk))
-        self.assertFalse(scope.is_developer_admin)
-        self.assertTrue(identity.staff_scope(self.root).is_developer_admin)
-        # A developer-admin grant without admin is not a path to technical settings.
+        self.assertTrue(scope.is_department_supervisor)
+        self.assertEqual(scope.overseen, {self.mtr.pk, self.trf.pk} | set(scope.overseen))
+        self.assertTrue(identity.may_change_ai(self.admin))
         lone = make_staff("lone", (Role.DEVELOPER_ADMIN, None))
-        self.assertFalse(identity.staff_scope(lone).is_developer_admin)
+        self.assertFalse(identity.staff_scope(lone).is_admin)
 
     def test_role_revocation_applies_to_an_open_session(self):
         client = self.client_for(self.meter)
@@ -136,31 +137,6 @@ class StaffScopeTests(IdentityTestCase):
 
 
 class AdminGuardTests(IdentityTestCase):
-    def test_account_management_cannot_bypass_developer_role(self):
-        original = self.root.password
-        actions = (
-            lambda: identity.reset_password(self.admin, self.root, "reset"),
-            lambda: identity.set_staff_active(self.admin, self.root, False, "suspend"),
-            lambda: identity.revoke_sessions(self.admin, self.root, "revoke"),
-            lambda: identity.revoke_role(
-                self.admin, RoleGrant.objects.get(user=self.root, role=Role.ADMIN), "revoke"
-            ),
-        )
-        for action in actions:
-            with self.subTest(action=action), self.assertRaises(PermissionDenied):
-                action()
-        self.root.refresh_from_db()
-        self.assertEqual(self.root.password, original)
-        self.assertFalse(AuditEvent.objects.filter(action="staff.password_reset").exists())
-        dormant = make_staff("dormant", (Role.DEVELOPER_ADMIN, None))
-        with self.assertRaises(PermissionDenied):
-            identity.reset_password(self.admin, dormant, "reset")
-        with self.assertRaises(PermissionDenied):
-            identity.grant_role(self.admin, dormant, Role.ADMIN)
-        password = identity.reset_password(self.root, self.root, "own account")
-        self.root.refresh_from_db()
-        self.assertTrue(self.root.check_password(password))
-
     def test_only_admins_change_accounts(self):
         for actor in (self.meter, self.norole):
             with self.subTest(actor=actor.username), self.assertRaises(PermissionDenied):
@@ -172,11 +148,26 @@ class AdminGuardTests(IdentityTestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(identity.staff_scope(self.meter).is_admin)
 
-    def test_developer_admin_is_granted_only_by_developer_admins(self):
-        with self.assertRaises(PermissionDenied):
-            identity.grant_role(self.admin, self.admin, Role.DEVELOPER_ADMIN)
-        identity.grant_role(self.root, self.admin, Role.DEVELOPER_ADMIN, reason="ดูแล AI")
-        self.assertTrue(identity.staff_scope(self.admin).is_developer_admin)
+    def test_developer_admin_is_retired(self):
+        with self.assertRaises(ValidationError):
+            identity.grant_role(self.root, self.admin, Role.DEVELOPER_ADMIN, reason="ดูแล AI")
+
+    def test_one_role_replaces_the_others(self):
+        # ADR 0041: a new role revokes the old one, and เจ้าหน้าที่ means no role at all.
+        identity.set_role(self.admin, self.meter, Role.SUPERVISOR, self.mtr, "หัวหน้ากอง")
+        held = RoleGrant.objects.filter(user=self.meter, revoked_at__isnull=True)
+        self.assertEqual(
+            list(held.values_list("role", "division")), [(Role.SUPERVISOR, self.mtr.pk)]
+        )
+        self.assertIsNone(identity.set_role(self.admin, self.meter, Role.SUPERVISOR, self.mtr))
+        identity.set_role(self.admin, self.meter, Role.DEPARTMENT_SUPERVISOR)
+        self.assertEqual(
+            list(held.values_list("role", "division")), [(Role.DEPARTMENT_SUPERVISOR, None)]
+        )
+        identity.set_role(self.admin, self.meter, identity.EMPLOYEE)
+        self.assertFalse(held.exists())
+        with self.assertRaises(ValidationError):
+            identity.set_role(self.admin, self.meter, Role.STAFF)  # no กอง and no สังกัด
 
     def test_scope_mismatched_or_duplicate_grants_are_rejected(self):
         with self.assertRaises(ValidationError):
@@ -188,17 +179,14 @@ class AdminGuardTests(IdentityTestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             RoleGrant.objects.create(user=self.norole, role=Role.STAFF)
 
-    def test_last_admin_and_last_developer_admin_cannot_be_removed(self):
-        root_admin = RoleGrant.objects.get(user=self.root, role=Role.ADMIN)
-        root_dev = RoleGrant.objects.get(user=self.root, role=Role.DEVELOPER_ADMIN)
-        with self.assertRaises(ValidationError):
-            identity.revoke_role(self.root, root_dev, "ไม่ใช้แล้ว")
-        with self.assertRaises(PermissionDenied):
-            identity.revoke_role(self.admin, root_admin, "ไม่ใช้แล้ว")
-        with self.assertRaises(PermissionDenied):
-            identity.set_staff_active(self.admin, self.root, False, "ไม่ใช้แล้ว")
+    def test_the_last_admin_cannot_be_removed(self):
         admin_grant = RoleGrant.objects.get(user=self.admin, role=Role.ADMIN)
         identity.revoke_role(self.root, admin_grant, "เหลือผู้ดูแลคนเดียว")
+        root_admin = RoleGrant.objects.get(user=self.root, role=Role.ADMIN)
+        with self.assertRaises(ValidationError):
+            identity.revoke_role(self.root, root_admin, "ไม่ใช้แล้ว")
+        with self.assertRaises(ValidationError):
+            identity.set_role(self.root, self.root, Role.DEPARTMENT_SUPERVISOR)
         with self.assertRaises(ValidationError):
             identity.set_staff_active(self.root, self.root, False, "ไม่ใช้แล้ว")
 
@@ -375,12 +363,10 @@ class RegistrationTests(IdentityTestCase):
 
 class ConcurrentAdminRemovalTests(TransactionTestCase):
     def setUp(self):
-        self.first = identity.bootstrap_admin(
-            "first", "First", secrets.token_urlsafe(16), developer=False
-        )
+        self.first = identity.bootstrap_admin("first", "First", secrets.token_urlsafe(16))
         self.second = make_staff("second", (Role.ADMIN, None))
 
-    def test_last_admin_is_protected_without_any_developer_admin(self):
+    def test_last_admin_is_protected(self):
         identity.set_staff_active(self.first, self.second, False, "ลาออก")
         own = RoleGrant.objects.get(user=self.first, role=Role.ADMIN)
         with self.assertRaises(ValidationError):

@@ -36,12 +36,13 @@ class SuspendedStaffAccountTests(StaffChatTestCase):
         )
         self.assertNotContains(response, "บัญชีเจ้าหน้าที่ถูกระงับ ให้แอดมินตรวจ")
         # The person is not suspended today, so the old account opens again with only the
-        # roles given now (user, 31 Oct 2569 Q9); the old roles stay in its history.
+        # role given now (user, 31 Oct 2569 Q9; one role, ADR 0041); the old roles stay in
+        # its history.
         old.refresh_from_db()
         self.assertTrue(old.is_active)
         self.assertEqual(
             set(RoleGrant.objects.filter(user=old, revoked_at=None).values_list("role", flat=True)),
-            {Role.STAFF, Role.SUPERVISOR},
+            {Role.SUPERVISOR},
         )
         self.assertTrue(
             RoleGrant.objects.filter(user=old, role=Role.DEPARTMENT_SUPERVISOR)
@@ -161,7 +162,8 @@ class DepartmentAccessTests(tile_tests.PickTestCase):
         self.assertEqual(identity.sync_membership_authority(self.kcw_viewer), 0)
         self.assertFalse(AuthorityGrant.objects.filter(user=self.kcw_viewer).exists())
 
-    def test_a_viewer_who_is_a_member_acts_in_their_own_division_only(self):
+    def test_a_viewer_made_a_member_stops_viewing_other_divisions(self):
+        # ADR 0041: the member role replaces the viewer role.
         identity.grant_role(
             self.boss, self.watcher, Role.STAFF, Division.objects.get(code="กอจ."), "ทดสอบ"
         )
@@ -169,15 +171,16 @@ class DepartmentAccessTests(tile_tests.PickTestCase):
         koj, kcw = (Division.objects.get(code=c).pk for c in ("กอจ.", "กคว."))
         self.assertTrue(identity.holds(scope, koj))
         self.assertFalse(identity.holds(scope, kcw))
-        self.assertIn(kcw, scope.viewed)
-        self.assertNotIn(koj, scope.viewed)
+        self.assertNotIn(kcw, scope.viewed)
 
     def test_two_supervisors_in_one_division_and_two_for_the_department(self):
         kcw = Division.objects.get(code="กคว.")
         first, second = make_staff("kcw-head-1"), make_staff("kcw-head-2")
         for user in (first, second):
             identity.grant_role(self.boss, user, Role.SUPERVISOR, kcw, "หัวหน้า")
-        identity.grant_role(self.boss, first, Role.DEPARTMENT_SUPERVISOR, None, "ผอ.")
+        identity.grant_role(
+            self.boss, make_staff("deputy"), Role.DEPARTMENT_SUPERVISOR, None, "ผอ."
+        )
         self.assertEqual(
             RoleGrant.objects.filter(role=Role.SUPERVISOR, division=kcw, revoked_at=None).count(), 2
         )

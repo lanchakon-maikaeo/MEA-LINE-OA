@@ -1,4 +1,9 @@
-"""Supervisor messages propose orders; only a fresh confirmation creates one."""
+"""Supervisor messages propose orders; only a fresh confirmation creates one.
+
+ADR 0041: the chat shows Flex cards in formal wording and opens no web page. ADR 0042 Q1 to Q3:
+สั่งงาน asks for the กอง (or อื่นๆ, the other แอดมินฝ่าย), then for its แอดมินกอง, then for the
+details typed as they are (no AI), and the summary card sets the due date with LINE's date
+picker and the urgency; nothing waits in quick replies."""
 
 import json
 import re
@@ -8,12 +13,17 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.utils import timezone
 
-from operations import ai, work_orders
+from operations import ai, units, work_orders
 from operations.models import WorkOrder
 
 PROMPT = "staff_order_chat"
 CONFIRM = "staff_order_confirm"
 START = re.compile(r"^(?:สั่งงาน|มอบหมาย|ให้\s*\S+)")
+GREEN = "#16804A"
+# Typed or tapped commands that are no task text (ADR 0042 Q3).
+COMMANDS = ("เลือกผู้รับ ", "ทั้งกอง ", "กำหนด ", "แก้งาน ", "แก้ชื่อ ", "เปลี่ยนงาน ")
+COMMANDS_EXACT = {"ไม่กำหนดวัน", "ไม่ด่วน", "ด่วน", "ปกติ", "วันนี้", "พรุ่งนี้"}
+EDITS = ("แก้งาน ", "แก้ชื่อ ", "เปลี่ยนงาน ")
 SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -81,34 +91,128 @@ def extract(messages):
         return None
 
 
+def card(turn, title, rows=(), note="", buttons=(), quick=None, plain=False):
+    """A Flex bubble: a title, label and value rows, a note, then buttons: (label, postback)
+    pairs or ready LINE actions (dicts). The first is green unless the card is a `plain` list."""
+    from operations.conversation import MAX_QUICK, _fit, _postback
+
+    body = [{"type": "text", "text": title, "weight": "bold", "size": "lg", "wrap": True}]
+    for label, value in rows:
+        body.append(
+            {
+                "type": "box",
+                "layout": "baseline",
+                "spacing": "sm",
+                "contents": [
+                    {"type": "text", "text": label, "size": "sm", "color": "#888888", "flex": 2},
+                    {"type": "text", "text": value or "-", "size": "sm", "wrap": True, "flex": 5},
+                ],
+            }
+        )
+    if note:
+        body.append({"type": "text", "text": note, "size": "xs", "color": "#666666", "wrap": True})
+    bubble = {
+        "type": "bubble",
+        "size": "kilo",
+        "body": {"type": "box", "layout": "vertical", "spacing": "md", "contents": body},
+    }
+    if buttons:
+        bubble["footer"] = {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "button",
+                    "height": "sm",
+                    "style": "secondary" if plain else ("primary" if n == 0 else "link"),
+                    **({} if plain else {"color": GREEN}),
+                    "action": button
+                    if isinstance(button, dict)
+                    else {"type": "postback", "label": _fit(button[0], 40), "data": button[1]},
+                }
+                for n, button in enumerate(buttons)
+            ],
+        }
+    message = {"type": "flex", "altText": title, "contents": bubble}
+    if quick:
+        message["quickReply"] = {"items": [_postback(*b) for b in quick][:MAX_QUICK]}
+    turn.replies.append(message)
+
+
+def who(user, division=None):
+    """First name and the deepest unit, which tells apart people who share a first name; a
+    แอดมินฝ่าย or แอดมินระบบ by the role, anyone else without a สังกัด by the กอง picked."""
+    from operations import identity
+
+    profile = getattr(user, "staff_profile", None)
+    place = [p for p in units.path_labels(profile) if p != units.NA]
+    if not place:
+        scope = identity.staff_scope(user)
+        place = (
+            ["แอดมินระบบ" if scope.is_admin else "แอดมินฝ่าย"]
+            if scope.is_department_supervisor
+            else []
+        )
+    if not place and division is not None:
+        place = [division.code]
+    return f"{work_orders.name_of(user)} · {place[-1]}" if place else work_orders.name_of(user)
+
+
 def start(turn, user):
     if not work_orders.may_issue(user):
-        turn.say("การสั่งงานสงวนสิทธิ์สำหรับ แอดมินฝ่ายเท่านั้น")
+        turn.say("การสั่งงานสงวนสิทธิ์สำหรับแอดมินฝ่ายและแอดมินระบบ")
         return
     turn.set_prompt(PROMPT, messages=[])
-    turn.say(
-        "พิมพ์ว่าให้ใครหรือกองไหนทำอะไร เช่น ให้สมชายตรวจมิเตอร์พรุ่งนี้ แล้วตรวจสรุปก่อนยืนยัน", edit_buttons(turn)
+    people(turn, user, {})
+
+
+def kongs(user):
+    """ADR 0042 Q1: the กอง and ศูนย์ (with บท.) an order goes to; a world of synthetic units
+    only (tests, demos) shows those instead."""
+    from operations.models import Division
+
+    rows = [d for d in work_orders.issuable(user) if d.kind == Division.Kind.DIVISION]
+    return [d for d in rows if not d.is_synthetic] or rows
+
+
+def desk(user):
+    """Where an order to another แอดมินฝ่าย is filed: the department's own unit (ฝอจ.)."""
+    from operations.models import Division
+
+    rows = [d for d in work_orders.issuable(user) if d.kind == Division.Kind.COORDINATION]
+    return next((d for d in rows if not d.is_intake and not d.is_synthetic), None) or next(
+        iter(rows), None
     )
+
+
+def task_text(messages):
+    """The typed details (ADR 0042 Q3): the latest edit, else the first message that is no
+    command."""
+    edits = [m.split(" ", 1)[1].strip() for m in messages if m.startswith(EDITS)]
+    if edits:
+        return edits[-1]
+    return next((m for m in messages if not m.startswith(COMMANDS) and m not in COMMANDS_EXACT), "")
 
 
 def _resolve(user, proposal, source):
     divisions = list(work_orders.issuable(user))
     code = proposal.get("division", "")
     if code and code not in source:
-        return None, None, "ระบุกองผู้รับงานให้ชัดเจน"
+        return None, None, "โปรดระบุกองของผู้รับงานให้ชัดเจน"
     selected = [d for d in divisions if d.code == code or (not code and d.code in source)]
     if not selected and not code and len(divisions) == 1:
         selected = divisions
     recipient = proposal.get("recipient", "")
     if recipient == "ทั้งกอง":
         if recipient not in source or len(selected) != 1:
-            return None, None, "พิมพ์ชื่อกองที่ต้องการสั่งงานถึงทั้งกอง"
+            return None, None, "โปรดพิมพ์ชื่อกองที่จะสั่งงานถึงทั้งกอง"
         return selected[0], None, ""
     if not recipient or recipient not in source:
-        return None, None, "พิมพ์ชื่อผู้รับงาน หรือ ทั้งกอง ตามด้วยชื่อกอง"
+        return None, None, "โปรดกด เลือกผู้รับ หรือพิมพ์ ทั้งกอง ตามด้วยชื่อกอง"
     matches = []
     for division in selected or (divisions if not code else []):
-        for person in work_orders.members(division.pk):
+        for person in work_orders.recipients(division.pk):
             if (
                 recipient.casefold() in work_orders.name_of(person).casefold()
                 or recipient == person.username
@@ -119,9 +223,8 @@ def _resolve(user, proposal, source):
     if len(matches) == 1:
         return *matches[0], ""
     if matches:
-        choices = " / ".join(f"{work_orders.name_of(p)} {d.code}" for d, p in matches[:8])
-        return None, None, f"ชื่อนี้ตรงหลายคน พิมพ์ชื่อเต็มและกอง: {choices}"
-    return None, None, "ไม่พบผู้รับในกองที่คุณมีสิทธิ์สั่งงาน พิมพ์ชื่อเต็มหรือกองอีกครั้ง"
+        return None, None, "ชื่อนี้ตรงกับหลายคน โปรดกดเลือกผู้รับงานจากรายการ"
+    return None, None, "ไม่พบผู้รับในกองที่สั่งงานได้ โปรดกดเลือกผู้รับงานจากรายการ"
 
 
 def _local(messages, user):
@@ -130,13 +233,17 @@ def _local(messages, user):
     names = {
         work_orders.name_of(person)
         for division in divisions
-        for person in work_orders.members(division.pk)
+        for person in work_orders.recipients(division.pk)
     }
-    proposal = {"title": messages[0], "recipient": "", "division": "", "due": "", "urgent": False}
+    proposal = {
+        "title": task_text(messages)[: work_orders.TITLE_MAX],  # the rest is the detail
+        "recipient": "",
+        "division": "",
+        "due": "",
+        "urgent": False,
+    }
     today = timezone.localdate()
     for message in messages:
-        if message.startswith(("แก้งาน ", "แก้ชื่อ ", "เปลี่ยนงาน ")):
-            proposal["title"] = message.split(" ", 1)[1].strip()
         found = [name for name in names if name.casefold() in message.casefold()]
         if "ทั้งกอง" in message:
             proposal["recipient"] = "ทั้งกอง"
@@ -166,46 +273,113 @@ def _local(messages, user):
     return proposal
 
 
-def edit_buttons(turn):
-    return [
-        turn.button("เลือกผู้รับ", "staff_order_people", {"page": 1}),
-        *[
-            turn.button(label, "staff_order_value", {"command": label})
-            for label in ["วันนี้", "พรุ่งนี้", "ไม่กำหนดวัน", "ปกติ", "ด่วน"]
-        ],
+def people(turn, user, value):
+    """ADR 0042 Q1: a card of กอง and อื่นๆ, then of the chosen กอง's แอดมินกอง (or the other
+    แอดมินฝ่าย for อื่นๆ)."""
+    from operations.models import Role, RoleGrant
+
+    cancel = turn.button("ยกเลิก", "staff_order_cancel")
+    others = desk(user) if value.get("others") else None
+    division = None
+    if value.get("division"):
+        division = next((d for d in kongs(user) if d.pk == value["division"]), None)
+    if division is None and others is None:
+        buttons = [
+            turn.button(d.code, "staff_order_people", {"division": d.pk}) for d in kongs(user)
+        ]
+        if desk(user) is not None:
+            buttons.append(turn.button("อื่นๆ", "staff_order_people", {"others": 1}))
+        card(turn, "สั่งงาน", note="โปรดเลือกกองของผู้รับงาน", buttons=[*buttons, cancel], plain=True)
+        return
+    if others is not None:
+        heads = [
+            g.user
+            for g in RoleGrant.objects.filter(
+                role__in=[Role.DEPARTMENT_SUPERVISOR, Role.ADMIN],
+                revoked_at__isnull=True,
+                user__is_active=True,
+            )
+            .exclude(user=user)
+            .select_related("user__staff_profile")
+            .order_by("user__username")
+        ]
+        title, target, buttons = "เลือกแอดมินฝ่าย", others, []
+    else:
+        heads = [
+            g.user
+            for g in RoleGrant.objects.filter(
+                division=division,
+                role=Role.SUPERVISOR,
+                revoked_at__isnull=True,
+                user__is_active=True,
+            ).select_related("user__staff_profile")
+        ]
+        title, target = f"เลือกผู้รับงาน {division.code}", division
+        buttons = [
+            turn.button(
+                f"ทั้งกอง {division.code}",
+                "staff_order_value",
+                {"command": f"ทั้งกอง {division.code}"},
+            )
+        ]
+    buttons += [
+        turn.button(
+            who(person, target),
+            "staff_order_value",
+            {"command": f"เลือกผู้รับ {person.username} {target.code}"},
+        )
+        for person in dict.fromkeys(heads)
+    ]
+    buttons.append(turn.button("เลือกกองอื่น", "staff_order_people", {"page": 1}))
+    note = "" if len(buttons) > 2 or others is None else "ไม่มีแอดมินฝ่ายท่านอื่นในระบบ"
+    card(turn, title, note=note, buttons=[*buttons, cancel], plain=True)
+
+
+def ask_details(turn, again=False):
+    card(
+        turn,
+        "แก้ไขรายละเอียดงาน" if again else "รายละเอียดงาน",
+        note="โปรดระบุรายละเอียดงานที่จะสั่ง เช่น ตรวจนับมิเตอร์คงคลังและรายงานผล",
+        buttons=[turn.button("ยกเลิก", "staff_order_cancel")],
+    )
+
+
+def summary(turn, proposal, person, division):
+    due = proposal["due"]
+    today = timezone.localdate().isoformat()
+    picker = turn.button("เลือกวันกำหนดเสร็จ", "staff_order_value", {"command": "กำหนด"})
+    buttons = [
+        turn.button("ยืนยัน", CONFIRM),
+        {
+            "type": "datetimepicker",
+            "label": "เปลี่ยนวันกำหนดเสร็จ" if due else "เลือกวันกำหนดเสร็จ",
+            "data": picker[1],
+            "mode": "date",
+            "initial": due or today,
+            "min": today,
+        },
+    ]
+    if due:
+        buttons.append(turn.button("ไม่กำหนดวัน", "staff_order_value", {"command": "ไม่กำหนดวัน"}))
+    flip = "ปกติ" if proposal["urgent"] else "ด่วน"
+    buttons += [
+        turn.button(f"เปลี่ยนเป็น{flip}", "staff_order_value", {"command": flip}),
+        turn.button("แก้ไขรายละเอียด", "staff_order_edit"),
         turn.button("ยกเลิก", "staff_order_cancel"),
     ]
-
-
-def people(turn, user, value):
-    from django.core.paginator import Paginator
-
-    divisions = work_orders.issuable(user)
-    division = divisions.filter(pk=value.get("division")).first() if value.get("division") else None
-    query = work_orders.members(division.pk) if division else divisions.order_by("code")
-    rows = Paginator(query, 5).get_page(value.get("page", 1))
-    quick, lines = [], []
-    if division:
-        quick.append(
-            turn.button("ทั้งกอง", "staff_order_value", {"command": f"ทั้งกอง {division.code}"})
-        )
-    for row in rows:
-        if division:
-            lines.append(f"#{row.pk} {work_orders.name_of(row)}")
-            quick.append(
-                turn.button(
-                    f"{row.pk} {work_orders.name_of(row)}"[:20],
-                    "staff_order_value",
-                    {"command": f"เลือกผู้รับ {row.username} {division.code}"},
-                )
-            )
-        else:
-            quick.append(turn.button(row.code[:20], "staff_order_people", {"division": row.pk}))
-    for label, number in (("ย้อนกลับ", rows.number - 1), ("ถัดไป", rows.number + 1)):
-        if 1 <= number <= rows.paginator.num_pages:
-            quick.append(turn.button(label, "staff_order_people", {**value, "page": number}))
-    quick.append(turn.button("กลับร่าง", "staff_order_edit"))
-    turn.say(f"เลือกผู้รับ · หน้า {rows.number}/{rows.paginator.num_pages}\n" + "\n".join(lines), quick)
+    card(
+        turn,
+        "ตรวจสอบร่างคำสั่งงาน",
+        [
+            ("รายละเอียดงาน", proposal["title"]),
+            ("ผู้รับงาน", who(person, division) if person else f"ทั้งกอง {division.code}"),
+            ("กอง", f"{division.code} · {division.name}"),
+            ("กำหนดเสร็จ", units.thai_date(date.fromisoformat(due)) if due else "ไม่กำหนดวัน"),
+            ("ความเร่งด่วน", "ด่วน" if proposal["urgent"] else "ปกติ"),
+        ],
+        note="โปรดตรวจสอบแล้วกด ยืนยัน เพื่อออกคำสั่งงาน",
+        buttons=buttons,
+    )
 
 
 def handle(turn, user, command, token):
@@ -230,44 +404,52 @@ def handle(turn, user, command, token):
         return False
     if not work_orders.may_issue(user):
         turn.set_prompt()
-        turn.say("สิทธิ์สั่งงานเปลี่ยนแล้ว ติดต่อแอดมิน")
+        turn.say("สิทธิ์การสั่งงานของท่านเปลี่ยนแปลงแล้ว โปรดติดต่อแอดมินระบบ")
         return True
     if choice:
         if not active or token.value.get("prompt_revision") != turn.conversation.prompt_data.get(
             "prompt_revision"
         ):
-            turn.say("ปุ่มนี้เป็นฉบับเก่า ใช้ร่างล่าสุดแทน")
+            turn.say("ปุ่มนี้หมดอายุแล้ว โปรดใช้การ์ดล่าสุด")
             return True
         if token.action == "staff_order_people":
             people(turn, user, token.value)
             return True
         if token.action == "staff_order_edit":
-            data = dict(turn.conversation.prompt_data)
-            turn.set_prompt(PROMPT, **data)
-            turn.say("พิมพ์ แก้งาน ตามด้วยงานใหม่ หรือเลือกผู้รับ วัน และความเร่งด่วน", edit_buttons(turn))
+            turn.set_prompt(PROMPT, **{**turn.conversation.prompt_data, "editing": True})
+            ask_details(turn, again=True)
             return True
         command = (
             "ยกเลิก" if token.action == "staff_order_cancel" else token.value.get("command", "")
         )
+        if command == "กำหนด":  # LINE's date picker puts the day it chose in the event
+            picked = ((turn.event or {}).get("postback") or {}).get("params", {}).get("date", "")
+            if not picked:
+                return True
+            command = f"กำหนด {picked}"
     if confirm:
         if not active or token.value.get("prompt_revision") != turn.conversation.prompt_data.get(
             "prompt_revision"
         ):
-            turn.say("สรุปนี้เป็นฉบับเก่า ใช้ข้อความล่าสุดแทน")
+            turn.say("การ์ดสรุปนี้หมดอายุแล้ว โปรดใช้การ์ดล่าสุด")
             return True
         command = "ยืนยัน"
     data = dict(turn.conversation.prompt_data) if active else {"messages": []}
     if command in {"ยกเลิก", "ยกเลิกสั่งงาน"}:
         turn.set_prompt()
-        turn.say(
-            "ยกเลิกร่างคำสั่งงานแล้ว",
-            [turn.button("สั่งงานใหม่", "staff_ow_start"), turn.button("หน้าหลัก", "staff_menu")],
+        card(
+            turn,
+            "ยกเลิกคำสั่งงานแล้ว",
+            buttons=[
+                turn.button("สั่งงานใหม่", "staff_ow_start"),
+                turn.button("หน้าหลัก", "staff_menu"),
+            ],
         )
         return True
     if command == "ยืนยัน":
         proposal = data.get("proposal")
         if not proposal or not data.get("ready"):
-            turn.say("ยังไม่มีสรุปพร้อมยืนยัน พิมพ์งานและผู้รับก่อน")
+            turn.say("ยังไม่มีคำสั่งงานที่พร้อมยืนยัน โปรดระบุผู้รับงานและรายละเอียดงานก่อน")
             return True
         source = "\n".join(data["messages"])
         division, person, problem = _resolve(user, proposal, source)
@@ -280,39 +462,64 @@ def handle(turn, user, command, token):
                 proposal["title"],
                 division,
                 person,
-                detail=source,
+                detail=task_text(data["messages"]),
                 due_on=date.fromisoformat(proposal["due"]) if proposal["due"] else None,
                 urgent=proposal["urgent"],
                 channel=WorkOrder.Channel.LINE,
             )
         except (ValidationError, PermissionDenied, ValueError) as exc:
-            turn.say("; ".join(getattr(exc, "messages", ["สร้างงานไม่ได้ ตรวจผู้รับและวันที่อีกครั้ง"])))
+            turn.say(
+                "; ".join(
+                    getattr(
+                        exc,
+                        "messages",
+                        ["ไม่สามารถออกคำสั่งงานได้ โปรดตรวจสอบผู้รับงานและวันกำหนดเสร็จอีกครั้ง"],
+                    )
+                )
+            )
             return True
         turn.set_prompt()
-        turn.say(
-            f"สร้างงาน {order.number} แล้ว",
+        card(
+            turn,
+            "ออกคำสั่งงานเรียบร้อยแล้ว",
             [
-                turn.button(order.number, "staff_order", {"order": str(order.pk)}),
+                ("เลขที่งาน", order.number),
+                ("รายละเอียดงาน", order.title),
+                ("ผู้รับงาน", who(person, division) if person else f"ทั้งกอง {division.code}"),
+            ],
+            buttons=[
+                turn.button("ดูรายละเอียดงาน", "staff_order", {"order": str(order.pk)}),
                 turn.button("สั่งงานใหม่", "staff_ow_start"),
-                turn.button("งานที่ฉันสั่ง", "staff_list", {"kind": "issued"}),
+                turn.button("งานที่ท่านสั่ง", "staff_list", {"kind": "issued"}),
             ],
         )
         return True
     if not command:
         return False
+    if data.pop("editing", False) and not command.startswith(COMMANDS):
+        command = f"แก้งาน {command}"
     messages = [*data.get("messages", []), command[:2000]][-12:]
-    proposal = extract(messages) or _local(messages, user)
+    # ADR 0042 Q3: once the recipient came from a button, the typed details are the task.
+    picked = any(m.startswith(("เลือกผู้รับ ", "ทั้งกอง ")) for m in messages)
+    proposal = (None if picked else extract(messages)) or _local(messages, user)
     for message in reversed(messages):
         if message.startswith("เลือกผู้รับ "):
             _, recipient, code = message.split(" ", 2)
             proposal = {**proposal, "recipient": recipient, "division": code}
             break
+        if message.startswith("ทั้งกอง "):  # the button names the กอง
+            proposal = {**proposal, "recipient": "ทั้งกอง", "division": message.split(" ", 1)[1]}
+            break
         if message.startswith("เปลี่ยนผู้รับ ") or "ทั้งกอง" in message:
             break
     source = "\n".join(messages)
     division, person, problem = _resolve(user, proposal, source)
-    if not proposal["title"] or len(proposal["title"]) > work_orders.TITLE_MAX:
-        problem = "พิมพ์สรุปงานไม่เกิน 200 ตัวอักษร"
+    if not proposal["title"] and not problem:
+        turn.set_prompt(PROMPT, messages=messages, proposal=proposal, ready=False)
+        ask_details(turn)
+        return True
+    if len(proposal["title"]) > work_orders.TITLE_MAX:
+        problem = "โปรดสรุปงานไม่เกิน 200 ตัวอักษร"
     date_mentions = [
         m
         for m in messages
@@ -324,28 +531,24 @@ def handle(turn, user, command, token):
     ]
     if not proposal["due"] and date_mentions:
         if not re.search(r"ไม่กำหนด|ไม่ระบุวัน", date_mentions[-1]):
-            problem = "ยังอ่านวันกำหนดไม่ชัด พิมพ์วันที่แบบ 2026-10-20 หรือ ไม่กำหนดวัน"
+            problem = "ระบบยังอ่านวันกำหนดไม่ได้ โปรดพิมพ์วันที่ เช่น 2026-10-20 หรือ ไม่กำหนดวัน"
     if proposal["due"]:
         try:
             if date.fromisoformat(proposal["due"]) < timezone.localdate():
-                problem = "วันกำหนดผ่านไปแล้ว พิมพ์วันใหม่"
+                problem = "วันกำหนดเสร็จผ่านไปแล้ว โปรดระบุวันใหม่"
         except ValueError:
-            problem = "พิมพ์วันกำหนดให้ชัด เช่น 2026-10-20"
+            problem = "โปรดระบุวันกำหนดเสร็จให้ชัดเจน เช่น 2026-10-20"
     turn.set_prompt(PROMPT, messages=messages, proposal=proposal, ready=not problem)
     if problem:
-        turn.say(problem, edit_buttons(turn))
+        card(
+            turn,
+            "ข้อมูลคำสั่งงานยังไม่ครบถ้วน",
+            note=problem,
+            buttons=[
+                turn.button("เลือกผู้รับ", "staff_order_people", {"page": 1}),
+                turn.button("ยกเลิก", "staff_order_cancel"),
+            ],
+        )
         return True
-    turn.say(
-        f"ตรวจก่อนสั่งงาน\nให้ทำ: {proposal['title']}\nถึง: "
-        f"{work_orders.name_of(person) if person else 'ทั้งกอง'} · {division.code}\n"
-        f"กำหนด: {proposal['due'] or 'ไม่กำหนดวัน'}\n"
-        f"ความเร่งด่วน: {'ด่วน' if proposal['urgent'] else 'ปกติ'}\n"
-        "ตอบ ยืนยัน เพื่อสั่งงาน หรือพิมพ์แก้ไข / ยกเลิก\n"
-        "เช่น แก้งาน ตรวจตู้มิเตอร์ / เปลี่ยนผู้รับ ชื่อเต็ม / ไม่กำหนดวัน / ปกติ",
-        [
-            turn.button("ยืนยัน", CONFIRM),
-            turn.button("แก้ร่าง", "staff_order_edit"),
-            turn.button("ยกเลิก", "staff_order_cancel"),
-        ],
-    )
+    summary(turn, proposal, person, division)
     return True

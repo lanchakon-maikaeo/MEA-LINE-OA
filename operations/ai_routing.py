@@ -593,7 +593,7 @@ def request_eval(actor):
         or versions.order_by("-number").first()
     )
     if version is None:
-        raise ValidationError("ยังไม่มีรุ่น AI ส่งกอง แอดมินผู้พัฒนาต้องสร้างรุ่นในหน้า AI ก่อน")
+        raise ValidationError("ยังไม่มีรุ่น AI ส่งกอง แอดมินระบบต้องสร้างรุ่นในหน้า AI ก่อน")
     try:
         with transaction.atomic():
             job = AIEvalJob.objects.create(version=version, requested_by=actor)
