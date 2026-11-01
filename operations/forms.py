@@ -27,7 +27,7 @@ class StaffCreateForm(forms.Form):
 class GrantRoleForm(forms.Form):
     role = forms.ChoiceField(label="บทบาท")
     division = forms.ModelChoiceField(
-        label="กอง (เว้นว่างสำหรับบทบาทระดับระบบและ Supervisor ระดับฝ่าย)",
+        label="กอง (เว้นว่างสำหรับบทบาทระดับระบบและ แอดมินฝ่าย)",
         queryset=Division.objects.filter(is_active=True),
         required=False,
     )

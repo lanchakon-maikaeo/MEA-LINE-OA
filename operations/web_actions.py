@@ -194,7 +194,7 @@ class Situation:
     sections: list = field(default_factory=list)  # the owner division's active แผนก
     overseen: frozenset = frozenset()  # divisions this viewer supervises (16 Oct 2569 Q5)
     admin: bool = False  # ADR 0030: admins send cases to divisions and answer what they hold
-    department: bool = False  # ADR 0039: a Supervisor ระดับฝ่าย sends the admins' cases too
+    department: bool = False  # ADR 0039: a แอดมินฝ่าย sends the admins' cases too
 
     def member(self, division_id, roles=None):
         if self.support:

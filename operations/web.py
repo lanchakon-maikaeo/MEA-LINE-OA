@@ -315,7 +315,7 @@ def _queue(request, division, admin_all=False):
 
 
 def _members(division):
-    """One row per person (16 Oct 2569 Q3): Supervisor ของกอง or สมาชิกกอง, or each duty when
+    """One row per person (16 Oct 2569 Q3): แอดมินกอง or สมาชิกกอง, or each duty when
     the organisation splits the division's work."""
     grants = (
         RoleGrant.objects.filter(division=division, revoked_at__isnull=True, user__is_active=True)

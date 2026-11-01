@@ -248,18 +248,34 @@ class StaffMenuTests(MenuTestCase):
                             "ติดตามเลขเรื่อง",
                         ],
                     )
-                elif page == "sup-work":
+                elif page.endswith("-work"):
+                    # 1 Nov 2569: one work page; Broadcast is the extra tile of แอดมินกอง/ฝ่าย.
                     self.assertEqual(nav[0]["data"], "m=staff_inbox")
                     self.assertEqual(nav[-1]["data"], "m=roles")
+                    extra = ["Broadcast"] if page == "sup-work" else []
                     self.assertEqual(
                         [box["label"] for box in drawing[page][2:]],
-                        ["งานสั่งที่ได้รับ", "Broadcast", "เมนูเพิ่มเติม"],
+                        ["งานสั่งที่ได้รับ", *extra, "เมนูเพิ่มเติม"],
                     )
                 else:
                     self.assertEqual(len(nav), 4)
                     self.assertEqual(nav[-1]["data"], "m=roles")
                 if page.startswith(("staff-", "sup-")):
                     self.assertEqual(drawing[page][0]["label"], "บริการ")
+                    self.assertEqual(drawing[page][1]["label"], "งานของกอง/ฝ่าย")
+
+    def test_the_work_tab_follows_admin_roles(self):
+        # 1 Nov 2569: แอดมินกอง/ฝ่าย get the tab with Broadcast, the system's admins get it
+        # without Broadcast, and สมาชิกกอง keep everyone's menu.
+        people = {
+            "user": make_staff("tabmember", (Role.STAFF, "กองอุปกรณ์ฯ")),
+            "sup-report": make_staff("tabhead", (Role.SUPERVISOR, "กองอุปกรณ์ฯ")),
+            "staff-report": make_staff("tabadmin", (Role.ADMIN, None)),
+        }
+        for page, user in people.items():
+            with self.subTest(page=page):
+                line = ChannelIdentity(channel="line", external_id="U" + "a" * 32, staff_user=user)
+                self.assertEqual(line_menu.page_for_identity(line), page)
 
     @override_settings(LINE_CHANNEL_ACCESS_TOKEN="test-token")
     def test_a_staff_line_follows_its_role(self):

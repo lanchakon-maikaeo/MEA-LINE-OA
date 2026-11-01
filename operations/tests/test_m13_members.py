@@ -1,6 +1,6 @@
 """สมาชิกกองกับ Supervisor (16 ต.ค. 2569 Q3–Q5): with ตัวเลือก "หน้าที่ในกอง" = member every
 member does every step and holds the division's authority; the old duties merge into สมาชิกกอง;
-a Supervisor ของกอง assigns work in that division and a Supervisor ระดับฝ่าย in every division.
+a แอดมินกอง assigns work in that division and a แอดมินฝ่าย in every division.
 """
 
 import importlib
@@ -106,7 +106,7 @@ class MemberTests(MemberTestCase):
         members = page.context["members"]
         self.assertEqual(
             sorted((m["name"], m["label"]) for m in members),
-            [("Head", "Supervisor ของกอง"), ("Kcw", "สมาชิกกอง"), ("Kcw2", "สมาชิกกอง")],
+            [("Head", "แอดมินกอง"), ("Kcw", "สมาชิกกอง"), ("Kcw2", "สมาชิกกอง")],
         )
 
 

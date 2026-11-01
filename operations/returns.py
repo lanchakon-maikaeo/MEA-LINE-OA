@@ -679,7 +679,7 @@ def _still_conflicting(case, unit):
 def terminate_return(ctx, case, payload, reason, target):
     """ยุติส่วนค้างส่งคืน by the owner division's supervisor; lost needs a registry document."""
     if ctx.requester is not None:
-        fail(ErrorCode.FORBIDDEN, "เฉพาะ Supervisor ของกองเจ้าภาพยุติส่วนค้างส่งคืน (Q11)")
+        fail(ErrorCode.FORBIDDEN, "เฉพาะ แอดมินกองเจ้าภาพยุติส่วนค้างส่งคืน (Q11)")
     lines = _lines(case)
     raw = payload.get("lines")
     if not isinstance(raw, list) or not raw:
@@ -689,7 +689,7 @@ def terminate_return(ctx, case, payload, reason, target):
         ctx,
         case,
         Role.SUPERVISOR,
-        "เฉพาะ Supervisor ของกองเจ้าภาพยุติส่วนค้างส่งคืน (Q11)",
+        "เฉพาะ แอดมินกองเจ้าภาพยุติส่วนค้างส่งคืน (Q11)",
         [line for line, _ in chosen],
     )
     category = payload.get("category")

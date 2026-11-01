@@ -23,6 +23,7 @@ dev = [
     "playwright>=1.50,<2",
     "pip-audit>=2.9,<3",
     "detect-secrets>=1.5,<2",
+    "tblib>=3,<4",
 ]
 
 [tool.uv]

@@ -25,7 +25,7 @@ EDITABLE = {S.DRAFT, S.PAUSED, S.SCHEDULED, S.QUEUED, S.HELD}
 def require_supervisor(user):
     scope = identity.staff_scope(user)
     if not scope.overseen and not scope.is_department_supervisor:
-        raise PermissionDenied("การประกาศสงวนสิทธิ์สำหรับ Supervisor เท่านั้น")
+        raise PermissionDenied("การประกาศสงวนสิทธิ์สำหรับแอดมินกองและแอดมินฝ่ายเท่านั้น")
     return scope
 
 

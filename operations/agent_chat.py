@@ -146,7 +146,7 @@ def capabilities(context):
     if "งานของกอง" in commands:
         services.append("ดูงานของกอง")
     if any(command.startswith("สั่งงาน ") for command in commands):
-        services.append("สั่งงานตามสิทธิ์ Supervisor")
+        services.append("สั่งงานตามสิทธิ์แอดมินฝ่าย")
     if "แอดมิน" in commands:
         services.append("ตรวจคำขอลงทะเบียนและจัดการสิทธิ์ผู้ใช้")
     return (

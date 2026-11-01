@@ -53,7 +53,7 @@ class MCPTests(AgentTestCase):
         self.assertEqual(run.status, AIRun.Status.ANSWERED)
         self.assertIn("เบิกและส่งคืนอุปกรณ์", texts(reply))
         self.assertIn("ดูงานของกอง", texts(reply))
-        self.assertNotIn("สั่งงานตามสิทธิ์ Supervisor", texts(reply))
+        self.assertNotIn("สั่งงานตามสิทธิ์แอดมินฝ่าย", texts(reply))
         self.assertNotIn("ตรวจคำสั่งก่อนดำเนินการ", texts(reply))
         self.assertNotIn("ยืนยัน", buttons(reply))
         self.assertFalse(Case.objects.exists())

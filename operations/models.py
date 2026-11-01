@@ -130,7 +130,7 @@ class Role(models.TextChoices):
     # separation of duties; granted only on the host (manage.py system_support).
     SYSTEM_SUPPORT = "system_support", "ผู้ช่วยเหลือระบบ"
     # 16 Oct 2569 (Q5): oversees every division (ผอ. ฝอจ. at first); assigns work anywhere.
-    DEPARTMENT_SUPERVISOR = "department_supervisor", "Supervisor ระดับฝ่าย"
+    DEPARTMENT_SUPERVISOR = "department_supervisor", "แอดมินฝ่าย"
     # Division roles. With ตัวเลือก "หน้าที่ในกอง" = member (16 Oct 2569 Q3) every member does
     # every step and holds the division's authority; the duties below matter only when the
     # organisation splits them again.
@@ -140,7 +140,7 @@ class Role(models.TextChoices):
     RECEIVER = "receiver", "ผู้รับคืน"
     INSPECTOR = "inspector", "ผู้ตรวจสภาพ"
     RESOLVER = "resolver", "ผู้แก้ปัญหา"
-    SUPERVISOR = "supervisor", "Supervisor ของกอง"
+    SUPERVISOR = "supervisor", "แอดมินกอง"
     # ADR 0039: sees what a Supervisor of the scope sees and does nothing.
     DIVISION_VIEWER = "division_viewer", "ผู้ดูข้อมูลของกอง"
     DEPARTMENT_VIEWER = "department_viewer", "ผู้ดูข้อมูลระดับฝ่าย"
@@ -2295,7 +2295,7 @@ class DeadlinePause(models.Model):
 
     class Kind(models.TextChoices):
         AWAITING_INFO = "awaiting_info", "รอข้อมูลจากหน่วยงาน (เขต/ฝ่าย)"
-        SUPERVISOR = "supervisor", "Supervisor อนุมัติพัก"
+        SUPERVISOR = "supervisor", "แอดมินกองอนุมัติพัก"
 
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="deadline_pauses")
     kind = models.CharField(max_length=16, choices=Kind.choices)

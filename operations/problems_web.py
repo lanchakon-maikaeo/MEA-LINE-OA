@@ -13,7 +13,7 @@ ADR 0030 (28 Oct 2569): the page is a tab after คิวงาน for admins. I
 cases nobody picked a division for (ปัญหาการใช้งานหรืออื่นๆ); admins tick cases, or every case
 the filters match, and send them to one division with one reason after confirming the count.
 
-ADR 0039 (31 Oct 2569): a Supervisor ระดับฝ่าย opens the page and sends as admins do; a
+ADR 0039 (31 Oct 2569): a แอดมินฝ่าย opens the page and sends as admins do; a
 ผู้ดูข้อมูลระดับฝ่าย only reads it. The CSV carries every row the filters match and what the
 page shows, with the full text; an anonymous reporter is still only their รหัสแทนตัว.
 """
@@ -65,7 +65,7 @@ HEADER = (
 
 
 def _department_required(may_send=False):
-    """ADR 0039: ฝ่าย reads the page; admins and Supervisor ระดับฝ่าย also send."""
+    """ADR 0039: ฝ่าย reads the page; admins and แอดมินฝ่าย also send."""
 
     def decorate(view):
         @login_required

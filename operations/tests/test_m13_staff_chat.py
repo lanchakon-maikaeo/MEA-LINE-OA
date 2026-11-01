@@ -88,8 +88,25 @@ class WorkTabTests(StaffChatTestCase):
 
         RoleGrant.objects.filter(user=self.head).update(revoked_at=timezone.now())
         reply = self.say(self.postback(ALICE, "m=broadcast"))
-        self.assertIn("สงวนสิทธิ์สำหรับ Supervisor", texts(reply))
+        self.assertIn("สงวนสิทธิ์สำหรับแอดมินกองและแอดมินฝ่าย", texts(reply))
         self.assertNotIn("เปิด Broadcast", buttons(reply))
+
+    def test_every_admin_opens_the_inbox_and_members_do_not(self):
+        # 1 Nov 2569: the system's admins read every กอง there; สมาชิกกอง have no work tab.
+        self.link(self.admin, ALICE)
+        order = work_orders.create(self.director, "งานที่แอดมินระบบเห็น", self.kae)
+        reply = self.say(self.postback(ALICE, "m=staff_inbox"))
+        self.assertIn(order.number, texts(reply))
+        self.assertIn("เลือกกอง/ศูนย์", buttons(reply))
+        member = make_staff("kaemember", (Role.STAFF, "กองอุปกรณ์ฯ"))
+        self.link(member, BOB)
+        reply = self.say(self.postback(BOB, "m=staff_inbox"))
+        self.assertIn("สงวนสิทธิ์สำหรับแอดมิน", texts(reply))
+
+    def test_more_menu_offers_nothing_but_orders_of_the_department_admin(self):
+        self.link(self.head, ALICE)
+        reply = self.say(self.postback(ALICE, "m=roles"))
+        self.assertIn("ไม่มีเมนูเพิ่มเติมในขณะนี้", texts(reply))
 
     def test_new_received_tile_opens_scoped_inbox(self):
         self.link(self.head, ALICE)
@@ -153,7 +170,7 @@ class OrderTabTests(StaffChatTestCase):
     def test_the_order_tab_is_for_supervisors_only(self):
         member = make_staff("kaemember", (Role.STAFF, "กองอุปกรณ์ฯ"))
         self.link(member, ALICE)
-        self.assertIn("Supervisor ระดับฝ่ายเท่านั้น", texts(self.tile(A.ORDER_NEW)))
+        self.assertIn("แอดมินฝ่ายเท่านั้น", texts(self.tile(A.ORDER_NEW)))
 
     def test_more_menu_contains_only_order_for_department_supervisor(self):
         self.link(self.director, ALICE)
@@ -166,7 +183,7 @@ class OrderTabTests(StaffChatTestCase):
         self.link(self.head, ALICE)
         self.assertEqual(buttons(self.say(self.postback(ALICE, "m=roles"))), {})
         for reply in (self.tile(A.ORDER_NEW), self.type(ALICE, "สั่งงาน")):
-            self.assertIn("Supervisor ระดับฝ่ายเท่านั้น", texts(reply))
+            self.assertIn("แอดมินฝ่ายเท่านั้น", texts(reply))
         self.type(ALICE, "ให้ทั้งกอง กองอุปกรณ์ฯ ตรวจมิเตอร์")
         self.type(ALICE, "ยืนยัน")
         self.assertFalse(WorkOrder.objects.exists())

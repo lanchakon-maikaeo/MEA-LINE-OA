@@ -301,7 +301,7 @@ def line_people(division, work, assignee=None, section=None, with_reasons=False)
         ).select_related("user__staff_profile")
         if has_line(g.user)
     ]
-    found = [(u, f"Supervisor ของ {short(division)} (ยังไม่ได้เลือกผู้รับแจ้ง)") for u in heads]
+    found = [(u, f"แอดมินของ {short(division)} (ยังไม่ได้เลือกผู้รับแจ้ง)") for u in heads]
     return (found if with_reasons else heads) or None
 
 
@@ -322,7 +322,7 @@ def preview(division, kind, group, today=None):
             .distinct()
             if has_line(g.user)
         ]
-        people = [(u, f"ทุกคนใน {short(division)} ที่ผูก LINE (ไม่มี Supervisor)") for u in everyone]
+        people = [(u, f"ทุกคนใน {short(division)} ที่ผูก LINE (ไม่มีแอดมินกอง)") for u in everyone]
     return {
         "work": work,
         "unit": unit,

@@ -28,7 +28,7 @@
   <div class="org-card__block">
     <h3 class="org-card__h">ผู้รับแจ้งเรื่องสำคัญ</h3>
     {% if c.receivers %}<p>{{ c.receivers|join:", " }}</p>
-    {% else %}<p class="muted">{% if c.unit.section or c.unit.group %}ไม่ได้เลือก จึงใช้ของหน่วยที่ใหญ่กว่า{% else %}ไม่ได้เลือก จึงส่งหา Supervisor ของกอง{% endif %}</p>{% endif %}
+    {% else %}<p class="muted">{% if c.unit.section or c.unit.group %}ไม่ได้เลือก จึงใช้ของหน่วยที่ใหญ่กว่า{% else %}ไม่ได้เลือก จึงส่งหา แอดมินกอง{% endif %}</p>{% endif %}
   </div>
 
   {% if c.koj %}<div class="org-card__block">

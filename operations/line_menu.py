@@ -39,12 +39,12 @@ PAGES = (
 )
 PAGE_TITLES = {
     "user": "ทุกคน",
-    "employee-report": "เจ้าหน้าที่ · บริการ",
-    "staff-report": "เจ้าหน้าที่ · บริการ",
-    "staff-work": "เจ้าหน้าที่ · งานของกอง",
-    "sup-report": "Supervisor · บริการ",
-    "sup-work": "Supervisor · งานของกอง/ฝ่าย",
-    "sup-order": "Supervisor · สั่งงาน",
+    "employee-report": "พนักงาน · บริการ",
+    "staff-report": "แอดมินระบบ · บริการ",
+    "staff-work": "แอดมินระบบ · งานของกอง/ฝ่าย",
+    "sup-report": "แอดมินกอง/ฝ่าย · บริการ",
+    "sup-work": "แอดมินกอง/ฝ่าย · งานของกอง/ฝ่าย",
+    "sup-order": "แอดมินกอง/ฝ่าย · สั่งงาน",
 }
 logger = logging.getLogger(__name__)
 
@@ -117,16 +117,18 @@ def areas(page="user"):
     if is_service_page:
         top = [{"item": item} for item in tiles(T.REPORT)]
         bottom = [{"item": item} for item in bar(T.REPORT)]
-    elif page == "sup-work":
-        url = broadcast_url()
-        top = [
-            {"item": None, "label": "งานสั่งที่ได้รับ", "postback": "m=staff_inbox"},
-            {
-                "item": None,
-                "label": "Broadcast",
-                **({"uri": url} if url else {"postback": "m=broadcast"}),
-            },
-        ]
+    elif tab == T.WORK:
+        # 1 Nov 2569: one work page for every admin; only แอดมินกอง/ฝ่าย add the Broadcast tile.
+        top = [{"item": None, "label": "งานสั่งที่ได้รับ", "postback": "m=staff_inbox"}]
+        if role == "sup":
+            url = broadcast_url()
+            top.append(
+                {
+                    "item": None,
+                    "label": "Broadcast",
+                    **({"uri": url} if url else {"postback": "m=broadcast"}),
+                }
+            )
         bottom = [{"item": None, "label": "เมนูเพิ่มเติม", "postback": "m=roles", "place": "bar"}]
     else:
         top = [{"item": item} for item in tiles(tab)[:3]]
@@ -147,8 +149,8 @@ def areas(page="user"):
                 "h": top_h,
             }
         )
-    if is_service_page or page == "sup-work":
-        columns = 2 if page == "sup-work" else 3
+    if is_service_page or tab == T.WORK:
+        columns = 3 if is_service_page else 2
         rows = [top[i : i + columns] for i in range(0, len(top), columns)]
         grid_h = tile_h - (BAR if bottom else 0)
         for r, row in enumerate(rows):
@@ -242,7 +244,7 @@ def drawing():
                 label, note, place = a["label"], "", a.get("place", "tile")
             elif a["item"] is None:
                 label = "บริการ" if a["tab"] == T.REPORT else T(a["tab"]).label
-                if a["role"] == "sup" and a["tab"] == T.WORK:
+                if a["tab"] == T.WORK:
                     label = "งานของกอง/ฝ่าย"
                 note, place = "", "tab"
             else:
@@ -274,13 +276,19 @@ def _picture(data):
 
 
 def staff_page(user):
-    """The service grid is the default; staff can switch to work and order tabs when needed."""
+    """The service grid is the default; admins switch to the work tab when needed."""
     return "sup-report" if identity.staff_scope(user).overseen else "staff-report"
+
+
+def has_work_tab(user):
+    """1 Nov 2569: แอดมินกอง/ฝ่าย and the system's admins get the work tab; สมาชิกกอง do not."""
+    scope = identity.staff_scope(user)
+    return bool(scope.overseen) or scope.is_admin or scope.is_support
 
 
 def page_for_identity(row):
     user = row.staff_user
-    if user and user.is_active and identity.staff_scope(user).has_any_access:
+    if user and user.is_active and has_work_tab(user):
         return staff_page(user)
     requester = row.requester
     if (
