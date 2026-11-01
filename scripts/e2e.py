@@ -28,10 +28,14 @@ REAL_SETUP = (
     "division = Division.objects.get(code='กคว.')\n"
     "RoleGrant.objects.get_or_create(user=actor, role=Role.SUPERVISOR,\n"
     "    division=division, revoked_at=None)\n"
+    "# ADR 0040: only a department supervisor issues work orders.\n"
+    "issuer = get_user_model().objects.get_or_create(username='e2e-dept')[0]\n"
+    "RoleGrant.objects.get_or_create(user=issuer, role=Role.DEPARTMENT_SUPERVISOR,\n"
+    "    division=None, revoked_at=None)\n"
     "for channel in WorkOrder.Channel.values:\n"
     "    title = 'E2E queue ' + channel\n"
-    "    if not WorkOrder.objects.filter(issued_by=actor, title=title).exists():\n"
-    "        work_orders.create(actor, title, division, actor, urgent=True, channel=channel)\n"
+    "    if not WorkOrder.objects.filter(issued_by=issuer, title=title).exists():\n"
+    "        work_orders.create(issuer, title, division, actor, urgent=True, channel=channel)\n"
 )
 # The SIM-* journeys walk screening and the stock work, which ADR 0025 and ADR 0032 keep in the
 # code behind options (default off); the real-structure journeys run with the defaults. The
@@ -433,9 +437,8 @@ with Path("reports/e2e-server.log").open("w") as log:
             # M10: skip link first, then the brand, then the staff sign-in button.
             page.keyboard.press("Tab")
             assert page.locator(":focus").get_attribute("href") == "#main"
-            page.get_by_role("link", name="สถานะเว็บ").focus()
-            page.keyboard.press("Enter")
-            page.wait_for_url("**/health/live/")
+            # 31 Oct: the home page is the sign-in card and no longer links the health pages.
+            page.goto(base_url + "/health/live/")
             assert page.request.get(base_url + "/health/ready/").json() == {"status": "ok"}
             page.screenshot(path="reports/e2e-health.png")
 
@@ -471,7 +474,7 @@ with Path("reports/e2e-server.log").open("w") as log:
             real_structure(browser, base_url, env["E2E_PASSWORD"])
             mixed_queue(browser, base_url, env["E2E_PASSWORD"])
             browser.close()
-        print("PASS Chromium: Thai landing, keyboard link, database readiness")
+        print("PASS Chromium: Thai landing, skip link, web and database health")
         print("PASS Chromium: keyboard login, own-division scope, admin denied, logout")
         print("PASS Chromium: M10 withdrawal partly issued (old stock on: approve, issue)")
         print("PASS Chromium: M10 return waiting for inspection (receive on the case page)")
