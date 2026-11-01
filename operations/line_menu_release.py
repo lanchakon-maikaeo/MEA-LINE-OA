@@ -71,7 +71,9 @@ def _allowed_menu_ids(release, page):
     role = page.partition("-")[0]
     tabs = line_menu.ROLE_TABS.get(role)
     pages = [f"{role}-{tab}" for tab in tabs] if tabs else [page]
-    return {release.menus[p] for p in pages if p in release.menus}
+    allowed = {release.menus[p] for p in pages if p in release.menus}
+    # Everyone's menu is the default, so no own link shows it too (relink deletes that link).
+    return (allowed | {None}) if page == "user" else allowed
 
 
 def _links_match(release, people):

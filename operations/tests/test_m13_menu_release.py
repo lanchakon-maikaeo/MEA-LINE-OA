@@ -142,6 +142,16 @@ class ReleaseTests(TestCase):
         self.assertIn(("/v2/bot/richmenu/old-menu", "DELETE"), self.calls)
         self.assertFalse(ChannelIdentity.objects.get(external_id="test-viewer").is_following)
 
+    def test_everyones_menu_is_the_default_so_no_own_link_is_needed(self):
+        # 1 Nov 2569: LINE kept no own link for one pending account (404 after every accepted
+        # link), which held releases 6-8 partial though the default already showed its menu.
+        with patch.object(line_api, "call", side_effect=self.api):
+            line_menu.publish(None, self.images, "verify")
+        release = LineMenuRelease.objects.get()
+        self.assertEqual(release.status, "complete")
+        self.assertNotIn("test-viewer", self.links)
+        self.assertIn((f"/v2/bot/user/all/richmenu/{release.menus['user']}", "POST"), self.calls)
+
     def test_guest_image_matches_guest_actions_and_every_image_fits(self):
         labels = [a["action"]["displayText"] for a in line_menu.rich_menu("user")["areas"]]
         self.assertEqual(
