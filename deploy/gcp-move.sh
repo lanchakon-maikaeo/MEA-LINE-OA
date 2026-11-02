@@ -16,6 +16,7 @@
 # Phase 2 (needs `deploy/e5-move.sh tunnel` access; E5 runs GCP's checks in one-off containers):
 #   deploy/gcp-move.sh escrow-check   hashes of the keys the data needs, to compare with the
 #                                     owner's password manager
+#   deploy/gcp-move.sh escrow-copy KEY  that key from E5 onto this Mac's clipboard (owner runs it)
 #   deploy/gcp-move.sh dry-run        E5's data into a throwaway database on GCP, deep compare
 #   deploy/gcp-move.sh move           the move itself (5-move.md); asks YES before E5 stops
 #   deploy/gcp-move.sh back-to-e5     undo a move that stopped before GCP opened
@@ -252,6 +253,23 @@ for pair in app.secret.env:AI_SECRET_KEY app.secret.env:PII_SECRET_KEY app.secre
   printf '%-30s %s\n' "$k" "$( [ -n "$v" ] && printf %s "$v" | sha256sum | cut -c1-16 || echo EMPTY)"
 done
 EOF
+}
+
+# One key from E5 straight onto this Mac's clipboard for the owner's password manager: never on
+# the screen, in a file or in the chat. E5 is only read. The owner runs this, not the assistant.
+escrow_copy() {
+  local key=${1:-} file
+  case "$key" in
+    AI_SECRET_KEY|PII_SECRET_KEY|DJANGO_SECRET_KEY) file=app.secret.env;;
+    PGBACKREST_REPO1_CIPHER_PASS) file=db.secret.env;;
+    RESTIC_PASSWORD) file=backup.secret.env;;
+    *) die "escrow-copy AI_SECRET_KEY|PII_SECRET_KEY|DJANGO_SECRET_KEY|PGBACKREST_REPO1_CIPHER_PASS|RESTIC_PASSWORD";;
+  esac
+  { echo "K=$key F=$file"; lib <<'EOF'; } | e5_root | tr -d '\n' | pbcopy
+grep "^$K=" "/srv/faoj/env/$F" | tail -1 | cut -d= -f2- | tr -d '\n'
+EOF
+  [ -n "$(pbpaste)" ] || die "$key is empty on E5"
+  say "$key is on the clipboard ($(pbpaste | shasum -a 256 | cut -c1-16)): paste it into the password manager, then copy something else"
 }
 
 e5_manifest() {  # $1 local file
@@ -580,11 +598,12 @@ case "$cmd" in
   deploy) deploy "$@";;
   status) status;;
   escrow-check) tunnels; escrow_check;;
+  escrow-copy) tunnels; escrow_copy "$@";;
   dry-run) dry_run;;
   move) move;;
   back-to-e5) back_to_e5;;
   reverse-move) reverse_move;;
   ssh) if [ $# -gt 0 ]; then on_gcp "$@"; else
          exec gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --ssh-key-file "$KEY"; fi;;
-  *) sed -n '2,26p' "$0"; exit 2;;
+  *) sed -n '2,27p' "$0"; exit 2;;
 esac
