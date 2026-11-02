@@ -22,7 +22,10 @@ perm=$(stat -f %Lp "$CONFIG" 2>/dev/null || stat -c %a "$CONFIG")
 : "${S3_ENDPOINT:?}" "${S3_REGION:?}" "${S3_KEY:?}" "${S3_SECRET:?}" "${DEST:?}"
 SOURCE_ENV=${SOURCE_ENV:-production}
 # A launchd job may not write into OneDrive (macOS privacy): say so instead of failing quietly.
-if ! mkdir -p "$DEST/pgbackrest" "$DEST/restic" 2>/dev/null; then
+# sync deletes what the source lacks: each pgBackRest path gets its own folder, so moving to a new
+# stanza (production-gcp, 2 Nov 2026) never wipes the copy of the old one.
+PGB_DEST="$DEST/pgbackrest${SOURCE_REPO_PATH:+-$(basename "$SOURCE_REPO_PATH")}"
+if ! mkdir -p "$PGB_DEST" "$DEST/restic" 2>/dev/null; then
   osascript -e 'display notification "macOS ไม่ให้งานเบื้องหลังเขียนลง OneDrive รัน make backup-pull ใน Terminal แทน" with title "สำเนา backup รายสัปดาห์ ฝอจ."' >/dev/null 2>&1 || true
   echo "cannot write $DEST from here: run 'make backup-pull' in Terminal" >&2
   exit 1
@@ -37,7 +40,7 @@ run() {  # bucket/path → local folder; sync = an exact copy, older versions ar
     -v "$2:/dest" "$RCLONE" sync "oci:$1" /dest --fast-list --transfers 2 --stats-one-line -v 2>&1 | tail -n 3
 }
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-run "faoj-backup${SOURCE_REPO_PATH:-/pgbackrest/$SOURCE_ENV}" "$DEST/pgbackrest"
+run "faoj-backup${SOURCE_REPO_PATH:-/pgbackrest/$SOURCE_ENV}" "$PGB_DEST"
 run "faoj-files/$SOURCE_ENV" "$DEST/restic"
 printf '{"pulled_at": "%s", "source_env": "%s"}\n' "$started" "$SOURCE_ENV" > "$DEST/last-pull.json"
 echo "backup-pull done: $DEST"

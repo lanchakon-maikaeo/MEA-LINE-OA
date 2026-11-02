@@ -5,7 +5,7 @@
 # page (503) is planned work, never an alert. Switching to the standby stays a person's call.
 #
 # Config (optional) ~/.config/faoj/health.env, mode 600:
-#   STAFF_URL=https://168-107-70-170.sslip.io/health/ready/
+#   STAFF_URL=https://34-15-129-131.sslip.io/health/ready/
 #   WEBHOOK_URL=https://crabmeat-lake-lunar.ngrok-free.dev/webhooks/line
 #   TEAMS_WEBHOOK_URL=        (an incoming-webhook URL of the Teams channel; empty = Mac only)
 #   ALERT_AFTER=3
@@ -15,7 +15,7 @@ STATE=${FAOJ_HEALTH_STATE:-$HOME/.config/faoj/health}
 mkdir -p "$STATE"
 # shellcheck disable=SC1090
 [ -r "$CONFIG" ] && . "$CONFIG"
-STAFF_URL=${STAFF_URL:-https://168-107-70-170.sslip.io/health/ready/}
+STAFF_URL=${STAFF_URL:-https://34-15-129-131.sslip.io/health/ready/}
 WEBHOOK_URL=${WEBHOOK_URL:-https://crabmeat-lake-lunar.ngrok-free.dev/webhooks/line}
 ALERT_AFTER=${ALERT_AFTER:-3}
 
