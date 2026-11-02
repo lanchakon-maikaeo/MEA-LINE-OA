@@ -8,8 +8,9 @@
 > - **ข้อ 3:** `pgbackrest check` ผ่าน, backup ล่าสุดไม่เกิน 2 นาที, restic ของ GCP ใช้ host `production-gcp` (Release `79d3c22`)
 > - **ข้อ 4:** `standby.sh setup` ดึง env จาก GCP และเก็บ reader key เดิม standby เดิม (ตาม E5) ย้ายไปเก็บที่ `~/faoj-standby/data/postgres/pgdata.e5-20261102` แล้ว build release ของ standby ใหม่ เพราะรุ่นเดิมกำหนด path ตายตัว restore แล้วอยู่ใน recovery ตามหลังราว 1 นาที, `files` ดึงจาก host `production-gcp` ได้ และ `make standby-schedule` ติดตั้งสคริปต์ใหม่แล้ว
 > - **ข้อ 5:** `backup-pull` แยกโฟลเดอร์ต่อ path (`pgbackrest-production-gcp`) เพราะ `rclone sync` จะลบสำเนา stanza ของ E5 ใน OneDrive ถ้าใช้โฟลเดอร์เดิม ตั้ง `SOURCE_REPO_PATH` แล้ว ยังไม่ได้ pull (เน็ตมือถือ)
-> - **ข้อ 7:** Endpoint URL (Published) เป็น `https://34-15-129-131.sslip.io/broadcasts/` แล้ว ตอบ 200
+> - **ข้อ 7:** Endpoint URL (Published) เป็น `https://dedcenter-381083094942.asia-southeast3.run.app/broadcasts/` แล้ว ตอบ 200
 > - **ข้อ 8:** rich menu ใช้ `miniapp.line.me/<LIFF ID>` จึงตามข้อ 7 ไปเอง ไม่ต้องรันใหม่
+> - **เว็บเจ้าหน้าที่จากเครือข่าย กฟน.:** FortiGate ของ กฟน. บล็อก `sslip.io` (หมวด Dynamic DNS) จึงเปิดเว็บผ่าน Cloud Run ที่ `https://dedcenter-381083094942.asia-southeast3.run.app/` แทน (FortiGuard จัดเป็น Information Technology) ด้วย `gcp-move.sh staff-proxy` (`68c6010`) `STAFF_WEB_BASE_URL` และ Endpoint ของ Mini App ชี้ชื่อนี้แล้ว ส่วน LINE webhook ยังใช้ ngrok ชื่อนี้ผูกกับโปรเจกต์ GCP จึงต้องเปลี่ยนอีกรอบตอนย้ายออก ยังควรขอ subdomain ของ กฟน.
 > - **ข้อ 9:** healthcheck ชี้ GCP แล้ว (บน E5 เห็นแต่หน้า maintenance จึงไม่เคยเตือน) การเตือนเรื่อง backup ใช้ lag ของ standby (เกิน 15 นาที) แทน
 
 ## ทำทันที (G5)
