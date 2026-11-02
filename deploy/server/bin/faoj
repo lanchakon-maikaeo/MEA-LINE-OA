@@ -541,7 +541,7 @@ restore_drill() {
   # The production repository, read-only key: the restore and, during recovery, archive-get.
   local repo=(--env-file "$ENV_DIR/drill.secret.env"
     -e PGBACKREST_STANZA=faoj -e PGBACKREST_PG1_PATH=/var/lib/postgresql/data/pgdata
-    -e PGBACKREST_REPO1_TYPE=s3 -e PGBACKREST_REPO1_PATH="/pgbackrest/$source"
+    -e PGBACKREST_REPO1_TYPE=s3 -e PGBACKREST_REPO1_PATH="${DRILL_REPO_PATH:-/pgbackrest/$source}"
     -e PGBACKREST_REPO1_S3_ENDPOINT="$BACKUP_S3_ENDPOINT" -e PGBACKREST_REPO1_S3_BUCKET="$BACKUP_DB_BUCKET"
     -e PGBACKREST_REPO1_S3_REGION="$BACKUP_S3_REGION" -e PGBACKREST_REPO1_S3_URI_STYLE=path
     -e PGBACKREST_REPO1_STORAGE_VERIFY_TLS="${BACKUP_S3_VERIFY_TLS:-y}" -e PGBACKREST_REPO1_CIPHER_TYPE=aes-256-cbc)

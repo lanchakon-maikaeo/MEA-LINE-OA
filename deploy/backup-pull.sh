@@ -9,6 +9,7 @@
 #   S3_KEY=…   S3_SECRET=…
 #   DEST=$HOME/Library/CloudStorage/OneDrive-MetropolitanElectricityAuthority/faoj-backup-offsite
 #   SOURCE_ENV=production        (repository path inside the buckets)
+#   SOURCE_REPO_PATH=/pgbackrest/production-gcp   (pgBackRest path when it is not /pgbackrest/$SOURCE_ENV)
 #   S3_CA_FILE=                  (rehearsals only: CA of a local S3 stand-in)
 set -euo pipefail
 CONFIG=${FAOJ_BACKUP_PULL_CONFIG:-$HOME/.config/faoj/backup-pull.env}
@@ -36,7 +37,7 @@ run() {  # bucket/path → local folder; sync = an exact copy, older versions ar
     -v "$2:/dest" "$RCLONE" sync "oci:$1" /dest --fast-list --transfers 2 --stats-one-line -v 2>&1 | tail -n 3
 }
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-run "faoj-backup/pgbackrest/$SOURCE_ENV" "$DEST/pgbackrest"
+run "faoj-backup${SOURCE_REPO_PATH:-/pgbackrest/$SOURCE_ENV}" "$DEST/pgbackrest"
 run "faoj-files/$SOURCE_ENV" "$DEST/restic"
 printf '{"pulled_at": "%s", "source_env": "%s"}\n' "$started" "$SOURCE_ENV" > "$DEST/last-pull.json"
 echo "backup-pull done: $DEST"
