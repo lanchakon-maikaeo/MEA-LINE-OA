@@ -152,14 +152,11 @@ deploy() {
   say "faoj deploy $sha (detached; log /srv/faoj/run/deploy-$sha.log)"
   # systemd-run keeps the deploy alive when the IAP session drops (1 Nov 2026 on E5).
   on_gcp "set -e
+    # The new release's own faoj runs the deploy, so a fix in faoj applies to this deploy too.
     tmp=/srv/faoj/run/bundle-$sha; sudo mkdir -p /srv/faoj/run
-    if [ ! -x /usr/local/sbin/faoj ] || [ ! -e /srv/faoj/releases/current ]; then
-      sudo rm -rf \$tmp; sudo mkdir -p \$tmp; cid=\$(sudo docker create '$1')
-      sudo docker cp \"\$cid:/app/deploy/server/.\" \$tmp/ >/dev/null; sudo docker rm \"\$cid\" >/dev/null
-      bin=\$tmp/bin/faoj
-    else
-      bin=/usr/local/sbin/faoj
-    fi
+    sudo rm -rf \$tmp; sudo mkdir -p \$tmp; cid=\$(sudo docker create '$1')
+    sudo docker cp \"\$cid:/app/deploy/server/.\" \$tmp/ >/dev/null; sudo docker rm \"\$cid\" >/dev/null
+    bin=\$tmp/bin/faoj
     sudo systemctl reset-failed faoj-deploy-$sha 2>/dev/null || true
     sudo systemd-run --unit faoj-deploy-$sha --setenv FAOJ_ROOT=/srv/faoj \
       --property StandardOutput=file:/srv/faoj/run/deploy-$sha.log \
@@ -190,7 +187,7 @@ dc() { docker compose -p faoj -f "$rel/compose.yaml" --env-file /srv/faoj/env/co
   --env-file "$rel/release.env" --profile clamav "$@"; }
 psql_faoj() { dc exec -T -u postgres db psql -qAt -v ON_ERROR_STOP=1 -d faoj "$@"; }
 manage() { dc run --rm -T migrate /app/.venv/bin/python manage.py "$@"; }
-# On E5: the same migrate service (env, network, media, TLS) with GCP's image, without touching db.
+# On E5: the same migrate service (env, network, media, TLS) with the GCP image; db untouched.
 tool() { APP_IMAGE=$TOOL dc run --rm -T --no-deps migrate /app/.venv/bin/python manage.py "$@"; }
 set_kv() { python3 - "$1" "$2" "$3" <<"PY"
 import os, re, sys
@@ -227,7 +224,7 @@ tunnels() {
 # release, so E5 never goes down for this. Schema differences show as applied_migrations.
 TOOL_IMAGE=""
 tool_image() {
-  TOOL_IMAGE=$(gcp_cmd "sed -n 's/^APP_IMAGE=//p' /srv/faoj/releases/current/release.env")
+  TOOL_IMAGE=${GCP_TOOL_IMAGE:-$(gcp_cmd "sudo sed -n 's/^APP_IMAGE=//p' /srv/faoj/releases/current/release.env")}
   image_arg "$TOOL_IMAGE"
   say "E5 (pull only, services untouched): checks from ${TOOL_IMAGE##*@sha256:}"
   on_e5 "sudo /usr/local/sbin/faoj-ocir-login && sudo docker pull -q '$TOOL_IMAGE' >/dev/null" \
@@ -296,7 +293,7 @@ EOF
   say "GCP: restore into a throwaway database and compare deep (the real database is not touched)"
   lib <<EOF | gcp_root
 d=$d
-. "\$rel/release.env"
+APP_IMAGE='$TOOL_IMAGE'
 pw=\$(python3 -c 'import secrets; print(secrets.token_hex(16))')
 key=\$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')
 trap 'docker rm -f faoj-dry-db >/dev/null 2>&1; docker network rm faoj-dry >/dev/null 2>&1; rm -rf "\$d"' EXIT
