@@ -541,6 +541,8 @@ restore_drill() {
     trap 'docker rm -f faoj-drill-db faoj-drill-web >/dev/null 2>&1; dc start >/dev/null; maintenance off' EXIT
   fi
   rm -rf "$drill"; mkdir -p "$drill/pg" "$drill/media" "$drill/n8n"
+  # umask 077: the containers' own users (postgres, the app's 10001) must reach their mounts.
+  chmod 755 "$drill/pg"; chown 10001:10001 "$drill/media"
   local net=faoj-drill; docker network create "$net" >/dev/null 2>&1 || true
   say "restore database (pgBackRest, archive-mode=off: nothing is pushed back to production's repo)"
   # The production repository, read-only key: the restore and, during recovery, archive-get.
@@ -574,7 +576,7 @@ SQL
     -v "$drill:/restore" -v "$FAOJ_ROOT/tls/backup:/run/faoj-backup-tls:ro" \
     restic/restic:0.18.1@sha256:39d9072fb5651c80d75c7a811612eb60b4c06b32ffe87c2e9f3c7222e1797e76 \
     "${rcafile[@]+"${rcafile[@]}"}" -o s3.bucket-lookup=path restore latest --host "${DRILL_HOST_TAG:-$source}" --target /restore/tree >/dev/null
-  [ -d "$drill/tree/backup/media" ] && cp -R "$drill/tree/backup/media/." "$drill/media/"
+  [ -d "$drill/tree/backup/media" ] && cp -Rp "$drill/tree/backup/media/." "$drill/media/"
   say "start the web app on 127.0.0.1:18000 with every outbound path off"
   docker run -d --name faoj-drill-web --network "$net" \
     --env-file "$ENV_DIR/django.env" --env-file "$ENV_DIR/app.secret.env" \
