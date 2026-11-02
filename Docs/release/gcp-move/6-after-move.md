@@ -6,7 +6,7 @@
 > - **ข้อ 1:** LINE บน GCP รับและตอบได้ ข้อความจริง 8 รายการหลังย้ายตอบ `sent` ทั้งหมด outbox ไม่ค้าง ข้อความ 21:50:38 ที่ได้ 400 เข้ามาทาง redelivery ตอน 21:52:39 ส่วนการ login ของเจ้าหน้าที่ (OTP mail) เจ้าของยังต้องลอง
 > - **ข้อ 2:** `faoj restore-drill` ของ `production-gcp` ผ่าน (RPO 533 s, RTO 79 s, ไฟล์แนบไม่หายและไม่เปลี่ยน) ก่อนหน้านั้น drill ล้มเพราะ `umask 077` ทำให้ postgres กับแอปเข้าโฟลเดอร์ drill ไม่ได้ แก้ใน `93c5d5e` (รอ release ถัดไป) `drill.secret.env` บน GCP สร้างจาก key ของเครื่องเอง
 > - **ข้อ 3:** `pgbackrest check` ผ่าน, backup ล่าสุดไม่เกิน 2 นาที, restic ของ GCP ใช้ host `production-gcp` (Release `79d3c22`)
-> - **ข้อ 4:** `standby.sh setup` ดึง env จาก GCP และเก็บ reader key เดิม standby เดิม (ตาม E5) ย้ายไปเก็บที่ `~/faoj-standby/data/postgres/pgdata.e5-20261102` แล้ว build release ของ standby ใหม่ เพราะรุ่นเดิมกำหนด path ตายตัว
+> - **ข้อ 4:** `standby.sh setup` ดึง env จาก GCP และเก็บ reader key เดิม standby เดิม (ตาม E5) ย้ายไปเก็บที่ `~/faoj-standby/data/postgres/pgdata.e5-20261102` แล้ว build release ของ standby ใหม่ เพราะรุ่นเดิมกำหนด path ตายตัว restore แล้วอยู่ใน recovery ตามหลังราว 1 นาที, `files` ดึงจาก host `production-gcp` ได้ และ `make standby-schedule` ติดตั้งสคริปต์ใหม่แล้ว
 > - **ข้อ 5:** `backup-pull` แยกโฟลเดอร์ต่อ path (`pgbackrest-production-gcp`) เพราะ `rclone sync` จะลบสำเนา stanza ของ E5 ใน OneDrive ถ้าใช้โฟลเดอร์เดิม ตั้ง `SOURCE_REPO_PATH` แล้ว ยังไม่ได้ pull (เน็ตมือถือ)
 > - **ข้อ 7:** Endpoint URL (Published) เป็น `https://34-15-129-131.sslip.io/broadcasts/` แล้ว ตอบ 200
 > - **ข้อ 8:** rich menu ใช้ `miniapp.line.me/<LIFF ID>` จึงตามข้อ 7 ไปเอง ไม่ต้องรันใหม่
