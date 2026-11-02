@@ -358,7 +358,8 @@ KEEP = {
     "migrate.secret.env": "all",
     "django.env": {"ALLOWED_HOSTS", "CSRF_TRUSTED_ORIGINS", "STAFF_WEB_BASE_URL"},
     "compose.env": {"FAOJ_ROOT", "PUBLIC_HOST", "METRICS_SINK", "NGROK_DOMAIN", "BACKUP_MODE",
-                    "PG_ARCHIVE_MODE", "BACKUP_REPO_PATH", "DRILL_REPO_PATH"},
+                    "PG_ARCHIVE_MODE", "BACKUP_REPO_PATH", "DRILL_REPO_PATH",
+                    "BACKUP_HOST_TAG", "DRILL_HOST_TAG"},
 }
 FROM_E5_ONLY = {"db.secret.env": {"PGBACKREST_REPO1_S3_KEY", "PGBACKREST_REPO1_S3_KEY_SECRET"}}
 line = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
@@ -474,7 +475,11 @@ EOF
   lib <<EOF | gcp_root || die "opening GCP failed; if $OPENED is missing, E5 is frozen and back-to-e5 is safe"
 f=/srv/faoj/env/compose.env
 for kv in BACKUP_MODE=pgbackrest PG_ARCHIVE_MODE=on BACKUP_REPO_PATH=/pgbackrest/production-gcp \
-    DRILL_REPO_PATH=/pgbackrest/production-gcp NGROK_DOMAIN=$NGROK_DOMAIN; do set_kv "\$f" "\${kv%%=*}" "\${kv#*=}"; done
+    DRILL_REPO_PATH=/pgbackrest/production-gcp BACKUP_HOST_TAG=production-gcp DRILL_HOST_TAG=production-gcp \
+    NGROK_DOMAIN=$NGROK_DOMAIN; do set_kv "\$f" "\${kv%%=*}" "\${kv#*=}"; done
+# LINE reaches web under the ngrok name (2 Nov 2026: without it Django answered 400).
+h=\$(sed -n 's/^ALLOWED_HOSTS=//p' /srv/faoj/env/django.env)
+case ",\$h," in *",$NGROK_DOMAIN,"*) ;; *) set_kv /srv/faoj/env/django.env ALLOWED_HOSTS "\$h,$NGROK_DOMAIN";; esac
 set -a; . "\$f"; set +a
 dc up -d --force-recreate --wait db
 dc exec -T -u postgres db pgbackrest stanza-create --log-level-console=warn
