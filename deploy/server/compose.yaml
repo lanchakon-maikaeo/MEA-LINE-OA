@@ -62,7 +62,9 @@ services:
       PGBACKREST_STANZA: faoj
       PGBACKREST_PG1_PATH: /var/lib/postgresql/data/pgdata
       PGBACKREST_REPO1_TYPE: ${BACKUP_REPO_TYPE:-s3}
-      PGBACKREST_REPO1_PATH: /pgbackrest/${FAOJ_ENV:?compose.env}
+      # A host restored from a dump (not from this repository) needs its own path: its system-id
+      # differs, so stanza-create would refuse the old one (Docs/release/gcp-move, 2 Nov 2026).
+      PGBACKREST_REPO1_PATH: ${BACKUP_REPO_PATH:-/pgbackrest/${FAOJ_ENV:?compose.env}}
       PGBACKREST_REPO1_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-none}
       PGBACKREST_REPO1_S3_BUCKET: ${BACKUP_DB_BUCKET:-none}
       PGBACKREST_REPO1_S3_REGION: ${BACKUP_S3_REGION:-none}

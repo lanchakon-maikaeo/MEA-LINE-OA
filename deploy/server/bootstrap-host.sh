@@ -93,6 +93,9 @@ BACKUP_S3_REGION=ap-singapore-1
 BACKUP_DB_BUCKET=faoj-backup
 BACKUP_S3_VERIFY_TLS=y
 DRILL_SOURCE_ENV=production
+# pgBackRest path; empty means /pgbackrest/\$FAOJ_ENV (DRILL_REPO_PATH likewise for the drill source).
+BACKUP_REPO_PATH=
+DRILL_REPO_PATH=
 # Metrics to OCI Monitoring (instance principal); stdout on rehearsals.
 METRICS_SINK=$([ "$ENV" = rehearsal ] && echo stdout || echo oci)
 OCI_REGION=ap-singapore-1
