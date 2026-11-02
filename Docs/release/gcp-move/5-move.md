@@ -6,6 +6,7 @@
 
 > **ย้ายแล้ว 2 พ.ย. 2569:** `gcp-move.sh move` เริ่ม 21:42:47 GCP เปิดรับงาน 21:48:02 ระบบหยุดราว 5 นาที dump 5.9 MB sha256 ตรงกัน, `move_manifest --deep --compare` ตรง (125 ตาราง, audit 2039, ไฟล์แนบ 4, ไฟล์ทั้งหมด 8), `decrypt_check` ผ่าน (AI 2/2, อีเมล 7198/7198, ไฟล์ 1/1), smoke ผ่าน, full backup ของ `production-gcp` และ restic snapshot ขึ้นแล้ว E5 อยู่ใน maintenance แบบ read-only dump อยู่ที่ `/srv/faoj/restore/move-20261102-214247` บน GCP
 > - **webhook ได้ 400 อยู่ราว 4 นาที (21:48–21:52):** `ALLOWED_HOSTS` ของ GCP ไม่มีชื่อ ngrok แก้บนเครื่องแล้ว POST จาก LINE ตอน 21:52:39 ได้ 200 (redelivery) สคริปต์แก้ใน `4ef380b`
+> - **escrow:** cipher pass ของ stanza `production-gcp` อยู่ในตัวจัดการรหัสผ่านของเจ้าของแล้ว (hash `cd708313c21e8ef2` ตรง) คำสั่ง ssh ของ `gcp-move.sh` พ่น `WARNING: ` ออก stdout จึงต้องกรองด้วย `sed '/^WARNING: *$/d'` ก่อน `pbcopy`
 > - **restic:** E5 กับ GCP ใช้ repo เดียวกันและ host tag เดียวกัน (`production`) files backup แรกของ GCP จึงลบ snapshot ของ E5 ณ จุด freeze (`0e9408ce`) ไป ข้อมูลไม่หาย เพราะ media อยู่บน GCP แล้ว (ตรวจแบบ deep), E5 ยังเก็บไว้ครบ และ dump ของ n8n อยู่ในโฟลเดอร์ย้าย แก้ด้วย `BACKUP_HOST_TAG=production-gcp` (`4ef380b`, PR #45) ต้อง deploy ก่อน timer files รอบ 03:30
 
 ## ลำดับใน `gcp-move.sh move`
