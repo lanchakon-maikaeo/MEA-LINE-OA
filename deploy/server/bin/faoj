@@ -275,7 +275,11 @@ deploy() {
     maintenance on
     say "drain: stop claiming (n8n, worker)"
     dc_in "$old" stop -t 60 n8n worker || true
-    if [ "$FAOJ_ENV" = "production" ]; then
+    if [ "$FAOJ_ENV" = "production" ] && [ "${BACKUP_MODE:-pgbackrest}" = "dump" ]; then
+      # A host without Object Storage keys yet (the empty GCP skeleton, 2 Nov 2026).
+      say "restore point: database dump (BACKUP_MODE=dump)"
+      backup dump
+    elif [ "$FAOJ_ENV" = "production" ]; then
       say "restore point: pgBackRest incremental backup"
       dc_in "$old" exec -T -u postgres db pgbackrest backup --type=incr
     fi

@@ -6,9 +6,10 @@ import tempfile
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from operations import sealing
 from operations.management.commands import decrypt_check, move_manifest
@@ -98,3 +99,14 @@ class DecryptCheckTests(TestCase):
         self.assertEqual(report["ai_keys"], (0, 1))
         self.assertEqual(report["roster_files"], (0, 1))
         self.assertEqual(exit_.exception.code, 1)
+
+
+class SkeletonDeployTests(SimpleTestCase):
+    def test_restore_point_follows_backup_mode(self):
+        # The empty GCP skeleton has no Object Storage keys: its deploys take a dump instead.
+        faoj = (Path(settings.BASE_DIR) / "deploy/server/bin/faoj").read_text()
+        deploy = faoj[faoj.index("\ndeploy() {") :]
+        deploy = deploy[: deploy.index("\n}\n")]
+        dump, incr = deploy.index("backup dump"), deploy.index("pgbackrest backup --type=incr")
+        self.assertIn('"${BACKUP_MODE:-pgbackrest}" = "dump"', deploy[:dump])
+        self.assertLess(dump, incr)
