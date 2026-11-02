@@ -4,8 +4,9 @@
 # mode, replaying production's WAL from Object Storage (5-10 minutes behind) with the
 # backup-READER key: this Mac can read production's backups but never write to them.
 #
-#   deploy/standby.sh setup      copy production's settings from E5 (needs the e5-move tunnel),
-#                                then the owner types the backup-reader secret key
+#   deploy/standby.sh setup      copy production's settings from its host (GCP since 2 Nov 2026;
+#                                STANDBY_SOURCE=e5 for E5), keep this Mac's backup-reader key or
+#                                ask the owner to type it
 #   deploy/standby.sh rotate-reader-key   new reader key made by OCI, secret written to the
 #                                settings unseen, old keys deleted, standby restarted
 #   deploy/standby.sh build      build the arm64 db + app images here and unpack the release
@@ -14,7 +15,7 @@
 #   deploy/standby.sh files      copy private files and n8n data from the restic backup
 #   deploy/standby.sh check      launchd, every 5 minutes: keep it running, files daily, warn
 #                                when it falls more than 15 minutes behind
-#   deploy/standby.sh failover   a person decides production is gone: stop E5's ngrok if it
+#   deploy/standby.sh failover   a person decides production is gone: stop its ngrok if it
 #                                still answers, promote this database, start the whole stack
 #                                here and move LINE's ngrok domain to this Mac
 #
@@ -34,6 +35,11 @@ say() { echo "[$(date +%H:%M:%S)] $*" >&2; }
 die() { echo "standby: $*" >&2; exit 1; }
 notify() { osascript -e "display notification \"$2\" with title \"$1\"" >/dev/null 2>&1 || true; }
 faoj() { "$ROOT/releases/current/bin/faoj" "$@"; }
+prod_ssh() {  # one command on production's host as ubuntu; stdout passes through clean
+  if [ "${STANDBY_SOURCE:-gcp}" = e5 ]; then
+    "$REPO/deploy/e5-move.sh" tunnel >&2; "$REPO/deploy/e5-move.sh" ssh "$@"
+  else "$REPO/deploy/gcp-move.sh" ssh "$@"; fi
+}
 dc() {
   local rel; rel=$(cd "$ROOT/releases/current" 2>/dev/null && pwd -P) || die "no release: run build"
   docker compose -p faoj -f "$rel/compose.yaml" --env-file "$ROOT/env/compose.env" \
@@ -56,9 +62,13 @@ PY
 setup() {
   mkdir -p "$ROOT"/{env,releases,run,drills,restore,tls/db} \
     "$ROOT"/data/{postgres,media,n8n,caddy,clamav,dumps,restic-cache,pgbackrest-spool}
-  say "copying production's settings and database TLS from E5 (through the e5-move tunnel)"
-  "$REPO/deploy/e5-move.sh" tunnel
-  "$REPO/deploy/e5-move.sh" ssh 'sudo tar -C /srv/faoj -czf - env tls/db' | tar -C "$ROOT" -xzf -
+  # The backup-reader key already here survives a new copy (it lives only on this Mac).
+  local old="" pair
+  if [ -r "$ROOT/env/db.secret.env" ]; then
+    old="$ROOT/env.before-$(date +%Y%m%d-%H%M%S)"; cp -a "$ROOT/env" "$old"
+  fi
+  say "copying production's settings and database TLS from ${STANDBY_SOURCE:-gcp}"
+  prod_ssh 'sudo tar -C /srv/faoj -czf - env tls/db' | tar -C "$ROOT" -xzf -
   chmod 700 "$ROOT/env" "$ROOT/tls/db"; chmod 600 "$ROOT"/env/*.secret.env "$ROOT"/tls/db/*.key
   local env="$ROOT/env/compose.env"
   # This Mac: local ports and certificates, no ClamAV, no WAL archive and no Object Storage
@@ -77,7 +87,16 @@ setup() {
   set_kv "$ROOT/env/django.env" ALLOWED_HOSTS "localhost,web,$NGROK_DOMAIN"
   set_kv "$ROOT/env/django.env" CSRF_TRUSTED_ORIGINS "https://localhost:8443"
   set_kv "$ROOT/env/django.env" STAFF_WEB_BASE_URL "https://localhost:8443"
-  reader_key
+  rm -f "$ROOT/env/drill.secret.env"  # production's writer key: never on this Mac
+  if [ -n "$old" ] && grep -q '^AWS_ACCESS_KEY_ID=.' "$old/backup.secret.env" 2>/dev/null; then
+    for pair in db.secret.env:PGBACKREST_REPO1_S3_KEY db.secret.env:PGBACKREST_REPO1_S3_KEY_SECRET \
+        backup.secret.env:AWS_ACCESS_KEY_ID backup.secret.env:AWS_SECRET_ACCESS_KEY; do
+      set_kv "$ROOT/env/${pair%%:*}" "${pair#*:}" "$(grep "^${pair#*:}=" "$old/${pair%%:*}" | tail -1 | cut -d= -f2-)"
+    done
+    say "kept this Mac's backup-reader key; the copy before this setup is $old"
+  else
+    reader_key
+  fi
 }
 
 reader_key() {
@@ -226,7 +245,8 @@ files() {
   rm -rf "$ROOT/restore/files"
   # Explicit checks: called as `files || true` from check, set -e does not apply in here.
   # --no-lock: the reader key cannot write restic's lock file (it would retry forever).
-  dc run --rm -T files-backup -o s3.bucket-lookup=path --no-lock restore latest --host production \
+  local host; host=$(sed -n 's/^BACKUP_HOST_TAG=//p' "$ROOT/env/compose.env")
+  dc run --rm -T files-backup -o s3.bucket-lookup=path --no-lock restore latest --host "${host:-production}" \
     --target /restore/files || { say "no files copied (restic failed)"; return 1; }
   # The restic image (pinned in compose.yaml) has a shell: copy without another image.
   dc run --rm -T --no-deps -v "$ROOT/restore/files/backup:/from:ro" -v "$ROOT/data:/to" \
@@ -254,14 +274,14 @@ check() {
 failover() {
   [ -e "$ROOT/releases/current" ] || die "no standby here"
   echo "Failover makes THIS MAC production: the standby is promoted and LINE moves here."
-  echo "Do it only when E5 is really gone (health alert, RB01). Data written on E5 after the"
+  echo "Do it only when production is really gone (health alert, RB01). Data written there after the"
   echo "last replayed WAL (status shows how far behind) is not here."
   status
   read -r -p "Type FAILOVER to continue: " answer
   [ "$answer" = FAILOVER ] || die "cancelled"
-  say "E5: stop its ngrok if it still answers (only one host may hold the LINE domain)"
-  "$REPO/deploy/e5-move.sh" ssh 'sudo bash -c "cd /srv/faoj/releases/current && docker compose -p faoj -f compose.yaml --env-file /srv/faoj/env/compose.env --env-file release.env --profile ngrok stop ngrok; faoj maintenance on"' \
-    2>/dev/null || say "E5 does not answer: going on"
+  say "production (${STANDBY_SOURCE:-gcp}): stop its ngrok if it still answers (only one host may hold the LINE domain)"
+  prod_ssh 'sudo bash -c "cd /srv/faoj/releases/current && docker compose -p faoj -f compose.yaml --env-file /srv/faoj/env/compose.env --env-file release.env --profile ngrok stop ngrok; faoj maintenance on"' \
+    2>/dev/null || say "production does not answer: going on"
   say "promote the standby"
   dc exec -T db gosu postgres psql -Atq -d postgres -c 'select pg_promote(true, 60)'
   touch "$ROOT/run/promoted"

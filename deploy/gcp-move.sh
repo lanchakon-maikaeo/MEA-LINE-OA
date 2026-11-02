@@ -608,7 +608,7 @@ case "$cmd" in
   move) move;;
   back-to-e5) back_to_e5;;
   reverse-move) reverse_move;;
-  ssh) if [ $# -gt 0 ]; then on_gcp "$@"; else
+  ssh) if [ $# -gt 0 ]; then gcp_cmd "$*"; else  # stdout stays clean for pipes (gcloud's WARNING goes to stderr)
          exec gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --ssh-key-file "$KEY"; fi;;
   *) sed -n '2,27p' "$0"; exit 2;;
 esac
