@@ -12,6 +12,8 @@
 #   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's OCIR digest, detached
 #   deploy/gcp-move.sh status         faoj status and /health/ready/
 #   deploy/gcp-move.sh ssh [cmd]      a shell (or one command) on the host through IAP
+#   deploy/gcp-move.sh staff-proxy    the staff web at https://dedcenter-….run.app (Cloud Run), for
+#                                     networks that block sslip.io as Dynamic DNS (MEA's FortiGate)
 #
 # Phase 2 (needs `deploy/e5-move.sh tunnel` access; E5 runs GCP's checks in one-off containers):
 #   deploy/gcp-move.sh escrow-check   hashes of the keys the data needs, to compare with the
@@ -171,6 +173,42 @@ status() {
   on_gcp 'sudo faoj status 2>&1 | tail -20; echo; sudo faoj maintenance status'
   curl -s -m 10 "https://$PUBLIC_HOST/health/ready/" || echo "(no answer from https://$PUBLIC_HOST/)"
   echo
+}
+
+# MEA's FortiGate blocks sslip.io ("Dynamic DNS"); run.app is "Information Technology" (FortiGuard,
+# 2 Nov 2026). Cloud Run runs the pinned Caddy as a plain reverse proxy to the VM: the VM still sees
+# its own host name, so only CSRF_TRUSTED_ORIGINS and STAFF_WEB_BASE_URL learn the new one.
+STAFF_PROXY=dedcenter
+STAFF_PROXY_URL=https://$STAFF_PROXY-381083094942.asia-southeast3.run.app
+CADDY_IMAGE=docker.io/library/caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+staff_proxy() {
+  local env; env=$(mktemp); trap 'rm -f "$env"' RETURN
+  cat > "$env" <<EOF
+CADDYFILE: |
+  {
+  	admin off
+  	auto_https off
+  }
+  :{\$PORT} {
+  	header -Server
+  	reverse_proxy https://$PUBLIC_HOST {
+  		header_up Host $PUBLIC_HOST
+  		header_down Location https://$PUBLIC_HOST $STAFF_PROXY_URL
+  	}
+  }
+EOF
+  gcloud run deploy "$STAFF_PROXY" --project "$PROJECT" --region asia-southeast3 --image "$CADDY_IMAGE" \
+    --env-vars-file "$env" --command sh \
+    --args='^|^-c|printf "%s" "$CADDYFILE" > /tmp/Caddyfile && exec caddy run --config /tmp/Caddyfile --adapter caddyfile' \
+    --port 8080 --memory 256Mi --cpu 1 --min-instances 0 --max-instances 3 --allow-unauthenticated --quiet
+  lib <<EOF | gcp_root
+h=\$(sed -n 's/^CSRF_TRUSTED_ORIGINS=//p' /srv/faoj/env/django.env)
+case ",\$h," in *",$STAFF_PROXY_URL,"*) ;; *) set_kv /srv/faoj/env/django.env CSRF_TRUSTED_ORIGINS "\$h,$STAFF_PROXY_URL";; esac
+set_kv /srv/faoj/env/django.env STAFF_WEB_BASE_URL "$STAFF_PROXY_URL"
+dc up -d --force-recreate --wait web worker >/dev/null
+grep -E '^(CSRF_TRUSTED_ORIGINS|STAFF_WEB_BASE_URL)=' /srv/faoj/env/django.env
+EOF
+  say "staff web: $STAFF_PROXY_URL/ (also still https://$PUBLIC_HOST/)"
 }
 
 # --- Phase 2: keys, data and webhook in one window (Docs/release/gcp-move/5-move.md) ----------
@@ -608,6 +646,7 @@ case "$cmd" in
   move) move;;
   back-to-e5) back_to_e5;;
   reverse-move) reverse_move;;
+  staff-proxy) staff_proxy;;
   ssh) if [ $# -gt 0 ]; then gcp_cmd "$*"; else  # stdout stays clean for pipes (gcloud's WARNING goes to stderr)
          exec gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --ssh-key-file "$KEY"; fi;;
   *) sed -n '2,27p' "$0"; exit 2;;
