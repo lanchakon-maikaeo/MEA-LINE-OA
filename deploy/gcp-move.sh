@@ -4,7 +4,9 @@
 # stack: no keys, no LINE webhook, no data; E5 keeps serving. Each step can be re-run.
 #
 #   deploy/gcp-move.sh prepare        Docker, unattended upgrades, the 150 GB disk at /srv/faoj
-#   deploy/gcp-move.sh ocir-login     the owner types a pull-only OCIR auth token (hidden)
+#   deploy/gcp-move.sh pull-token [USER]  OCI user faoj-gcp-pull in faoj-deployers (pull only), a new
+#                                     auth token piped straight into docker login on the host
+#   deploy/gcp-move.sh ocir-login     or: the owner types an existing pull-only token (hidden)
 #   deploy/gcp-move.sh bootstrap IMG  bootstrap-host.sh from the release image (its own secrets)
 #   deploy/gcp-move.sh skeleton-config  dump backups, no WAL archive, metrics to stdout, no ngrok
 #   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's OCIR digest, detached
@@ -64,6 +66,55 @@ ocir_login() {
     -- -o LogLevel=ERROR 2>&1 | grep -v -e NumPy -e tcp_upload -e '^$'
 }
 
+# The host saves the login; the token passes from `oci` through ssh stdin and is never printed,
+# written on the Mac or put in argv (like ci-ocir-setup.sh). A new token can take minutes to work.
+login_on_host() {  # user; token on stdin
+  gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap \
+    --ssh-key-file "$KEY" --quiet -- -o LogLevel=ERROR \
+    "t=\$(cat); for i in \$(seq 1 15); do printf %s \"\$t\" | sudo docker login $REGISTRY -u '$1' --password-stdin >/dev/null 2>&1 && { echo 'OCIR login saved'; exit 0; }; sleep 20; done; echo 'OCIR login failed'; exit 1" \
+    2>&1 | grep -v -e NumPy -e tcp_upload -e '^$'
+}
+
+pull_token() {
+  export OCI_CLI_PROFILE=faoj OCI_CLI_AUTH=security_token PYTHONWARNINGS=ignore
+  oci session refresh --profile faoj >/dev/null 2>&1 || die "OCI session expired: oci session authenticate --region ap-singapore-1 --tenancy-name MEAFlow --profile-name faoj"
+  local tenancy name=${1:-faoj-gcp-pull} user_id tokens
+  tenancy=$(oci iam compartment get --compartment-id "${E5_COMPARTMENT:-ocid1.compartment.oc1..aaaaaaaairylkjofkqqwzysmo2ies2ptax4qlmsotny2cwwxg2yitpg6g4lq}" \
+    --query 'data."compartment-id"' --raw-output)
+  user_id=$(oci iam user list --compartment-id "$tenancy" --all --query "data[?name=='$name'].id | [0]" --raw-output)
+  if [ "$name" != faoj-gcp-pull ]; then
+    # An existing user (2 Nov 2026 the owner chose faoj-ci): its groups and capabilities stay as they are.
+    [ -n "$user_id" ] && [ "$user_id" != null ] || die "no OCI user $name"
+  elif [ -z "$user_id" ] || [ "$user_id" = null ]; then
+    local email
+    read -r -p "E-mail YOU own for the new OCI user faoj-gcp-pull (e.g. yourname+gcp@gmail.com): " email
+    [ -n "$email" ] || die "an e-mail is needed for a user in the Default identity domain"
+    say "creating OCI user faoj-gcp-pull"
+    user_id=$(oci iam user create --compartment-id "$tenancy" --name faoj-gcp-pull --email "$email" \
+      --description "faoj-prod-gcp: pull faoj/* from OCIR only (gcp-move)" --query data.id --raw-output)
+  fi
+  [ "$name" = faoj-gcp-pull ] && { set_up_pull_user "$tenancy" "$user_id" || return 1; }
+  tokens=$(oci iam auth-token list --user-id "$user_id" --query 'length(data[?"lifecycle-state"==`ACTIVE`])' --raw-output)
+  [ "${tokens:-0}" -lt 2 ] || die "$name already has 2 auth tokens (OCI's limit): delete an old one first"
+  say "new auth token for $name straight into docker login on $VM (not shown; retries while OCIR accepts it)"
+  oci iam auth-token create --user-id "$user_id" --description "faoj-prod-gcp $(date +%Y-%m-%d)" \
+      --query data.token --raw-output | tr -d '\n' | login_on_host "$NAMESPACE/$name"
+}
+
+set_up_pull_user() {  # tenancy user_id: auth tokens only, group faoj-deployers (read repos)
+  local tenancy=$1 user_id=$2 group_id
+  oci iam user update-user-capabilities --user-id "$user_id" --can-use-auth-tokens true \
+    --can-use-console-password false --can-use-api-keys false --can-use-customer-secret-keys false \
+    --can-use-smtp-credentials false --can-use-db-credentials false \
+    --can-use-o-auth2-client-credentials false >/dev/null
+  group_id=$(oci iam group list --compartment-id "$tenancy" --all --query 'data[?name==`faoj-deployers`].id | [0]' --raw-output)
+  [ -n "$group_id" ] && [ "$group_id" != null ] || die "group faoj-deployers is missing (Terraform iam.tf)"
+  if ! oci iam user list-groups --user-id "$user_id" --compartment-id "$tenancy" --query 'data[].name' --raw-output | grep -q '"faoj-deployers"'; then
+    say "adding faoj-gcp-pull to faoj-deployers (read repos only)"
+    oci iam group add-user --group-id "$group_id" --user-id "$user_id" >/dev/null
+  fi
+}
+
 bootstrap() {
   image_arg "${1:-}"
   say "bootstrap-host.sh from $1 (secrets made on the host, never shown)"
@@ -119,6 +170,7 @@ status() {
 cmd=${1:-}; shift || true
 case "$cmd" in
   prepare) prepare;;
+  pull-token) pull_token "$@";;
   ocir-login) ocir_login;;
   bootstrap) bootstrap "$@";;
   skeleton-config) skeleton_config;;
