@@ -165,7 +165,7 @@ services:
     mem_limit: ${WORKER_MEM:-300m}
 
   n8n:
-    image: n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b
+    image: n8nio/n8n:2.45.6@sha256:45edf89655fd66dd55ea9336c1791ad14777599fdbf6c5aec6db583ede99a40b
     env_file:
       - ${FAOJ_ROOT}/env/n8n.secret.env
     environment:
@@ -206,7 +206,7 @@ services:
 
   n8n-import:
     # One-off per release: the Django credential and this release's workflows (no duplicates).
-    image: n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b
+    image: n8nio/n8n:2.45.6@sha256:45edf89655fd66dd55ea9336c1791ad14777599fdbf6c5aec6db583ede99a40b
     env_file:
       - ${FAOJ_ROOT}/env/n8n.secret.env
     environment:
