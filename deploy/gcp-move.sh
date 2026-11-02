@@ -13,7 +13,7 @@
 #   deploy/gcp-move.sh status         faoj status and /health/ready/
 #   deploy/gcp-move.sh ssh [cmd]      a shell (or one command) on the host through IAP
 #
-# Phase 2 (needs `deploy/e5-move.sh tunnel` access and the same Release digest on both hosts):
+# Phase 2 (needs `deploy/e5-move.sh tunnel` access; E5 runs GCP's checks in one-off containers):
 #   deploy/gcp-move.sh escrow-check   hashes of the keys the data needs, to compare with the
 #                                     owner's password manager
 #   deploy/gcp-move.sh dry-run        E5's data into a throwaway database on GCP, deep compare
@@ -190,6 +190,8 @@ dc() { docker compose -p faoj -f "$rel/compose.yaml" --env-file /srv/faoj/env/co
   --env-file "$rel/release.env" --profile clamav "$@"; }
 psql_faoj() { dc exec -T -u postgres db psql -qAt -v ON_ERROR_STOP=1 -d faoj "$@"; }
 manage() { dc run --rm -T migrate /app/.venv/bin/python manage.py "$@"; }
+# On E5: the same migrate service (env, network, media, TLS) with GCP's image, without touching db.
+tool() { APP_IMAGE=$TOOL dc run --rm -T --no-deps migrate /app/.venv/bin/python manage.py "$@"; }
 set_kv() { python3 - "$1" "$2" "$3" <<"PY"
 import os, re, sys
 path, key, value = sys.argv[1:4]
@@ -220,12 +222,16 @@ tunnels() {
   gcp_cmd true || die "no IAP ssh to $VM (gcloud auth login?)"
 }
 
-same_release() {  # move_manifest and decrypt_check must be the same code on both hosts
-  local a b
-  a=$(on_e5 'basename "$(readlink -f /srv/faoj/releases/current)"')
-  b=$(gcp_cmd 'basename "$(readlink -f /srv/faoj/releases/current)"')
-  [ -n "$a" ] && [ "$a" = "$b" ] || die "E5 runs release $a, GCP runs $b: deploy the same Release digest on both first"
-  say "both hosts run release $a"
+# The checks (move_manifest --deep, decrypt_check) are GCP's release. E5 runs them in one-off
+# containers of that image (owner, 2 Nov 2026): pulled onto E5, nothing there restarts or changes
+# release, so E5 never goes down for this. Schema differences show as applied_migrations.
+TOOL_IMAGE=""
+tool_image() {
+  TOOL_IMAGE=$(gcp_cmd "sed -n 's/^APP_IMAGE=//p' /srv/faoj/releases/current/release.env")
+  image_arg "$TOOL_IMAGE"
+  say "E5 (pull only, services untouched): checks from ${TOOL_IMAGE##*@sha256:}"
+  on_e5 "sudo /usr/local/sbin/faoj-ocir-login && sudo docker pull -q '$TOOL_IMAGE' >/dev/null" \
+    || die "E5 could not pull $TOOL_IMAGE"
 }
 
 not_opened() {
@@ -245,8 +251,8 @@ EOF
 }
 
 e5_manifest() {  # $1 local file
-  lib <<'EOF' | e5_root > "$1"
-manage move_manifest --deep
+  { echo "TOOL='$TOOL_IMAGE'"; lib <<'EOF'; } | e5_root > "$1"
+tool move_manifest --deep
 EOF
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1" || die "E5 manifest is not JSON (see $1)"
 }
@@ -271,12 +277,12 @@ EOF
 }
 
 dry_run() {
-  tunnels; same_release
+  tunnels; tool_image
   local ts d; ts=$(date +%Y%m%d-%H%M%S); d=/srv/faoj/restore/dry-$ts
   mkdir -p "$STATE"; chmod 700 "$STATE"
   say "E5 (read-only): decrypt_check with E5's own keys"
-  lib <<'EOF' | e5_root
-manage decrypt_check
+  { echo "TOOL='$TOOL_IMAGE'"; lib <<'EOF'; } | e5_root
+tool decrypt_check
 EOF
   say "E5: deep manifest, dump, deep manifest (E5 keeps serving, so a write in between means retry)"
   gcp_cmd "sudo install -d -m 700 $d"
@@ -398,7 +404,7 @@ EOF
 }
 
 move() {
-  tunnels; same_release; not_opened
+  tunnels; not_opened; tool_image
   local ts d; ts=$(date +%Y%m%d-%H%M%S); d=/srv/faoj/restore/move-$ts
   mkdir -p "$STATE/move-$ts"; chmod 700 "$STATE" "$STATE/move-$ts"
   echo "This stops E5 (maintenance, services, read-only database) and moves keys, data and LINE to GCP." >&2
