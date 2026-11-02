@@ -96,6 +96,9 @@ DRILL_SOURCE_ENV=production
 # pgBackRest path; empty means /pgbackrest/\$FAOJ_ENV (DRILL_REPO_PATH likewise for the drill source).
 BACKUP_REPO_PATH=
 DRILL_REPO_PATH=
+# restic host of this host's files snapshots; empty means \$FAOJ_ENV (DRILL_HOST_TAG likewise).
+BACKUP_HOST_TAG=
+DRILL_HOST_TAG=
 # Metrics to OCI Monitoring (instance principal); stdout on rehearsals.
 METRICS_SINK=$([ "$ENV" = rehearsal ] && echo stdout || echo oci)
 OCI_REGION=ap-singapore-1

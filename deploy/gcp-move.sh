@@ -16,9 +16,11 @@
 # Phase 2 (needs `deploy/e5-move.sh tunnel` access; E5 runs GCP's checks in one-off containers):
 #   deploy/gcp-move.sh escrow-check   hashes of the keys the data needs, to compare with the
 #                                     owner's password manager
+#   deploy/gcp-move.sh escrow-copy KEY  that key from E5 onto this Mac's clipboard (owner runs it)
 #   deploy/gcp-move.sh dry-run        E5's data into a throwaway database on GCP, deep compare
 #   deploy/gcp-move.sh move           the move itself (5-move.md); asks YES before E5 stops
 #   deploy/gcp-move.sh back-to-e5     undo a move that stopped before GCP opened
+#   deploy/gcp-move.sh reverse-move   after GCP took work: the move back to E5, same checks
 #
 # Deploy only images the Release workflow built and scanned (ap-singapore-1.ocir.io/…@sha256),
 # never one built on a host.
@@ -213,6 +215,12 @@ gcp_cmd() {  # one command line on GCP; stdin, stdout and the exit code pass thr
 }
 gcp_root() { gcp_cmd "f=\$(mktemp) && cat > \$f && sudo bash \$f $* < /dev/null; rc=\$?; rm -f \$f; exit \$rc"; }
 lib() { echo "$REMOTE_LIB"; cat; }
+# From the terminal itself: ssh before it may have read (and dropped) piped stdin.
+confirm_yes() {
+  local answer=${GCP_MOVE_ANSWER:-}
+  [ -n "$answer" ] || read -r -p "Type YES to start: " answer < /dev/tty
+  [ "$answer" = YES ] || die "not started"
+}
 
 tunnels() {
   "$REPO/deploy/e5-move.sh" tunnel
@@ -245,6 +253,23 @@ for pair in app.secret.env:AI_SECRET_KEY app.secret.env:PII_SECRET_KEY app.secre
   printf '%-30s %s\n' "$k" "$( [ -n "$v" ] && printf %s "$v" | sha256sum | cut -c1-16 || echo EMPTY)"
 done
 EOF
+}
+
+# One key from E5 straight onto this Mac's clipboard for the owner's password manager: never on
+# the screen, in a file or in the chat. E5 is only read. The owner runs this, not the assistant.
+escrow_copy() {
+  local key=${1:-} file
+  case "$key" in
+    AI_SECRET_KEY|PII_SECRET_KEY|DJANGO_SECRET_KEY) file=app.secret.env;;
+    PGBACKREST_REPO1_CIPHER_PASS) file=db.secret.env;;
+    RESTIC_PASSWORD) file=backup.secret.env;;
+    *) die "escrow-copy AI_SECRET_KEY|PII_SECRET_KEY|DJANGO_SECRET_KEY|PGBACKREST_REPO1_CIPHER_PASS|RESTIC_PASSWORD";;
+  esac
+  { echo "K=$key F=$file"; lib <<'EOF'; } | e5_root | tr -d '\n' | pbcopy
+grep "^$K=" "/srv/faoj/env/$F" | tail -1 | cut -d= -f2- | tr -d '\n'
+EOF
+  [ -n "$(pbpaste)" ] || die "$key is empty on E5"
+  say "$key is on the clipboard ($(pbpaste | shasum -a 256 | cut -c1-16)): paste it into the password manager, then copy something else"
 }
 
 e5_manifest() {  # $1 local file
@@ -333,7 +358,8 @@ KEEP = {
     "migrate.secret.env": "all",
     "django.env": {"ALLOWED_HOSTS", "CSRF_TRUSTED_ORIGINS", "STAFF_WEB_BASE_URL"},
     "compose.env": {"FAOJ_ROOT", "PUBLIC_HOST", "METRICS_SINK", "NGROK_DOMAIN", "BACKUP_MODE",
-                    "PG_ARCHIVE_MODE", "BACKUP_REPO_PATH", "DRILL_REPO_PATH"},
+                    "PG_ARCHIVE_MODE", "BACKUP_REPO_PATH", "DRILL_REPO_PATH",
+                    "BACKUP_HOST_TAG", "DRILL_HOST_TAG"},
 }
 FROM_E5_ONLY = {"db.secret.env": {"PGBACKREST_REPO1_S3_KEY", "PGBACKREST_REPO1_S3_KEY_SECRET"}}
 line = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
@@ -376,36 +402,39 @@ PY
 EOF
 }
 
-e5_freeze() {
-  lib <<'EOF' | e5_root
+# Freeze and unfreeze run the same way on either host: e5_root or gcp_root as $1.
+freeze_on() {
+  lib <<'EOF' | "$1"
 faoj maintenance on
 dc --profile ngrok stop -t 60 web worker n8n ngrok >/dev/null
 psql_faoj -c "ALTER DATABASE faoj SET default_transaction_read_only = on" \
   -c "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE datname = 'faoj' AND pid <> pg_backend_pid()" >/dev/null
 sleep 2
 left=$(psql_faoj -c "SELECT count(*) FROM pg_stat_activity WHERE datname = 'faoj' AND backend_type = 'client backend' AND pid <> pg_backend_pid()")
-[ "$left" = 0 ] || { echo "E5 still has $left client sessions" >&2; exit 1; }
+[ "$left" = 0 ] || { echo "$(hostname) still has $left client sessions" >&2; exit 1; }
 faoj backup incr
 faoj backup files
-echo "E5 frozen: maintenance on, services stopped, database read-only, backup at the freeze point"
+echo "$(hostname) frozen: maintenance on, services stopped, database read-only, backup at the freeze point"
 EOF
 }
 
-e5_unfreeze() {
-  lib <<'EOF' | e5_root
+unfreeze_on() {
+  lib <<'EOF' | "$1"
 psql_faoj -c "ALTER DATABASE faoj RESET default_transaction_read_only"
 dc --profile ngrok up -d web worker n8n ngrok >/dev/null
 faoj maintenance off
-echo "E5 serves again"
+echo "$(hostname) serves again"
 EOF
 }
+e5_freeze() { freeze_on e5_root; }
+e5_unfreeze() { unfreeze_on e5_root; }
 
 move() {
   tunnels; not_opened; tool_image
   local ts d; ts=$(date +%Y%m%d-%H%M%S); d=/srv/faoj/restore/move-$ts
   mkdir -p "$STATE/move-$ts"; chmod 700 "$STATE" "$STATE/move-$ts"
   echo "This stops E5 (maintenance, services, read-only database) and moves keys, data and LINE to GCP." >&2
-  local answer; read -r -p "Type YES to start: " answer; [ "$answer" = YES ] || die "not started"
+  confirm_yes
   say "GCP: maintenance on, stop web/worker/n8n"
   lib <<'EOF' | gcp_root
 faoj maintenance on; dc stop -t 60 web worker n8n >/dev/null
@@ -446,7 +475,11 @@ EOF
   lib <<EOF | gcp_root || die "opening GCP failed; if $OPENED is missing, E5 is frozen and back-to-e5 is safe"
 f=/srv/faoj/env/compose.env
 for kv in BACKUP_MODE=pgbackrest PG_ARCHIVE_MODE=on BACKUP_REPO_PATH=/pgbackrest/production-gcp \
-    DRILL_REPO_PATH=/pgbackrest/production-gcp NGROK_DOMAIN=$NGROK_DOMAIN; do set_kv "\$f" "\${kv%%=*}" "\${kv#*=}"; done
+    DRILL_REPO_PATH=/pgbackrest/production-gcp BACKUP_HOST_TAG=production-gcp DRILL_HOST_TAG=production-gcp \
+    NGROK_DOMAIN=$NGROK_DOMAIN; do set_kv "\$f" "\${kv%%=*}" "\${kv#*=}"; done
+# LINE reaches web under the ngrok name (2 Nov 2026: without it Django answered 400).
+h=\$(sed -n 's/^ALLOWED_HOSTS=//p' /srv/faoj/env/django.env)
+case ",\$h," in *",$NGROK_DOMAIN,"*) ;; *) set_kv /srv/faoj/env/django.env ALLOWED_HOSTS "\$h,$NGROK_DOMAIN";; esac
 set -a; . "\$f"; set +a
 dc up -d --force-recreate --wait db
 dc exec -T -u postgres db pgbackrest stanza-create --log-level-console=warn
@@ -471,6 +504,95 @@ EOF
   e5_unfreeze
 }
 
+# GCP has taken work and something forces production back to E5 before 10 Nov: the same move
+# the other way (freeze GCP, dump, deep compare on E5, decrypt_check), so GCP's writes go along.
+reverse_move() {
+  tunnels
+  gcp_cmd "test -e $OPENED" || die "GCP never took work: back-to-e5 is enough"
+  tool_image
+  local ts d; ts=$(date +%Y%m%d-%H%M%S); d=/srv/faoj/restore/reverse-$ts
+  mkdir -p "$STATE/reverse-$ts"; chmod 700 "$STATE" "$STATE/reverse-$ts"
+  echo "This stops GCP (maintenance, services, read-only database) and moves its data back to E5." >&2
+  confirm_yes
+  say "GCP: freeze"
+  freeze_on gcp_root || { unfreeze_on gcp_root; die "freeze failed; GCP serves again, nothing moved"; }
+  set +e
+  (
+    set -e
+    lib <<'EOF' | gcp_root > "$STATE/reverse-$ts/source.json"
+manage move_manifest --deep
+EOF
+    # E5's own release must know every migration GCP applied, or it would run on a newer schema.
+    lib <<'EOF' | e5_root | sed -n 's/^ *\[.\] *//p' | sort > "$STATE/reverse-$ts/e5-known"
+manage showmigrations --plan
+EOF
+    python3 - "$STATE/reverse-$ts/source.json" "$STATE/reverse-$ts/e5-known" <<'PY' || die "deploy GCP's release on E5 first (it is offline now, so no one notices)"
+import json, sys
+applied = set(json.load(open(sys.argv[1]))["applied_migrations"])
+known = set(open(sys.argv[2]).read().split())
+missing = sorted(applied - known)
+if missing:
+    sys.exit(f"E5's release does not know {missing[:5]}")
+PY
+    on_e5 "sudo install -d -m 700 $d"
+    rm -f "$STATE/dump.sha"
+    lib <<'EOF' | gcp_root | tee >(shasum -a 256 | cut -d' ' -f1 > "$STATE/dump.sha") | on_e5 "sudo tee $d/app.dump >/dev/null"
+dc exec -T -u postgres db pg_dump -Fc --no-owner --no-privileges faoj
+EOF
+    local i=0; until [ -s "$STATE/dump.sha" ]; do i=$((i + 1)); [ $i -lt 50 ] || die "no checksum of the dump"; sleep 0.2; done
+    [ "$(cat "$STATE/dump.sha")" = "$(on_e5 "sudo sha256sum $d/app.dump | cut -d' ' -f1")" ] || die "dump changed in transit"
+    lib <<'EOF' | gcp_root > "$STATE/reverse-$ts/after.json"
+manage move_manifest --deep
+EOF
+    cmp -s "$STATE/reverse-$ts/source.json" "$STATE/reverse-$ts/after.json" || die "GCP changed while frozen"
+    on_e5 "sudo tee $d/source.json >/dev/null" < "$STATE/reverse-$ts/source.json"
+    say "GCP → E5: private files (E5's old folder kept as media.before-reverse-$ts)"
+    on_e5 "sudo mv /srv/faoj/data/media /srv/faoj/data/media.before-reverse-$ts && sudo install -d -o 10001 -g 10001 -m 700 /srv/faoj/data/media"
+    lib <<'EOF' | gcp_root | on_e5 "sudo tar -x --same-owner -p -C /srv/faoj/data/media"
+tar -C /srv/faoj/data/media -cf - .
+EOF
+    say "keys changed on GCP since the move (names only; E5 keeps its own values):"
+    for side in gcp_root e5_root; do
+      lib <<'EOF' | "$side" > "$STATE/reverse-$ts/keys-$side"
+for f in /srv/faoj/env/app.secret.env /srv/faoj/env/django.env; do
+  sed -n 's/^\([A-Z_][A-Z0-9_]*\)=\(.*\)$/\1 \2/p' "$f" | while read -r k v; do
+    printf '%s %s\n' "$k" "$(printf %s "$v" | sha256sum | cut -c1-16)"; done
+done | sort
+EOF
+    done
+    comm -3 "$STATE/reverse-$ts/keys-gcp_root" "$STATE/reverse-$ts/keys-e5_root" | awk '{print "  " $1}' | sort -u \
+      | grep -v -e DATABASE_URL -e ORCHESTRATOR_TOKEN -e ALLOWED_HOSTS -e CSRF_TRUSTED_ORIGINS -e STAFF_WEB_BASE_URL || echo "  (none)"
+    say "E5: restore, migrate, deep compare, decrypt_check"
+    { echo "TOOL='$TOOL_IMAGE'"; lib <<EOF; } | e5_root
+grep -qx FAOJ_HOST=faoj-prod-e5 /etc/faoj/host.env || { echo "not faoj-prod-e5: refusing to drop anything" >&2; exit 1; }
+psql_faoj -c 'ALTER DATABASE faoj RESET default_transaction_read_only'
+psql_faoj -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public AUTHORIZATION faoj_owner'
+dc exec -T -u postgres db pg_restore -d faoj --no-owner --no-privileges --role=faoj_owner --exit-on-error < $d/app.dump
+dc run --rm -T migrate >/dev/null
+tool move_manifest --compare /dev/stdin < $d/source.json
+tool decrypt_check
+EOF
+  )
+  local rc=$?; set -e
+  if [ $rc -ne 0 ]; then
+    say "STOPPED before E5 opened: GCP serves again with its data untouched; E5 stays in maintenance"
+    unfreeze_on gcp_root; exit 1
+  fi
+  say "GCP: LINE webhook off; E5: open"
+  lib <<EOF | gcp_root
+set_kv /srv/faoj/env/compose.env NGROK_DOMAIN ""
+mv $OPENED $OPENED.reversed-$ts
+EOF
+  lib <<'EOF' | e5_root || die "opening E5 failed: GCP is frozen with all data, E5 holds the same; fix E5 or unfreeze GCP"
+dc --profile ngrok up -d --wait web worker n8n caddy ngrok
+faoj maintenance off
+faoj smoke
+faoj backup full
+faoj backup files
+EOF
+  say "moved back: LINE → ngrok → E5. GCP stays frozen; dumps kept in $d on E5"
+}
+
 cmd=${1:-}; shift || true
 case "$cmd" in
   prepare) prepare;;
@@ -481,10 +603,12 @@ case "$cmd" in
   deploy) deploy "$@";;
   status) status;;
   escrow-check) tunnels; escrow_check;;
+  escrow-copy) tunnels; escrow_copy "$@";;
   dry-run) dry_run;;
   move) move;;
   back-to-e5) back_to_e5;;
+  reverse-move) reverse_move;;
   ssh) if [ $# -gt 0 ]; then on_gcp "$@"; else
          exec gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --ssh-key-file "$KEY"; fi;;
-  *) sed -n '2,25p' "$0"; exit 2;;
+  *) sed -n '2,27p' "$0"; exit 2;;
 esac

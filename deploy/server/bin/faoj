@@ -450,8 +450,9 @@ backup() {
     full|diff|incr) dc exec -T -u postgres db pgbackrest backup --type="$1";;
     files)
       restic_cmd cat config >/dev/null 2>&1 || restic_cmd init
-      restic_cmd backup --tag files --host "$FAOJ_ENV" /backup/media /backup/n8n
-      restic_cmd forget --host "$FAOJ_ENV" --keep-daily 7 --keep-weekly 4 --prune;;
+      # One repository, several hosts: each keeps and forgets only its own snapshots.
+      restic_cmd backup --tag files --host "${BACKUP_HOST_TAG:-$FAOJ_ENV}" /backup/media /backup/n8n
+      restic_cmd forget --host "${BACKUP_HOST_TAG:-$FAOJ_ENV}" --keep-daily 7 --keep-weekly 4 --prune;;
     dump)
       local day; day=$(date -u +%Y%m%dT%H%M%SZ); mkdir -p "$FAOJ_ROOT/data/dumps"
       dc exec -T -u postgres db pg_dump -Fc faoj > "$FAOJ_ROOT/data/dumps/$day-faoj.dump"
@@ -572,7 +573,7 @@ SQL
   docker run --rm --env-file "$ENV_DIR/drill.secret.env" -e AWS_DEFAULT_REGION="$BACKUP_S3_REGION" \
     -v "$drill:/restore" -v "$FAOJ_ROOT/tls/backup:/run/faoj-backup-tls:ro" \
     restic/restic:0.18.1@sha256:39d9072fb5651c80d75c7a811612eb60b4c06b32ffe87c2e9f3c7222e1797e76 \
-    "${rcafile[@]+"${rcafile[@]}"}" -o s3.bucket-lookup=path restore latest --host "$source" --target /restore/tree >/dev/null
+    "${rcafile[@]+"${rcafile[@]}"}" -o s3.bucket-lookup=path restore latest --host "${DRILL_HOST_TAG:-$source}" --target /restore/tree >/dev/null
   [ -d "$drill/tree/backup/media" ] && cp -R "$drill/tree/backup/media/." "$drill/media/"
   say "start the web app on 127.0.0.1:18000 with every outbound path off"
   docker run -d --name faoj-drill-web --network "$net" \
