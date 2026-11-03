@@ -216,6 +216,20 @@ def home(request):
         open_count=open_count,
         new_link=link("new", "window"),
         ended_link=link("ended", "window"),
+        # Each division/centre's share of the open work, above สถานะ (user, 3 Nov 2569).
+        share=None
+        if context["chosen"]
+        else charts.pie(
+            [
+                (
+                    c["division"].code,
+                    c["open"],
+                    reverse("division-detail", args=[c["division"].code]) + "?tab=host",
+                )
+                for c in cards
+            ],
+            other_href=reverse("queue-all") if scope.sees_department else "",
+        ),
         today=now,
     )
     return render(request, "operations/console.html", context)

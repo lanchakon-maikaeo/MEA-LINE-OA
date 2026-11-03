@@ -7,6 +7,7 @@ are admin-only (GuardTests); the AI/rule proposal is shown apart from people's d
 """
 
 import ast
+import itertools
 import tempfile
 import uuid
 from datetime import timedelta
@@ -948,6 +949,40 @@ class NavigationTests(WebTestCase):
         self.assertGreater(tick["5"], trend["top"])
         edge = trend["columns"][2]["x"]
         self.assertIn(f"L{edge} {tick['2']} L{edge} {tick['5']}", trend["new_path"])
+
+    def test_pie_shares_the_open_work_and_folds_the_rest(self):
+        # 3 Nov 2569: each division's share of the open work; past five the smallest are อื่นๆ.
+        rows = [(f"D{n}", n, f"/d/{n}") for n in (0, 1, 2, 3, 4, 10, 20, 60)]
+        pie = charts.pie(rows, other_href="/all/")
+        labels = [(s["label"], s["n"], s["percent"], s["tone"]) for s in pie["slices"]]
+        self.assertEqual(pie["total"], 100)
+        self.assertEqual(
+            labels,
+            [
+                ("D60", 60, "60%", "c1"),
+                ("D20", 20, "20%", "c2"),
+                ("D10", 10, "10%", "c3"),
+                ("D4", 4, "4%", "c4"),
+                ("D3", 3, "3%", "c5"),
+                ("อื่นๆ", 3, "3%", "other"),
+            ],
+        )
+        self.assertEqual(pie["slices"][-1]["href"], "/all/")
+        self.assertIn(" 0 1 ", pie["slices"][0]["path"])  # 60% takes the long way round
+        # Each % sits at the end of a leader line, on its slice's side; small slices never touch.
+        self.assertEqual(pie["slices"][0]["anchor"], "start")  # 0-60% clockwise: mostly right
+        self.assertEqual(pie["slices"][-1]["anchor"], "end")
+        for anchor in ("start", "end"):
+            ys = sorted(s["label_y"] for s in pie["slices"] if s["anchor"] == anchor)
+            self.assertTrue(all(b - a >= charts.LABEL_GAP for a, b in itertools.pairwise(ys)))
+        self.assertEqual(len(charts.pie([("D1", 0, ""), ("D2", 5, "")])["slices"]), 1)
+
+    def test_overview_shows_the_share_instead_of_the_ack_average(self):
+        self.at_meter(), self.at_transformer()
+        page = self.client_for(self.admin).get("/console/")
+        self.assertNotContains(page, "ตอบรับเฉลี่ย</span>")
+        self.assertContains(page, "สัดส่วนงานแต่ละกอง")
+        self.assertContains(page, 'href="/divisions/SIM-MTR/?tab=host" aria-label="SIM-MTR')
 
     def test_trend_legend_stays_off_the_lines(self):
         # Rising lines leave the upper left free; one line along the top and one along the bottom

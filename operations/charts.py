@@ -7,6 +7,7 @@ chart also has a table view, so nothing is readable only by hovering.
 
 import math
 import unicodedata
+from itertools import pairwise
 
 WIDTH, HEIGHT = 960, 280
 LEFT, RIGHT, TOP, BOTTOM = 64, 36, 16, 52
@@ -200,3 +201,92 @@ def legend(items, marks):
             for (series, label), row in zip(items, rows, strict=True)
         ],
     }
+
+
+PIE_R = 90
+PIE_PAD_X, PIE_PAD_Y = 52, 16  # room around the pie for the % labels on their leader lines
+PIE_SLICES = 5  # past five divisions the smallest fold into อื่นๆ; a sixth hue would blur
+LABEL_GAP = 16  # the least height between two labels on the same side
+
+
+def pie(rows, other_href=""):
+    """[(label, n, href)] → pie slices with each one's share, largest first from 12 o'clock.
+
+    Each division/centre's share of the open work (user, 3 Nov 2569). Slices take seaborn's
+    deep hues in a fixed order whose neighbours stay apart for colour-blind readers; อื่นๆ is
+    grey. Divisions with nothing open are left out. Each slice's % sits outside the pie at the
+    end of a leader line from the slice (user, 3 Nov 2569)."""
+    rows = sorted((r for r in rows if r[1]), key=lambda r: -r[1])
+    if len(rows) > PIE_SLICES + 1:
+        rest = rows[PIE_SLICES:]
+        rows = rows[:PIE_SLICES] + [("อื่นๆ", sum(r[1] for r in rest), other_href)]
+    total = sum(n for _, n, _ in rows)
+    cx, cy = PIE_PAD_X + PIE_R, PIE_PAD_Y + PIE_R
+    slices, start = [], 0
+    for i, (label, n, href) in enumerate(rows):
+        share = n / total
+        end = start + share
+        other = label == "อื่นๆ" and i == len(rows) - 1
+        percent = round(share * 100)
+        slices.append(
+            {
+                "label": label,
+                "n": n,
+                "href": href,
+                "percent": f"{percent}%" if percent else "<1%",
+                "tone": "other" if other else f"c{i + 1}",
+                "path": _wedge(cx, cy, start, end),
+                "middle": (start + end) / 2,
+            }
+        )
+        start = end
+    _leaders(slices, cx, cy)
+    return {
+        "width": 2 * (PIE_PAD_X + PIE_R),
+        "height": 2 * (PIE_PAD_Y + PIE_R),
+        "total": total,
+        "slices": slices,
+    }
+
+
+def _angle_point(cx, cy, share, radius):
+    angle = 2 * math.pi * share - math.pi / 2
+    return cx + radius * math.cos(angle), cy + radius * math.sin(angle)
+
+
+def _wedge(cx, cy, start, end):
+    """SVG path of the share start..end (0..1, clockwise from 12 o'clock) around (cx, cy)."""
+    x1, y1 = _angle_point(cx, cy, start, PIE_R)
+    x2, y2 = _angle_point(cx, cy, end, PIE_R)
+    large = 1 if end - start > 0.5 else 0
+    return f"M{cx} {cy} L{x1:.2f} {y1:.2f} A{PIE_R} {PIE_R} 0 {large} 1 {x2:.2f} {y2:.2f} Z"
+
+
+def _leaders(slices, cx, cy):
+    """A line out from the middle of each slice's rim, bending level to its % label. Labels on
+    one side that would touch are pushed apart top to bottom, then back up if they overflow."""
+    top, bottom = 8, 2 * (PIE_PAD_Y + PIE_R) - 8
+    for s in slices:
+        s["right"] = math.sin(2 * math.pi * s["middle"]) >= 0
+        s["rim"] = _angle_point(cx, cy, s["middle"], PIE_R - 4)
+        s["knee"] = _angle_point(cx, cy, s["middle"], PIE_R + 10)
+        s["label_y"] = min(max(s["knee"][1], top), bottom)
+    for right in (True, False):
+        side = sorted((s for s in slices if s["right"] == right), key=lambda s: s["label_y"])
+        for above, below in pairwise(side):
+            below["label_y"] = max(below["label_y"], above["label_y"] + LABEL_GAP)
+        if side and side[-1]["label_y"] > bottom:
+            side[-1]["label_y"] = bottom
+            for below, above in pairwise(side[::-1]):
+                above["label_y"] = min(above["label_y"], below["label_y"] - LABEL_GAP)
+    for s in slices:
+        sign = 1 if s["right"] else -1
+        end_x = cx + sign * (PIE_R + 22)
+        (rx, ry), (kx, _) = s["rim"], s["knee"]
+        y = round(s["label_y"], 1)
+        s["leader"] = f"{rx:.1f},{ry:.1f} {kx:.1f},{y} {end_x:.1f},{y}"
+        s["label_x"] = round(end_x + sign * 4, 1)
+        s["anchor"] = "start" if s["right"] else "end"
+        s["label_y"] = y
+        for key in ("rim", "knee", "right", "middle"):
+            del s[key]

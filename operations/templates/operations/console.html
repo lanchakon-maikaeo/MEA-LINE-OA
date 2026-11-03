@@ -71,11 +71,6 @@
       <span class="kpi__value">{{ dash.trend.total_ended }}</span>
       <span class="kpi__note">{{ days }} วัน</span>
     </a>
-    <a class="kpi" href="{{ dash.times.ack }}">
-      <span class="kpi__label">ตอบรับเฉลี่ย</span>
-      <span class="kpi__value kpi__value--text">{{ report.avg_ack|duration }}</span>
-      <span class="kpi__note">{{ report.ack_count }} ครั้ง</span>
-    </a>
   </div>
 </section>
 
@@ -132,6 +127,32 @@
     </details>
   </section>
 
+  <div class="ov-side">
+  {% if share.slices|length > 1 %}
+  <section class="panel viz ov-share" aria-labelledby="r-share">
+    <div class="panel__head"><h3 id="r-share">สัดส่วนงานแต่ละกอง</h3><span class="muted">{{ share.total }} เรื่องที่ต้องทำ</span></div>
+    <div class="pie">
+      <svg viewBox="0 0 {{ share.width }} {{ share.height }}" role="img" aria-labelledby="r-share r-share-desc">
+        <desc id="r-share-desc">วงกลมแบ่งเรื่องที่ต้องทำตามกอง {% for s in share.slices %}{{ s.label }} {{ s.percent }} {% endfor %}</desc>
+        {% for s in share.slices %}
+          {% if s.href %}<a href="{{ s.href }}" aria-label="{{ s.label }} {{ s.n }} เรื่อง {{ s.percent }}">{% endif %}
+          <path class="pie__slice pie__slice--{{ s.tone }}" d="{{ s.path }}"><title>{{ s.label }} {{ s.n }} เรื่อง ({{ s.percent }})</title></path>
+          {% if s.href %}</a>{% endif %}
+        {% endfor %}
+        {% for s in share.slices %}
+          <polyline class="pie__leader" points="{{ s.leader }}"/>
+          <text class="pie__label" x="{{ s.label_x }}" y="{{ s.label_y }}" text-anchor="{{ s.anchor }}" dominant-baseline="middle">{{ s.percent }}</text>
+        {% endfor %}
+      </svg>
+      <ul class="pie__legend">
+        {% for s in share.slices %}
+          <li><span class="pie__key pie__slice--{{ s.tone }}" aria-hidden="true"></span><span class="pie__name" title="{{ s.label }}">{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</span><span class="num">{{ s.percent }}</span><span class="muted num">{{ s.n }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="panel viz" aria-labelledby="r-status">
     <div class="panel__head"><h3 id="r-status">สถานะ</h3><span class="muted">{{ report.total }} เรื่อง</span></div>
     <div class="viz-bars">
@@ -140,6 +161,7 @@
       {% empty %}<p class="muted">ไม่มีเรื่องที่เปิดอยู่</p>{% endfor %}
     </div>
   </section>
+  </div>
 </div>
 {% endwith %}
 

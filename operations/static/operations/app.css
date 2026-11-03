@@ -1250,6 +1250,32 @@ a.kpi--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 }
 .ov-trend .chart { margin-top: var(--s-4); }
 .ov-trend .disclosure { margin-top: var(--s-12); }
+.ov-side { display: grid; gap: var(--s-18); align-content: start; }
+
+/* Each division's share of the open work (user, 3 Nov 2569): seaborn deep hues in a fixed order
+   that keeps neighbouring slices apart for colour-blind readers (validated on white); อื่นๆ grey.
+   Each slice's % sits outside at the end of a leader line; the legend under the pie names
+   each slice with its share and count. */
+.pie { display: grid; gap: var(--s-18); margin-top: var(--s-12); }
+.pie svg { display: block; width: 100%; max-width: 300px; height: auto; margin: 0 auto; overflow: visible; }
+.pie__leader { fill: none; stroke: var(--ash); stroke-width: 1; }
+.pie__label { fill: var(--ink); font-size: 13px; font-weight: 600; font-family: var(--font); font-variant-numeric: tabular-nums; }
+.pie__slice { stroke: var(--canvas); stroke-width: 2; stroke-linejoin: round; }
+.pie a:hover .pie__slice, .pie a:focus-visible .pie__slice { opacity: 0.8; }
+.pie__slice--c1 { fill: #4c72b0; background: #4c72b0; }
+.pie__slice--c2 { fill: #dd8452; background: #dd8452; }
+.pie__slice--c3 { fill: #7a68b8; background: #7a68b8; }
+.pie__slice--c4 { fill: #55a868; background: #55a868; }
+.pie__slice--c5 { fill: #c44e52; background: #c44e52; }
+.pie__slice--other { fill: #b0b0b0; background: #b0b0b0; }
+.pie__legend { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--s-8) var(--s-18); font-size: 14px; }
+.pie__legend li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto 4ch; gap: var(--s-8); align-items: center; }
+.pie__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pie__key { width: 12px; height: 12px; border-radius: 3px; }
+.pie__legend a { color: var(--ink); text-decoration: none; }
+.pie__legend a:hover { text-decoration: underline; }
+.pie__legend .num { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pie__legend .muted { font-weight: 400; }
 
 .ov-table th[scope="row"] { font-size: 15px; font-weight: 400; color: var(--ink); white-space: normal; vertical-align: middle; border-bottom: 1px solid var(--hairline-soft); padding: var(--s-12); }
 .ov-table td { vertical-align: middle; font-size: 17px; }
@@ -1298,7 +1324,7 @@ body:has(.ov-page) .footer { border-top: 0; }
 .ov-page .panel__head .muted { font-size: 13px; }
 .ov-page .panel-grid { gap: var(--s-18); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .ov-page .ov-grid { gap: var(--s-18); margin-top: var(--s-18); }
-.ov-page .kpis { gap: var(--s-18); }
+.ov-page .kpis { gap: var(--s-18); grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .ov-page .ov-card { border-radius: 18px; padding: var(--s-4) var(--s-12); }
 .ov-page .ov-table thead th { border-bottom-color: var(--hairline-soft); }
 .ov-page .ov-table tbody tr:last-child > * { border-bottom: 0; }
