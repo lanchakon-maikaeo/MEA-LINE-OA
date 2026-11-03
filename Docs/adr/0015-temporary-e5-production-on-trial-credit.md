@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: partly superseded by ADR 0043
 ---
 
 # production ชั่วคราวบน E5.Flex ด้วยเครดิตทดลอง โดยมี Mac เป็นเครื่องสำรอง
+
+> production ย้ายไป GCP แล้วตั้งแต่ 2 พ.ย. 2569 ตาม [ADR 0043](0043-production-on-gcp-free-trial.md) ส่วนเครื่อง prod และทางเข้าในเอกสารนี้จึงเลิกใช้ ส่วน Mac standby, การจัดการตอนระบบล่ม และการแยกรุ่น minor กับ major ยังใช้ต่อ
 
 แก้ไขบางส่วนของ [ADR 0006](0006-oci-always-free-singapore-without-payg.md) ผู้ใช้ตกลงวันที่ 14 ตุลาคม 2569 (grill Q1–Q22) หลังสร้างเครื่อง A1 ไม่ได้มาสองวัน (K16) tenancy `MEAFlow` มีเครดิตทดลอง SGD 400 ที่หมดอายุ 10 พฤศจิกายน 2569 บัญชียังเป็น `FREE_TIER` และ**ห้ามอัปเกรด** ถ้าเครดิตหมดหรือถึงวันหมดอายุ Oracle จะหยุดเครื่องที่ไม่ฟรี ไม่ตัดบัตร
 

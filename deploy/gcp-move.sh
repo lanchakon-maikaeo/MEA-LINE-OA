@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
-# Production from faoj-prod-e5 to faoj-prod-gcp (Docs/release/gcp-move). Run from the repository on
-# the Mac, logged in with `gcloud auth login`. Phase 1 (this file so far) brings up an EMPTY
-# stack: no keys, no LINE webhook, no data; E5 keeps serving. Each step can be re-run.
+# Production on faoj-prod-gcp (ADR 0043; how-to in Docs/deploy-gcp.md). Run from the repository
+# on the Mac, logged in with `gcloud auth login`. Each step can be re-run.
 #
+#   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's OCIR digest, detached;
+#                                     GCP_APPROVAL="who/when approved" goes into the release record
+#   deploy/gcp-move.sh status         faoj status and /health/ready/
+#   deploy/gcp-move.sh line-menu      publish the Rich Menu from the running release, nothing else
+#   deploy/gcp-move.sh manage CMD...  one manage.py command in the migrate service
+#   deploy/gcp-move.sh ssh [cmd]      a shell (or one command) on the host through IAP
+#   deploy/gcp-move.sh staff-proxy    the staff web at https://dedcenter-….run.app (Cloud Run), for
+#                                     networks that block sslip.io as Dynamic DNS (MEA's FortiGate)
+#
+# Setting up a host (phase 1 of Docs/release/gcp-move, 1 Nov 2026):
 #   deploy/gcp-move.sh prepare        Docker, unattended upgrades, the 150 GB disk at /srv/faoj
 #   deploy/gcp-move.sh pull-token [USER]  OCI user faoj-gcp-pull in faoj-deployers (pull only), a new
 #                                     auth token piped straight into docker login on the host
 #   deploy/gcp-move.sh ocir-login     or: the owner types an existing pull-only token (hidden)
 #   deploy/gcp-move.sh bootstrap IMG  bootstrap-host.sh from the release image (its own secrets)
 #   deploy/gcp-move.sh skeleton-config  dump backups, no WAL archive, metrics to stdout, no ngrok
-#   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's OCIR digest, detached
-#   deploy/gcp-move.sh status         faoj status and /health/ready/
-#   deploy/gcp-move.sh ssh [cmd]      a shell (or one command) on the host through IAP
-#   deploy/gcp-move.sh staff-proxy    the staff web at https://dedcenter-….run.app (Cloud Run), for
-#                                     networks that block sslip.io as Dynamic DNS (MEA's FortiGate)
 #
-# Phase 2 (needs `deploy/e5-move.sh tunnel` access; E5 runs GCP's checks in one-off containers):
+# The move from E5 (phase 2, done 2 Nov 2026; needs `deploy/e5-move.sh tunnel` access; E5 runs
+# GCP's checks in one-off containers):
 #   deploy/gcp-move.sh escrow-check   hashes of the keys the data needs, to compare with the
 #                                     owner's password manager
 #   deploy/gcp-move.sh escrow-copy KEY  that key from E5 onto this Mac's clipboard (owner runs it)
@@ -36,7 +41,7 @@ KEY=${GCP_KEY:-$HOME/.ssh/faoj_gcp_ed25519}
 PUBLIC_HOST=${GCP_PUBLIC_HOST:-34-15-129-131.sslip.io}
 REGISTRY=ap-singapore-1.ocir.io
 NAMESPACE=axif86tn0tbj
-APPROVAL=${GCP_APPROVAL:-"owner in chat 2 Nov 2026: empty skeleton on faoj-prod-gcp, no data (gcp-move phase 1)"}
+APPROVAL=${GCP_APPROVAL:-"owner in chat 2 Nov 2026: production on faoj-prod-gcp (ADR 0043)"}
 
 say() { echo "[$(date +%H:%M:%S)] $*" >&2; }
 die() { echo "gcp-move: $*" >&2; exit 1; }
@@ -253,6 +258,12 @@ gcp_cmd() {  # one command line on GCP; stdin, stdout and the exit code pass thr
 }
 gcp_root() { gcp_cmd "f=\$(mktemp) && cat > \$f && sudo bash \$f $* < /dev/null; rc=\$?; rm -f \$f; exit \$rc"; }
 lib() { echo "$REMOTE_LIB"; cat; }
+manage_gcp() {  # one manage.py command on GCP (the migrate service: same env, network and media)
+  [ $# -gt 0 ] || die "usage: deploy/gcp-move.sh manage <command> [args...]"
+  lib <<'EOF' | gcp_root "$(printf '%q ' "$@")"
+manage "$@"
+EOF
+}
 # From the terminal itself: ssh before it may have read (and dropped) piped stdin.
 confirm_yes() {
   local answer=${GCP_MOVE_ANSWER:-}
@@ -647,7 +658,9 @@ case "$cmd" in
   back-to-e5) back_to_e5;;
   reverse-move) reverse_move;;
   staff-proxy) staff_proxy;;
+  manage) manage_gcp "$@";;
+  line-menu) say "publishing the Rich Menu from the running release; services stay up"; manage_gcp setup_line_rich_menu;;
   ssh) if [ $# -gt 0 ]; then gcp_cmd "$*"; else  # stdout stays clean for pipes (gcloud's WARNING goes to stderr)
          exec gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap --ssh-key-file "$KEY"; fi;;
-  *) sed -n '2,27p' "$0"; exit 2;;
+  *) sed -n '/^set -euo/q;2,$p' "$0"; exit 2;;
 esac

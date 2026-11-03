@@ -33,7 +33,7 @@
 
 ## ภายใน 24 ชั่วโมง
 
-- ☐ บันทึก ADR ใหม่ "production บน GCP Free Trial ที่กรุงเทพฯ" (แก้ ADR 0015) รวมทั้งกติกาใน [0-data-safety.md](0-data-safety.md)
+- ☑ บันทึก ADR ใหม่ "production บน GCP Free Trial ที่กรุงเทพฯ" (แก้ ADR 0015) รวมทั้งกติกาใน [0-data-safety.md](0-data-safety.md): [ADR 0043](../../adr/0043-production-on-gcp-free-trial.md) และ [คู่มือ deploy บน GCP](../../deploy-gcp.md) (3 พ.ย.)
 - ☐ ดูค่าใช้จ่ายวันแรกใน GCP Billing (รวม snapshot) แล้วประมาณว่า $300 จะพอถึงวันไหน
 
 ## วันที่ 10 พ.ย. 2569

@@ -20,7 +20,7 @@
 | Published | 2012304620 | 2012304620-sg7m4ScY | production |
 
 - scope เปิด `openid, profile` แล้ว
-- production: หลัง deploy รุ่นที่มี `/broadcasts/` ให้รัน `deploy/e5-move.sh mini-app` เพื่อใส่ค่ารุ่น Published แล้วเปลี่ยน Endpoint URL ของรุ่น Published ใน LINE Developers เป็น `https://168-107-70-170.sslip.io/broadcasts/` ตอนนี้ยังเป็นหน้าตัวอย่างของ LINE
+- production (GCP ตั้งแต่ 2 พ.ย. 2569, ADR 0043): `django.env` บนเครื่องมีค่ารุ่น Published แล้ว (ย้ายมาจาก E5) Endpoint URL ของรุ่น Published ใน LINE Developers คือ `https://dedcenter-381083094942.asia-southeast3.run.app/broadcasts/` ถ้าต้องตั้งค่าบนเครื่องใหม่ ใส่ `LINE_MINI_CHANNEL_ID` และ `LINE_LIFF_ID` ของรุ่น Published ใน `/srv/faoj/env/django.env` แล้ว recreate web และ worker
 
 ตาม [LINE ID token verification](https://developers.line.biz/en/reference/line-login/#verify-id-token) server ตรวจ token กับ channel ID โดยไม่เชื่อ roles/user ID จาก browser เซสชัน Mini App จำกัดเฉพาะ Broadcast และไม่เปลี่ยนเป็นเซสชันเว็บเจ้าหน้าที่ทั่วไป
 
