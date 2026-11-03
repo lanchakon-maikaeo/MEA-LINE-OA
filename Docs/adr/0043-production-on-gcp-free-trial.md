@@ -10,7 +10,7 @@ status: accepted
 - **ทางเข้า:** LINE ยังใช้ ngrok static domain เดิม URL ของ webhook จึงไม่เปลี่ยน เว็บเจ้าหน้าที่ใช้ `sslip.io` ไม่ได้เพราะ FortiGate ของ กฟน. จัด `sslip.io` เป็น Dynamic DNS แล้วบล็อก จึงตั้ง Cloud Run ชื่อ `dedcenter` ที่ `https://dedcenter-381083094942.asia-southeast3.run.app/` (FortiGuard จัด `run.app` เป็น Information Technology) ให้รัน Caddy ส่งต่อไปที่เครื่อง Endpoint ของ Mini App ก็ใช้ชื่อนี้
 - **backup:** pgBackRest ใช้ bucket เดิมใน OCI Object Storage แต่แยก path เป็น `/pgbackrest/production-gcp` สำเนาของ E5 ที่ `/pgbackrest/production` จึงไม่ถูกแตะ restic ใช้ repo เดิมและแยกกันด้วย host tag (`BACKUP_HOST_TAG`) แต่ละเครื่องลบได้เฉพาะ snapshot ของตัวเอง Mac ยังเป็น standby และดึงสำเนาไป OneDrive ทุกสัปดาห์ แยกโฟลเดอร์ตาม path
 - **การ deploy:** deploy เฉพาะ digest จาก Release workflow ผ่าน `deploy/gcp-move.sh deploy` ซึ่งรัน `faoj deploy` แบบ detached บนเครื่อง เข้าเครื่องผ่าน IAP จึงไม่ต้องแก้ allow list เมื่อ IP ของ Mac เปลี่ยน auto-promote ปิดไว้ และเครื่องดึง image จาก OCIR ด้วย auth token ที่ pull ได้อย่างเดียว
-- **การเฝ้าดู:** metric ส่งออก stdout (`METRICS_SINK=stdout`) ไม่ขึ้น OCI Monitoring การเตือนมีแค่ healthcheck บน Mac (ทุกนาที และเตือนเมื่อ standby ตามหลังเกิน 15 นาที) กับ UptimeRobot
+- **การเฝ้าดู:** metric ส่งออก stdout (`METRICS_SINK=stdout`) ไม่ขึ้น OCI Monitoring การเตือนมีแค่งานบน Mac (healthcheck ทุกนาที และงาน standby ที่เตือนเมื่อตามหลังเกิน 15 นาที) กับ UptimeRobot
 - **E5:** เก็บไว้แบบอ่านอย่างเดียวจนถึงวันที่ 10 พ.ย. (ฐานข้อมูลเป็น `default_transaction_read_only=on` หยุด web, worker, n8n และ ngrok) ทุกหน้าบอกที่อยู่ใหม่ การเขียนอะไรบน E5 ต้องให้เจ้าของอนุมัติทีละครั้ง
 
 ## Considered Options

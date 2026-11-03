@@ -2,6 +2,8 @@
 
 ปรับปรุงวันที่ 3 พ.ย. 2569 production ย้ายจาก OCI E5 มาอยู่ที่ GCP ตั้งแต่ 2 พ.ย. 2569 เวลา 21:48 น. ตาม [ADR 0043](adr/0043-production-on-gcp-free-trial.md) ขั้นตอนตอนย้ายอยู่ใน [แผนย้าย](release/gcp-move/README.md) ส่วนเอกสารนี้ใช้กับงานประจำหลังย้าย
 
+แต่ละขั้นในคู่มือมีคำสั่งที่ต้องรัน และย่อหน้า **ถ้าถูกต้อง** ที่บอกว่าควรเห็นอะไร ถ้าเห็นไม่ตรง ให้ไปดูส่วน [ปัญหาที่อาจเจอและวิธีแก้](#ปัญหาที่อาจเจอและวิธีแก้) ท้ายเอกสาร
+
 ## ระบบตอนนี้
 
 | | ค่า |
@@ -22,6 +24,29 @@ E5 (`168-107-70-170.sslip.io`) หยุดรับงานแล้ว ฐา
 1. เจ้าของ login ด้วย `gcloud auth login` บน Mac
 2. ทุกคำสั่งรันจาก repository บน Mac ผ่าน `deploy/gcp-move.sh` ซึ่งเข้าเครื่องผ่าน IAP ด้วย key `~/.ssh/faoj_gcp_ed25519` เครื่องไม่เปิดพอร์ต SSH สู่อินเทอร์เน็ต และไม่ต้องแก้ allow list เมื่อ IP ของ Mac เปลี่ยน (ต่างจาก Bastion ของ E5)
 3. ถ้าต้องการ shell บนเครื่อง ใช้ `deploy/gcp-move.sh ssh` ถ้าต้องการรันคำสั่งเดียว ใช้ `deploy/gcp-move.sh ssh '<คำสั่ง>'` คำสั่ง `faoj` ต้องใช้ `sudo`
+
+ทดสอบว่าเข้าเครื่องได้
+
+```bash
+deploy/gcp-move.sh status
+```
+
+**ถ้าถูกต้อง** จะเห็นรายชื่อ service ครบ 7 ตัว และบรรทัดสุดท้ายเป็น `{"status": "ok"}` ส่วนบรรทัด `WARNING:` ที่ว่างอยู่ด้านบนมาจาก gcloud ไม่มีผลอะไร
+
+```
+env: production  host: 34-15-129-131.sslip.io  maintenance: off
+current: ec9a92d9f70e
+SERVICE   STATUS
+caddy     Up 8 hours
+clamav    Up 17 hours (healthy)
+db        Up 8 hours (healthy)
+n8n       Up 8 hours (healthy)
+ngrok     Up 10 hours
+web       Up 8 hours (healthy)
+worker    Up 8 hours (healthy)
+off
+{"status": "ok"}
+```
 
 ## จากโค้ดถึง production
 
@@ -44,7 +69,19 @@ E5 (`168-107-70-170.sslip.io`) หยุดรับงานแล้ว ฐา
 make ci
 ```
 
-`make ci` รัน 5 ขั้นตามลำดับ คือ `migrate`, `check`, `security`, `test` และ `test-e2e` แล้วเขียนผลแต่ละขั้นไว้ใน `reports/` ขั้น `security` อยู่ก่อนชุดทดสอบยาว ถ้ามี secret หลุดเข้า commit จะรู้ภายในนาทีแรก ผ่านครบแล้วจึง push
+`make ci` รัน 5 ขั้นตามลำดับ คือ `migrate`, `check`, `security`, `test` และ `test-e2e` แล้วเขียนผลแต่ละขั้นไว้ใน `reports/` ขั้น `security` อยู่ก่อนชุดทดสอบยาว ถ้ามี secret หลุดเข้า commit จะรู้ภายในนาทีแรก
+
+**ถ้าถูกต้อง** ทุกขั้นขึ้น `PASS`
+
+```
+migrate: PASS
+check: PASS
+security: PASS
+test: PASS
+test-e2e: PASS
+```
+
+ผ่านครบแล้วจึง push
 
 ```bash
 git push origin dev
@@ -56,9 +93,15 @@ git push origin dev
 gh pr create --base main --head dev --title "<สรุปสั้น>" --body "<มีอะไรเปลี่ยน และตรวจอะไรแล้ว>"
 ```
 
-CI บน GitHub รัน `make ci` ขั้นเดียวกันและเก็บรายงานไว้ใน artifact `foundation-reports` ถ้า push เข้า `dev` อีกระหว่างที่ CI ของ PR ยังรันอยู่ รอบเดิมจะถูกยกเลิกและเริ่มใหม่ จึงควรรวมงานให้เสร็จก่อน push
+**ถ้าถูกต้อง** คำสั่งจะพิมพ์ลิงก์ของ PR และในหน้า PR จะมี check ชื่อ `foundation` ของ CI กำลังรัน CI รัน `make ci` ขั้นเดียวกันและเก็บรายงานไว้ใน artifact `foundation-reports` ถ้า push เข้า `dev` อีกระหว่างที่ CI ยังรันอยู่ รอบเดิมจะถูกยกเลิกและเริ่มใหม่ จึงควรรวมงานให้เสร็จก่อน push
 
-เจ้าของเป็นคน merge ในหน้า PR ให้เลือก **Create a merge commit** CI ของ `main` จะเห็นว่าโค้ดตรงกับที่ PR ผ่านมาแล้ว จึงไม่รันซ้ำและ Release เริ่มได้ภายในนาทีเดียว ถ้าเลือก Squash หรือ Rebase CI จะรันใหม่ทั้งชุดอีกราว 25 นาทีก่อน Release เริ่ม
+เจ้าของเป็นคน merge ในหน้า PR ให้เลือก **Create a merge commit** CI ของ `main` จะเห็นว่าโค้ดตรงกับที่ PR ผ่านมาแล้ว จึงไม่รันซ้ำ ถ้าเลือก Squash หรือ Rebase CI จะรันใหม่ทั้งชุดอีกราว 25 นาทีก่อน Release เริ่ม
+
+**ถ้าถูกต้อง** CI ของ `main` จบในไม่ถึงนาที และมีข้อความ notice ว่า
+
+```
+Tree <hash> passed every stage in pull request run <run id>; not tested again.
+```
 
 ## 3. Release
 
@@ -75,7 +118,13 @@ Release workflow เริ่มเองเมื่อ CI ของ `main` ผ
 id=$(gh run list --workflow release.yml --branch main --limit 1 --json databaseId --jq '.[0].databaseId'); gh run watch "$id" --exit-status && d=$(mktemp -d) && gh run download "$id" -D "$d" && python3 -c 'import json,glob,sys; m=json.load(open(glob.glob(sys.argv[1]+"/release-*/release.json")[0])); print(m["app_image"], "release_ok:", m["release_ok"])' "$d"
 ```
 
-`release_ok` ต้องเป็น `True` ถ้าเป็น `False` ห้าม deploy ให้ดูตารางผลสแกนในหน้าสรุปของ Release run แก้แล้วเปิด PR ใหม่ ทุกวันจันทร์ 03:00 workflow `scheduled.yml` จะสแกน release ของ `main` ล่าสุดซ้ำ เพื่อจับช่องโหว่ที่ประกาศหลังวันที่ build
+**ถ้าถูกต้อง** จะได้ digest หนึ่งบรรทัด ตามด้วย `release_ok: True` และหน้าสรุปของ Release run เขียนว่า `Blocking scans: passed`
+
+```
+ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:ec9a92d9f70e… release_ok: True
+```
+
+ทุกวันจันทร์ 03:00 workflow `scheduled.yml` จะสแกน release ของ `main` ล่าสุดซ้ำ เพื่อจับช่องโหว่ที่ประกาศหลังวันที่ build
 
 ## 4. Deploy บน GCP
 
@@ -95,7 +144,18 @@ id=$(gh run list --workflow release.yml --branch main --limit 1 --json databaseI
    deploy/gcp-move.sh ssh 'sudo tail -f /srv/faoj/run/deploy-<12 ตัวแรกของ digest>.log'
    ```
 
-   บรรทัด "OCIR login with the instance principal failed; using Docker's saved login" เป็นเรื่องปกติบน GCP เพราะเครื่องนี้ไม่มี instance principal ของ OCI และดึง image ด้วย login ที่บันทึกไว้ deploy เสร็จเมื่อ log จบด้วย `deployed <digest>`
+   **ถ้าถูกต้อง** log จะเดินตามลำดับนี้ และจบด้วย `deployed <digest>` (กด Ctrl+C เพื่อออกจาก `tail`) บรรทัดแรกเรื่อง instance principal เป็นเรื่องปกติบน GCP เพราะเครื่องนี้ดึง image ด้วย login ที่บันทึกไว้
+
+   ```
+   [17:20:12] OCIR login with the instance principal failed; using Docker's saved login
+   [17:20:12] release ec9a92d9f70e (previous: 7359950aa629)
+   [17:20:19] maintenance ON (Caddy answers 503 with the fallback channels)
+   [17:20:22] restore point: pgBackRest incremental backup
+   [...] migrate (owner role, one job) and narrow runtime grants
+   [17:21:34] maintenance OFF
+   edge smoke ok
+   [17:21:34] deployed ec9a92d9f70e
+   ```
 
 3. ตรวจหลัง deploy
 
@@ -107,7 +167,7 @@ id=$(gh run list --workflow release.yml --branch main --limit 1 --json databaseI
    curl -s https://dedcenter-381083094942.asia-southeast3.run.app/health/ready/
    ```
 
-   ต้องได้ maintenance `off` ทุก service ทำงาน และ `/health/ready/` ตอบ `ok` worker ที่เพิ่งเริ่มจะเผยแพร่ Rich Menu ของรุ่นใหม่ทันที
+   **ถ้าถูกต้อง** `current:` เป็น 12 ตัวแรกของ digest ใหม่ maintenance เป็น `off` ทุก service ขึ้น `Up` และ `curl` ได้ `{"status": "ok"}` worker ที่เพิ่งเริ่มจะเผยแพร่ Rich Menu ของรุ่นใหม่ทันที
 
 `faoj auto-promote` และ `faoj auto-deploy` ปิดอยู่บน GCP ระบบจึงไม่รับรุ่นใหม่เอง ทุกรุ่นต้อง deploy ด้วยมือตามขั้นข้างบน
 
@@ -118,6 +178,8 @@ deploy/gcp-move.sh ssh 'sudo faoj rollback'
 ```
 
 คำสั่งนี้กลับไปรุ่นก่อนหน้าที่ deploy สำเร็จ ถ้าต้องการรุ่นที่เจาะจง ให้ใส่ digest ต่อท้าย (`sudo faoj rollback <image@sha256:…>`) ดูรายการรุ่นได้จาก `sudo faoj releases` การย้อนรุ่นเปลี่ยนแค่ image ไม่ย้อน migration และไม่ restore ฐานข้อมูล ถ้า migration ทำข้อมูลเสียให้ใช้ RB05 ใน `PROJECT.md` ส่วน E.9
+
+**ถ้าถูกต้อง** คำสั่งจบด้วย `rolled back` และ `deploy/gcp-move.sh status` แสดง `current:` เป็นรุ่นเดิม
 
 ## Flow ของ LINE
 
@@ -136,7 +198,7 @@ deploy/gcp-move.sh ssh 'sudo faoj rollback'
 3. กด "ลองคุย" เพื่อเล่นร่างเหมือนคุยใน LINE
 4. กดเผยแพร่และใส่เหตุผล ระบบไม่ให้เผยแพร่ถ้ายังมีจุดที่ต้องแก้ รุ่นก่อนหน้ายังเก็บไว้ และการเผยแพร่ทุกครั้งบันทึกใน audit
 
-ผู้แจ้งที่คุยค้างอยู่ยังใช้ flow รุ่นเดิมจนจบหรือจนร่างหมดอายุใน 7 วัน ถ้าเปลี่ยนหัวข้อหรือช่องที่ AI อ่าน ต้องประเมิน AI ใหม่ ระหว่างนั้นแชตจะถามทีละขั้น
+**ถ้าถูกต้อง** หน้าเว็บขึ้นว่า "เผยแพร่ <ชื่อ flow> รุ่น <เลข> แล้ว" และผู้แจ้งที่เริ่มคุยหลังจากนั้นจะได้ flow รุ่นใหม่ ผู้แจ้งที่คุยค้างอยู่ยังใช้รุ่นเดิมจนจบหรือจนร่างหมดอายุใน 7 วัน ถ้าเปลี่ยนหัวข้อหรือช่องที่ AI อ่าน ต้องประเมิน AI ใหม่ ระหว่างนั้นแชตจะถามทีละขั้น
 
 flow ตั้งต้นเก็บเป็นไฟล์ใน `operations/fixtures/` ถ้าต้องการนำไฟล์เข้าเป็นร่าง (ไม่แตะรุ่นที่เผยแพร่อยู่) ใช้
 
@@ -158,7 +220,13 @@ Rich Menu มี 5 หน้า (`user`, `employee-report`, `sup-report`, `sup-w
    ```
 
 3. commit ภาพและ `menu-manifest.json` พร้อมโค้ด แล้วทำตามขั้น 1 ถึง 4
-4. หลัง deploy worker จะเผยแพร่เมนูทันทีที่เริ่ม และตรวจซ้ำทุก 5 นาที ถ้าภาพไม่ตรงกับโค้ด worker จะไม่อัปโหลด และ log ของ worker จะมีข้อความ "ภาพเมนูไม่ตรงรุ่นโปรแกรม ต้อง build_line_menu_images ก่อนปล่อยรุ่น"
+4. หลัง deploy worker จะเผยแพร่เมนูทันทีที่เริ่ม และตรวจซ้ำทุก 5 นาที
+
+**ถ้าถูกต้อง** เปิด LINE OA บนโทรศัพท์แล้วเห็นเมนูใหม่ตามสิทธิ์ของบัญชีนั้น (ถ้ายังเห็นเมนูเดิม ให้ปิดแล้วเปิดห้องแชตใหม่) และ log ของ worker ไม่มีข้อความ "Automatic LINE menu update incomplete"
+
+```bash
+deploy/gcp-move.sh ssh 'sudo docker logs --since 15m faoj-worker-1 2>&1 | tail -30'
+```
 
 ถ้าเมนูใน LINE ไม่ตรงกับรุ่นที่รันอยู่ (เช่น การเผยแพร่ค้างกลางทาง) ให้เผยแพร่ซ้ำโดยไม่ต้อง deploy คำสั่งนี้ทำต่อจากจุดที่ค้าง
 
@@ -166,19 +234,17 @@ Rich Menu มี 5 หน้า (`user`, `employee-report`, `sup-report`, `sup-w
 deploy/gcp-move.sh line-menu
 ```
 
-ปุ่ม Broadcast ในเมนูเปิด Mini App ผ่าน `miniapp.line.me/<LIFF ID>` จึงไม่ต้องสร้างเมนูใหม่เมื่อ Endpoint ของ Mini App เปลี่ยน ดูผลการเผยแพร่ได้จาก log ของ worker
+**ถ้าถูกต้อง** จะเห็น `LINE menu synchronization completed (or outbound LINE is disabled).`
 
-```bash
-deploy/gcp-move.sh ssh 'sudo docker logs --since 15m faoj-worker-1 2>&1 | tail -30'
-```
+ปุ่ม Broadcast ในเมนูเปิด Mini App ผ่าน `miniapp.line.me/<LIFF ID>` จึงไม่ต้องสร้างเมนูใหม่เมื่อ Endpoint ของ Mini App เปลี่ยน
 
 ## งานย่อย
 
-| งาน | คำสั่ง |
-|---|---|
-| รัน `manage.py` หนึ่งคำสั่ง | `deploy/gcp-move.sh manage <คำสั่ง> [args…]` |
-| ปิดหรือเปิดระบบชั่วคราว | `deploy/gcp-move.sh ssh 'sudo faoj maintenance on'` (หรือ `off`) |
-| ตั้ง Cloud Run ของเว็บเจ้าหน้าที่ใหม่ (เช่น IP ของเครื่องเปลี่ยน) | `deploy/gcp-move.sh staff-proxy` |
+| งาน | คำสั่ง | ถ้าถูกต้อง |
+|---|---|---|
+| รัน `manage.py` หนึ่งคำสั่ง | `deploy/gcp-move.sh manage <คำสั่ง> [args…]` | ผลของคำสั่งนั้น เช่น `manage check` ได้ `System check identified no issues` |
+| ปิดหรือเปิดระบบชั่วคราว | `deploy/gcp-move.sh ssh 'sudo faoj maintenance on'` (หรือ `off`) | `maintenance ON` หรือ `maintenance OFF` |
+| ตั้ง Cloud Run ของเว็บเจ้าหน้าที่ใหม่ (เช่น IP ของเครื่องเปลี่ยน) | `deploy/gcp-move.sh staff-proxy` | `staff web: https://dedcenter-….run.app/` และค่า `CSRF_TRUSTED_ORIGINS` ที่มีชื่อ run.app |
 
 ## Backup และการเฝ้าดู
 
@@ -190,15 +256,108 @@ deploy/gcp-move.sh ssh 'sudo docker logs --since 15m faoj-worker-1 2>&1 | tail -
 | full backup | วันจันทร์ 03:00 | ที่เดียวกัน |
 | diff backup | วันอังคารถึงอาทิตย์ 03:00 | ที่เดียวกัน |
 | ไฟล์แนบและ n8n | ทุกวัน 03:30 | restic host `production-gcp` |
-| standby บน Mac | ทุก 5 นาที | `~/faoj-standby` |
-| healthcheck บน Mac | ทุกนาที | ตรวจ `https://34-15-129-131.sslip.io/health/ready/` |
+| standby บน Mac | ทุก 5 นาที | `~/faoj-standby` แจ้งเตือนบน Mac เมื่อตามหลังเกิน 15 นาที |
+| healthcheck บน Mac | ทุกนาที | ตรวจ `34-15-129-131.sslip.io` และ LINE webhook ล้มติดกัน 3 ครั้งจะแจ้งเตือนบน Mac |
 | สำเนานอก OCI | วันจันทร์ 09:00 | OneDrive โฟลเดอร์ `pgbackrest-production-gcp` และ `restic` |
 
-ดูผลได้ด้วย `sudo faoj backup status` บนเครื่อง และ `deploy/standby.sh status` บน Mac (ถ้าตามหลังเกิน 15 นาที healthcheck จะเตือน)
+ดูผลบนเครื่อง
 
-บน GCP ตั้ง `METRICS_SINK=stdout` ไว้ metric จึงไม่ขึ้น OCI Monitoring และ alarm ของ OCI ไม่เห็นเครื่องนี้ การเตือนตอนนี้มีแค่ healthcheck บน Mac กับ UptimeRobot ส่วน `faoj quota-check` เป็นงบของ OCI และปิดไว้บนเครื่องนี้
+```bash
+deploy/gcp-move.sh ssh 'sudo faoj backup status 2>&1 | tail -1'
+```
+
+**ถ้าถูกต้อง** ตัวเลขต้องไม่เกิน 93,600 วินาที (26 ชั่วโมง) เพราะ backup รันทุกคืน
+
+```
+last database backup: 18294s ago
+```
+
+ดูผลบน Mac
+
+```bash
+deploy/standby.sh status
+```
+
+**ถ้าถูกต้อง** ฐานข้อมูลตามหลังไม่เกินราว 10 นาที
+
+```
+database: standby, 2 min 12 s behind production
+files: last copy 2026-11-02 23:13
+```
+
+บน GCP ตั้ง `METRICS_SINK=stdout` ไว้ metric จึงไม่ขึ้น OCI Monitoring และ alarm ของ OCI ไม่เห็นเครื่องนี้ การเตือนตอนนี้มีแค่งานบน Mac กับ UptimeRobot ถ้า Mac ปิดอยู่ จะเหลือแค่ UptimeRobot ส่วน `faoj quota-check` เป็นงบของ OCI และปิดไว้บนเครื่องนี้
 
 `faoj-restore-drill.timer` ปิดอยู่บน GCP การซ้อมกู้ต้องสั่งเอง (`sudo faoj restore-drill`) ระหว่างซ้อมระบบจะเข้า maintenance และหยุดชั่วคราว ครั้งล่าสุดวันที่ 2 พ.ย. ใช้เวลา 88 วินาที จึงควรซ้อมนอกเวลางาน
+
+## ปัญหาที่อาจเจอและวิธีแก้
+
+แต่ละตารางเรียงตามขั้นในคู่มือ ข้อความในคอลัมน์แรกคือสิ่งที่จะเห็นบนจอหรือใน log
+
+### เข้าเครื่องไม่ได้
+
+| เห็นอะไร | แปลว่า | แก้อย่างไร |
+|---|---|---|
+| gcloud ขึ้นข้อความเรื่อง auth tokens หรือให้ login ใหม่ | session ของ gcloud หมดอายุ | เจ้าของรัน `gcloud auth login` แล้วลองใหม่ |
+| ssh ผ่าน IAP ค้างหรือต่อไม่ติด | IAP หรือเครื่องยังไม่พร้อม หรือเครื่องหยุด | ลองใหม่อีกครั้ง ถ้ายังไม่ได้ ดูสถานะเครื่องด้วย `gcloud compute instances list --project mea-ded-center-line-oa` |
+| เครื่องหยุด (`TERMINATED` หรือ `SUSPENDED`) และทุกอย่างล่ม | เครดิต Free Trial อาจหมด | เปิดหน้า Billing ของ GCP ดูเครดิต ห้ามกด Upgrade และแจ้งเจ้าของทันที ข้อมูลยังอยู่ใน backup ที่ OCI และ standby บน Mac |
+
+### CI
+
+| เห็นอะไร | แปลว่า | แก้อย่างไร |
+|---|---|---|
+| ขั้นใดขั้นหนึ่งของ `make ci` ขึ้น `FAIL` | โค้ดมีปัญหาในขั้นนั้น | อ่าน `reports/<ขั้น>.log` บน Mac หรือดาวน์โหลด artifact `foundation-reports` ของ CI แก้แล้วรันใหม่ |
+| CI ของ PR เป็น cancelled | มี push ใหม่เข้า `dev` ระหว่างที่ CI รัน | ไม่ต้องทำอะไร รอบใหม่เริ่มให้เองแล้ว |
+| CI ของ `main` รันนาน 25 นาที | merge แบบ Squash หรือ Rebase | รอให้จบ ครั้งหน้าใช้ Create a merge commit |
+
+### Release
+
+| เห็นอะไร | แปลว่า | แก้อย่างไร |
+|---|---|---|
+| Release ไม่เริ่มหลัง merge | CI ของ `main` ไม่ผ่าน | ดู CI ของ `main` ก่อน แก้แล้วเปิด PR ใหม่ |
+| notice `OCIR_REGISTRY/OCIR_NAMESPACE not set yet` | ตัวแปรของ repository หาย | เจ้าของตั้ง `OCIR_REGISTRY` และ `OCIR_NAMESPACE` ใน GitHub แล้วรัน Release ใหม่ |
+| `release_ok: False` หรือ `Blocking scans: FAILED` | Trivy พบช่องโหว่ที่มีตัวแก้แล้ว หรือพบ secret ใน image | ห้าม deploy ดูตารางผลสแกนในหน้าสรุป อัปเดต package หรือ base image แล้วเปิด PR ใหม่ |
+
+### Deploy
+
+| เห็นอะไร | แปลว่า | แก้อย่างไร |
+|---|---|---|
+| `give the Release workflow's app image` | digest ไม่ได้มาจาก OCIR ในรูป `ap-singapore-1.ocir.io/…@sha256:…` | คัดลอก `app_image` จากขั้น Release มาใส่ทั้งบรรทัด |
+| `last database backup is …s old; run 'faoj backup diff' first` | backup ล่าสุดเก่ากว่า 26 ชั่วโมง ระบบไม่ยอม migrate | รัน `deploy/gcp-move.sh ssh 'sudo faoj backup diff'` แล้ว deploy ใหม่ ถ้า backup ไม่สำเร็จ ให้หยุดและหาสาเหตุก่อน |
+| `another deploy holds …` | มี deploy อื่นค้างอยู่ | ดูว่ามี deploy รันอยู่จริงไหมด้วย `deploy/gcp-move.sh ssh 'systemctl list-units "faoj-deploy-*"'` ถ้ารันอยู่ให้รอ ลบ lock เฉพาะเมื่อแน่ใจว่าไม่มี deploy รัน |
+| ดึง image ไม่ได้ (`unauthorized` หรือ `denied`) | auth token สำหรับ pull หมดอายุหรือถูกลบ | เจ้าของรัน `deploy/gcp-move.sh pull-token` (หรือ `ocir-login`) แล้ว deploy ใหม่ |
+| `migration failed (RB07); maintenance stays on` | migration ล้ม ระบบกลับไปรุ่นเดิมแต่ยังปิดรับงาน | อ่าน log หาสาเหตุ ถ้ารุ่นเดิมทำงานปกติ ใช้ `sudo faoj maintenance off` แล้วแก้โค้ดในรอบหน้า ถ้าข้อมูลเสีย ใช้ RB05 |
+| `smoke failed` แล้วตามด้วย `rolling back to …` | รุ่นใหม่ไม่ผ่าน smoke ระบบย้อนกลับเอง | ตรวจ `deploy/gcp-move.sh status` ว่ารุ่นเดิมกลับมาและ maintenance เป็น `off` แล้วหาสาเหตุจาก log ก่อนลองใหม่ |
+| maintenance ยังเป็น `on` หลัง deploy จบ | deploy หรือ rollback ไม่ผ่านครบ | ดู `deploy/gcp-move.sh status` ถ้าทุก service `Up` และ `healthy` ให้ `sudo faoj maintenance off` ถ้าไม่ ใช้ `sudo faoj rollback` |
+
+### หลัง deploy
+
+| เห็นอะไร | แปลว่า | แก้อย่างไร |
+|---|---|---|
+| run.app ตอบช้าราว 1 วินาทีในครั้งแรก | Cloud Run เพิ่งปลุก instance (ตั้งให้เหลือ 0 ได้เมื่อไม่มีคนใช้) | ปกติ ไม่ต้องแก้ |
+| เจ้าหน้าที่ใน กฟน. เปิด `sslip.io` ไม่ได้ และเห็นหน้า FortiGate | FortiGate บล็อก `sslip.io` เป็น Dynamic DNS | ใช้ URL run.app |
+| login แล้วได้ 403 (CSRF) ผ่าน run.app | `CSRF_TRUSTED_ORIGINS` ไม่มีชื่อ run.app | รัน `deploy/gcp-move.sh staff-proxy` ใหม่ คำสั่งนี้เติมค่าให้และ restart web กับ worker |
+| LINE webhook ได้ 400 | `ALLOWED_HOSTS` ใน `django.env` ไม่มีชื่อ ngrok (เกิดตอนย้ายวันที่ 2 พ.ย.) | เติม `crabmeat-lake-lunar.ngrok-free.dev` ใน `ALLOWED_HOSTS` แล้ว recreate web เปิด Webhook redelivery ไว้ LINE จึงส่งข้อความที่พลาดซ้ำให้ |
+| webhook ตอบ 405 เมื่อเปิดด้วยเบราว์เซอร์ | webhook รับเฉพาะ POST | ปกติ |
+| ทุกหน้าขึ้น 503 หน้าปิดปรับปรุง | maintenance ยังเปิดอยู่ | ดูแถว maintenance ในตาราง Deploy |
+
+### LINE flow และ Rich Menu
+
+| เห็นอะไร | แปลว่า | แก้อย่างไร |
+|---|---|---|
+| "ใส่เหตุผลก่อนเผยแพร่" | ช่องเหตุผลว่าง | ใส่เหตุผลแล้วกดเผยแพร่อีกครั้ง |
+| "ยังมีจุดที่ต้องแก้ก่อนเผยแพร่" | ร่างยังไม่ผ่านการตรวจ | แก้ตามจุดที่ระบบบอกในหน้าแก้ flow แล้วบันทึก |
+| "เผยแพร่ได้เฉพาะร่าง" | กำลังกดเผยแพร่รุ่นที่เผยแพร่แล้ว | เปิดร่างใหม่ก่อน |
+| log ของ worker มี "ภาพเมนูไม่ตรงรุ่นโปรแกรม ต้อง build_line_menu_images ก่อนปล่อยรุ่น" | ภาพเมนูใน release ไม่ตรงกับโค้ด เมนูเดิมยังอยู่ใน LINE | รัน `build_line_menu_images` บน Mac, commit ภาพและ `menu-manifest.json` แล้วทำตามขั้น 1 ถึง 4 |
+| log ของ worker มี "Automatic LINE menu update incomplete; retry in five minutes" | เผยแพร่เมนูไม่ครบ | worker ลองใหม่เองใน 5 นาที ถ้าอยากให้ทำทันที ใช้ `deploy/gcp-move.sh line-menu` |
+| เมนูในโทรศัพท์ยังเป็นรุ่นเดิม | LINE ในโทรศัพท์อาจยังแสดงเมนูเดิมค้างไว้ | ปิดแล้วเปิดห้องแชต OA ใหม่ ถ้ายังไม่เปลี่ยน ดู log ของ worker |
+
+### Backup และ standby
+
+| เห็นอะไร | แปลว่า | แก้อย่างไร |
+|---|---|---|
+| Mac แจ้งเตือนว่า standby ตามหลังเกิน 15 นาที | Mac ดึง WAL ไม่ได้ หรือ production ส่ง WAL ขึ้น OCI ไม่ได้ | ดู `deploy/standby.sh status` ก่อน ถ้าเน็ตของ Mac ปกติ ให้ดูว่า Postgres บนเครื่องส่ง WAL ผ่านไหมด้วย `deploy/gcp-move.sh ssh 'sudo docker logs --since 30m faoj-db-1 2>&1 \| grep -i archive \| tail'` |
+| Mac แจ้งเตือนว่าระบบล่ม | healthcheck ล้ม 3 ครั้งติดกัน | ดู `deploy/gcp-move.sh status` แล้วทำตาม RB01 ใน `PROJECT.md` ส่วน E.9 หน้าปิดปรับปรุง (503) ไม่นับเป็นล่ม |
+| `last database backup` เกิน 26 ชั่วโมง | backup คืนที่ผ่านมาไม่สำเร็จ | ดู `deploy/gcp-move.sh ssh 'systemctl status faoj-backup-diff'` แล้วรัน `sudo faoj backup diff` เอง |
 
 ## เมื่อต้องย้ายออกจาก GCP
 
