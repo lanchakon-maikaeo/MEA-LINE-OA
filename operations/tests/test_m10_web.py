@@ -949,6 +949,18 @@ class NavigationTests(WebTestCase):
         edge = trend["columns"][2]["x"]
         self.assertIn(f"L{edge} {tick['2']} L{edge} {tick['5']}", trend["new_path"])
 
+    def test_trend_legend_stays_off_the_lines(self):
+        # Rising lines leave the upper left free; one line along the top and one along the bottom
+        # leave only the middle height.
+        days = [timezone.localdate() - timedelta(days=n) for n in range(29, -1, -1)]
+        link = lambda metric, day: ""  # noqa: E731
+        rising = charts.trend([(d, 1, 0) for d in days], link)["legend"]
+        early = charts.trend([(d, 9 if i == 0 else 0, 0) for i, d in enumerate(days)], link)
+        self.assertEqual((rising["x"], rising["y"]), (charts.LEFT + 10, charts.TOP + 10))
+        self.assertGreater(early["legend"]["y"], charts.TOP + 10)
+        self.assertLess(early["legend"]["y"] + early["legend"]["height"], early["bottom"] - 10)
+        self.assertEqual([i["label"] for i in rising["items"]], ["เข้า 30", "จบ 0", "ส่วนต่าง +30"])
+
 
 class FoundationTests(TestCase):
     def test_pages_carry_a_strict_content_security_policy(self):

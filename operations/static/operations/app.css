@@ -997,13 +997,19 @@ a.viz-bar:hover, a.viz-bar:focus-visible { background: var(--cloud); color: var(
 .legend__key--gap { width: 16px; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--viz-1) 16%, transparent); }
 .chart { position: relative; margin-bottom: var(--s-12); }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+/* The cumulative trend wears seaborn's whitegrid look (user, 3 Nov 2569): its "deep" blue and
+   orange, a grey frame and grid in both directions, a framed legend inside the plot. */
+.ov-trend { --viz-1: #4c72b0; --viz-2: #dd8452; --viz-grid: #e3e3e3; --viz-axis: #cccccc; }
 .chart__grid { stroke: var(--viz-grid); stroke-width: 1; }
 .chart__base, .chart__cross { stroke: var(--viz-axis); stroke-width: 1; }
 .chart__cross { stroke-dasharray: 3 3; }
-.chart__tick { fill: var(--mute); font-size: 13px; font-family: var(--font); font-variant-numeric: tabular-nums; }
-.chart__axis { fill: var(--ash); font-size: 13px; font-family: var(--font); }
+.chart__frame { fill: none; stroke: var(--viz-axis); stroke-width: 1.25; }
+.chart__tick { fill: var(--ash); font-size: 13px; font-family: var(--font); font-variant-numeric: tabular-nums; }
+.chart__axis { fill: var(--ink); font-size: 14px; font-family: var(--font); }
 .chart__end { fill: var(--ink); font-size: 13px; font-weight: 600; font-family: var(--font); font-variant-numeric: tabular-nums; }
-.chart__gap { fill: var(--viz-1); fill-opacity: 0.12; }
+.chart__gap { fill: var(--viz-1); fill-opacity: 0.18; }
+.chart__legend { fill: var(--canvas); fill-opacity: 0.85; stroke: var(--viz-axis); stroke-width: 1; }
+.chart__legend-text { fill: var(--ink); font-size: 13px; font-family: var(--font); font-variant-numeric: tabular-nums; }
 .chart__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart__line--new { stroke: var(--viz-1); }
 .chart__line--ended { stroke: var(--viz-2); }

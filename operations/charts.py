@@ -6,10 +6,12 @@ chart also has a table view, so nothing is readable only by hovering.
 """
 
 import math
+import unicodedata
 
 WIDTH, HEIGHT = 960, 280
 LEFT, RIGHT, TOP, BOTTOM = 64, 36, 16, 52
-HEADROOM = 1.08  # the highest line stays clear of the top edge, as matplotlib's margins do
+MARGIN = 0.05  # seaborn (matplotlib) axes margins: the lines stay clear of the frame on every side
+LEGEND_ROW, LEGEND_PAD = 20, 7
 
 
 def tick_step(value):
@@ -27,13 +29,19 @@ def signed(n):
     return f"+{n:,}" if n > 0 else f"−{-n:,}" if n < 0 else "0"
 
 
+def text_width(text, size=13):
+    """Rough rendered width; Thai marks above or below a letter take no room of their own."""
+    return sum(0 if unicodedata.category(ch) == "Mn" else size * 0.62 for ch in text)
+
+
 def trend(points, link):
     """[(day, new, ended)] → two cumulative step lines, the gap between them, ticks and hit columns.
 
     The lines add up from the first day of the period (15 ต.ค. 2569 Q8), so the gap between them
     is what came in during the period and has not ended. A count changes on its day, so each line
-    steps at the day's edge instead of sloping across days. Each column keeps its own day's counts
-    for the tooltip and the table. `link(metric, day)` returns the drill-down URL of one day."""
+    steps halfway between two days instead of sloping across them. Each column keeps its own day's
+    counts for the tooltip and the table. `link(metric, day)` returns the drill-down URL of one day.
+    The look follows seaborn's whitegrid style (user, 3 Nov 2569)."""
     count = len(points)
     totals, new_sum, ended_sum = [], 0, 0
     for d, new, ended in points:
@@ -41,22 +49,26 @@ def trend(points, link):
         totals.append((d, new_sum, ended_sum))
     plot_w, plot_h = WIDTH - LEFT - RIGHT, HEIGHT - TOP - BOTTOM
     peak = max(new_sum, ended_sum, 1)
-    unit, ceiling = tick_step(peak), peak * HEADROOM
-    step = plot_w / max(count, 1)
+    unit, low, high = tick_step(peak), -MARGIN * peak, (1 + MARGIN) * peak
+    span = max(count - 1, 1)
+    dx = plot_w / (span * (1 + 2 * MARGIN))
 
     def x(i):
-        return round(LEFT + i * step + step / 2, 1)
+        return round(LEFT + (MARGIN * span + i) * dx, 1)
+
+    def edge(i):
+        """Between day i - 1 and day i."""
+        return round(LEFT + (MARGIN * span + i - 0.5) * dx, 1)
 
     def y(value):
-        return round(TOP + plot_h * (1 - value / ceiling), 1)
+        return round(TOP + plot_h * (high - value) / (high - low), 1)
 
     def steps(index):
         if not count:
             return []
         corners = [(x(0), y(totals[0][index]))]
         for i in range(1, count):
-            edge = round(LEFT + i * step, 1)
-            corners += [(edge, y(totals[i - 1][index])), (edge, y(totals[i][index]))]
+            corners += [(edge(i), y(totals[i - 1][index])), (edge(i), y(totals[i][index]))]
         return corners + [(x(count - 1), y(totals[-1][index]))]
 
     def path(corners, close=False):
@@ -65,27 +77,30 @@ def trend(points, link):
         return "M" + " L".join(f"{px} {py}" for px, py in corners) + (" Z" if close else "")
 
     new_line, ended_line = steps(1), steps(2)
-    ticks = [{"y": y(v), "label": f"{v:,}"} for v in range(0, int(ceiling) + 1, unit)]
+    ticks = [{"y": y(v), "label": f"{v:,}"} for v in range(0, int(high) + 1, unit)]
     labels = [
         {"x": x(i), "label": f"{d.day}/{d.month}"}
         for i, (d, _, _) in enumerate(points)
         if (count - 1 - i) % 7 == 0
     ]
-    columns = [
-        {
-            "x": round(LEFT + i * step, 1),
-            "width": round(step, 1),
-            "center": x(i),
-            "day": f"{d.day}/{d.month}/{d.year + 543}",
-            "new": new,
-            "ended": ended,
-            "new_total": totals[i][1],
-            "ended_total": totals[i][2],
-            "href": link("new", d.isoformat()),
-            "ended_href": link("ended", d.isoformat()),
-        }
-        for i, (d, new, ended) in enumerate(points)
-    ]
+    columns = []
+    for i, (d, new, ended) in enumerate(points):
+        start = LEFT if i == 0 else edge(i)
+        end = WIDTH - RIGHT if i == count - 1 else edge(i + 1)
+        columns.append(
+            {
+                "x": start,
+                "width": round(end - start, 1),
+                "center": x(i),
+                "day": f"{d.day}/{d.month}/{d.year + 543}",
+                "new": new,
+                "ended": ended,
+                "new_total": totals[i][1],
+                "ended_total": totals[i][2],
+                "href": link("new", d.isoformat()),
+                "ended_href": link("ended", d.isoformat()),
+            }
+        )
     ends = []
     if count:
         new_y, ended_y = y(new_sum), y(ended_sum)
@@ -114,6 +129,7 @@ def trend(points, link):
         "right": WIDTH - RIGHT,
         "top": TOP,
         "bottom": HEIGHT - BOTTOM,
+        "plot_w": plot_w,
         "plot_h": plot_h,
         "tick_x": LEFT - 10,
         "label_y": HEIGHT - BOTTOM + 22,
@@ -129,7 +145,58 @@ def trend(points, link):
         "labels": labels,
         "columns": columns,
         "ends": ends,
+        "legend": legend(
+            [
+                ("new", f"เข้า {new_sum:,}"),
+                ("ended", f"จบ {ended_sum:,}"),
+                ("gap", f"ส่วนต่าง {signed(new_sum - ended_sum)}"),
+            ],
+            [(x(i), y(t[k])) for i, t in enumerate(totals) for k in (1, 2)],
+        ),
         "total_new": new_sum,
         "total_ended": ended_sum,
         "gap": signed(new_sum - ended_sum),
+    }
+
+
+def legend(items, marks):
+    """A framed legend inside the plot, at the first place that covers the fewest points of the
+    lines, tried in matplotlib's loc="best" order (upper right, upper left, lower left, ...)."""
+    width = round(52 + max(text_width(label) for _, label in items))
+    height = 2 * LEGEND_PAD + LEGEND_ROW * len(items)
+    left, right = LEFT + 10, WIDTH - RIGHT - 10 - width
+    upper, lower = TOP + 10, HEIGHT - BOTTOM - 10 - height
+    middle_x, middle_y = round((left + right) / 2), round((upper + lower) / 2)
+    corners = [
+        (right, upper),
+        (left, upper),
+        (left, lower),
+        (right, lower),
+        (right, middle_y),
+        (left, middle_y),
+        (middle_x, lower),
+        (middle_x, upper),
+        (middle_x, middle_y),
+    ]
+
+    def covered(corner):
+        bx, by = corner
+        return sum(
+            bx - 6 <= mx <= bx + width + 6 and by - 6 <= my <= by + height + 6 for mx, my in marks
+        )
+
+    bx, by = min(corners, key=covered)
+    rows = [by + LEGEND_PAD + LEGEND_ROW * k + LEGEND_ROW / 2 for k in range(len(items))]
+    return {
+        "x": bx,
+        "y": by,
+        "width": width,
+        "height": height,
+        "key_x": bx + 10,
+        "key_end": bx + 32,
+        "text_x": bx + 40,
+        "items": [
+            {"series": series, "label": label, "y": row, "box_y": row - 5.5}
+            for (series, label), row in zip(items, rows, strict=True)
+        ],
     }
