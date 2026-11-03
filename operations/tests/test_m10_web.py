@@ -940,7 +940,14 @@ class NavigationTests(WebTestCase):
         self.assertEqual([c["ended_total"] for c in trend["columns"]], [0, 1, 3])
         self.assertEqual([c["new"] for c in trend["columns"]], [2, 0, 3])
         self.assertEqual((trend["total_new"], trend["total_ended"]), (5, 3))
-        self.assertEqual(trend["ends"][0]["y"], trend["top"])  # the new line ends at the top
+        self.assertEqual(trend["gap"], "+2")
+        tick = {t["label"]: t["y"] for t in trend["ticks"]}
+        self.assertEqual(list(tick), ["0", "1", "2", "3", "4", "5"])
+        # The new line ends on the top tick, below the frame, and steps up at the third day's edge.
+        self.assertEqual(trend["ends"][0]["y"], tick["5"])
+        self.assertGreater(tick["5"], trend["top"])
+        edge = trend["columns"][2]["x"]
+        self.assertIn(f"L{edge} {tick['2']} L{edge} {tick['5']}", trend["new_path"])
 
 
 class FoundationTests(TestCase):

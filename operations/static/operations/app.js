@@ -144,6 +144,8 @@
     // Cumulative lines (15 ต.ค. 2569): the total so far, then that day's own count.
     tipRow(tip, "new", hit.getAttribute("data-new-total"), "เข้าสะสม · วันนั้น +" + hit.getAttribute("data-new"));
     tipRow(tip, "ended", hit.getAttribute("data-ended-total"), "จบสะสม · วันนั้น +" + hit.getAttribute("data-ended"));
+    var gap = hit.getAttribute("data-new-total") - hit.getAttribute("data-ended-total");
+    tipRow(tip, "gap", gap > 0 ? "+" + gap : gap < 0 ? "−" + -gap : "0", "ส่วนต่าง");
     if (parts.cross) {
       parts.cross.setAttribute("x1", x);
       parts.cross.setAttribute("x2", x);

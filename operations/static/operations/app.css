@@ -994,11 +994,16 @@ a.viz-bar:hover, a.viz-bar:focus-visible { background: var(--cloud); color: var(
 .legend { display: flex; flex-wrap: wrap; gap: var(--s-8) var(--s-24); list-style: none; margin: 0 0 var(--s-12); padding: 0; font-size: 13px; color: var(--ash); }
 .legend__key { display: inline-block; width: 16px; height: 2px; border-radius: 1px; vertical-align: middle; margin-right: var(--s-8); background: var(--viz-1); }
 .legend__key--ended { background: var(--viz-2); }
+.legend__key--gap { width: 16px; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--viz-1) 16%, transparent); }
 .chart { position: relative; margin-bottom: var(--s-12); }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart__grid { stroke: var(--viz-grid); stroke-width: 1; }
 .chart__base, .chart__cross { stroke: var(--viz-axis); stroke-width: 1; }
+.chart__cross { stroke-dasharray: 3 3; }
 .chart__tick { fill: var(--mute); font-size: 13px; font-family: var(--font); font-variant-numeric: tabular-nums; }
+.chart__axis { fill: var(--ash); font-size: 13px; font-family: var(--font); }
+.chart__end { fill: var(--ink); font-size: 13px; font-weight: 600; font-family: var(--font); font-variant-numeric: tabular-nums; }
+.chart__gap { fill: var(--viz-1); fill-opacity: 0.12; }
 .chart__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart__line--new { stroke: var(--viz-1); }
 .chart__line--ended { stroke: var(--viz-2); }
