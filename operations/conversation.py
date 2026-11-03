@@ -422,12 +422,16 @@ def _dispatch(inbox, event_override=None, allow_agent=True):
         turn.say("ช่องทางนี้ใช้ติดตามใบเบิก ใบส่งคืน และแจ้งปัญหาหรือข้อเสนอแนะถึง ฝอจ.")
     command = (_event_text(turn) or "").strip()
     external = identity.requester_id and identity.requester.is_external
-    tapped = (turn.event.get("postback") or {}).get("data") == EMPLOYEE_BUTTON[1]
-    if (command in EMPLOYEE_WORDS or tapped) and (
+    data = (turn.event.get("postback") or {}).get("data", "")
+    if (command in EMPLOYEE_WORDS or data == EMPLOYEE_BUTTON[1]) and (
         identity.status != ChannelIdentity.Status.ACTIVE or external
     ):
         _ask_employee_id(turn, {})
         return turn.replies, True
+    step = conversation.prompt
+    if data and not data.startswith("t=") and step.startswith("reg_") and step != "reg_location":
+        # 3 พ.ย. 2569: a menu tap leaves the registration step (its own buttons are tokens).
+        turn.set_prompt()
     if external and (
         conversation.prompt.startswith("reg_")
         or command in {"สถานะลงทะเบียน", "ยกเลิกคำขอ"}

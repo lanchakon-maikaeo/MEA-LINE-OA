@@ -335,3 +335,26 @@ class ServiceMenuFlowTests(MenuTestCase):
                         prompt="", prompt_data={}
                     )
                     self.assertIn("พิมพ์รหัสพนักงาน", texts(self.type(user, typed)), typed)
+
+    def test_a_menu_tap_leaves_the_employee_id_step(self):
+        # 3 พ.ย. 2569: someone asked for their employee ID who taps a menu gets that menu, not
+        # the same question again; a new user gets the type chooser.
+        from operations.tests.test_m03_line import BOB, CAROL
+
+        dave = "U" + "d" * 32
+        self.type(BOB, "เริ่ม")
+        self.type(BOB, "อื่น ๆ")
+        self.type(BOB, "ผู้แจ้ง ทดสอบ")
+        self.type(CAROL, "เริ่ม")
+        self.type(CAROL, "ไม่ระบุตัวตน")
+        for user in (BOB, CAROL):
+            with self.subTest(user=user):
+                self.assertIn("พิมพ์รหัสพนักงาน", texts(self.type(user, "ยืนยันตัวตน")))
+                reply = self.type(user, "ตรวจสอบการใช้ไฟฟ้า")
+                self.assertIn("เมนูนี้ใช้ได้เฉพาะพนักงาน กฟน.", texts(reply))
+                self.assertNotIn("พิมพ์รหัสพนักงานของคุณ", texts(reply))
+        with self.settings(LINE_ALLOWED_RECIPIENTS=frozenset({dave})):
+            self.type(dave, "เริ่ม")
+            self.assertIn("พิมพ์รหัสพนักงาน", texts(self.press(dave, "พนักงาน กฟน.")))
+            reply = self.type(dave, "ตรวจสอบการใช้ไฟฟ้า")
+            self.assertIn("เป็นพนักงาน กฟน. ไหม", texts(reply))
