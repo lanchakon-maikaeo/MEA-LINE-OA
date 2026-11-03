@@ -183,6 +183,7 @@ MENU_WORDS.update(
 EMPLOYEE_WORDS = {"ลงทะเบียนพนักงาน", "ยืนยันพนักงาน", "ยืนยันตัวตนพนักงาน", "ยืนยันตัวตน", "เป็นพนักงาน"}
 EMPLOYEE_BUTTON = ("ยืนยันตัวตนพนักงาน", "m=employee")
 EMPLOYEE_HINT = "ถ้าเป็นพนักงาน กฟน. กด 'ยืนยันตัวตนพนักงาน' แล้วพิมพ์รหัสพนักงาน"
+NOT_AN_ID = re.compile(r"\s|[ก-๏]")  # a space or a Thai letter (Thai digits are allowed)
 # What typed text reads as besides an answer to the bot's question (ADR 0012): a question to the
 # bot, or a new request. Question words that also end plain descriptions ("ไม่รู้เป็นอะไร",
 # "ทำไม") are left out on purpose; "ไหม้" (burnt) is not "ไหม".
@@ -428,8 +429,7 @@ def _dispatch(inbox, event_override=None, allow_agent=True):
     ):
         _ask_employee_id(turn, {})
         return turn.replies, True
-    step = conversation.prompt
-    if data and not data.startswith("t=") and step.startswith("reg_") and step != "reg_location":
+    if data and not data.startswith("t=") and conversation.prompt.startswith("reg_"):
         # 3 พ.ย. 2569: a menu tap leaves the registration step (its own buttons are tokens).
         turn.set_prompt()
     if external and (
@@ -958,8 +958,14 @@ def _registration(turn):
         turn.set_prompt()
         return _menu(turn, "ลงทะเบียนแล้ว สามารถแจ้งปัญหาหรือข้อเสนอแนะได้")
     if prompt == "reg_employee":
-        if text and text.strip():
-            return _employee_id(turn, data, text.strip()[:32])
+        typed = (text or "").strip()
+        if typed and (len(typed) > 32 or NOT_AN_ID.search(typed)):
+            # 3 พ.ย. 2569: a sentence typed here is asked again, not counted as a failed check.
+            turn.say("ข้อความนี้ไม่ใช่รหัสพนักงาน รหัสพนักงานพิมพ์ติดกัน ไม่มีเว้นวรรค")
+        elif typed:
+            from operations import employees
+
+            return _employee_id(turn, data, typed.translate(employees.THAI_DIGITS))
         return _ask_employee_id(turn, data)
     if prompt == "reg_code" and text and text.strip():
         return _check_code(turn, data, text)
@@ -984,8 +990,6 @@ def _registration(turn):
 
         turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
         return
-    if prompt == "reg_location":  # left at the location step removed 31 ต.ค. 2569: go on
-        return _registration_next(turn, data)
     if prompt == "reg_name" and text:
         text = " ".join(text.split())
         if not 2 <= len(text) <= 200:

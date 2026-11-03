@@ -148,16 +148,16 @@ class RegistrationTests(PeopleTestCase):
         page.force_login(self.admin)
         self.assertNotContains(page.get("/console/admin/options/"), "ตำแหน่งของผู้ลงทะเบียน")
 
-    def test_a_registration_left_at_the_old_location_step_goes_on(self):
+    def test_a_registration_left_at_the_old_location_step_starts_again(self):
+        # 3 พ.ย. 2569: the location step is gone; whoever was left there chooses the type again.
         self.register(BOB)
         Conversation.objects.filter(identity__external_id=BOB).update(
             prompt="reg_location",
             prompt_data={"name": "ผู้ลงทะเบียน ทดสอบ", "district": "D01", "checked": True},
         )
         reply = self.say(self.location(BOB))
-        self.assertIn("ส่งคำขอให้แอดมินตรวจแล้ว", texts(reply))
-        registration = RegistrationRequest.objects.get(identity__external_id=BOB)
-        self.assertEqual((registration.status, registration.latitude), ("pending", None))
+        self.assertIn("เป็นพนักงาน กฟน. ไหม", texts(reply))
+        self.assertFalse(RegistrationRequest.objects.filter(identity__external_id=BOB).exists())
 
 
 class UnverifiedTagTests(PeopleTestCase):

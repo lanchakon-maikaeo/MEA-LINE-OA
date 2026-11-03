@@ -366,6 +366,17 @@ class LineEmailTests(RosterTestCase):
         registration = RegistrationRequest.objects.get()
         self.assertEqual((registration.status, registration.employee), ("pending", None))
 
+    def test_a_sentence_is_not_counted_and_thai_digits_are_read(self):
+        # 3 พ.ย. 2569: text that cannot be an employee ID is asked again without using a try.
+        self.say(self.event(ALICE, "follow"))
+        self.press(ALICE, "พนักงาน กฟน.")
+        for typed in ("สวัสดีครับ", "ขอเบิกมิเตอร์ 2 ตัว", "5" * 33):
+            reply = self.type(ALICE, typed)
+            self.assertIn("ข้อความนี้ไม่ใช่รหัสพนักงาน", texts(reply), typed)
+            self.assertIn("ใช้วิธีอื่น", buttons(reply))
+        self.assertIn("ลองได้อีก 2", texts(self.type(ALICE, "999999")))  # the first try counted
+        self.assertIn("ส่งรหัสทางอีเมล", buttons(self.type(ALICE, "๕๑๐๐๐๑")))
+
     def test_others_register_with_a_name_and_can_report_immediately(self):
         self.say(self.event(ALICE, "follow"))
         self.assertIn("พิมพ์ชื่อของคุณ", texts(self.press(ALICE, "อื่น ๆ")))
