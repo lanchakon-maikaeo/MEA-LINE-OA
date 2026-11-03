@@ -11,6 +11,7 @@
 > - **ข้อ 7:** Endpoint URL (Published) เป็น `https://dedcenter-381083094942.asia-southeast3.run.app/broadcasts/` แล้ว ตอบ 200
 > - **ข้อ 8:** rich menu ใช้ `miniapp.line.me/<LIFF ID>` จึงตามข้อ 7 ไปเอง ไม่ต้องรันใหม่
 > - **เว็บเจ้าหน้าที่จากเครือข่าย กฟน.:** FortiGate ของ กฟน. บล็อก `sslip.io` (หมวด Dynamic DNS) จึงเปิดเว็บผ่าน Cloud Run ที่ `https://dedcenter-381083094942.asia-southeast3.run.app/` แทน (FortiGuard จัดเป็น Information Technology) ด้วย `gcp-move.sh staff-proxy` (`68c6010`) `STAFF_WEB_BASE_URL` และ Endpoint ของ Mini App ชี้ชื่อนี้แล้ว ส่วน LINE webhook ยังใช้ ngrok ชื่อนี้ผูกกับโปรเจกต์ GCP จึงต้องเปลี่ยนอีกรอบตอนย้ายออก ยังควรขอ subdomain ของ กฟน.
+> - **หน้า E5 (3 พ.ย.):** เจ้าของอนุมัติให้เขียนทับ `caddy/maintenance/index.html` ใน release `40e478840222` ของ E5 เป็นหน้า "ย้ายไปที่อยู่ใหม่แล้ว" พร้อมลิงก์ run.app (ไฟล์เดิมอยู่ข้างกันเป็น `index.html.before-moved`) GET ทุก path ได้ 503 พร้อมหน้านี้ POST ยังได้ข้อความ 503 เดิม แก้เฉพาะบน E5 เพราะ template ใน repo คือหน้า maintenance ของ GCP ตอนเดียวกันเช็กแล้วว่าฐานข้อมูล `faoj` บน E5 ยังเป็น `default_transaction_read_only=on`
 > - **ข้อ 9:** healthcheck ชี้ GCP แล้ว (บน E5 เห็นแต่หน้า maintenance จึงไม่เคยเตือน) การเตือนเรื่อง backup ใช้ lag ของ standby (เกิน 15 นาที) แทน
 
 ## ทำทันที (G5)
