@@ -299,7 +299,7 @@ class LineEmailTests(RosterTestCase):
 
     def start(self, user=ALICE, employee_id="510001"):
         reply = self.say(self.event(user, "follow"))
-        self.assertIn("เลือกประเภทผู้ใช้", texts(reply))
+        self.assertIn("เป็นพนักงาน กฟน. ไหม", texts(reply))
         self.assertIn("อื่น ๆ", buttons(reply))
         self.assertIn("รหัสพนักงาน", texts(self.press(user, "พนักงาน กฟน.")))
         return self.type(user, employee_id)

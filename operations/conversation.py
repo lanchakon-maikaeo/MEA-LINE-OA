@@ -178,6 +178,11 @@ MENU_WORDS.update(
         "เมนูเพิ่มเติม": "m=roles",
     }
 )
+# 3 พ.ย. 2569: the way back to the employee check for someone not verified as an employee yet,
+# from any menu: the button on the reply, or one of these words typed.
+EMPLOYEE_WORDS = {"ลงทะเบียนพนักงาน", "ยืนยันพนักงาน", "ยืนยันตัวตนพนักงาน", "ยืนยันตัวตน", "เป็นพนักงาน"}
+EMPLOYEE_BUTTON = ("ยืนยันตัวตนพนักงาน", "m=employee")
+EMPLOYEE_HINT = "ถ้าเป็นพนักงาน กฟน. กด 'ยืนยันตัวตนพนักงาน' แล้วพิมพ์รหัสพนักงาน"
 # What typed text reads as besides an answer to the bot's question (ADR 0012): a question to the
 # bot, or a new request. Question words that also end plain descriptions ("ไม่รู้เป็นอะไร",
 # "ทำไม") are left out on purpose; "ไหม้" (burnt) is not "ไหม".
@@ -417,7 +422,8 @@ def _dispatch(inbox, event_override=None, allow_agent=True):
         turn.say("ช่องทางนี้ใช้ติดตามใบเบิก ใบส่งคืน และแจ้งปัญหาหรือข้อเสนอแนะถึง ฝอจ.")
     command = (_event_text(turn) or "").strip()
     external = identity.requester_id and identity.requester.is_external
-    if command in {"ลงทะเบียนพนักงาน", "ยืนยันพนักงาน"} and (
+    tapped = (turn.event.get("postback") or {}).get("data") == EMPLOYEE_BUTTON[1]
+    if (command in EMPLOYEE_WORDS or tapped) and (
         identity.status != ChannelIdentity.Status.ACTIVE or external
     ):
         _ask_employee_id(turn, {})
@@ -987,7 +993,7 @@ def _registration(turn):
         return _ask_district(turn, name, **{k: v for k, v in data.items() if k == "checked"})
     if problem:
         turn.say(problem)
-    lead = "ยังไม่ได้ลงทะเบียนเป็นผู้แจ้ง"
+    lead = "ยังไม่ได้ลงทะเบียน"
     if latest is not None and latest.status == RegistrationRequest.Status.REJECTED:
         lead = "คำขอก่อนหน้าไม่ได้รับการรับรอง"
         if latest.decision_reason:
@@ -1007,7 +1013,11 @@ def _employee_path_on():
 def _ask_kind(turn, lead):
     turn.set_prompt("reg_kind")
     turn.say(
-        lead + "\nเลือกประเภทผู้ใช้ กดปุ่มหรือพิมพ์ พนักงาน / อื่น ๆ / ไม่ระบุตัวตน",
+        f"{lead}\nเป็นพนักงาน กฟน. ไหม\n"
+        "• พนักงาน: กด 'พนักงาน กฟน.' แล้วพิมพ์รหัสพนักงาน\n"
+        "• ไม่ใช่พนักงาน: กด 'อื่น ๆ' แล้วพิมพ์ชื่อ\n"
+        "• ไม่บอกชื่อ: กด 'ไม่ระบุตัวตน'\n"
+        "สองแบบหลังแจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ",
         [
             turn.button("พนักงาน กฟน.", "reg_as", {"who": "employee"}),
             turn.button("อื่น ๆ", "reg_as", {"who": "other"}),
@@ -1918,14 +1928,11 @@ def _menu_item(turn, pk, go=False):
     # 23 Oct 2569: a tile that asks for the equipment first also takes problem reports, so a
     # person who may only report problems opens it too (the withdrawal choices stay closed).
     equipment_first = any(c.action == A.EQUIPMENT for c in choices)
-    if (
-        turn.requester
-        and (turn.requester.is_external or turn.requester.is_anonymous)
-        and action in {A.TOPIC, A.RETURN}
-        and not equipment_first
-    ):
-        return _menu(turn, "บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ พิมพ์ ลงทะเบียนพนักงาน เพื่อยืนยัน")
+    if _not_employee(turn) and action in {A.TOPIC, A.RETURN} and not equipment_first:
+        return _menu(turn, "เมนูนี้ใช้ได้เฉพาะพนักงาน กฟน. ที่ยืนยันตัวตนแล้ว")
     if action == A.REGISTER:
+        if _not_employee(turn):  # 3 พ.ย. 2569: the type is chosen; the employee check is left
+            return _ask_employee_id(turn, {})
         return _ask_kind(turn, "ลงทะเบียนหรือยืนยันตัวตน")
     if action == A.TOPIC:
         if not choices:
@@ -1954,7 +1961,7 @@ def _menu_item(turn, pk, go=False):
         if item.topic not in TYPED_GROUPS:
             return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
         if _problems_only(turn):
-            turn.say("บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ")
+            turn.say(_problems_note(turn))
             return _typed_draft(turn, item, K.PROBLEM)
         return _action_card(turn, item)
     if action == A.NEW:
@@ -2014,6 +2021,18 @@ def _problems_only(turn):
     )
 
 
+def _not_employee(turn):
+    """An outside (อื่น ๆ) or anonymous reporter: someone who may still prove to be an employee."""
+    return bool(turn.requester and (turn.requester.is_external or turn.requester.is_anonymous))
+
+
+def _problems_note(turn):
+    """Said before a problem draft opens. Text only: LINE shows the quick replies of the last
+    message, and that is the draft's question (3 พ.ย. 2569 Q8)."""
+    note = "บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ"
+    return f"{note}\nถ้าเป็นพนักงาน กฟน. พิมพ์ ยืนยันตัวตนพนักงาน" if _not_employee(turn) else note
+
+
 def _card(turn, title, prompt, buttons, quick=()):
     """A choice of the menu as one message with its choices as quick replies (25 Oct 2569 Q1:
     the owner wants the "ปุ่ม bubble" instead of the Flex card of 23 Oct): the title and question
@@ -2054,7 +2073,7 @@ def _equipment_named(turn, text):
         turn.say(f"ชื่ออุปกรณ์พิมพ์ไม่เกิน {limit} ตัวอักษร กรุณาพิมพ์ใหม่")
         return
     if _problems_only(turn):
-        turn.say("บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ")
+        turn.say(_problems_note(turn))
         return _typed_draft(turn, item, K.PROBLEM, name=name)
     return _action_card(turn, item, name=name)
 
@@ -2218,8 +2237,9 @@ def _menu(turn, text):
     buttons = []
     if turn.requester and _open_drafts(turn).exists():
         buttons.append(("ร่างที่ยังไม่ส่ง", "m=new"))
-    if turn.requester and turn.requester.is_external:
-        text += "\nพิมพ์ ลงทะเบียนพนักงาน หากต้องการยืนยันตัวตน"
+    if _not_employee(turn):
+        text += f"\n{EMPLOYEE_HINT}"
+        buttons.append(EMPLOYEE_BUTTON)
     turn.say(text, [*buttons, *[turn.button(label, "staff_menu") for label, _ in extra]])
 
 

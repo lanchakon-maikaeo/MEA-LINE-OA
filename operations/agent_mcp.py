@@ -274,7 +274,7 @@ class Tools:
             return False
         if conv.prompt.startswith(("reg_", "staff_otp", "staff_emp", "staff_check")):
             return False
-        if command in {"เชื่อมบัญชีเจ้าหน้าที่", "เลิกเชื่อมบัญชีเจ้าหน้าที่", "ลงทะเบียนพนักงาน", "ยืนยันพนักงาน"}:
+        if command in {"เชื่อมบัญชีเจ้าหน้าที่", "เลิกเชื่อมบัญชีเจ้าหน้าที่", *conversation.EMPLOYEE_WORDS}:
             return False
         if command in conv.reply_choices.get("actions", {}):
             return True

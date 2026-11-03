@@ -225,12 +225,12 @@ class CanvasFlowTests(KojTestCase):
         self.type(BOB, "ไม่ระบุตัวตน")
         drafts_before = ConversationDraft.objects.count()
         reply = self.open(BOB)
-        self.assertIn("ยืนยันตัวตนพนักงานก่อนติดตามงาน กอจ.", texts(reply))
+        self.assertIn("ติดตามงาน กอจ. ใช้ได้เฉพาะพนักงาน", texts(reply))
         self.assertNotIn("หม้อแปลง", buttons(reply))
         self.assertEqual(ConversationDraft.objects.count(), drafts_before)
         # A typed or old postback cannot reach the lookup either.
         reply = self.say(self.postback(BOB, "m=koj&do=equipment&key=transformer"))
-        self.assertIn("ยืนยันตัวตนพนักงานก่อนติดตามงาน กอจ.", texts(reply))
+        self.assertIn("ติดตามงาน กอจ. ใช้ได้เฉพาะพนักงาน", texts(reply))
 
     def test_a_problem_only_account_cannot_read_koj_external_documents(self):
         self.publish()

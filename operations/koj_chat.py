@@ -75,7 +75,10 @@ def live(item):
 def home(turn):
     if not allowed(turn):
         turn.set_prompt()
-        return turn.say("กรุณาลงทะเบียนและยืนยันตัวตนพนักงานก่อนติดตามงาน กอจ.")
+        from operations import conversation  # local: conversation builds on this module
+
+        # 3 พ.ย. 2569: with the button back to the employee check for those who may take it.
+        return conversation._menu(turn, "ติดตามงาน กอจ. ใช้ได้เฉพาะพนักงาน กฟน. ที่ยืนยันตัวตนแล้ว")
     turn.set_prompt()
     choices = [
         (tracking.EQUIPMENT[key], f"m=koj&do=equipment&key={key}")
