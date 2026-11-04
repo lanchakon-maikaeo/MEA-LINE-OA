@@ -48,6 +48,7 @@ CODE = re.compile(r"(?=[A-Z0-9ก-ฮ]*\d)[A-Z0-9ก-ฮ]{2,30}")  # one digit a
 CODE_DROP = re.compile(r"[\s./\\_-]")
 INVISIBLE = re.compile("[\u00ad\u200b-\u200f\u2060\ufeff]")
 NEAR_K, NEAR_CUTOFF = 5, 0.6  # ADR 0046: top five that are this alike at least
+LOOK_ALIKE = str.maketrans("OQDILZSB", "00011258")  # a letter typed for the digit it looks like
 TOKEN = re.compile(r"[A-Za-z0-9ก-ฮ][A-Za-z0-9ก-ฮ./-]*")
 
 
@@ -536,24 +537,50 @@ def lookup(source, numbers, district=None, names=None):
 
 def near(source, items, district=None):
     """ADR 0046: [(name, number)] of up to five rows of the asker's ฟข. most alike a piece not
-    found, by its number or by the tool name typed with it, best first."""
+    found, by its number or by the tool name typed with it. A slip of the finger (O for 0, two
+    neighbours swapped) comes first, then the most alike, then one of the same length:
+    the codes sit close together (NC001 to NC999), so ties are many. One button per number:
+    a number of several tools goes without a name, and its answer lists every tool."""
     missed = [(i["number"], name_key(i.get("name"))) for i in items if not i["found"]]
     if source.match != source.Match.CODE or not missed:
         return []
-    scores = {}
-    rows = SheetEntry.objects.filter(source=source).values_list("number", "name", "district")
-    for number, name, cell in rows.iterator():
-        if source.district_column and not district_matches(cell, district):
-            continue
+    rows = SheetEntry.objects.filter(source=source).order_by()
+    mine, scores, names = {}, {}, {}
+    for number, name, cell in rows.values_list("number", "name", "district").distinct():
+        if source.district_column:
+            if cell not in mine:  # a sheet names its ฟข. in a few ways, not one per row
+                mine[cell] = district_matches(cell, district)
+            if not mine[cell]:
+                continue
         written = name_key(name)
         for typed, typed_name in missed:
-            score = SequenceMatcher(None, typed, number).ratio()
-            if typed_name and written:
-                score = max(score, SequenceMatcher(None, typed_name, written).ratio())
-            if score >= NEAR_CUTOFF and score > scores.get((number, name), 0):
-                scores[(number, name)] = score
-    best = sorted(scores, key=lambda k: (-scores[k], k))[:NEAR_K]
-    return [(name, number) for number, name in best]
+            look = _slip(typed, number)
+            alike = max(_alike(typed, number), _alike(typed_name, written) if typed_name else 0)
+            if look or alike >= NEAR_CUTOFF:
+                score = (look, alike, len(number) == len(typed))
+                scores[number] = max(scores.get(number, score), score)
+                names.setdefault(number, set()).add(name)
+    best = sorted(sorted(scores), key=scores.get, reverse=True)[:NEAR_K]  # ties by number
+    return [(next(iter(names[n])) if len(names[n]) == 1 else "", n) for n in best]
+
+
+def _slip(typed, number):
+    """A look-alike letter typed for a digit (O for 0), or two neighbouring characters swapped."""
+    a, b = typed.translate(LOOK_ALIKE), number.translate(LOOK_ALIKE)
+    if a == b:
+        return True
+    diff = [i for i in range(len(a)) if len(a) == len(b) and a[i] != b[i]]
+    return len(diff) == 2 and diff[1] == diff[0] + 1 and a[diff[0]] == b[diff[1]]
+
+
+def _alike(typed, written):
+    """difflib's ratio, skipped when its cheap upper bounds already fall short."""
+    if not typed or not written:
+        return 0
+    m = SequenceMatcher(None, written, typed)
+    if m.real_quick_ratio() < NEAR_CUTOFF or m.quick_ratio() < NEAR_CUTOFF:
+        return 0
+    return m.ratio()
 
 
 def near_label(name, number):

@@ -316,6 +316,9 @@ class RepairSheetTests(KkoTestCase):
     def test_a_near_miss_offers_the_askers_closest_rows(self):
         # ADR 0046: NC8O1 (a letter O) is not NC801; the closest rows of ฟข. come as buttons.
         self.assertEqual(sheet_lookup.code_key("nc_801\u200b"), "NC801")
+        self.assertTrue(sheet_lookup._slip("NC810", "NC801"))  # neighbours swapped
+        self.assertTrue(sheet_lookup._slip("NC8O1", "NC801"))  # a letter O for the zero
+        self.assertFalse(sheet_lookup._slip("NC811", "NC801"))
         self.assertEqual(sheet_lookup.name_key("ทํางาน"), sheet_lookup.name_key("ทำงาน"))
         self.load()
         reply = self.ask("safety belt, NC8O1")
@@ -332,6 +335,8 @@ class RepairSheetTests(KkoTestCase):
             near[0], {"type": "message", "label": "NC801 SAFETY BELT", "text": "SAFETY BELT, NC801"}
         )
         self.assertLessEqual(len(near), sheet_lookup.NEAR_K)
+        # NC001 is two tools: one button with the number alone, whose answer lists both
+        self.assertIn({"type": "message", "label": "NC001", "text": "NC001"}, near)
         self.assertNotIn("XY900", str(near))  # another ฟข.'s row
         self.assertIn("ส่งให้ คม. ตรวจ", list(buttons(reply)))
         said = texts(self.type(ALICE, near[0]["text"]))
