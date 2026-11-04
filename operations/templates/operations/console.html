@@ -130,11 +130,11 @@
   <div class="ov-side">
   {% if share %}
   <section class="panel viz ov-share" aria-labelledby="r-share">
-    <div class="panel__head"><h3 id="r-share">สัดส่วนงานแต่ละกอง</h3><span class="muted">{{ share.total }} เรื่องที่ต้องทำ</span></div>
+    <div class="panel__head"><h3 id="r-share">{% if chosen %}สัดส่วนงานตามชนิด{% else %}สัดส่วนงานแต่ละกอง{% endif %}</h3><span class="muted">{{ share.total }} เรื่องที่ต้องทำ</span></div>
     {% if share.slices %}
     <div class="pie">
       <svg viewBox="0 0 {{ share.width }} {{ share.height }}" role="img" aria-labelledby="r-share r-share-desc">
-        <desc id="r-share-desc">วงกลมแบ่งเรื่องที่ต้องทำตามกอง {% for s in share.slices %}{{ s.label }} {{ s.percent }} {% endfor %}</desc>
+        <desc id="r-share-desc">วงกลมแบ่งเรื่องที่ต้องทำตาม{% if chosen %}ชนิด{% else %}กอง{% endif %} {% for s in share.slices %}{{ s.label }} {{ s.percent }} {% endfor %}</desc>
         {% for s in share.slices %}
           {% if s.href %}<a href="{{ s.href }}" aria-label="{{ s.label }} {{ s.n }} เรื่อง {{ s.percent }}">{% endif %}
           <path class="pie__slice pie__slice--{{ s.tone }}" d="{{ s.path }}"><title>{{ s.label }} {{ s.n }} เรื่อง ({{ s.percent }})</title></path>
@@ -226,6 +226,7 @@
       </div>
     </section>
 
+    {% if not chosen %}{# one division: the pie by kind says it (user, 4 Nov 2569) #}
     <section class="panel" aria-labelledby="r-kind">
       <div class="panel__head"><h3 id="r-kind">ชนิดเรื่อง</h3></div>
       <div class="viz-bars">
@@ -234,6 +235,7 @@
         {% endfor %}
       </div>
     </section>
+    {% endif %}
 
     <section class="panel" aria-labelledby="r-items">
       <div class="panel__head"><h3 id="r-items">ของที่ขอบ่อย</h3></div>

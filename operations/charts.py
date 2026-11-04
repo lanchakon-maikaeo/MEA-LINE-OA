@@ -216,15 +216,16 @@ def pie(rows, other_href=""):
     deep hues in a fixed order whose neighbours stay apart for colour-blind readers; อื่นๆ is
     grey. Divisions with nothing open are left out; one division alone is a whole disc. Each
     slice's % sits outside the pie at the end of a leader line from the slice (user, 3 Nov
-    2569)."""
+    2569). A row may bring its own tone, so a kind keeps its colour whatever its size (user,
+    4 Nov 2569)."""
     rows = sorted((r for r in rows if r[1]), key=lambda r: -r[1])
     if len(rows) > PIE_SLICES + 1:
         rest = rows[PIE_SLICES:]
         rows = rows[:PIE_SLICES] + [("อื่นๆ", sum(r[1] for r in rest), other_href)]
-    total = sum(n for _, n, _ in rows)
+    total = sum(r[1] for r in rows)
     cx, cy = PIE_PAD_X + PIE_R, PIE_PAD_Y + PIE_R
     slices, start = [], 0
-    for i, (label, n, href) in enumerate(rows):
+    for i, (label, n, href, *tone) in enumerate(rows):
         share = n / total
         end = start + share
         other = label == "อื่นๆ" and i == len(rows) - 1
@@ -235,7 +236,7 @@ def pie(rows, other_href=""):
                 "n": n,
                 "href": href,
                 "percent": f"{percent}%" if percent else "<1%",
-                "tone": "other" if other else f"c{i + 1}",
+                "tone": tone[0] if tone else "other" if other else f"c{i + 1}",
                 "path": _wedge(cx, cy, start, end),
                 "middle": (start + end) / 2,
             }

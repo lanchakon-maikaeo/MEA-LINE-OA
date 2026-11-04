@@ -29,6 +29,7 @@ from operations import (
     policy,
     staff_email,
     wording,
+    work_orders,
 )
 from operations.models import (
     AckClock,
@@ -985,6 +986,27 @@ class NavigationTests(WebTestCase):
         self.assertNotContains(page, "ตอบรับเฉลี่ย</span>")
         self.assertContains(page, "สัดส่วนงานแต่ละกอง")
         self.assertContains(page, 'href="/divisions/SIM-MTR/?tab=host" aria-label="SIM-MTR')
+
+    def test_one_division_shows_its_share_by_kind(self):
+        # 4 Nov 2569: one division's pie is by kind, งานสั่ง too, each kind in its own colour;
+        # the kind bars go, and each slice opens the queue filtered to that kind.
+        case = self.at_meter()
+        order = work_orders.create(self.admin, "งานทดสอบ", case.owner_division)
+        head = make_staff("mtr-head", (Role.SUPERVISOR, "SIM-MTR"))
+        page = self.client_for(head).get("/console/")
+        self.assertContains(page, "สัดส่วนงานตามชนิด")
+        self.assertNotContains(page, 'id="r-kind"')
+        tones = {s["label"]: s["tone"] for s in page.context["share"]["slices"]}
+        self.assertEqual(tones, {"เบิก": "c1", "งานสั่ง": "c4"})
+        self.assertContains(page, 'href="/divisions/SIM-MTR/?tab=host&amp;kind=order"')
+        queue = self.client_for(head).get("/divisions/SIM-MTR/", {"tab": "host", "kind": "order"})
+        self.assertContains(queue, order.number)
+        self.assertNotContains(queue, case.number)
+        queue = self.client_for(head).get("/divisions/SIM-MTR/", {"kind": "withdrawal"})
+        self.assertContains(queue, case.number)
+        self.assertNotContains(queue, order.number)
+        ranked = charts.pie([("A", 1, "", "c1"), ("B", 3, "", "c2")])["slices"]
+        self.assertEqual([(s["label"], s["tone"]) for s in ranked], [("B", "c2"), ("A", "c1")])
 
     def test_trend_legend_stays_off_the_lines(self):
         # Rising lines leave the upper left free; one line along the top and one along the bottom

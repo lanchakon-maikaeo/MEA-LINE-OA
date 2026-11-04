@@ -61,6 +61,8 @@ REFERENCE_URLS = {"pii", "routing-words", "duties", "knowledge"}
 ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
 ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
 # ADR 0030 Q12: ปัญหาและข้อเสนอแนะ is a tab of its own after คิวงาน, for admins only.
+# The queue's kind filter and the one-division pie: the LINE short names, then งานสั่ง.
+KINDS = [*units.KIND_SHORT.items(), (queues.ORDER_KIND, "งานสั่ง")]
 PROBLEM_URLS = {"admin-problems", "admin-problems-csv", "admin-problems-send"}
 
 
@@ -215,8 +217,9 @@ def home(request):
         open_count=open_count,
         new_link=link("new", "window"),
         ended_link=link("ended", "window"),
-        # Each division/centre's share of the open work, above สถานะ (user, 3 Nov 2569).
-        share=None
+        # Each division/centre's share of the open work, above สถานะ (user, 3 Nov 2569); one
+        # division's share by kind, each kind in its own colour (user, 4 Nov 2569).
+        share=_kind_share(request.user, context["chosen"], now)
         if context["chosen"]
         else charts.pie(
             [
@@ -232,6 +235,17 @@ def home(request):
         today=now,
     )
     return render(request, "operations/console.html", context)
+
+
+def _kind_share(user, division, now):
+    names = dict(KINDS)
+    queue = reverse("division-detail", args=[division.code])
+    return charts.pie(
+        [
+            (names[kind], n, f"{queue}?{urlencode({'tab': 'host', 'kind': kind})}", f"c{i + 1}")
+            for i, (kind, n) in enumerate(queues.host_by_kind(user, division, now))
+        ]
+    )
 
 
 def _attention(user, scope, report, link):
@@ -299,7 +313,7 @@ def _queue(request, division, admin_all=False):
         "pager": pager,
         "shown": shown,
         "now": now,
-        "kinds": list(units.KIND_SHORT.items()),
+        "kinds": KINDS,
         "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "ยังไม่ตั้งระดับ")],
         "sort": sort,
         "sorts": queues.SORTS.items(),

@@ -39,6 +39,7 @@ from operations.models import (
 
 S = Case.Status
 K = Case.Kind
+ORDER_KIND = "order"  # the kind filter's งานสั่ง: work orders only (user, 4 Nov 2569)
 WAITING_DISTRICT = frozenset({S.AWAITING_INFO, S.AWAITING_CONFIRMATION})
 CLOSED_DAYS = 30
 PAGE_SIZE = 50
@@ -205,7 +206,7 @@ def read_filters(params, roles):
     priority = params.get("priority", "")
     section = params.get("section") or ""
     filters = Filters(
-        kind=params.get("kind", "") if params.get("kind") in K.values else "",
+        kind=params.get("kind", "") if params.get("kind") in [*K.values, ORDER_KIND] else "",
         priority=priority if priority in [*Priority.values, "none"] else "",
         status=params.get("status", "")
         if params.get("status") in [*S.values, *WorkOrder.Status.values]
@@ -224,6 +225,8 @@ def read_filters(params, roles):
 
 
 def apply_filters(cases, filters):
+    if filters.kind == ORDER_KIND:
+        return cases.none()
     if filters.kind:
         cases = cases.filter(kind=filters.kind)
     if filters.status:
@@ -291,7 +294,7 @@ def order_queryset(user, tab, division, now, filters=None):
         if filters.district or filters.section not in ("", "none"):
             return orders.none()
         if not filters.preset:
-            if filters.kind:
+            if filters.kind not in ("", ORDER_KIND):
                 return orders.none()
             if filters.status:
                 orders = orders.filter(status=filters.status)
@@ -321,6 +324,14 @@ def counts(user, division, now, keys, admin_all=False):
         key: base.filter(tab_condition(key, division, user, now, admin_all)).count() + orders[key]
         for key in keys
     }
+
+
+def host_by_kind(user, division, now):
+    """[(kind, n)] of the งานของกอง tab, งานสั่ง last: the one-division overview's pie."""
+    cases = visible(user).filter(tab_condition("host", division, user, now)).order_by()
+    by_kind = dict(cases.values_list("kind").annotate(n=Count("pk")))
+    orders = order_queryset(user, "host", division, now).count()
+    return [(kind, by_kind.get(kind, 0)) for kind in K.values] + [(ORDER_KIND, orders)]
 
 
 def overdue_count(user, division, now, admin_all=False):
