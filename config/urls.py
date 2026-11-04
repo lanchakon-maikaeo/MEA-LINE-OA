@@ -100,6 +100,7 @@ urlpatterns = [
     path("cases/<str:number>/revision/", web.case_revision, name="case-revision"),
     path("cases/<str:number>/act/<slug:action>/", web.case_action, name="case-action"),
     path("cases/<str:number>/files/", web.case_upload, name="case-upload"),
+    path("cases/<str:number>/numbers/", web.case_number_edit, name="case-numbers"),
     path("cases/<str:number>/chat/", warehouse_web.case_chat_post, name="case-chat"),
     path("chat/", warehouse_web.chat_dock, name="chat-dock"),
     path(

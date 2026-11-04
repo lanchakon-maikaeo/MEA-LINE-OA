@@ -2,18 +2,11 @@
 {% if panel.warehouse or panel.milestones or panel.appointments %}
 <section data-tour="stages" class="section" aria-labelledby="s-warehouse">
   <div class="section-head"><h2 id="s-warehouse">งานคลังและนัด</h2>{% if panel.warehouse %}<a class="btn btn--ghost btn--sm" href="{% url 'warehouse' case.owner_division.code %}">ไปหน้างานคลัง</a>{% endif %}</div>
-  {% if panel.milestones %}<ol class="wh-steps">{% for m in panel.milestones %}<li><strong>{{ m.label }}</strong> {{ m.on|thai_date }}{% if m.planned_on %} · วันจ่าย {{ m.planned_on|thai_date }}{% endif %}{% if m.note %} · {{ m.note }}{% endif %} <span class="muted">{{ m.recorded_by.staff_profile.display_name|default:m.recorded_by.username }}</span></li>{% endfor %}</ol>{% elif panel.warehouse %}<p class="muted">ยังไม่ได้บันทึกขั้นงานคลัง</p>{% endif %}
+  {% if panel.milestones %}<ol class="wh-steps">{% for m in panel.milestones %}<li><strong>{{ m.label }}</strong>{% if panel.per_number and m.stage == "keyed" %} {{ m.number|default:case.sap_number }}{% endif %} {{ m.on|thai_date }}{% if m.planned_on %} · วันจ่าย {{ m.planned_on|thai_date }}{% endif %}{% if m.note %} · {{ m.note }}{% endif %} <span class="muted">{{ m.recorded_by.staff_profile.display_name|default:m.recorded_by.username }}</span></li>{% endfor %}</ol>{% elif panel.warehouse %}<p class="muted">ยังไม่ได้บันทึกขั้นงานคลัง</p>{% endif %}
   {% if panel.warehouse and case.status == "awaiting_approval" %}<p class="muted">เรื่องนี้ยังรอรับเรื่อง บันทึกขั้นงานคลังได้หลังรับเรื่องแล้ว</p>
-  {% elif panel.warehouse and panel.can_act and panel.next_stage and case.status != "closed" %}
-  <form method="post" action="{% url 'case-stage' case.number %}" class="wh-next">
-    {% csrf_token %}<input type="hidden" name="stage" value="{{ panel.next_stage }}">
-    <div class="wh-next__fields">
-      <div class="field"><label for="st-on">วันที่</label><input type="date" id="st-on" name="on" value="{{ panel.today|date:'Y-m-d' }}" max="{{ panel.today|date:'Y-m-d' }}" required></div>
-      {% if panel.next_stage == "keyed" and not panel.returning %}<div class="field"><label for="st-plan">วันจ่าย</label><input type="date" id="st-plan" name="planned_on"{% if panel.suggested %} value="{{ panel.suggested|date:'Y-m-d' }}"{% endif %}><span class="helptext">{% if panel.suggested %}ระบบเสนอตามตาราง แก้ได้{% else %}ใส่วันจ่าย ตารางยังไม่มีกำหนดของชนิดนี้{% endif %} ผู้แจ้งได้ข้อความวันจ่ายและปุ่มเลือกวิธีรับ</span></div>{% endif %}
-      <div class="field"><label for="st-note">บันทึกภายใน</label><input type="text" id="st-note" name="note" maxlength="300"></div>
-    </div>
-    <button class="btn btn--sm" type="submit">บันทึก{{ panel.next_label }}</button>
-  </form>
+  {% elif panel.warehouse and panel.can_act and case.status != "closed" %}
+  {% if panel.next_stage %}{% include "operations/_stage_form.html" with stage=panel.next_stage label=panel.next_label pre="st" %}{% endif %}
+  {% if panel.more_keyed %}{% include "operations/_stage_form.html" with stage="keyed" label=panel.keyed_label pre="sk" %}{% endif %}
   {% endif %}
   {% for a in panel.appointments %}
   <div class="wh-appt">

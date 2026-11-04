@@ -23,6 +23,7 @@ taken at once while the box's sheet is not set up; what was typed goes on to the
 import re
 from datetime import timedelta
 
+from django.db.models import Q
 from django.utils import timezone
 
 from operations import (
@@ -1023,7 +1024,8 @@ def _tracking_notes(turn, values, target):
     if not number:
         return
     config = target["config"] if target else {}
-    found = Case.objects.filter(sap_number__iexact=number).exclude(status__in=workflow.TERMINAL)
+    cited = Q(sap_number__iexact=number) | Q(extra_numbers__number__iexact=number)  # ADR 0047
+    found = Case.objects.filter(cited).exclude(status__in=workflow.TERMINAL).distinct()
     kind = values.get("case_kind") or config.get("case_kind")
     if kind:
         found = found.filter(kind=kind)

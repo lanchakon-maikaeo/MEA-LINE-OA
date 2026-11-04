@@ -1,0 +1,48 @@
+{% load ui %}
+{% with n=tracking_numbers %}{% if n %}
+<div class="more-numbers" id="s-numbers">
+  {% if n.rows %}
+  <p class="labelled__label">เลขที่เจ้าหน้าที่เพิ่ม</p>
+  <ul class="more-numbers__list">
+    {% for row in n.rows %}
+    <li class="more-numbers__row">
+      <div class="more-numbers__text">
+        <span class="tracking__label">{{ row.label }}</span>
+        <strong class="more-numbers__number">{{ row.number }}</strong>
+        {% if row.keyed %}<span class="muted">วันจ่าย {{ row.keyed.planned_on|thai_date|default:"-" }}</span>{% endif %}
+        {% if row.repeats %}<span class="flag flag--alert">เลขซ้ำกับเรื่อง {% for r in row.repeats %}<a href="{% url 'case-detail' r %}">{{ r }}</a>{% if not forloop.last %}, {% endif %}{% endfor %} ที่ยังไม่ปิด</span>{% endif %}
+      </div>
+      <button class="btn btn--outline btn--sm" type="button" data-copy="{{ row.number }}">{% icon "copy" "sm" %} <span data-copy-label aria-live="polite">คัดลอก</span></button>
+      {% if n.may_edit and not row.keyed %}
+      <details class="more-numbers__remove"><summary>ลบเลข</summary>
+        <form method="post" action="{% url 'case-numbers' case.number %}">
+          {% csrf_token %}<input type="hidden" name="remove" value="{{ row.pk }}">
+          <div class="field"><label for="nr{{ row.pk }}">เหตุผลที่ลบ</label><input type="text" id="nr{{ row.pk }}" name="reason" maxlength="300" required></div>
+          <button class="btn btn--outline btn--sm" type="submit">ลบเลข {{ row.number }}</button>
+        </form>
+      </details>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if n.may_edit %}
+  <details class="fold more-numbers__add">
+    <summary>{% if n.found %}ดึงเลขจากรายละเอียด ({{ n.found|length }}) หรือเพิ่มเลข{% else %}เพิ่มเลข{% endif %}</summary>
+    <form method="post" action="{% url 'case-numbers' case.number %}">
+      {% csrf_token %}
+      {% if n.found %}
+      <fieldset class="wh-numbers"><legend>เลขที่พบในรายละเอียด ติ๊กเลขที่จะเพิ่ม</legend>
+        {% for f in n.found %}<label class="chip-check"><input type="checkbox" name="found" value="{{ f }}"> {{ f }}</label>{% endfor %}
+      </fieldset>
+      {% endif %}
+      <div class="wh-next__fields">
+        <div class="field"><label for="nk">ชนิดของเลข</label><select id="nk" name="kind">{% for v, l in n.kinds %}<option value="{{ v }}"{% if v == n.kind %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="nt">พิมพ์เลขเพิ่ม</label><input type="text" id="nt" name="typed" maxlength="600"><span class="helptext">หลายเลขคั่นด้วยจุลภาคหรือขึ้นบรรทัดใหม่</span></div>
+      </div>
+      <button class="btn btn--sm" type="submit">เพิ่มเลข</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endif %}{% endwith %}

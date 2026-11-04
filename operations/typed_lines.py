@@ -18,6 +18,7 @@ import secrets
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 
 from operations import identity, workflow
 from operations.models import Case, CaseLine, Division, EntryField, EquipmentType
@@ -106,7 +107,8 @@ def clean_sap(text):
 def sap_in_use(number, requester, exclude=None):
     """Why this SAP number cannot start another case, or "". An open case of this requester is
     named; anyone else's is not."""
-    found = Case.objects.filter(sap_number=number).exclude(status__in=workflow.TERMINAL)
+    found = Case.objects.filter(Q(sap_number=number) | Q(extra_numbers__number=number))
+    found = found.exclude(status__in=workflow.TERMINAL).distinct()  # ADR 0047: added ones too
     if exclude is not None:
         found = found.exclude(pk=exclude.pk)
     own = found.filter(requester=requester).first() if requester is not None else None

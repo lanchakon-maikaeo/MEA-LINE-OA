@@ -2367,7 +2367,8 @@ def _sap_cases(turn, text):
         return False
     found = list(
         services.visible_cases(_actor(turn))
-        .filter(sap_number__iexact=number)
+        .filter(Q(sap_number__iexact=number) | Q(extra_numbers__number__iexact=number))
+        .distinct()
         .order_by("-submitted_at")[:5]
     )
     if len(found) == 1:
@@ -2422,6 +2423,9 @@ def _case_detail(turn, number):
     files = case.attachments.count()
     sap_label = typed_lines.sap_label(case.kind, case.topic, case.sap_kind)
     sap = f"\n{sap_label}: {case.sap_number}" if case.sap_number and sap_label else ""
+    more = list(case.extra_numbers.values_list("number", flat=True)) if sap_label else []
+    if more:  # ADR 0047: the numbers staff added from the details
+        sap += f"\nเลขเพิ่มเติม: {', '.join(more)}"
     if case.meters:
         sap += f"\nเครื่องวัดฯ: {usage_meters.describe(case.meters)}"
     bar, status = requester_steps.bar(case.status), _status_label(case)

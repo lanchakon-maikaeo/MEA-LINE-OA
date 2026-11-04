@@ -21,6 +21,7 @@ from datetime import date, datetime, time, timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from operations import calendars, identity
@@ -266,7 +267,27 @@ def save_short_names(actor, names, reason):
 
 
 def stages(case):
-    return {m.stage: m for m in CaseMilestone.objects.filter(case=case)}
+    # The first number's row ("") comes last, so its คีย์จ่ายแล้ว stands for the case.
+    return {m.stage: m for m in CaseMilestone.objects.filter(case=case).order_by("-number")}
+
+
+# ADR 0047: the numbers of a withdrawal that get their own pay day; meters and projects do not.
+PAYABLE = {"", "slip", "work_order", "memo", "other_number"}
+
+
+def payable(case):
+    """(value, number) of each number of a withdrawal that gets a pay day; the first number's
+    value is "". Empty for a return or a case with no such number."""
+    if case.kind != Case.Kind.WITHDRAWAL:
+        return []
+    first = [("", case.sap_number)] if case.sap_number and case.sap_kind in PAYABLE else []
+    return first + [(n.number, n.number) for n in case.extra_numbers.all() if n.kind in PAYABLE]
+
+
+def unkeyed(case):
+    """The payable numbers with no คีย์จ่ายแล้ว yet, as payable() gives them."""
+    keyed = set(case.milestones.filter(stage=S.KEYED).values_list("number", flat=True))
+    return [(value, number) for value, number in payable(case) if value not in keyed]
 
 
 def current(case):
@@ -291,7 +312,9 @@ def find_cases(actor, division, numbers):
     base = Case.objects.filter(owner_division=division, kind__in=kinds)
     base = base.exclude(status__in=workflow.TERMINAL)
     for number in numbers:
-        hit = list(base.filter(number=number.upper())) or list(base.filter(sap_number=number))
+        hit = list(base.filter(number=number.upper())) or list(
+            base.filter(Q(sap_number=number) | Q(extra_numbers__number=number)).distinct()
+        )
         if not hit:
             missing.append(number)
         for case in hit:
@@ -301,8 +324,9 @@ def find_cases(actor, division, numbers):
 
 
 @transaction.atomic
-def record(actor, cases, stage, on, planned_on=None, note=""):
-    """Record one stage for many cases; returns (done, skipped [(case, why)])."""
+def record(actor, cases, stage, on, planned_on=None, note="", numbers=()):
+    """Record one stage for many cases; returns (done, skipped [(case, why)]). คีย์จ่ายแล้ว
+    goes to the case's numbers among `numbers`, else to each number not keyed yet (ADR 0047)."""
     if stage not in S.values:
         raise ValidationError("ขั้นไม่ถูกต้อง")
     if len(cases) > MAX_BULK:
@@ -312,6 +336,7 @@ def record(actor, cases, stage, on, planned_on=None, note=""):
     scope = identity.staff_scope(actor)
     order = CaseMilestone.ORDER
     done, skipped = [], []
+    typed = {str(n).strip().upper() for n in numbers}
     for case in cases:
         if not identity.holds(scope, case.owner_division_id) and not scope.is_admin:
             skipped.append((case, "ไม่ใช่งานของกองคุณ"))
@@ -320,7 +345,12 @@ def record(actor, cases, stage, on, planned_on=None, note=""):
             skipped.append((case, "ยังรอรับเรื่อง บันทึกขั้นงานคลังได้หลังรับเรื่องแล้ว"))
             continue
         have = stages(case)
-        if stage in have:
+        targets = [("", "")]
+        if stage == S.KEYED and payable(case):
+            # A number typed or ticked keys only itself; a case number keys every one left.
+            named = [t for t in payable(case) if t[1].upper() in typed]
+            targets = [t for t in unkeyed(case) if t in named or not named]
+        if stage in have and (stage != S.KEYED or not payable(case) or not targets):
             skipped.append((case, f"บันทึก{S(stage).label}ไว้แล้ว"))
             continue
         earlier = order[: order.index(stage)]
@@ -335,21 +365,31 @@ def record(actor, cases, stage, on, planned_on=None, note=""):
         if stage == S.KEYED and plan is None and not returning:
             skipped.append((case, "ใส่วันจ่าย (ตารางกำหนดจ่ายยังไม่มีขนาดนี้)"))
             continue
-        CaseMilestone.objects.create(
-            case=case,
-            stage=stage,
-            on=on,
-            planned_on=plan if stage == S.KEYED else None,
-            note=note[:300],
-            recorded_by=actor,
+        for value, _ in targets:
+            CaseMilestone.objects.create(
+                case=case,
+                stage=stage,
+                number=value,
+                on=on,
+                planned_on=plan if stage == S.KEYED else None,
+                note=note[:300],
+                recorded_by=actor,
+            )
+        recorded = [n for _, n in targets if n]
+        identity.audit(
+            actor,
+            f"case.stage_{stage}",
+            case,
+            number=case.number,
+            on=on.isoformat(),
+            **({"numbers": recorded} if recorded else {}),
         )
-        identity.audit(actor, f"case.stage_{stage}", case, number=case.number, on=on.isoformat())
         done.append(case)
         if returning:
             if stage == S.DELIVERED and _close(actor, case):
                 _tell(actor, case, f"{case.number} {stage_label(case, stage)} ปิดเรื่องแล้ว")
         elif stage == S.KEYED:
-            _offer(actor, case, plan)
+            _offer(actor, case, plan, recorded if len(payable(case)) > 1 else ())
         elif stage == S.ISSUED:
             _tell(actor, case, f"จ่ายแล้ว {thai_date(on)}" + _method_text(case))
         elif stage == S.DELIVERED and _close(actor, case):
@@ -451,13 +491,15 @@ def offer_buttons(case, found, issue_on):
     return buttons
 
 
-def _offer(actor, case, issue_on):
-    """Q27: the issue day and the ways to get the goods in one message."""
+def _offer(actor, case, issue_on, numbers=()):
+    """Q27: the issue day and the ways to get the goods in one message. ADR 0047: a case of
+    several numbers names the ones this pay day is for."""
     from operations import case_chat
 
     found = _identity(case)
     if found is None:
         return
+    lead = f"เลขที่ {', '.join(numbers)}\n" if numbers else ""
     code = case.owner_division.code
     schedule = schedule_of(case.owner_division)
     truck = truck_day(case, issue_on)
@@ -467,14 +509,16 @@ def _offer(actor, case, issue_on):
             calendar = pickup_calendar(case.owner_division)
             if calendar is not None:
                 _choose(case, calendar, Appointment.Method.TRUCK, note=f"วันส่งรถ {truck}")
-            text = f"รถ {code} จะนำของไปส่งถึงเขต{thai_date(truck)}\nถ้าจะมารับเองที่ {code} กดมารับเอง"
+            text = (
+                f"{lead}รถ {code} จะนำของไปส่งถึงเขต{thai_date(truck)}\nถ้าจะมารับเองที่ {code} กดมารับเอง"
+            )
         else:
-            text = f"กำหนดจ่าย {thai_date(issue_on)}\nยังไม่มีวันรถของเขตนี้"
+            text = f"{lead}กำหนดจ่าย {thai_date(issue_on)}\nยังไม่มีวันรถของเขตนี้"
             if schedule.contact:
                 text += f" สอบถามวันส่งได้ที่ {schedule.contact}"
         case_chat.send_system(actor, case, text, offer_buttons(case, found, issue_on))
         return
-    text = f"กำหนดจ่าย {thai_date(issue_on)}\nเลือกวิธีรับของ"
+    text = f"{lead}กำหนดจ่าย {thai_date(issue_on)}\nเลือกวิธีรับของ"
     if truck is not None:
         text += f" รถ {code} ไปส่งเขต{thai_date(truck)} หรือมารับเอง"
     else:
@@ -571,9 +615,12 @@ def status_lines(case):
     if now is not None:
         label = stage_label(case, now.stage)
         lines.append(f"ขั้นงานคลัง: {label} ({now.on:%d/%m}/{now.on.year + 543})")
-    keyed = stages(case).get(S.KEYED)
-    if keyed and keyed.planned_on and case.kind != Case.Kind.RETURN:
-        lines.append(f"กำหนดจ่าย: {thai_date(keyed.planned_on)}")
+    keyed = [m for m in case.milestones.filter(stage=S.KEYED) if m.planned_on]
+    if case.kind != Case.Kind.RETURN and len(keyed) > 1:  # ADR 0047: one pay day per number
+        for m in sorted(keyed, key=lambda m: (m.planned_on, m.number)):
+            lines.append(f"กำหนดจ่าย {m.number or case.sap_number}: {thai_date(m.planned_on)}")
+    elif keyed and case.kind != Case.Kind.RETURN:
+        lines.append(f"กำหนดจ่าย: {thai_date(keyed[0].planned_on)}")
     method = _method_text(case).strip()
     if method:
         lines.append(method)

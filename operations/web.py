@@ -24,6 +24,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from operations import (
     admin_nav,
     approvals,
+    case_numbers,
     casepage,
     charts,
     employees,
@@ -508,6 +509,7 @@ def case_detail(request, number):
             "hints": web_actions.hints(st, offers),
             "can_upload": uploads.may_upload(st),
             "panel": warehouse_web.case_panel(request.user, case),
+            "tracking_numbers": case_numbers.panel(request.user, case),
             # Zero trust (31 ต.ค. 2569 Q2): a typed name is not checked against the roster.
             "unverified": not (case.requester.is_anonymous or case.requester.is_internal)
             and employees.identity_state(case.requester) != "verified",
@@ -638,6 +640,31 @@ def case_action(request, number, action):
 
 
 @login_required
+@require_POST
+def case_number_edit(request, number):
+    """ADR 0047: add the numbers the requester typed in the details, or remove one with a reason."""
+    case = _visible_case(request, number)
+    try:
+        if request.POST.get("remove"):
+            case_numbers.remove(
+                request.user, case, int(request.POST["remove"]), request.POST.get("reason")
+            )
+            messages.success(request, "ลบเลขแล้ว")
+        else:
+            kind = request.POST.get("kind", "")
+            typed = case_numbers.split(request.POST.get("typed", ""), kind)
+            typed += request.POST.getlist("found")
+            added = case_numbers.add(request.user, case, kind, typed)
+            messages.success(request, "เพิ่มเลข " + ", ".join(n for n, _ in added) + " แล้ว")
+            for n, others in added:
+                if others:
+                    messages.warning(request, f"เลข {n} ซ้ำกับเรื่อง {', '.join(others)} ที่ยังไม่ปิด")
+    except (ValidationError, PermissionDenied, ValueError) as exc:
+        messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์ทำรายการนี้"])))
+    return redirect(f"{reverse('case-detail', args=[case.number])}#s-numbers")
+
+
+@login_required
 @require_safe
 def case_revision(request, number):
     """Round 1 Q15: polled every 30 s; a banner (never a reload) when the case changed."""
@@ -669,10 +696,13 @@ def case_search(request):
     if query:
         # 23 Oct 2569: a SAP slip number finds its case too.
         visible = queues.visible(request.user)
-        cases = visible.filter(Q(number__icontains=query) | Q(sap_number__iexact=typed))
+        # ADR 0047: a number staff added finds the case too.
+        cited = Q(sap_number__iexact=typed) | Q(extra_numbers__number__iexact=typed)
+        cases = visible.filter(Q(number__icontains=query) | cited).distinct()
         exact = cases.filter(number=query).first()
-        if exact is None and visible.filter(sap_number__iexact=typed).count() == 1:
-            exact = visible.get(sap_number__iexact=typed)
+        citing = visible.filter(cited).distinct()
+        if exact is None and citing.count() == 1:
+            exact = citing.get()
         if exact is not None:
             return redirect("case-detail", number=exact.number)
         orders = (

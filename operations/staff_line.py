@@ -468,7 +468,8 @@ def _case_for(user, case_id=None, number=None, sap_number=None):
         return cases.filter(pk=case_id).first()
     if sap_number:
         # The newest case citing this SAP slip (an older one may be closed already).
-        return cases.filter(sap_number__iexact=sap_number).order_by("-submitted_at").first()
+        cited = Q(sap_number__iexact=sap_number) | Q(extra_numbers__number__iexact=sap_number)
+        return cases.filter(cited).order_by("-submitted_at").first()
     return cases.filter(number=number).first()
 
 

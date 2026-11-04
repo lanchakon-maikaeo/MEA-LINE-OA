@@ -3455,6 +3455,22 @@ class Appointment(models.Model):
         ordering = ["-requested_at"]
 
 
+class CaseNumber(models.Model):
+    """เลขติดตามที่เจ้าหน้าที่เพิ่มเข้าเรื่อง (ADR 0047): the first number stays Case.sap_number."""
+
+    case = models.ForeignKey("Case", on_delete=models.CASCADE, related_name="extra_numbers")
+    kind = models.CharField(max_length=16)  # a sap_kind: slip, work_order, memo, meter, ...
+    number = models.CharField(max_length=60, db_index=True)
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["added_at", "pk"]
+        constraints = [models.UniqueConstraint(fields=["case", "number"], name="case_number_once")]
+
+
 class CaseMilestone(models.Model):
     """ขั้นงานคลังของใบเบิก (Q16, Q18): staff record each stage, many slips at once. `on` is the
     day it happened; for คีย์จ่ายแล้ว `planned_on` is the issue day กคว. set (Q20)."""
@@ -3476,11 +3492,13 @@ class CaseMilestone(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
     )
     recorded_at = models.DateTimeField(auto_now_add=True)
+    # ADR 0047: คีย์จ่ายแล้ว comes once per number of a withdrawal; "" is the case's first number.
+    number = models.CharField(max_length=60, blank=True, default="")
 
     class Meta:
         ordering = ["case", "on", "pk"]
         constraints = [
-            models.UniqueConstraint(fields=["case", "stage"], name="case_milestone_once")
+            models.UniqueConstraint(fields=["case", "stage", "number"], name="case_milestone_once")
         ]
 
     @property

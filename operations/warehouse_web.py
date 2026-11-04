@@ -99,7 +99,7 @@ def warehouse_page(request, code):
         cases, missing = warehouse.find_cases(request.user, division, numbers)
         try:
             done, skipped = warehouse.record(
-                request.user, cases, stage, on, planned, request.POST.get("note", "")
+                request.user, cases, stage, on, planned, request.POST.get("note", ""), numbers
             )
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
@@ -574,8 +574,11 @@ def case_stage(request, number):
         raise Http404
     on = _day(request.POST.get("on"), timezone.localdate())
     planned = _day(request.POST.get("planned_on"))
+    numbers = request.POST.getlist("number")
     if on is None or (request.POST.get("planned_on") and planned is None):
         messages.error(request, "วันที่ไม่ถูกต้อง")
+    elif request.POST.get("pick_numbers") and not numbers:
+        messages.error(request, "เลือกเลขอย่างน้อยหนึ่งเลข")
     else:
         try:
             done, skipped = warehouse.record(
@@ -585,6 +588,7 @@ def case_stage(request, number):
                 on,
                 planned,
                 request.POST.get("note", ""),
+                numbers,
             )
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
@@ -637,6 +641,9 @@ def case_panel(user, case):
     done = {m.stage: m for m in case.milestones.all()}
     next_stage = _next_stage(case, done)
     received = done.get(S.RECEIVED)
+    payable = warehouse.payable(case)
+    # ADR 0047: numbers left to key once the case is keyed; ticked one by one when several.
+    unkeyed = warehouse.unkeyed(case) if received and payable else []
     open_appointments = [
         a for a in case.appointments.select_related("slot", "calendar") if a.status != "cancelled"
     ]
@@ -645,11 +652,15 @@ def case_panel(user, case):
         "next_stage": next_stage,
         "returning": case.kind == Case.Kind.RETURN,
         "next_label": warehouse.stage_label(case, next_stage) if next_stage else "",
+        "keyed_label": warehouse.stage_label(case, S.KEYED),
         "suggested": (
             warehouse.suggested_issue(case, received.on, timezone.localdate())
-            if next_stage == S.KEYED and received and case.kind != Case.Kind.RETURN
+            if (next_stage == S.KEYED or unkeyed) and received and case.kind != Case.Kind.RETURN
             else None
         ),
+        "unkeyed": [n for _, n in unkeyed] if len(payable) > 1 else [],
+        "more_keyed": next_stage != S.KEYED and bool(unkeyed),
+        "per_number": len(payable) > 1,
         "today": timezone.localdate(),
         "waiting": [a for a in open_appointments if a.status == Appointment.Status.REQUESTED],
         "free": {

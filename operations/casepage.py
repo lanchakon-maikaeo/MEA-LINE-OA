@@ -104,6 +104,9 @@ SYSTEM_EVENTS = {
     "case.repeat_dispute": "ผู้แจ้งโต้แย้งผลซ้ำ",
 }
 
+# ADR 0047: staff add and remove เลขติดตาม; the timeline names who did it.
+NUMBER_EVENTS = {"case.number_added": "เพิ่มเลข", "case.number_removed": "ลบเลข"}
+
 TEXT_FIELDS = [
     ("purpose", "จุดประสงค์"),
     ("description", "รายละเอียด"),
@@ -239,6 +242,19 @@ def timeline(case):
                 "why": event.reason,
                 "status": " · ".join(parts),
                 "system": True,
+            }
+        )
+    for event in AuditEvent.objects.filter(
+        target_type="Case", target_id=str(case.pk), action__in=list(NUMBER_EVENTS)
+    ).select_related("actor__staff_profile"):
+        entries.append(
+            {
+                "at": event.created_at,
+                "what": f"{NUMBER_EVENTS[event.action]} {event.data.get('number', '')}",
+                "who": _who(event.actor, event.actor_label, case),
+                "why": event.reason,
+                "status": "",
+                "system": False,
             }
         )
     for reply in case.info_replies.order_by("created_at"):

@@ -61,6 +61,7 @@
     {% elif r.no_number %}
     <p class="tracking tracking--none">ไม่มีเลขติดตาม เจ้าหน้าที่ค้นหาเอกสารจากรายละเอียดที่ผู้แจ้งระบุ</p>
     {% endif %}
+    {% include "operations/_case_numbers.html" %}
     <div class="labelled"><p class="labelled__label">รายละเอียดที่ผู้แจ้งระบุ</p>{% if r.details %}<div class="prose-block">{{ r.details }}</div>{% else %}<p class="muted">ผู้แจ้งไม่ได้ระบุรายละเอียดเพิ่มเติม</p>{% endif %}</div>
     {% if r.photos %}
     <div class="labelled"><p class="labelled__label">รูปที่ผู้แจ้งแนบ</p>
@@ -71,6 +72,7 @@
   {% endif %}{% endwith %}
   <div class="detail__main">
     <div id="action-slot" aria-live="polite"></div>
+    {% if not page.line_request %}{% include "operations/_case_numbers.html" %}{% endif %}
 
     {% include "operations/_case_panel.html" %}
 
