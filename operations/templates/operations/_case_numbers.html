@@ -28,8 +28,8 @@
   {% endif %}
   {% if n.may_edit %}
   <details class="fold more-numbers__add">
-    <summary>{% if n.found %}ดึงเลขจากรายละเอียด ({{ n.found|length }}) หรือเพิ่มเลข{% else %}เพิ่มเลข{% endif %}</summary>
-    <form method="post" action="{% url 'case-numbers' case.number %}">
+    <summary><span class="fold__title">{% if n.found %}ดึงเลขจากรายละเอียด ({{ n.found|length }}) หรือเพิ่มเลข{% else %}เพิ่มเลข{% endif %}</span></summary>
+    <form method="post" action="{% url 'case-numbers' case.number %}" class="fold__body">
       {% csrf_token %}
       {% if n.found %}
       <fieldset class="wh-numbers"><legend>เลขที่พบในรายละเอียด ติ๊กเลขที่จะเพิ่ม</legend>

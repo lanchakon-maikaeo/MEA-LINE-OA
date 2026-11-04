@@ -286,7 +286,7 @@ def payable(case):
 
 def unkeyed(case):
     """The payable numbers with no คีย์จ่ายแล้ว yet, as payable() gives them."""
-    keyed = set(case.milestones.filter(stage=S.KEYED).values_list("number", flat=True))
+    keyed = {m.number for m in case.milestones.all() if m.stage == S.KEYED}  # prefetch-friendly
     return [(value, number) for value, number in payable(case) if value not in keyed]
 
 

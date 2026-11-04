@@ -116,7 +116,7 @@ def warehouse_page(request, code):
         Case.objects.filter(owner_division=division, kind__in=kinds)
         .exclude(status__in=workflow.TERMINAL)
         .select_related("district")
-        .prefetch_related("milestones", "lines", "appointments")
+        .prefetch_related("milestones", "lines", "appointments", "extra_numbers")
         .order_by("submitted_at")
     )
     today = timezone.localdate()
@@ -129,7 +129,10 @@ def warehouse_page(request, code):
         waiting = case.status == Case.Status.AWAITING_APPROVAL
         keyed = done.get(S.KEYED)
         received = done.get(S.RECEIVED)
-        planned = keyed.planned_on if keyed else None
+        # ADR 0047: a case of several numbers is late by its earliest pay day.
+        plans = [m.planned_on for m in case.milestones.all() if m.stage == S.KEYED and m.planned_on]
+        planned = min(plans, default=None)
+        several = len(warehouse.payable(case)) > 1
         method = next(
             (a for a in case.appointments.all() if a.status in Appointment.HOLDING and a.method),
             None,
@@ -146,6 +149,9 @@ def warehouse_page(request, code):
             "method": method,
             "next": nxt,
             "next_label": NEXT_LABELS.get(nxt, ""),
+            "extra": [n.number for n in case.extra_numbers.all()],
+            "left": [n for _, n in warehouse.unkeyed(case)] if several and keyed else [],
+            "several": several,
         }
         if waiting:
             by_tab["approval"].append(row)

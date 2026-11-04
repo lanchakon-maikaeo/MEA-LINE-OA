@@ -76,6 +76,10 @@ class CaseNumberTests(WorkTestCase):
         self.assertIn("\nเลขที่ 4500070002\nกำหนดจ่าย", held.last().text)
         page = self.web.get(reverse("case-detail", args=[case.number]))
         self.assertContains(page, "บันทึกคีย์จ่ายแล้ว")  # the first number is left to key
+        listed = self.web.get(reverse("warehouse", args=[self.division.code]))
+        self.assertContains(listed, "และ 4500070002, 99887766")
+        self.assertContains(listed, "ยังไม่คีย์จ่าย 4500070001")
+        self.assertContains(listed, "คีย์จ่ายเลขที่เหลือ")
         warehouse.record(self.kcw, [case], S.KEYED, monday, thursday + timedelta(days=5))
         self.assertIn("เลขที่ 4500070001\n", held.last().text)
         done, skipped = warehouse.record(self.kcw, [case], S.KEYED, monday, thursday)
