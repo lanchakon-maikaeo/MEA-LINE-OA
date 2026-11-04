@@ -11,11 +11,17 @@ ADR 0029 (grill กคอ. 28 ต.ค. 2569): a source may match หมายเ
 digits, compared without spaces, "-", "/" or "."; typed as "ชื่อเครื่องมือ, หมายเลข" a line
 each), answer only rows of the asker's ฟข. (district_column), show a status cell as its word
 (status_words, so a repair code never reaches ฟข.) and show a few more cells such as dates.
+
+ADR 0046: when such a piece is not found, the five rows of the asker's ฟข. closest to what was
+typed (difflib, by number and by tool name) come back as quick replies; the answer still comes
+only from an exact match.
 """
 
 import logging
 import re
+import unicodedata
 from datetime import date, timedelta
+from difflib import SequenceMatcher
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -39,7 +45,9 @@ NUMBER = re.compile(r"\d[\d-]*\d|\d")
 MIN_DIGITS, MAX_DIGITS = 6, 12
 MAX_EXTRA = 4
 CODE = re.compile(r"(?=[A-Z0-9ก-ฮ]*\d)[A-Z0-9ก-ฮ]{2,30}")  # one digit at least
-CODE_DROP = re.compile(r"[\s./\\-]")
+CODE_DROP = re.compile(r"[\s./\\_-]")
+INVISIBLE = re.compile("[\u00ad\u200b-\u200f\u2060\ufeff]")
+NEAR_K, NEAR_CUTOFF = 5, 0.6  # ADR 0046: top five that are this alike at least
 TOKEN = re.compile(r"[A-Za-z0-9ก-ฮ][A-Za-z0-9ก-ฮ./-]*")
 
 
@@ -55,9 +63,16 @@ def numbers_in(text):
     return found
 
 
+def clean(value):
+    """ADR 0046: one form for what ฟข. typed and what the sheet says: NFC, Thai digits, no
+    invisible characters, and ำ typed as ํ + า made one."""
+    text = unicodedata.normalize("NFC", str(value or "")).translate(THAI_DIGITS)
+    return INVISIBLE.sub("", text).replace("\u0e4d\u0e32", "\u0e33")
+
+
 def code_key(value):
-    """หมายเลขอุปกรณ์ as compared: "nc-801", "NC 801" and "NC801" are one piece."""
-    return CODE_DROP.sub("", str(value or "").translate(THAI_DIGITS)).upper()
+    """หมายเลขอุปกรณ์ as compared: "nc-801", "NC 801", "NC_801" and "NC801" are one piece."""
+    return CODE_DROP.sub("", clean(value)).upper()
 
 
 def codes_in(text):
@@ -89,7 +104,7 @@ NAME_DROP = re.compile(r"[^0-9a-zก-๙]+")
 
 
 def name_key(value):
-    return NAME_DROP.sub("", str(value or "").lower().translate(THAI_DIGITS))
+    return NAME_DROP.sub("", clean(value).lower())
 
 
 def name_matches(typed, written):
@@ -517,6 +532,38 @@ def lookup(source, numbers, district=None, names=None):
         }
         for n in numbers
     ]
+
+
+def near(source, items, district=None):
+    """ADR 0046: [(name, number)] of up to five rows of the asker's ฟข. most alike a piece not
+    found, by its number or by the tool name typed with it, best first."""
+    missed = [(i["number"], name_key(i.get("name"))) for i in items if not i["found"]]
+    if source.match != source.Match.CODE or not missed:
+        return []
+    scores = {}
+    rows = SheetEntry.objects.filter(source=source).values_list("number", "name", "district")
+    for number, name, cell in rows.iterator():
+        if source.district_column and not district_matches(cell, district):
+            continue
+        written = name_key(name)
+        for typed, typed_name in missed:
+            score = SequenceMatcher(None, typed, number).ratio()
+            if typed_name and written:
+                score = max(score, SequenceMatcher(None, typed_name, written).ratio())
+            if score >= NEAR_CUTOFF and score > scores.get((number, name), 0):
+                scores[(number, name)] = score
+    best = sorted(scores, key=lambda k: (-scores[k], k))[:NEAR_K]
+    return [(name, number) for number, name in best]
+
+
+def near_label(name, number):
+    """A button of 20 letters at most: the number, then whole words of the name that fit."""
+    label = number[:20]
+    for word in str(name or "").split():
+        if len(label) + 1 + len(word) > 20:
+            break
+        label += " " + word
+    return label
 
 
 def reports(item):

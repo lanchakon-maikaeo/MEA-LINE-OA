@@ -313,6 +313,32 @@ class RepairSheetTests(KkoTestCase):
         self.assertIn("NC001 (CLIP ON VOLT AMMETER 600A.600V.): ซ่อมเสร็จ รอส่งคืน", said)
         self.assertIn("NC001 (HV.DETECTOR (NOISY TESTER)): กำลังซ่อม", said)
 
+    def test_a_near_miss_offers_the_askers_closest_rows(self):
+        # ADR 0046: NC8O1 (a letter O) is not NC801; the closest rows of ฟข. come as buttons.
+        self.assertEqual(sheet_lookup.code_key("nc_801\u200b"), "NC801")
+        self.assertEqual(sheet_lookup.name_key("ทํางาน"), sheet_lookup.name_key("ทำงาน"))
+        self.load()
+        reply = self.ask("safety belt, NC8O1")
+        said = texts(reply)
+        self.assertIn("ไม่พบหมายเลขอุปกรณ์ NC8O1", said)
+        self.assertIn("กดหมายเลขที่ใกล้เคียงด้านล่างเพื่อค้นอีกครั้ง", said)
+        near = [
+            i["action"]
+            for m in reply
+            for i in m.get("quickReply", {}).get("items", [])
+            if i["action"]["type"] == "message"
+        ]
+        self.assertEqual(
+            near[0], {"type": "message", "label": "NC801 SAFETY BELT", "text": "SAFETY BELT, NC801"}
+        )
+        self.assertLessEqual(len(near), sheet_lookup.NEAR_K)
+        self.assertNotIn("XY900", str(near))  # another ฟข.'s row
+        self.assertIn("ส่งให้ คม. ตรวจ", list(buttons(reply)))
+        said = texts(self.type(ALICE, near[0]["text"]))
+        self.assertIn("หมายเลขอุปกรณ์ NC801 (SAFETY BELT): ซ่อมเสร็จ ส่งคืน ฟข. แล้ว", said)
+        reply = self.type(ALICE, "ZZ9999")
+        self.assertNotIn("ใกล้เคียง", texts(reply))
+
     def test_dates_and_names(self):
         self.assertEqual(sheet_lookup.iso_date("17/11/2566"), "2023-11-17")
         self.assertEqual(sheet_lookup.iso_date("17/11/2023"), "2023-11-17")
