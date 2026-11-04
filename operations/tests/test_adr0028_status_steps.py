@@ -86,17 +86,17 @@ class LineTests(StatusTestCase):
         text = texts(self.type(ALICE, self.case.number))
         self.assertIn("●●○○ กำลังดำเนินการ\n", text)  # ADR 0042 Q10: in progress at once
         self.assertNotIn("สถานะในระบบ", text)
-        # Q3, Q5: the LINE user reads กำลังดำเนินการ; staff pages keep รอกองรับเรื่อง.
+        # Q3, Q5: the LINE user reads กำลังดำเนินการ; staff pages keep รอรับเรื่อง.
         Case.objects.filter(pk=self.case.pk).update(status=S.AWAITING_APPROVAL)
         text = texts(self.type(ALICE, self.case.number))
         self.assertIn("●●○○ กำลังดำเนินการ", text)
         self.assertNotIn("สถานะในระบบ", text)  # it would say the same again
-        self.assertNotIn("รอกองรับเรื่อง", text)
-        self.assertContains(self.client.get(f"/cases/{self.case.number}/"), "รอกองรับเรื่อง")
+        self.assertNotIn("รอรับเรื่อง", text)
+        self.assertContains(self.client.get(f"/cases/{self.case.number}/"), "รอรับเรื่อง")
         options.change(None, options.LINE_AWAITING, "real", "ทดสอบ")
         options.change(None, options.STEP_PREFIX + "awaiting_approval", "received", "ทดสอบ")
         text = texts(self.type(ALICE, self.case.number))
-        self.assertIn("●○○○ รับเรื่องแล้ว\nสถานะในระบบ: รอกองรับเรื่อง", text)
+        self.assertIn("●○○○ รับเรื่องแล้ว\nสถานะในระบบ: รอรับเรื่อง", text)
 
     def test_the_next_message_says_the_new_step_and_notice(self):
         self.type(ALICE, "เรื่องของฉัน")  # marks what the requester has seen

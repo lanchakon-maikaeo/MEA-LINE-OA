@@ -239,15 +239,15 @@ ACTIONS = {
         # Lines are decided one by one; the case waits until every line is decided (Q3).
         ActionSpec(
             "approve",
-            "รับเรื่อง",
+            "ดำเนินการ",
             "M07",
             {
                 K.WITHDRAWAL: {
                     S.AWAITING_APPROVAL: frozenset(
-                        {S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.REJECTED}
+                        {S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.IN_PROGRESS, S.REJECTED}
                     )
                 },
-                K.RETURN: {S.AWAITING_APPROVAL: frozenset({S.AWAITING_EXECUTION})},
+                K.RETURN: {S.AWAITING_APPROVAL: frozenset({S.AWAITING_EXECUTION, S.IN_PROGRESS})},
                 K.PROBLEM: {S.AWAITING_APPROVAL: frozenset({S.IN_PROGRESS})},
             },
         ),
@@ -261,7 +261,7 @@ ACTIONS = {
         # emergency problem report without waiting (Q24). No person performs these.
         ActionSpec(
             "skip_screening",
-            "ข้ามขั้นคัดกรอง เข้ารอกองรับเรื่อง",
+            "ข้ามขั้นคัดกรอง เข้ารอรับเรื่อง",
             "M06",
             _per_kind(
                 lambda k, _: {S.SUBMITTED: {S.AWAITING_APPROVAL}, S.TRIAGE: {S.AWAITING_APPROVAL}}

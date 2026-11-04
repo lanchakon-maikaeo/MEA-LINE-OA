@@ -3,7 +3,7 @@
 <section data-tour="stages" class="section" aria-labelledby="s-warehouse">
   <div class="section-head"><h2 id="s-warehouse">งานคลังและนัด</h2>{% if panel.warehouse %}<a class="btn btn--ghost btn--sm" href="{% url 'warehouse' case.owner_division.code %}">ไปหน้างานคลัง</a>{% endif %}</div>
   {% if panel.milestones %}<ol class="wh-steps">{% for m in panel.milestones %}<li><strong>{{ m.label }}</strong> {{ m.on|thai_date }}{% if m.planned_on %} · วันจ่าย {{ m.planned_on|thai_date }}{% endif %}{% if m.note %} · {{ m.note }}{% endif %} <span class="muted">{{ m.recorded_by.staff_profile.display_name|default:m.recorded_by.username }}</span></li>{% endfor %}</ol>{% elif panel.warehouse %}<p class="muted">ยังไม่ได้บันทึกขั้นงานคลัง</p>{% endif %}
-  {% if panel.warehouse and case.status == "awaiting_approval" %}<p class="muted">เรื่องนี้ยังรอกองรับเรื่อง บันทึกขั้นงานคลังได้หลังกองรับเรื่องแล้ว</p>
+  {% if panel.warehouse and case.status == "awaiting_approval" %}<p class="muted">เรื่องนี้ยังรอรับเรื่อง บันทึกขั้นงานคลังได้หลังรับเรื่องแล้ว</p>
   {% elif panel.warehouse and panel.can_act and panel.next_stage and case.status != "closed" %}
   <form method="post" action="{% url 'case-stage' case.number %}" class="wh-next">
     {% csrf_token %}<input type="hidden" name="stage" value="{{ panel.next_stage }}">

@@ -214,8 +214,9 @@ def pie(rows, other_href=""):
 
     Each division/centre's share of the open work (user, 3 Nov 2569). Slices take seaborn's
     deep hues in a fixed order whose neighbours stay apart for colour-blind readers; อื่นๆ is
-    grey. Divisions with nothing open are left out. Each slice's % sits outside the pie at the
-    end of a leader line from the slice (user, 3 Nov 2569)."""
+    grey. Divisions with nothing open are left out; one division alone is a whole disc. Each
+    slice's % sits outside the pie at the end of a leader line from the slice (user, 3 Nov
+    2569)."""
     rows = sorted((r for r in rows if r[1]), key=lambda r: -r[1])
     if len(rows) > PIE_SLICES + 1:
         rest = rows[PIE_SLICES:]
@@ -256,6 +257,9 @@ def _angle_point(cx, cy, share, radius):
 
 def _wedge(cx, cy, start, end):
     """SVG path of the share start..end (0..1, clockwise from 12 o'clock) around (cx, cy)."""
+    if end - start >= 1:  # one division has all the work: a whole disc (an arc can't close)
+        half = f"A{PIE_R} {PIE_R} 0 1 1"
+        return f"M{cx} {cy - PIE_R} {half} {cx} {cy + PIE_R} {half} {cx} {cy - PIE_R} Z"
     x1, y1 = _angle_point(cx, cy, start, PIE_R)
     x2, y2 = _angle_point(cx, cy, end, PIE_R)
     large = 1 if end - start > 0.5 else 0

@@ -109,6 +109,7 @@ ADDRESS = re.compile(
 )
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 CASE_NUMBER = re.compile(r"[A-Za-z]{1,3}\d{2}-\d{4,8}")
+CASE_TAIL = re.compile(r"\d{2}-\d{6}")  # ADR 0045: after a division code such as กคว.
 DATE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}-\d{1,2}-\d{2,4}")
 UNIT_AFTER = re.compile(r"\s*(?:บาท|kva|kwh|kw|หน่วย|วัตต์|โวลต์|แอมป์)", re.I)
 
@@ -320,6 +321,12 @@ class Masker:
                 continue
             if token.upper() in self.codes or CASE_NUMBER.fullmatch(token):
                 continue
+            # ADR 0045: a case number after its division's code (กคว.69-000142, SIM-EQP69-…).
+            coded = re.search(r"[\u0e00-\u0e7f.]$", probe[: m.start()])
+            if CASE_TAIL.fullmatch(token[-9:]) and (
+                coded and len(token) == 9 or token[:-9].upper() in self.codes
+            ):
+                continue
             if DATE.fullmatch(token) or UNIT_AFTER.match(probe, m.end()):
                 continue
             yield m.start(), m.end(), "number"
@@ -503,7 +510,9 @@ def masked_words():
 
 
 def item_codes():
-    return list(EquipmentType.objects.values_list("code", flat=True))
+    # ADR 0045: division codes too, so a case number that starts with one stays readable.
+    items = EquipmentType.objects.values_list("code", flat=True)
+    return [*items, *Division.objects.values_list("code", flat=True)]
 
 
 # --- Counting (Q30: how much was hidden, never what) ------------------------------------------

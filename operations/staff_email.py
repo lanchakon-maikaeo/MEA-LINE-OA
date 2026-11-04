@@ -14,6 +14,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.db.models import Q
+from django.urls import reverse
 from django.utils import timezone
 
 from operations import orchestration, queues, services
@@ -118,7 +119,8 @@ def _text(kind, case, detail=""):
     ]
     if detail:
         rows.append(detail)
-    rows.append(f"เปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}/cases/{case.number}/")
+    path = reverse("case-detail", args=[case.number])
+    rows.append(f"เปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}{path}")
     rows.append("อีเมลนี้ส่งอัตโนมัติจาก DED Center (ข้อมูลกองและกติกาเป็นข้อมูลจำลอง)")
     return "\n".join(rows)
 

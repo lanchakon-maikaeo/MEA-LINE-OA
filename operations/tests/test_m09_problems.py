@@ -642,9 +642,9 @@ class ProblemChatTests(Problems, LineTestCase):
         self.assertEqual((planned.kind, planned.level), ("resolution_request", "critical"))
         self.assertIn("เปลี่ยนอุปกรณ์แล้ว", planned.text)
         self.assertNotIn("ช่างสมชาย", planned.text)  # the internal note stays inside (Q15)
-        refused = self.say(self.postback(BOB, self.card_buttons(case)["ยอมรับผล"]))
+        refused = self.say(self.postback(BOB, self.card_buttons(case)["ยืนยัน"]))
         self.assertIn("ปุ่มนี้ใช้ไม่ได้", texts(refused))
-        reply = self.say(self.postback(ALICE, self.card_buttons(case)["ยอมรับผล"]))
+        reply = self.say(self.postback(ALICE, self.card_buttons(case)["ยืนยัน"]))
         self.assertIn("ปิดแล้ว", texts(reply))
         self.assertEqual(Case.objects.get(pk=case.pk).status, S.CLOSED)
 

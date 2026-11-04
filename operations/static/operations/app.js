@@ -484,6 +484,52 @@
     });
     window.scrollTo(0, state.y);
   })();
+  // ADR 0044: a person's card on ผังบุคลากร picks ฝ่าย › กอง › แผนก › กลุ่มงาน from the roster's
+  // own paths (#org-units), filled when the card opens; a lower level empties when a higher changes.
+  var unitData = document.getElementById("org-units");
+  if (unitData) {
+    var unitTree = JSON.parse(unitData.textContent);
+    var fillUnits = function (box, changed) {
+      var node = unitTree;
+      box.querySelectorAll("select[data-level]").forEach(function (select, level) {
+        var keep = level > changed ? "" : select.value;
+        var names = node ? Object.keys(node).sort(function (a, b) { return a.localeCompare(b, "th"); }) : [];
+        if (keep && names.indexOf(keep) < 0) names.unshift(keep);
+        select.textContent = "";
+        if (level > 0) select.add(new Option("ไม่ระบุ", ""));
+        names.forEach(function (name) { select.add(new Option(name, name)); });
+        select.value = keep;
+        select.disabled = !names.length;
+        node = node && keep ? node[keep] : null;
+      });
+      box.setAttribute("data-filled", "1");
+    };
+    document.addEventListener("toggle", function (event) {
+      var pop = event.target.matches && event.target.matches("[popover]");
+      var box = pop && event.newState === "open" && event.target.querySelector("[data-cascade]:not([data-filled])");
+      if (box) fillUnits(box, 99);
+    }, true);
+    document.addEventListener("change", function (event) {
+      var select = event.target.closest && event.target.closest("[data-cascade] select[data-level]");
+      if (select) fillUnits(select.closest("[data-cascade]"), Number(select.getAttribute("data-level")));
+    });
+  }
+  // ADR 0044: the tree keeps the units opened in this tab, so a saved card does not fold it again.
+  var folds = document.querySelectorAll(".ot__fold[data-key]");
+  if (folds.length) {
+    var opened = {};
+    try { opened = JSON.parse(sessionStorage.getItem("ot-open") || "{}"); } catch (e) { opened = {}; }
+    folds.forEach(function (fold) {
+      var key = fold.getAttribute("data-key");
+      if (Object.prototype.hasOwnProperty.call(opened, key)) fold.open = opened[key];
+    });
+    document.addEventListener("toggle", function (event) {
+      var fold = event.target;
+      if (!fold.matches || !fold.matches(".ot__fold[data-key]")) return;
+      opened[fold.getAttribute("data-key")] = fold.open;
+      try { sessionStorage.setItem("ot-open", JSON.stringify(opened)); } catch (e) { /* private mode */ }
+    }, true);
+  }
   // A link to the page we came from steps back instead, so that page comes back as it was.
   document.addEventListener("click", function (event) {
     var link = event.target.closest && event.target.closest("a[href]");

@@ -11,6 +11,7 @@ from django.test import Client
 from django.urls import reverse
 
 from operations import identity, options, policy, queues, web_actions
+from operations.contracts import CommandFailed
 from operations.models import AuthorityGrant, Case, Division, Role, RoleGrant
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m07_fulfilment import lines
@@ -61,14 +62,18 @@ class MemberTests(MemberTestCase):
         kept = AuthorityGrant.objects.filter(user=member, revoked_at__isnull=True)
         self.assertTrue(kept.exists())
 
-    def test_one_member_takes_a_withdrawal_from_triage_to_approval(self):
+    def test_one_member_takes_a_withdrawal_from_triage_and_the_head_starts_it(self):
         member = self.member("member", self.kcw_division)
         _, case = self.submit(withdrawal(("MTR_SYN_A", "2")))
         self.assertEqual(case.owner_division, self.kcw_division)
         self.act(member, case, "start_triage")
         self.act(member, case, "set_priority", {"priority": "P3"})
         self.act(member, case, "complete_triage")
-        self.act(member, case, "approve", lines((1, "2", "ครบ")))
+        # ADR 0044: ดำเนินการ is the แอดมินกอง's, not every member's.
+        with self.assertRaises(CommandFailed):
+            self.act(member, case, "approve", lines((1, "2", "ครบ")))
+        head = make_staff("kcwhead", (Role.SUPERVISOR, self.kcw_division.code))
+        self.act(head, case, "approve", lines((1, "2", "ครบ")))
         self.assertEqual(Case.objects.get(pk=case.pk).status, S.AWAITING_EXECUTION)
 
     def test_coordinator_members_decide_routes_for_every_division(self):

@@ -622,7 +622,7 @@ class FriendlyFlowTests(WebTestCase):
         )
         for user in (self.trf_staff, self.intake):
             page = self.client_for(user).get(f"/cases/{case.number}/")
-            self.assertContains(page, "ผู้แจ้งตอบผลใน LINE ได้เอง กด “ยอมรับผล”")
+            self.assertContains(page, "ผู้แจ้งตอบผลใน LINE ได้เอง กด “ยืนยัน”")
             self.assertNotContains(page, "ไม่ได้ผูก LINE")
 
     def test_the_step_tracker_follows_the_case(self):
@@ -975,7 +975,9 @@ class NavigationTests(WebTestCase):
         for anchor in ("start", "end"):
             ys = sorted(s["label_y"] for s in pie["slices"] if s["anchor"] == anchor)
             self.assertTrue(all(b - a >= charts.LABEL_GAP for a, b in itertools.pairwise(ys)))
-        self.assertEqual(len(charts.pie([("D1", 0, ""), ("D2", 5, "")])["slices"]), 1)
+        alone = charts.pie([("D1", 0, ""), ("D2", 5, "")])["slices"]
+        self.assertEqual([(s["label"], s["percent"]) for s in alone], [("D2", "100%")])
+        self.assertEqual(alone[0]["path"].count("A"), 2)  # a whole disc, drawn as two halves
 
     def test_overview_shows_the_share_instead_of_the_ack_average(self):
         self.at_meter(), self.at_transformer()

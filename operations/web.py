@@ -28,8 +28,8 @@ from operations import (
     charts,
     employees,
     identity,
+    numbering,
     options,
-    policy,
     queues,
     registry,
     reports,
@@ -47,7 +47,6 @@ from operations import (
 from operations.contracts import Actor, CommandFailed, ErrorCode
 from operations.models import (
     VIEWER_ROLES,
-    AuthorityGrant,
     Case,
     District,
     Division,
@@ -295,6 +294,7 @@ def _queue(request, division, admin_all=False):
         "tabs": [(key, queues.TAB_LABELS[key], tally[key]) for key in keys],
         "filters": filters,
         "base_query": urlencode(filters.query()),
+        "today_query": urlencode(filters.query(today="" if filters.today else "1")),
         "rows": queues.build_rows(items, now),
         "pager": pager,
         "shown": shown,
@@ -305,9 +305,7 @@ def _queue(request, division, admin_all=False):
         "sorts": queues.SORTS.items(),
         "may_approve": bool(division)
         and approvals.no_screening()
-        and policy.has_authority(
-            request.user, AuthorityGrant.Activity.WITHDRAWAL_APPROVAL, division.pk
-        ),
+        and approvals.may_start(request.user, division.pk),
         "statuses": [
             *Case.Status.choices,
             *(
@@ -645,18 +643,20 @@ def case_search(request):
     scope = _scope(request)
     if not scope.may_read:
         raise Http404
-    query = (request.GET.get("q") or "").strip().upper()[:20]
+    typed = (request.GET.get("q") or "").strip()[:48]
+    # ADR 0045: กคว69-142 reads as กคว.69-000142, and 69-142 finds every number ending so.
+    query = numbering.read(typed) or numbering.tail(typed) or typed.upper()
     rows = []
     order = work_orders.visible(request.user).filter(number=query).first() if query else None
-    if order is not None:  # งานสั่ง numbers (T69-000001) open the order
+    if order is not None:  # a งานสั่ง number opens the order
         return redirect("order-detail", number=order.number)
     if query:
         # 23 Oct 2569: a SAP slip number finds its case too.
         visible = queues.visible(request.user)
-        cases = visible.filter(Q(number__icontains=query) | Q(sap_number__iexact=query))
+        cases = visible.filter(Q(number__icontains=query) | Q(sap_number__iexact=typed))
         exact = cases.filter(number=query).first()
-        if exact is None and visible.filter(sap_number__iexact=query).count() == 1:
-            exact = visible.get(sap_number__iexact=query)
+        if exact is None and visible.filter(sap_number__iexact=typed).count() == 1:
+            exact = visible.get(sap_number__iexact=typed)
         if exact is not None:
             return redirect("case-detail", number=exact.number)
         orders = (
@@ -1022,7 +1022,8 @@ def case_new(request):
             if value:
                 payload[name] = value
         if (data.get("related_case_number") or "").strip():
-            payload["related_case_number"] = data["related_case_number"].strip().upper()
+            typed = data["related_case_number"]
+            payload["related_case_number"] = numbering.read(typed) or typed.strip().upper()
         if kind == Case.Kind.PROBLEM and data.get("topic"):
             payload["topic"] = data["topic"]
         lines = []

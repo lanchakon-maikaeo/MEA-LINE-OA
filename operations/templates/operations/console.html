@@ -128,9 +128,10 @@
   </section>
 
   <div class="ov-side">
-  {% if share.slices|length > 1 %}
+  {% if share %}
   <section class="panel viz ov-share" aria-labelledby="r-share">
     <div class="panel__head"><h3 id="r-share">สัดส่วนงานแต่ละกอง</h3><span class="muted">{{ share.total }} เรื่องที่ต้องทำ</span></div>
+    {% if share.slices %}
     <div class="pie">
       <svg viewBox="0 0 {{ share.width }} {{ share.height }}" role="img" aria-labelledby="r-share r-share-desc">
         <desc id="r-share-desc">วงกลมแบ่งเรื่องที่ต้องทำตามกอง {% for s in share.slices %}{{ s.label }} {{ s.percent }} {% endfor %}</desc>
@@ -150,6 +151,7 @@
         {% endfor %}
       </ul>
     </div>
+    {% else %}<p class="muted">ไม่มีเรื่องที่ต้องทำ</p>{% endif %}
   </section>
   {% endif %}
 

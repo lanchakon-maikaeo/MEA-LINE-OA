@@ -707,21 +707,90 @@ def grant_full_division(actor, user, division, reason, approval_reference):
     return roles, granted
 
 
+LINE_ACCOUNT = "line-employee-"  # the prefix of an account provision_employee_staff made
+
+
 @transaction.atomic
 def set_employee_id(actor, user, employee_id, reason=""):
-    """รหัสพนักงาน of a staff account, used to link LINE by an employee check (ADR 0010)."""
+    """รหัสพนักงาน of a staff account, used to link LINE by an employee check (ADR 0010). An ID
+    held by an account the system made from LINE merges into this one (ADR 0044)."""
     require_admin(actor)
     employee_id = (employee_id or "").strip()[:32]
-    if (
-        employee_id
-        and StaffProfile.objects.filter(employee_id=employee_id).exclude(user=user).exists()
-    ):
+    others = StaffProfile.objects.filter(employee_id=employee_id).exclude(user=user)
+    if employee_id and others.exclude(user__username__startswith=LINE_ACCOUNT).exists():
         raise ValidationError("รหัสพนักงานนี้อยู่ในบัญชีอื่นแล้ว")
+    if employee_id and others.exists():
+        employee = Employee.objects.filter(employee_id=employee_id).first()
+        if employee is None:
+            raise ValidationError("ไม่พบรหัสพนักงานนี้ในทะเบียน")
+        merge_accounts(actor, employee, user, reason)
+        return
     profile = StaffProfile.objects.select_for_update().get(user=user)
     previous = profile.employee_id
     profile.employee_id = employee_id
     profile.save(update_fields=["employee_id"])
     audit(actor, "staff.employee_id_set", user, reason, previous=previous, value=employee_id)
+
+
+@transaction.atomic
+def merge_accounts(actor, employee, user, reason=""):
+    """One person, one account (ADR 0044): a web account such as user-4 takes the employee's ID,
+    and the account the system made when they came through LINE hands over its LINE link, role,
+    ผู้รับผิดชอบประจำงาน, alert lists and open cases, then closes. Its history stays with it."""
+    from operations import units  # local: units builds on identity
+    from operations.koj_models import KojRecipient
+    from operations.models import Case, UnitRecipient, UnitWorkOwner, WorkOrder
+
+    require_admin(actor)
+    reason = reason or f"รวมบัญชีของพนักงาน {employee.employee_id}"
+    target = StaffProfile.objects.select_for_update().get(user=user)
+    if target.employee_id and target.employee_id != employee.employee_id:
+        raise ValidationError("บัญชีนี้ผูกกับพนักงานคนอื่นแล้ว")
+    if user.username.startswith(LINE_ACCOUNT) or not user.is_active:
+        raise ValidationError("เลือกบัญชีเว็บที่ใช้งานอยู่")
+    olds = [
+        p.user
+        for p in StaffProfile.objects.select_for_update()
+        .filter(employee_id=employee.employee_id)
+        .exclude(user=user)
+        .select_related("user")
+    ]
+    if any(not old.username.startswith(LINE_ACCOUNT) for old in olds):
+        raise ValidationError("รหัสพนักงานนี้อยู่ในบัญชีเว็บอื่นแล้ว")
+    for old in olds:
+        StaffProfile.objects.filter(user=old).update(employee_id="")
+        if not ChannelIdentity.objects.filter(staff_user=user).exists():
+            ChannelIdentity.objects.filter(staff_user=old).update(staff_user=user)
+        held = (
+            RoleGrant.objects.filter(user=old, revoked_at__isnull=True)
+            .exclude(role=Role.SYSTEM_SUPPORT)
+            .first()
+        )
+        has_role = RoleGrant.objects.filter(user=user, revoked_at__isnull=True).exists()
+        if held is not None and not has_role:
+            set_role(actor, user, held.role, held.division, reason)
+        for model in (UnitWorkOwner, UnitRecipient, KojRecipient):
+            for row in model.objects.filter(user=old):
+                keys = {f: getattr(row, f) for f in ("work_id", "group") if hasattr(row, f)}
+                if keys and model.objects.filter(user=user, **keys).exists():
+                    row.delete()
+                else:
+                    model.objects.filter(pk=row.pk).update(user=user)
+        Case.objects.filter(assignee=old, ended_at__isnull=True).update(assignee=user)
+        WorkOrder.objects.filter(assignee=old, ended_at__isnull=True).update(assignee=user)
+        if old.is_active:
+            set_staff_active(actor, old, False, reason)
+    target.employee_id = employee.employee_id
+    target.save(update_fields=["employee_id"])
+    units.bind_from_roster(user, employee)
+    audit(
+        actor,
+        "staff.accounts_merged",
+        user,
+        reason,
+        employee=employee.employee_id,
+        closed=[old.username for old in olds],
+    )
 
 
 @transaction.atomic

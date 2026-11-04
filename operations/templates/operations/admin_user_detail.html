@@ -58,7 +58,7 @@
 <section class="org-here" aria-labelledby="u-unit">
   <h2 id="u-unit">สังกัด</h2>
   <p>{{ target|unit_path }}</p>
-  <p class="muted">ย้ายหน่วย ตั้งเป็นผู้รับผิดชอบประจำงาน หรือผู้รับแจ้งเรื่องสำคัญ ได้ที่<a href="{% url 'admin-org' %}">ผังหน่วยงาน</a> การย้ายหน่วยไม่เปลี่ยนสิทธิ์</p>
+  <p class="muted">ย้ายหน่วย ตั้งเป็นผู้รับผิดชอบประจำงาน หรือผู้รับแจ้งเรื่องสำคัญ ได้ที่<a href="{% url 'admin-org' %}">ผังบุคลากร</a> การย้ายหน่วยไม่เปลี่ยนสิทธิ์</p>
 </section>
 <form method="post" action="{% url 'admin-user-action' target.pk 'move' %}">
   <fieldset><legend>ย้ายกอง (ย้ายทุกบทบาทในกองต้นทาง)</legend>{% csrf_token %}{{ move_form.as_p }}<button type="submit">ย้าย</button></fieldset>

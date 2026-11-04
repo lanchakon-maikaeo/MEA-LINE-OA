@@ -14,6 +14,7 @@
     {% endif %}
   </div>
   <div class="page-head__actions">
+    <a class="chip{% if filters.today %} is-active{% endif %}" href="?tab={{ tab }}{% if today_query %}&amp;{{ today_query }}{% endif %}&amp;sort={{ sort }}">{% if filters.today %}{% icon "check" "sm" %} {% endif %}วันนี้<span class="visually-hidden">{% if filters.today %} (กรองอยู่ กดเพื่อดูทุกวัน){% else %} (กรองเฉพาะเรื่องที่เข้าวันนี้){% endif %}</span></a>
     {% if division.schedule %}<a class="btn btn--secondary" href="{% url 'warehouse' division.code %}">งานคลัง</a>{% endif %}
     {% if division.calendars.exists %}<a class="btn btn--secondary" href="{% url 'calendar' division.code %}">ปฏิทินนัด</a>{% endif %}
     {% if may_order %}<a class="btn btn--secondary" href="{% url 'order-new' %}{% if division %}?to=d:{{ division.pk }}{% endif %}">{% if division %}สั่งงานถึงกองนี้{% else %}สั่งงานใหม่{% endif %}</a>{% endif %}
@@ -25,6 +26,7 @@
 <form class="toolbar" method="get" data-autosubmit aria-label="ตัวกรองคิว" data-tour="queue-filters">
   <input type="hidden" name="tab" value="{{ tab }}">
   {% if filters.preset %}<input type="hidden" name="preset" value="1">{% endif %}
+  {% if filters.today %}<input type="hidden" name="today" value="1">{% endif %}
   <div class="filters">
     <label class="visually-hidden" for="f-kind">ชนิดเรื่อง</label>
     <select id="f-kind" name="kind" class="pill-select{% if filters.kind %} is-set{% endif %}">

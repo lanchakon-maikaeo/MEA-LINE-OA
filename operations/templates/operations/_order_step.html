@@ -1,7 +1,12 @@
 <form method="post" action="{% url 'order-action' order.number s.name %}" class="stack-sm">
   {% csrf_token %}
-  {% if s.needs == "result" %}
-    <label class="field"><span>ทำอะไรไปแล้ว <span class="req" aria-hidden="true">*</span></span><textarea name="result" rows="3" required></textarea></label>
+  {% if s.needs == "urgent" %}
+    <fieldset class="choice-field"><legend>ความเร่งด่วน</legend>
+      <label class="choice choice--sm"><input type="radio" name="urgent" value="1"{% if order.is_urgent %} checked{% endif %}> <span>ด่วน</span></label>
+      <label class="choice choice--sm"><input type="radio" name="urgent" value="0"{% if not order.is_urgent %} checked{% endif %}> <span>ปกติ</span></label>
+    </fieldset>
+  {% elif s.needs == "result" %}
+    <label class="field"><span>ผลการดำเนินงาน <span class="req" aria-hidden="true">*</span></span><textarea name="result" rows="3" required></textarea></label>
   {% elif s.needs == "reason" %}
     <label class="field"><span>เหตุผล (ไม่บังคับ)</span><textarea name="reason" rows="2"></textarea></label>
   {% elif s.needs == "person" %}
@@ -18,5 +23,5 @@
     </label>
     <label class="field"><span>กำหนดเสร็จใหม่</span><input name="due_on" type="date" min="{{ today }}"></label>
   {% endif %}
-  <button type="submit" class="{% if s.primary %}btn--block{% else %}btn--secondary btn--sm{% endif %}">{{ s.label }}</button>
+  <button type="submit" class="{% if s.primary or pop %}btn--block{% else %}btn--secondary btn--sm{% endif %}">{{ s.label }}</button>
 </form>

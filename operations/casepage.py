@@ -35,23 +35,24 @@ from operations.models import (
 K = Case.Kind
 S = Case.Status
 
-# The main path of each kind, for the step tracker at the top of the case page.
+# The main path of each kind, for the step tracker at the top of the case page. Every case starts
+# at รับเรื่อง (ADR 0044); a case from before still in screening shows there too.
+RECEIVE = ("รับเรื่อง", {S.SUBMITTED, S.TRIAGE, S.AWAITING_APPROVAL})
 JOURNEY = {
     K.PROBLEM: [
-        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
+        RECEIVE,
         ("แก้ปัญหา", {S.IN_PROGRESS}),
         ("รอหน่วยงาน (เขต/ฝ่าย)ยืนยันผล", {S.AWAITING_CONFIRMATION}),
         ("ปิดเรื่อง", {S.CLOSED}),
     ],
     K.WITHDRAWAL: [
-        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
-        ("กองรับเรื่อง", {S.AWAITING_APPROVAL}),
+        RECEIVE,
         ("จ่ายของ", {S.AWAITING_EXECUTION, S.IN_PROGRESS}),
         ("รอหน่วยงาน (เขต/ฝ่าย)ยืนยันรับ", {S.AWAITING_CONFIRMATION}),
         ("ปิดเรื่อง", {S.CLOSED}),
     ],
     K.RETURN: [
-        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
+        RECEIVE,
         ("รอของคืน", {S.AWAITING_EXECUTION}),
         ("รับคืนและตรวจสภาพ", {S.IN_PROGRESS}),
         ("ปิดเรื่อง", {S.CLOSED}),

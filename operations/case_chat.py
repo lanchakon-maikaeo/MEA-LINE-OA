@@ -229,10 +229,16 @@ def end(turn):
 def thread(case):
     """The case card's chat (grill กคว. รอบใหม่ Q16), oldest first: staff and requester
     messages, the answers to staff who asked for more, and, faint, what the requester typed in
-    LINE while filing the case. [{"who", "text", "at", "meta", "faint", "contact"}]"""
+    LINE while filing the case. [{"who", "text", "at", "meta", "faint", "contact", "name",
+    "note"}], each with "first" (a new sender: name and avatar) and "day" (a new day) for the
+    messenger look (ADR 0044)."""
+    from operations import units
     from operations.models import ConversationMessage
 
     items, seen_inboxes = [], set()
+    who = (
+        "ผู้แจ้งไม่ระบุตัวตน" if case.requester.is_anonymous else case.requester.display_name
+    ) or "ผู้แจ้ง"
     for m in M.objects.filter(case=case).select_related("author__staff_profile"):
         if m.inbox_id:
             seen_inboxes.add(m.inbox_id)
@@ -242,9 +248,9 @@ def thread(case):
                 if m.author_id and hasattr(m.author, "staff_profile")
                 else "ระบบ"
             )
-            meta = f"{name} · {m.get_status_display()}"
+            meta, note = f"{name} · {m.get_status_display()}", m.get_status_display()
         else:
-            meta = "ผู้แจ้ง"
+            name, meta, note = who, "ผู้แจ้ง", ""
         items.append(
             {
                 "who": m.direction,
@@ -254,6 +260,8 @@ def thread(case):
                 "faint": False,
                 "contact": m.contact,
                 "id": f"m{m.pk}",
+                "name": name,
+                "note": note,
             }
         )
     for c in ConversationMessage.objects.filter(case=case).exclude(inbox_id__in=seen_inboxes):
@@ -266,6 +274,8 @@ def thread(case):
                 "faint": False,
                 "contact": "",
                 "id": f"c{c.pk}",
+                "name": who,
+                "note": "ข้อมูลเพิ่ม",
             }
         )
     for c in ConversationMessage.objects.filter(draft__case=case, case__isnull=True):
@@ -278,6 +288,8 @@ def thread(case):
                 "faint": True,
                 "contact": "",
                 "id": f"d{c.pk}",
+                "name": who,
+                "note": "ตอนสร้างเรื่อง",
             }
         )
     # ADR 0036 Q2: a photo or file from LINE, sent while filing (faint) or after.
@@ -292,6 +304,8 @@ def thread(case):
                 "faint": bool(a.draft_id),
                 "contact": "",
                 "id": f"a{a.pk}",
+                "name": who,
+                "note": "ตอนสร้างเรื่อง" if a.draft_id else "",
             }
         )
     statuses = dict(case.Status.choices)
@@ -309,9 +323,26 @@ def thread(case):
                 "faint": False,
                 "contact": "",
                 "id": f"s{d.pk}",
+                "name": "",
+                "note": "",
             }
         )
-    return sorted(items, key=lambda i: i["at"])
+    items.sort(key=lambda i: i["at"])
+    before, day = None, None
+    for item in items:
+        local = timezone.localdate(item["at"])
+        item["day"] = units.thai_date(local) if local != day else ""
+        item["first"] = (
+            bool(item["day"])
+            or before is None
+            or (before["who"], before["name"])
+            != (
+                item["who"],
+                item["name"],
+            )
+        )
+        before, day = item, local
+    return items
 
 
 def last_from_requester(items):

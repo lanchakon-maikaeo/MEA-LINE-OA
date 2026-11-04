@@ -213,7 +213,7 @@ def detail(turn, rows, buttons):
             {
                 "type": "button",
                 "height": "sm",
-                "style": "primary" if label == "ยืนยันรับเรื่อง" else "link",
+                "style": "primary" if label == "ดำเนินการ" else "link",
                 "color": "#16804A",
                 "action": action,
             }

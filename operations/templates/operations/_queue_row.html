@@ -24,9 +24,14 @@
   <div class="qrow__main">
     <div class="qrow__title">
       <a class="qrow__link" href="{% url 'case-detail' row.case.number %}">{{ row.case.number }}</a>
-      <span class="qrow__sub">{% if row.case.menu_label %}{{ row.case.menu_label }}{% else %}{{ row.case.get_kind_display }}{% endif %} · {{ row.case.district.name }}</span>
+      <span class="qrow__sub">{{ row.case.get_kind_display }} · {{ row.case.district.name }}</span>
     </div>
+    {% with r=row.request %}{% if r %}
+    <ol class="picks qrow__picks" aria-label="รายการที่ผู้แจ้งเลือก">{% if r.tile %}<li><span class="pick pick--tile">{{ r.tile }}</span></li>{% endif %}{% for p in r.picks %}<li><span class="pick">{{ p }}</span></li>{% endfor %}</ol>
+    {% if r.number %}<div class="tracking qrow__tracking"><div><p class="tracking__label">{{ r.number_label }}</p><p class="tracking__number">{{ r.number }}</p></div></div>{% endif %}
+    {% endif %}{% endwith %}
     {% if row.summary %}<p class="qrow__summary">{{ row.summary }}</p>{% endif %}
+    {% if row.reporter %}<p class="qrow__note">ผู้แจ้ง {{ row.reporter }}</p>{% endif %}
     {% if row.flags %}
       <ul class="flags qrow__flags">
         {% for tone, text in row.flags %}<li class="flag{% if tone %} flag--{{ tone }}{% endif %}">{{ text }}</li>{% endfor %}

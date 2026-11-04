@@ -26,6 +26,7 @@ from operations import (
     coordination,
     fulfilment,
     identity,
+    numbering,
     policy,
     problems,
     registry,
@@ -57,7 +58,6 @@ from operations.models import (
     ActionReceipt,
     Case,
     CaseLine,
-    CaseNumberCounter,
     ChildWork,
     Decision,
     District,
@@ -72,7 +72,6 @@ from operations.models import (
 
 User = get_user_model()
 S = Case.Status
-NUMBER_PREFIX = {Case.Kind.WITHDRAWAL: "W", Case.Kind.RETURN: "R", Case.Kind.PROBLEM: "P"}
 
 
 def _dependency_guard(command):
@@ -333,18 +332,6 @@ def _receipt(ctx, action, key, request_hash, case, result):
 # --- Submission ------------------------------------------------------------------------------
 
 
-def _next_number(kind, now):
-    """Gap-free per prefix and Buddhist-era year: the counter row is locked and rolls back."""
-    prefix, year_be = NUMBER_PREFIX[kind], timezone.localtime(now).year + 543
-    CaseNumberCounter.objects.bulk_create(
-        [CaseNumberCounter(prefix=prefix, year_be=year_be)], ignore_conflicts=True
-    )
-    counter = CaseNumberCounter.objects.select_for_update().get(prefix=prefix, year_be=year_be)
-    counter.last_value += 1
-    counter.save(update_fields=["last_value"])
-    return f"{prefix}{year_be % 100:02d}-{counter.last_value:06d}"
-
-
 def _build_lines(submission):
     codes = [line.item_code for line in submission.lines]
     items = {i.code: i for i in EquipmentType.objects.filter(code__in=codes, is_active=True)}
@@ -560,7 +547,7 @@ def submit_case(actor, *, idempotency_key, payload):
         _check_meters(submission, fields, intake)
         for owner, group in routes:
             case = Case.objects.create(
-                number=_next_number(submission.kind, now),
+                number=uuid.uuid4().hex,  # ADR 0045: the number waits for the owner division
                 kind=submission.kind,
                 requester=requester,
                 district=requester.district,
@@ -586,7 +573,8 @@ def submit_case(actor, *, idempotency_key, payload):
                 case.owner_division = owner or _proposed_owner(case, coordinator, now)
                 case.section = units.section_for(case)  # ADR 0031 Q14
                 case.status = approvals.first_status(case)  # ADR 0025
-                case.save(update_fields=["owner_division", "section", "status"])
+            case.number = numbering.issue(case.owner_division, now)
+            case.save(update_fields=["owner_division", "section", "status", "number"])
             cases.append(case)
         numbers = [c.number for c in cases]
         results = []

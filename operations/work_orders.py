@@ -1,7 +1,8 @@
 """งานสั่ง (16 Oct 2569 Q6, Q7, Q14): work a Supervisor gives a division or one of its members.
 
 Only a Supervisor issues one: the แอดมินฝ่าย for any division, a แอดมินกอง for
-their own. มอบหมาย → รับทราบ → กำลังทำ → เสร็จ; the person or division doing it may send it back
+their own. มอบหมาย → กำลังดำเนินการ → เสร็จสิ้น → ปิดงาน (ADR 0044: ดำเนินการ takes the place of
+รับทราบ and เริ่มทำ); the person or division doing it may send it back
 with a reason, and a Supervisor closes or cancels it. The doer is told when it is assigned, the
 issuer when it is acknowledged, done or sent back, and the doer once near the due date and once
 after it (with the issuer). Every step is audited; nothing here counts in the district reports.
@@ -14,13 +15,13 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
+from django.urls import reverse
 from django.utils import timezone
 
-from operations import identity, options, orchestration
+from operations import identity, numbering, options, orchestration
 from operations.models import (
     VIEWER_ROLES,
     AuditEvent,
-    CaseNumberCounter,
     ChannelIdentity,
     Division,
     NotificationDelivery,
@@ -38,8 +39,8 @@ TITLE_MAX = 200
 # What each notice says (also the e-mail subject).
 SUBJECTS = {
     "staff_order_new": "มีงานสั่งถึงคุณ",
-    "staff_order_ack": "รับทราบงานที่คุณสั่งแล้ว",
-    "staff_order_done": "งานที่คุณสั่งเสร็จแล้ว",
+    "staff_order_ack": "งานที่คุณสั่งเริ่มดำเนินการแล้ว",
+    "staff_order_done": "งานที่คุณสั่งเสร็จสิ้นแล้ว",
     "staff_order_back": "งานที่คุณสั่งถูกส่งกลับ",
     "staff_order_soon": "งานสั่งใกล้ถึงกำหนด",
     "staff_order_late": "งานสั่งเกินกำหนดแล้ว",
@@ -49,11 +50,11 @@ SUBJECTS = {
 # "department"), and what
 # it needs typed. The web page and (later) LINE offer exactly these.
 STEPS = {
-    "acknowledge": ("รับทราบ", (S.ASSIGNED,), "doer", ""),
-    "start": ("เริ่มทำ", (S.ASSIGNED, S.ACKNOWLEDGED), "doer", ""),
-    "done": ("ทำเสร็จแล้ว", WorkOrder.OPEN, "doer", "result"),
+    # ADR 0044: one press starts the work and settles ด่วน or ปกติ (รับทราบ is no step of its own).
+    "start": ("ดำเนินการ", (S.ASSIGNED, S.ACKNOWLEDGED), "doer", "urgent"),
+    "done": ("เสร็จสิ้น", WorkOrder.OPEN, "doer", "result"),
     "send_back": ("ส่งกลับผู้สั่ง", WorkOrder.OPEN, "doer", "reason"),
-    "assign_person": ("มอบให้คนในกอง", WorkOrder.OPEN, "supervisor", "person"),
+    "assign_person": ("มอบหมายผู้รับผิดชอบ", WorkOrder.OPEN, "supervisor", "person"),
     "reassign": ("สั่งใหม่", (S.SENT_BACK,), "supervisor", "target"),
     # ADR 0040 Q2, Q7: the department moves open work to another division at once, unassigned.
     "forward": ("ส่งต่อให้กอง", WorkOrder.OPEN, "department", "division"),
@@ -108,7 +109,7 @@ def steps_for(user, order):
     for name, (label, starts, who, _) in STEPS.items():
         if order.status not in starts:
             continue
-        accepts_for_division = name == "acknowledge" and order.division_id in scope.overseen
+        accepts_for_division = name == "start" and order.division_id in scope.overseen
         if who == "doer" and not (is_doer(user, order, scope) or accepts_for_division):
             continue
         if who == "supervisor" and not is_supervisor(user, order, scope):
@@ -174,18 +175,6 @@ def _require_issuer(actor, division):
         raise PermissionDenied("เฉพาะ แอดมินกองนี้หรือ แอดมินฝ่ายสั่งงานได้")
 
 
-def _number(now):
-    """T69-000001: gap-free per Buddhist-era year, like case numbers."""
-    year_be = timezone.localtime(now).year + 543
-    CaseNumberCounter.objects.bulk_create(
-        [CaseNumberCounter(prefix="T", year_be=year_be)], ignore_conflicts=True
-    )
-    counter = CaseNumberCounter.objects.select_for_update().get(prefix="T", year_be=year_be)
-    counter.last_value += 1
-    counter.save(update_fields=["last_value"])
-    return f"T{year_be % 100:02d}-{counter.last_value:06d}"
-
-
 # --- Issuing and steps ------------------------------------------------------------------------
 
 
@@ -216,7 +205,7 @@ def create(
     if due_on is not None and due_on < timezone.localdate(now):
         raise ValidationError("วันกำหนดต้องไม่ใช่วันที่ผ่านมาแล้ว")
     order = WorkOrder.objects.create(
-        number=_number(now),
+        number=numbering.issue(division, now),  # ADR 0045: the cases' sequence too
         title=title,
         detail=(detail or "").strip(),
         division=division,
@@ -242,8 +231,11 @@ def create(
 
 
 @transaction.atomic
-def act(actor, order, step, reason="", result="", assignee=None, division=None, due_on=None):
-    """Take one step; the order is locked, and the step must still be allowed."""
+def act(
+    actor, order, step, reason="", result="", assignee=None, division=None, due_on=None, urgent=None
+):
+    """Take one step; the order is locked, and the step must still be allowed. ดำเนินการ may
+    change ด่วน or ปกติ (urgent True or False; None keeps it)."""
     if step not in STEPS:
         raise ValidationError("ไม่รู้จักขั้นนี้")
     order = WorkOrder.objects.select_for_update().get(pk=order.pk)
@@ -253,11 +245,13 @@ def act(actor, order, step, reason="", result="", assignee=None, division=None, 
     now = timezone.now()
     data = {}
     notice = None
-    if step in {"acknowledge", "start"}:
+    if step == "start":
         first = order.acknowledged_at is None
         if first:
             order.acknowledged_by, order.acknowledged_at = actor, now
-        order.status = S.ACKNOWLEDGED if step == "acknowledge" else S.IN_PROGRESS
+        order.status = S.IN_PROGRESS
+        if urgent is not None and bool(urgent) != order.is_urgent:
+            order.is_urgent = data["urgent"] = bool(urgent)
         if first:
             notice = ("staff_order_ack", [order.issued_by])
     elif step == "done":
@@ -323,6 +317,7 @@ def timeline(order):
     labels = {
         "created": "สั่งงาน",
         "attachment_added": "แนบไฟล์",
+        "acknowledge": "รับทราบ",  # a step of its own until ADR 0044
         **{name: label for name, (label, *_rest) in STEPS.items()},
     }
     for event in events.order_by("created_at", "id"):
@@ -437,7 +432,8 @@ def _notify(kind, order, users, key):
             )
         if staff_email.enabled() and user.email:
             # LINE gets a button instead (ADR 0041); the e-mail keeps the web link.
-            link = f"{body}\nเปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}/orders/{order.number}/"
+            path = reverse("order-detail", args=[order.number])
+            link = f"{body}\nเปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}{path}"
             planned.append(
                 _deliver(N.Channel.EMAIL, kind, order, user, key, now, email=user.email, text=link)
             )

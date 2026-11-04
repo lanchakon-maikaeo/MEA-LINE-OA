@@ -95,7 +95,7 @@ def labels(case):
     """(accept, dispute) button labels: a suggestion is acknowledged, a problem accepted."""
     if case.topic == Case.Topic.SUGGESTION:
         return "รับทราบ", "มีข้อมูลเพิ่ม"
-    return "ยอมรับผล", "ยังไม่เรียบร้อย"
+    return "ยืนยัน", "ยังไม่เรียบร้อย"  # ยอมรับผล until 4 Nov 2569
 
 
 def _case(turn, case_id):

@@ -24,6 +24,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
+from django.urls import reverse
 from django.utils import timezone
 
 from operations import identity, options, orchestration, queues, units
@@ -453,11 +454,15 @@ def budget_allows(level, now):
 # --- The staff side of a LINE chat ---------------------------------------------------------------
 
 
-def _case_for(user, case_id=None, number=None, sap_number=None):
+def _cases(user):
     from operations import services
     from operations.contracts import Actor
 
-    cases = services.visible_cases(Actor.staff(user))
+    return services.visible_cases(Actor.staff(user))
+
+
+def _case_for(user, case_id=None, number=None, sap_number=None):
+    cases = _cases(user)
     if case_id:
         return cases.filter(pk=case_id).first()
     if sap_number:
@@ -493,7 +498,7 @@ def case_detail(turn, user, case):
                 buttons.append(
                     turn.button(label, "staff_act", {"case": str(case.pk), "action": action})
                 )
-    url = f"{settings.STAFF_WEB_BASE_URL.rstrip('/')}/cases/{case.number}/"
+    url = f"{settings.STAFF_WEB_BASE_URL.rstrip('/')}{reverse('case-detail', args=[case.number])}"
     buttons.append(("เปิดในเว็บ", url))
     turn.say("\n".join(lines), buttons)
 

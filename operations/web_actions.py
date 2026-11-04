@@ -73,9 +73,9 @@ BUTTON_LABELS = {
     "set_section": "ระบุแผนก",
     "set_sap_number": "แก้เลข SAP ของคำขอ",
     "record_facts": "แก้ข้อเท็จจริง",
-    "approve": "รับเรื่อง",
+    "approve": "ดำเนินการ",
     "start_work": "เริ่มงานทันที (เรื่องฉุกเฉิน)",
-    "skip_screening": "ข้ามขั้นคัดกรอง เข้ารอกองรับเรื่อง",
+    "skip_screening": "ข้ามขั้นคัดกรอง เข้ารอรับเรื่อง",
     "deny_approval": "ไม่รับเรื่อง",
     "allocate": "จัดสรรของที่มีไม่พอ",
     "issue": "บันทึกการจ่ายของ",
@@ -354,9 +354,10 @@ RULES = {
     "record_facts": lambda st: st.member(st.owner),
     # ADR 0025: every kind; a case without item rows (or not a withdrawal) is approved whole,
     # and so is every case while the stock work is hidden (ADR 0032).
+    # ADR 0044: ดำเนินการ is for the owner's แอดมินกอง, a แอดมินฝ่าย, or a granted authority.
     "approve": lambda st: (
         st.other(st.case.submitted_by_id)
-        and (st.grant(A.WITHDRAWAL_APPROVAL) or (st.department and approvals.whole(st.case)))
+        and approvals.may_approve(st.user, st.case)
         and (approvals.whole(st.case) or any(line.approved_quantity is None for line in st.lines))
     ),
     "deny_approval": lambda st: RULES["approve"](st) and st.grant(A.WITHDRAWAL_APPROVAL),
@@ -527,7 +528,7 @@ def hints(st, offers):
             out.append(
                 Hint(
                     f"ผู้แจ้ง{answer}ใน LINE ได้เอง"
-                    + (" กด “ยอมรับผล” แล้วเรื่องจะปิดเอง" if case.kind == K.PROBLEM else "")
+                    + (" กด “ยืนยัน” แล้วเรื่องจะปิดเอง" if case.kind == K.PROBLEM else "")
                 )
             )
         else:
@@ -611,7 +612,8 @@ class ActionForm:
     picker: list = field(default_factory=list)  # (value, label, url-query) to switch the subject
 
 
-def _priority_field(case):
+def _priority_field(case, start=False):
+    """start: ดำเนินการ begins at ปกติ, or at the rule floor (ADR 0044), not at the proposal."""
     proposal = policy.card(case)
     suggested = proposal["priority"]["suggested"] if proposal else ""
     floor = proposal["priority"]["floor"] if proposal else ""
@@ -621,7 +623,7 @@ def _priority_field(case):
         "select",
         True,
         [(p, label) for p, label in _levels()],
-        suggested,
+        (floor or approvals.NORMAL) if start else suggested,
         help=(
             f"ระบบเสนอ: {queues.level_name(suggested)}"
             if suggested
@@ -799,14 +801,11 @@ def build_form(action, st, params, demo=False):
             add(Field(f"fact-{name}", title, "select", False, FACT_CHOICES))
         add(_reason(True, help_text="บอกว่ารู้ข้อเท็จจริงนี้จากไหน เช่น หน่วยงาน (เขต/ฝ่าย)แจ้งทางโทรศัพท์"))
     elif action == "approve" and approvals.whole(case):
-        # ADR 0025 Q25: one button for the whole case, the level in the same form.
+        # ADR 0025 Q25: one button for the whole case, the level in the same form (ADR 0044).
         if not st.priority_confirmed:
-            level = _priority_field(case)
-            form.intro = "รับเรื่องและตั้งระดับความเร่งด่วนไปพร้อมกัน " + (
-                "ระบบเลือกระดับที่เสนอไว้ให้แล้ว" if level.initial else "เลือกระดับแล้วบอกเหตุผล"
-            )
-            add(level)
-        add(_reason(label="หมายเหตุ", help_text="จำเป็นเมื่อระดับต่างจากที่ระบบเสนอ"))
+            form.intro = "เริ่มดำเนินการและตั้งระดับความเร่งด่วนไปพร้อมกัน"
+            add(_priority_field(case, start=True))
+        add(_reason(label="หมายเหตุ"))
     elif action == "approve":
         rows = [
             {

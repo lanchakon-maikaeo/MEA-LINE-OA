@@ -361,7 +361,7 @@ class SubmissionTests(CaseTestCase):
         result = self.submit()
         case = Case.objects.get(pk=result.case_id)
         year = (timezone.localtime().year + 543) % 100
-        self.assertEqual(case.number, f"W{year:02d}-000001")
+        self.assertEqual(case.number, f"{case.owner_division.code}{year:02d}-000001")  # ADR 0045
         self.assertEqual((case.status, case.revision, case.kind), (S.SUBMITTED, 1, K.WITHDRAWAL))
         self.assertEqual(case.owner_division, self.triage)
         self.assertEqual(case.district, self.req1.district)
@@ -380,7 +380,7 @@ class SubmissionTests(CaseTestCase):
             ("case.submitted", 1, 1, "pending"),
         )
 
-    def test_numbers_are_per_kind_and_buddhist_year_in_bangkok_time(self):
+    def test_numbers_are_per_owner_division_and_buddhist_year_in_bangkok_time(self):
         late_2569 = datetime(2026, 12, 31, 16, 59, tzinfo=UTC)  # 23:59 in Bangkok
         new_year_2570 = datetime(2026, 12, 31, 17, 30, tzinfo=UTC)  # 00:30 on 1 Jan
         with patch("operations.services.timezone.now", return_value=late_2569):
@@ -389,11 +389,16 @@ class SubmissionTests(CaseTestCase):
             problem_case = self.submit(payload=problem())
         with patch("operations.services.timezone.now", return_value=new_year_2570):
             next_year = self.submit()
+        # ADR 0045: the owner division's code; its withdrawals and problems share one sequence.
+        code = Case.objects.get(pk=first.case_id).owner_division.code
+        problem_code = Case.objects.get(pk=problem_case.case_id).owner_division.code
         self.assertEqual(
-            [first.case_number, second.case_number, problem_case.case_number],
-            ["W69-000001", "W69-000002", "P69-000001"],
+            [first.case_number, second.case_number],
+            [f"{code}69-000001", f"{code}69-000002"],
         )
-        self.assertEqual(next_year.case_number, "W70-000001")
+        expected = 3 if problem_code == code else 1
+        self.assertEqual(problem_case.case_number, f"{problem_code}69-{expected:06d}")
+        self.assertEqual(next_year.case_number, f"{code}70-000001")
 
     def test_quantity_and_unit_rules(self):
         invalid = {
@@ -970,6 +975,4 @@ class ConcurrencyTests(TransactionTestCase):
     def test_parallel_submissions_get_gap_free_numbers(self):
         results, errors = self.run_parallel([self.submit_call(key()) for _ in range(6)])
         self.assertEqual(errors, [])
-        self.assertEqual(
-            sorted(int(r.case_number.split("-")[1]) for r in results), list(range(1, 7))
-        )
+        self.assertEqual(sorted(int(r.case_number[-6:]) for r in results), list(range(1, 7)))

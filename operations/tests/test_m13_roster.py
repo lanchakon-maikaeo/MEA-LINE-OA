@@ -269,7 +269,7 @@ class OrgUnitTests(RosterTestCase):
         client = Client()
         client.force_login(self.admin)
         page = client.get("/console/admin/org/")
-        self.assertContains(page, "ผังบุคลากรที่ลงทะเบียน LINE")
+        self.assertContains(page, "คนที่ลงทะเบียน LINE")  # ผังบุคลากร (ADR 0044)
         self.assertContains(page, "แผนกทดสอบจำลอง")
         self.assertNotContains(page, "520002")  # not registered in LINE: not on the tree
         client.post(

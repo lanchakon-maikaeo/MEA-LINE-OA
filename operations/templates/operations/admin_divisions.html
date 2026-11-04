@@ -17,7 +17,7 @@
       <td class="cell--wide">{{ division.name }}{% if division.is_synthetic and "จำลอง" not in division.name %} (จำลอง){% endif %}</td>
       <td class="cell--wide" data-label="ประเภท">{{ division.get_kind_display }}{% if division.is_intake %} · <strong>กองรับเรื่องกลาง</strong>{% endif %}</td>
       <td class="cell--end" data-label="สถานะ">{{ division.is_active|yesno:"ใช้งาน,ปิด" }}</td>
-      <td class="cell--wide" data-label="หน่วยและผู้รับแจ้ง">{% if division.kind == "division" and division.is_active %}<a href="{% url 'admin-org' %}#u-d{{ division.pk }}">ดูในผังหน่วยงาน</a>{% else %}<span class="muted">ไม่มีในผังหน่วยงาน</span>{% endif %}</td>
+      <td class="cell--wide" data-label="หน่วยและผู้รับแจ้ง">{% if division.kind == "division" and division.is_active %}<a href="{% url 'admin-org' %}">ดูในผังบุคลากร</a>{% else %}<span class="muted">ไม่มีในผังบุคลากร</span>{% endif %}</td>
       <td class="cell--wide"><form class="inline" method="post" action="{% url 'admin-division-action' division.pk division.is_active|yesno:'deactivate,activate' %}">
         {% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">{{ division.is_active|yesno:"ปิด,เปิด" }}</button>
       </form>

@@ -1,85 +1,27 @@
 {% extends "operations/admin_base.html" %}
-{% load ui units_ui %}
-{% block title %}ผังหน่วยงาน · แอดมิน · DED Center{% endblock %}
+{% load ui %}
+{% block title %}ผังบุคลากร · แอดมิน · DED Center{% endblock %}
+{% block scripts %}{{ unit_tree|json_script:"org-units" }}{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
-    <span class="eyebrow">แอดมิน · กองและการส่งงาน</span>
-    <h1>ผังหน่วยงาน</h1>
+    <span class="eyebrow">แอดมิน · คนและสิทธิ์</span>
+    <h1>ผังบุคลากร</h1>
   </div>
 </div>
 
+<div class="notice notice--warning org-warn">{% icon "alert" "sm" %}<p class="notice__body">การย้ายหน่วยและแก้ตำแหน่งในผังนี้ใช้ได้จนถึงการนำเข้าทะเบียนพนักงานครั้งถัดไป เมื่อนำเข้าใหม่ หน่วยและตำแหน่งจะกลับไปตามไฟล์ทะเบียน</p></div>
+
 <section class="section" id="org-tree" aria-labelledby="org-tree-h">
-  <div class="section-head"><h2 id="org-tree-h">ผังบุคลากรที่ลงทะเบียน LINE</h2><span class="muted">{{ tree.count }} คน</span></div>
-  {% if tree.count %}
-  <div class="org-tree">
-    <div class="org-tree__root">{{ tree.label }}</div>
-    {% if tree.people %}{% include "operations/_org_tree.html" with node=tree.top %}{% endif %}
-    {% if tree.children %}<ul class="org-tree__lines">{% for line in tree.children %}<li class="org-tree__line">
-      <div class="org-node org-node--line"><span>{{ line.label }}</span><span class="org-node__n">{{ line.count }}</span></div>
-      {% include "operations/_org_tree.html" with node=line %}
-    </li>{% endfor %}</ul>{% endif %}
+  <div class="section-head"><h2 id="org-tree-h">คนที่ลงทะเบียน LINE</h2><span class="muted">{{ tree.count }} คน · กดที่หน่วยหรือคนเพื่อดูและแก้ไข</span></div>
+  {% if tree.children or tree.people %}
+  <div class="ot">
+    <div class="ot__root"><span class="ot__box ot__box--root">{{ tree.label }}<span class="ot__n">{{ tree.count }}</span></span></div>
+    {% include "operations/_org_tree.html" with node=tree %}
   </div>
-  <datalist id="org-paths">{% for path in paths %}<option value="{{ path }}"></option>{% endfor %}</datalist>
+  <datalist id="org-positions">{% for p in positions %}<option value="{{ p }}"></option>{% endfor %}</datalist>
   {% else %}
   <p>ยังไม่มีผู้ใช้ LINE ที่ผูกกับทะเบียนพนักงาน</p>
   {% endif %}
 </section>
-
-{% if unplaced %}
-<section class="section" aria-labelledby="org-unplaced">
-  <div class="section-head"><h2 id="org-unplaced">ยังไม่ได้จัดหน่วย <span class="chip__count chip__count--alert">{{ unplaced|length }}</span></h2></div>
-  <p class="muted">คนกลุ่มนี้มีบทบาทในกองแล้ว แต่ยังไม่มีกองในสังกัด ป้ายสังกัดจึงขึ้นเป็น N/A ทั้งหมด เลือกหน่วยได้เฉพาะในกองที่คนนั้นมีบทบาทอยู่</p>
-  <div class="table-wrap"><table>
-    <thead><tr><th scope="col">ชื่อ</th><th scope="col">ทะเบียนพนักงานระบุ</th><th scope="col">ย้ายไป</th></tr></thead>
-    <tbody>
-    {% for row in unplaced %}
-      <tr>
-        <td data-label="ชื่อ"><a href="{% url 'admin-user-detail' row.profile.user_id %}">{{ row.profile.display_name }}</a><br>{{ row.profile.user|unit_path }}</td>
-        <td data-label="ทะเบียนพนักงานระบุ">{{ row.roster|default:"ไม่มีข้อมูลในทะเบียน" }}</td>
-        <td data-label="ย้ายไป">
-          <form class="org-inline" method="post">{% csrf_token %}<input type="hidden" name="action" value="move_person"><input type="hidden" name="user" value="{{ row.profile.user_id }}">
-            <label class="visually-hidden" for="mv-{{ row.profile.pk }}">หน่วยของ {{ row.profile.display_name }}</label>
-            <select id="mv-{{ row.profile.pk }}" name="target" required>{% for key, label in row.options %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
-            <button class="btn btn--sm btn--secondary" type="submit">ย้าย</button></form></td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
-</section>
-{% endif %}
-
-<nav class="org-jump" aria-label="ไปที่กอง">{% for d in chart %}<a class="chip" href="#u-{{ d.key }}">{{ d.unit.label }}</a>{% endfor %}</nav>
-
-{% for d in chart %}
-<section class="section org-division" id="u-{{ d.key }}" aria-labelledby="h-{{ d.key }}">
-  <header class="org-division__head">
-    <div class="org-division__title"><span class="org-abbr">{{ d.unit.label }}</span><h2 id="h-{{ d.key }}">{{ d.unit.name }}</h2></div>
-    <div class="org-stats">
-      <span class="tag">{{ d.everyone|length }} คน</span>
-      <span class="tag">ผูก LINE {{ d.eligible_line|length }} คน</span>
-      <span class="tag">งานที่รับ {{ d.work_count }} รายการ</span>
-    </div>
-  </header>
-  {% include "operations/_org_card.html" with c=d division=d %}
-  {% if d.sections %}<div class="org-grid">
-    {% for s in d.sections %}{% include "operations/_org_card.html" with c=s division=d %}{% endfor %}
-  </div>{% endif %}
-  {% if d.everyone %}
-  <details class="fold org-move">
-    <summary><span class="fold__title">ย้ายคนใน {{ d.unit.label }}</span><span class="fold__sub">เปลี่ยนสังกัดของคนที่มีบทบาทในกองนี้</span></summary>
-    <div class="fold__body">
-      <form class="org-move__form" method="post">{% csrf_token %}<input type="hidden" name="action" value="move_person"><input type="hidden" name="unit" value="{{ d.key }}">
-        <div class="field"><label for="mp-{{ d.key }}">คน</label><select id="mp-{{ d.key }}" name="user" required>{% for p in d.everyone %}<option value="{{ p.user.pk }}">{{ p.name }} · {{ p.path|join:" › " }}</option>{% endfor %}</select></div>
-        <div class="field"><label for="mt-{{ d.key }}">ย้ายไป</label><select id="mt-{{ d.key }}" name="target">{% for key, label in d.units %}<option value="{{ key }}">{{ label }}</option>{% endfor %}<option value="">ไม่มีสังกัด (N/A)</option></select></div>
-        <div class="field"><label for="mr-{{ d.key }}">เหตุผล (ไม่บังคับ)</label><input id="mr-{{ d.key }}" name="reason" maxlength="500"></div>
-        <button class="btn btn--sm" type="submit">ย้าย</button>
-      </form>
-    </div>
-  </details>
-  {% endif %}
-</section>
-{% empty %}
-<p class="muted">ยังไม่มีกองที่ใช้งานอยู่</p>
-{% endfor %}
 {% endblock %}

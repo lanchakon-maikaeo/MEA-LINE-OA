@@ -78,11 +78,11 @@ class WebTests(NoScreeningTestCase):
         )
 
     def test_a_slip_case_is_taken_whole_and_the_stock_work_is_hidden(self):
-        self.assertEqual(Case.Status.AWAITING_APPROVAL.label, "รอกองรับเรื่อง")
+        self.assertEqual(Case.Status.AWAITING_APPROVAL.label, "รอรับเรื่อง")
         case = self.waiting(self.slip("4500103201"))
         self.assertTrue(case.lines.exists())
         offers = {o.name: o.label for o in web_actions.available(self.approver, case)}
-        self.assertEqual(offers["approve"], "รับเรื่อง")
+        self.assertEqual(offers["approve"], "ดำเนินการ")
         self.assertEqual(offers["deny_approval"], "ไม่รับเรื่อง")
         client = Client()
         client.force_login(self.approver)
@@ -90,7 +90,7 @@ class WebTests(NoScreeningTestCase):
         self.assertNotIn("จำนวนที่อนุมัติ", form)
         self.assertIn(self.take(client, case, "slip-take-1").status_code, (200, 302))
         case.refresh_from_db()
-        self.assertEqual(case.status, "awaiting_execution")
+        self.assertEqual(case.status, "in_progress")  # ADR 0044: ดำเนินการ starts the work
         self.assertIsNone(case.lines.first().approved_quantity)
         offered = {o.name for o in web_actions.available(self.approver, case)}
         self.assertFalse(offered & web_actions.STOCK)

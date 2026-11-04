@@ -92,7 +92,7 @@ class ChatTests(PickTestCase):
         case = Case.objects.get()
         self.assertEqual(
             (case.owner_division.code, case.topic, case.held_by_admin, case.status),
-            ("กคว.", "general", False, "in_progress"),
+            ("กคว.", "general", False, "awaiting_approval"),  # ADR 0044: รอรับเรื่อง
         )
         self.assertIn(
             f"ส่งเรื่อง {case.number} ถึงกองเครื่องวัดหน่วยไฟฟ้าแล้ว ดูความคืบหน้าได้ที่ เรื่องของฉัน",
@@ -191,7 +191,7 @@ class AdminTests(PickTestCase):
         case.refresh_from_db()
         self.assertEqual(
             (case.held_by_admin, case.owner_division.code, case.status),
-            (False, "กคว.", "in_progress"),  # ADR 0042 Q10
+            (False, "กคว.", "awaiting_approval"),  # ADR 0044: รอรับเรื่อง
         )
 
     def test_an_admin_answers_a_held_case_and_says_it_is_a_suggestion(self):

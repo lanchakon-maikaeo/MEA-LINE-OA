@@ -1,6 +1,7 @@
-"""งานสั่ง (16 ต.ค. 2569 Q6, Q7, Q14): only a Supervisor issues work; มอบหมาย → รับทราบ →
-กำลังทำ → เสร็จ, with send-back and a Supervisor's close or cancel; the doer hears at assignment,
-the issuer at รับทราบ, done or send-back, and reminders come once near and once past the due date.
+"""งานสั่ง (16 ต.ค. 2569 Q6, Q7, Q14): only a Supervisor issues work; มอบหมาย → กำลังดำเนินการ →
+เสร็จสิ้น → ปิดงาน (ADR 0044), with send-back and a Supervisor's close or cancel; the doer hears at
+assignment, the issuer at ดำเนินการ, done or send-back, and reminders come once near and once past
+the due date.
 """
 
 from datetime import timedelta
@@ -60,9 +61,10 @@ class IssueTests(OrderTestCase):
         with self.assertRaises(PermissionDenied):
             work_orders.create(self.head, "งานทดสอบ", self.kcw_division)
         order = work_orders.create(self.director, "งานทดสอบ", self.kcw_division)
-        self.assertRegex(order.number, r"^T\d\d-000001$")
+        # ADR 0045: the division's own sequence, which its cases share; no T any more.
+        self.assertRegex(order.number, r"^กคว\.\d\d-000001$")
         other = work_orders.create(self.director, "งานทดสอบ", self.ktf_division)
-        self.assertEqual(other.number[-6:], "000002")
+        self.assertRegex(other.number, r"^กตฟ\.\d\d-000001$")
         with self.assertRaises(ValidationError):
             work_orders.create(self.director, "งานทดสอบ", self.kcw_division, assignee=self.ktf)
         with self.assertRaises(ValidationError):
@@ -125,13 +127,12 @@ class IssueTests(OrderTestCase):
 
 
 class FlowTests(OrderTestCase):
-    def test_acknowledge_start_finish_and_close(self):
+    def test_start_finish_and_close(self):
         order = self.order()
         self.assertEqual(dict(work_orders.steps_for(self.ktf, order)), {})  # another division
-        work_orders.act(self.kcw, order, "acknowledge")
+        order = work_orders.act(self.kcw, order, "start", urgent=True)
+        self.assertEqual((order.status, order.is_urgent), (S.IN_PROGRESS, True))
         self.assertEqual(self.notices("staff_order_ack", self.director).count(), 1)
-        work_orders.act(self.kcw, order, "start")
-        self.assertEqual(self.notices("staff_order_ack").count(), 1)  # told once
         with self.assertRaises(ValidationError):
             work_orders.act(self.kcw, order, "done")
         order = work_orders.act(self.kcw, order, "done", result="นับครบ 120 ตัว")
@@ -143,14 +144,14 @@ class FlowTests(OrderTestCase):
         self.assertEqual(order.status, S.CLOSED)
         self.assertEqual(
             [row["what"] for row in work_orders.timeline(order)],
-            ["สั่งงาน", "รับทราบ", "เริ่มทำ", "ทำเสร็จแล้ว", "ปิดงาน"],
+            ["สั่งงาน", "ดำเนินการ", "เสร็จสิ้น", "ปิดงาน"],
         )
 
     def test_only_the_named_person_acts_on_their_order(self):
         order = self.order(assignee=self.kcw2)
         with self.assertRaises(PermissionDenied):
-            work_orders.act(self.kcw, order, "acknowledge")
-        work_orders.act(self.kcw2, order, "acknowledge")
+            work_orders.act(self.kcw, order, "start")
+        work_orders.act(self.kcw2, order, "start")
 
     def test_the_division_supervisor_names_a_person(self):
         order = self.order()
@@ -178,7 +179,7 @@ class ForwardTests(OrderTestCase):
     """ADR 0040 Q2, Q7: the department moves open work to another division, unassigned."""
 
     def test_the_department_forwards_open_work_and_the_destination_acknowledges_again(self):
-        order = work_orders.act(self.kcw, self.order(assignee=self.kcw), "acknowledge")
+        order = work_orders.act(self.kcw, self.order(assignee=self.kcw), "start")
         self.assertNotIn("forward", dict(work_orders.steps_for(self.head, order)))
         with self.assertRaises(PermissionDenied):
             work_orders.act(self.head, order, "forward", division=self.ktf_division)
@@ -193,7 +194,7 @@ class ForwardTests(OrderTestCase):
         )
         self.assertEqual(self.notices("staff_order_new", self.ktf).count(), 1)
         whats = [row["what"] for row in work_orders.timeline(order)]
-        self.assertEqual(whats, ["สั่งงาน", "รับทราบ", "ส่งต่อให้กอง"])
+        self.assertEqual(whats, ["สั่งงาน", "ดำเนินการ", "ส่งต่อให้กอง"])
         order = work_orders.act(self.director, order, "cancel")
         self.assertNotIn("forward", dict(work_orders.steps_for(self.director, order)))
 
@@ -301,8 +302,9 @@ class WebTests(OrderTestCase):
         self.assertContains(listing, order.number)
         self.assertNotContains(listing, 'href="/orders/"')
         page = member.get(reverse("order-detail", args=[order.number]))
-        self.assertContains(page, "รับทราบ")
-        member.post(reverse("order-action", args=[order.number, "acknowledge"]))
+        self.assertContains(page, "ดำเนินการ")
+        member.post(reverse("order-action", args=[order.number, "start"]), {"urgent": "0"})
+        self.assertFalse(WorkOrder.objects.get().is_urgent)
         member.post(reverse("order-action", args=[order.number, "done"]), {"result": "ส่งแล้ว"})
         self.assertEqual(WorkOrder.objects.get().status, S.DONE)
         self.assertEqual(

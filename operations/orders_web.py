@@ -21,11 +21,10 @@ from operations.models import Attachment, WorkOrder
 User = get_user_model()
 S = WorkOrder.Status
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "application/pdf": "pdf"}
-JOURNEY = (
+JOURNEY = (  # ADR 0044
     (S.ASSIGNED, "มอบหมาย"),
-    (S.ACKNOWLEDGED, "รับทราบ"),
-    (S.IN_PROGRESS, "กำลังทำ"),
-    (S.DONE, "เสร็จ"),
+    (S.IN_PROGRESS, "กำลังดำเนินการ"),
+    (S.DONE, "เสร็จสิ้น"),
     (S.CLOSED, "ปิดงาน"),
 )
 
@@ -89,8 +88,10 @@ def _journey(order):
     values = [value for value, _ in JOURNEY]
     if order.status in values:
         reached = values.index(order.status)
+    elif order.status == S.ACKNOWLEDGED:  # รับทราบ before ADR 0044: not started yet
+        reached = 0
     else:
-        reached = 3 if order.done_at else 1 if order.acknowledged_at else 0
+        reached = 2 if order.done_at else 1 if order.acknowledged_at else 0
     stopped = order.get_status_display() if order.status in {S.SENT_BACK, S.CANCELLED} else ""
     steps = []
     for index, (_, label) in enumerate(JOURNEY):
@@ -105,13 +106,11 @@ def _journey(order):
     return steps
 
 
-TUCKED = {"send_back", "cancel"}  # need a reason; kept under ตัวเลือกอื่น
 SAID = {
-    "acknowledge": "รับทราบงานแล้ว",
-    "start": "เริ่มทำงานแล้ว",
-    "done": "บันทึกว่าทำเสร็จแล้ว ผู้สั่งจะได้รับข้อความ",
+    "start": "เริ่มดำเนินการแล้ว",
+    "done": "บันทึกว่าเสร็จสิ้นแล้ว ผู้สั่งจะได้รับข้อความ",
     "send_back": "ส่งงานกลับผู้สั่งแล้ว",
-    "assign_person": "มอบให้คนในกองแล้ว",
+    "assign_person": "มอบหมายผู้รับผิดชอบแล้ว",
     "reassign": "สั่งงานใหม่แล้ว",
     "forward": "ส่งต่อให้กองแล้ว",
     "close": "ปิดงานแล้ว",
@@ -120,24 +119,17 @@ SAID = {
 
 
 def _offers(order, steps):
-    """The steps as buttons: the first plain one is the main button, and send-back and cancel
-    wait under ตัวเลือกอื่น."""
+    """The steps as buttons like a case's สิ่งที่ทำได้ (ADR 0044): the first is the main one with
+    its form open; the others open theirs in a pop-up."""
     offers = []
     for name, label in steps:
         if name == "assign_person" and order.assignee_id:
-            label = "เปลี่ยนคนทำ"
+            label = "เปลี่ยนผู้รับผิดชอบ"
         offers.append(
-            {
-                "name": name,
-                "label": label,
-                "needs": work_orders.STEPS[name][3],
-                "tucked": name in TUCKED,
-                "primary": False,
-            }
+            {"name": name, "label": label, "needs": work_orders.STEPS[name][3], "primary": False}
         )
-    plain = [o for o in offers if not o["tucked"]]
-    if plain and not (plain[0]["name"] == "assign_person" and order.assignee_id):
-        plain[0]["primary"] = True
+    if offers and not (offers[0]["name"] == "assign_person" and order.assignee_id):
+        offers[0]["primary"] = True
     return offers
 
 
@@ -222,7 +214,6 @@ def order_detail(request, number):
         {
             "order": order,
             "steps": offers,
-            "tucked": any(o["tucked"] for o in offers),
             "people": work_orders.members(order.division_id) if "assign_person" in names else [],
             "targets": _targets(request.user) if "reassign" in names else [],
             "divisions": work_orders.issuable(request.user).exclude(pk=order.division_id)
@@ -264,6 +255,7 @@ def order_action(request, number, step):
             assignee=person,
             division=division,
             due_on=_read_date(data.get("due_on")),
+            urgent=data["urgent"] == "1" if "urgent" in data else None,
         )
     except ValidationError as exc:
         messages.error(request, "; ".join(exc.messages))

@@ -9,7 +9,8 @@ from datetime import timedelta
 from django.test import Client
 from django.utils import timezone
 
-from operations import calendars, case_chat, warehouse
+from operations import calendars, case_chat, services, warehouse
+from operations.contracts import Actor
 from operations.models import (
     Appointment,
     AuthorityGrant,
@@ -49,21 +50,32 @@ class WorkTestCase(FlowTestCase):
             granted_by=cls.flow_admin,
         )
 
-    def withdraw(self, slip, meter="12345678", size="5(100)A", user=ALICE):
+    def withdraw(self, slip, meter="12345678", size="5(100)A", user=ALICE, start=True):
         self.track("มิเตอร์", "ติดตามใบเบิก", number=slip, user=user)
         self.press(user, "เพิ่มรายละเอียด")  # 30 ต.ค. 2569: the summary comes right after the number
         self.type(user, f"มิเตอร์ {meter} ขนาด {size} 1 เครื่อง ใช้ติดตั้ง")
         self.press(user, "ยืนยันส่งเรื่อง")
         case = Case.objects.order_by("-submitted_at").first()
-        self.assertEqual(case.status, Case.Status.IN_PROGRESS)  # ADR 0042 Q10: no acceptance step
+        self.assertEqual(case.status, Case.Status.AWAITING_APPROVAL)  # ADR 0044: รอรับเรื่อง
+        return self.start(case) if start else case
+
+    def start(self, case, level="P3"):
+        """ดำเนินการ with the level (ADR 0044), by someone granted the authority."""
+        services.perform_form_action(
+            Actor.staff(self.approver),
+            case.pk,
+            "approve",
+            expected_revision=case.revision,
+            idempotency_key=f"start-{case.pk}",
+            payload={"priority": level},
+        )
+        case.refresh_from_db()
+        self.assertEqual(case.status, Case.Status.IN_PROGRESS)
         return case
 
     def older_waiting(self, slip, **kwargs):
-        """A case filed before ADR 0042 Q10 still waits for its division to accept it."""
-        case = self.withdraw(slip, **kwargs)
-        Case.objects.filter(pk=case.pk).update(status=Case.Status.AWAITING_APPROVAL)
-        case.refresh_from_db()
-        return case
+        """A case still at รอรับเรื่อง."""
+        return self.withdraw(slip, start=False, **kwargs)
 
 
 class SearchTests(WorkTestCase):

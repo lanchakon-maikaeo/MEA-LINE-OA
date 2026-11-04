@@ -13,7 +13,8 @@ from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
 
-from operations import line_flows, sheet_lookup, typed_input, warehouse
+from operations import line_flows, services, sheet_lookup, typed_input, warehouse
+from operations.contracts import Actor
 from operations.models import (
     Appointment,
     AuditEvent,
@@ -74,7 +75,17 @@ class KkoTestCase(FlowTestCase):
             self.type(user, number)  # 30 ต.ค. 2569: the summary comes right after the number
         self.press(user, "ยืนยันส่งเรื่อง")
         case = Case.objects.order_by("-submitted_at").first()
-        self.assertEqual(case.status, Case.Status.IN_PROGRESS)  # ADR 0042 Q10: no acceptance step
+        self.assertEqual(case.status, Case.Status.AWAITING_APPROVAL)  # ADR 0044: รอรับเรื่อง
+        services.perform_form_action(  # ดำเนินการ, at ปกติ
+            Actor.staff(self.kko_approver),
+            case.pk,
+            "approve",
+            expected_revision=case.revision,
+            idempotency_key=f"start-{case.pk}",
+            payload={"priority": "P3"},
+        )
+        case.refresh_from_db()
+        self.assertEqual(case.status, Case.Status.IN_PROGRESS)
         return case
 
 

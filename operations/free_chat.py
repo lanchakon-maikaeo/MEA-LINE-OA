@@ -28,7 +28,16 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.utils import timezone
 
-from operations import ai, ai_answer, answers, knowledge, options, pii, requester_steps
+from operations import (
+    ai,
+    ai_answer,
+    answers,
+    knowledge,
+    numbering,
+    options,
+    pii,
+    requester_steps,
+)
 from operations.models import (
     AIRun,
     ChannelIdentity,
@@ -443,7 +452,7 @@ def problem(reply, basis, sources, own_numbers, used_tools, titles):
         return f"รับปากเกินอำนาจ ('{found}')"
     if "http" in reply.lower() or "www." in reply.lower():
         return "มีลิงก์"
-    others = set(ai_answer.CASE_NUMBER.findall(reply)) - set(own_numbers)
+    others = set(numbering.find(reply)) - set(own_numbers)
     if others:
         return f"มีเลขเรื่องที่ไม่ใช่ของผู้ถาม ({', '.join(sorted(others))})"
     kinds = personal(reply, sources)
@@ -491,7 +500,7 @@ def run(text, tools, current, budget, history=(), guides=None, max_calls=MAX_TOO
     result = {"reply": "", "basis": None, "sent": None, "refused": "", "tools": [], "attempts": []}
     if OVERRIDE.search(text or ""):
         return {**result, "outcome": "override"}
-    asked = set(ai_answer.CASE_NUMBER.findall((text or "").upper()))
+    asked = set(numbering.find(text))
     if asked and asked - tools.owns(asked):
         return {**result, "outcome": "not own", "fixed": NOT_OWN}
     if current is None or budget < 2:

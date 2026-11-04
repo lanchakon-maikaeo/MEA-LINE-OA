@@ -317,7 +317,7 @@ def record(actor, cases, stage, on, planned_on=None, note=""):
             skipped.append((case, "ไม่ใช่งานของกองคุณ"))
             continue
         if case.status == Case.Status.AWAITING_APPROVAL:  # ADR 0025, 28 ต.ค. 2569 Q4
-            skipped.append((case, "ยังรอกองรับเรื่อง บันทึกขั้นงานคลังได้หลังกองรับเรื่องแล้ว"))
+            skipped.append((case, "ยังรอรับเรื่อง บันทึกขั้นงานคลังได้หลังรับเรื่องแล้ว"))
             continue
         have = stages(case)
         if stage in have:

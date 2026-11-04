@@ -116,7 +116,7 @@ class WithdrawalTests(FlowTestCase):
             (case.kind, case.owner_division.code, case.sap_number, case.sap_kind, case.purpose),
             ("withdrawal", "กคว.", "4500012345/10", "slip", "มิเตอร์ 5(100)A 3 เครื่อง"),
         )
-        self.assertEqual((case.lines.count(), case.status), (0, "in_progress"))
+        self.assertEqual((case.lines.count(), case.status), (0, "awaiting_approval"))  # ADR 0044
         self.assertEqual(case.intake_data["group"], "meter")
         self.assertEqual(case.menu_label, f"{TILE} · มิเตอร์ · ติดตามใบเบิก")
         self.assertEqual(list(buttons(reply))[0], "ส่งเรื่องเพิ่มเติม")

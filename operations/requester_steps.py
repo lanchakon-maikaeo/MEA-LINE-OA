@@ -56,7 +56,7 @@ def label(case):
 
 
 def status_word(case):
-    """The status the LINE user reads: รอกองรับเรื่อง reads กำลังดำเนินการ unless an admin set it
+    """The status the LINE user reads: รอรับเรื่อง reads กำลังดำเนินการ unless an admin set it
     back (options.LINE_AWAITING, 30 ต.ค. 2569). Staff pages show the real status."""
     if case.status == S.AWAITING_APPROVAL and options.get(options.LINE_AWAITING) == "working":
         return S.IN_PROGRESS.label

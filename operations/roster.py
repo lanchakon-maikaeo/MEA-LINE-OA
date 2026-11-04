@@ -37,6 +37,7 @@ from operations.models import (
     Role,
     RoleGrant,
     RosterSetting,
+    RosterUnitName,
     RosterUpload,
     Section,
     StaffProfile,
@@ -518,12 +519,32 @@ def unit_paths():
     return dict(sorted(out.items()))
 
 
+def place_of(path, paths=None):
+    """The fields a person at this path takes; a path that stops above the file's rows (only a
+    ฝ่าย, 3 Nov 2569) takes a row below it with the lower levels empty."""
+    paths = unit_paths() if paths is None else paths
+    if path in paths:
+        return paths[path]
+    below = next((row for p, row in paths.items() if p.startswith(f"{path} › ")), None)
+    if not path or below is None:
+        return None
+    depth = len(path.split(" › "))
+    place, seen = dict(below), 0
+    for field in LEVELS:
+        seen += bool(below[field])
+        if seen > depth:
+            place[field] = ""
+    if not place["division_name"]:
+        place["division_id"] = None
+    return place
+
+
 @transaction.atomic
 def move_employee(actor, employee, path, reason=""):
     """An admin moves one person on the chart (1 Nov 2569 Q3): the roster row takes another
     path of the file, and the person's สังกัด and สมาชิกกอง role follow, until the next import."""
     identity.require_admin(actor)
-    place = unit_paths().get(" ".join((path or "").split()))
+    place = place_of(" ".join((path or "").split()))
     if place is None:
         raise ValidationError("โปรดเลือกหน่วยจากรายการ")
     employee = Employee.objects.select_for_update().get(pk=employee.pk)
@@ -535,13 +556,54 @@ def move_employee(actor, employee, path, reason=""):
     follow(actor, [employee.employee_id], {}, reason)
 
 
-def employee_path(employee):
+def employee_path(employee, names=None):
     """Q9: ฝ่าย › กอง › แผนก › กลุ่มงาน, N/A where a level is missing; a กอง of the system by its
-    ชื่อย่อ."""
+    ชื่อย่อ, and a unit outside it by the ชื่อย่อ in names (unit_names()) when given."""
     from operations import units  # local: units builds on identity
 
     if employee is None:
         return []
     division = units.short(employee.division) if employee.division_id else employee.division_name
-    levels = (employee.department, division, employee.section_name, employee.work_group)
+    levels = [employee.department, division, employee.section_name, employee.work_group]
+    if names and not employee.division_id:
+        path = []
+        for i, field in enumerate(LEVELS):
+            value = getattr(employee, field)
+            if value:
+                path.append(value)
+                levels[i] = names.get(" › ".join(path), levels[i])
     return [level or units.NA for level in levels]
+
+
+def unit_names():
+    """ชื่อย่อ of units outside the system, by roster path (ADR 0044)."""
+    return dict(RosterUnitName.objects.values_list("path", "short_name"))
+
+
+def set_unit_name(actor, path, value, reason=""):
+    """An admin names a roster unit outside the system; empty removes the name."""
+    identity.require_admin(actor)
+    path, value = " ".join((path or "").split()), (value or "").strip()[:32]
+    if not any(p == path or p.startswith(f"{path} › ") for p in unit_paths()):
+        raise ValidationError("ไม่พบหน่วยนี้ในทะเบียน")
+    row, _ = RosterUnitName.objects.get_or_create(path=path, defaults={"short_name": value})
+    identity.audit(actor, "roster.unit_named", row, reason, unit=path, value=value)
+    if value:
+        row.short_name = value
+        row.save(update_fields=["short_name"])
+    else:
+        row.delete()
+
+
+@transaction.atomic
+def set_position(actor, employee, position, reason=""):
+    """An admin changes a person's ตำแหน่ง on the chart; like a move, until the next import."""
+    identity.require_admin(actor)
+    position = " ".join((position or "").split())[:200]
+    employee = Employee.objects.select_for_update().get(pk=employee.pk)
+    previous = employee.position
+    employee.position = position
+    employee.save(update_fields=["position"])
+    identity.audit(
+        actor, "employee.position_changed", employee, reason, value=position, previous=previous
+    )
