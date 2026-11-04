@@ -49,6 +49,7 @@ SUBJECTS = {
     "staff_registry": "พบส่วนต่างทะเบียนใหม่จากไฟล์ SAP",  # M11 Q19: one per import
     "staff_support": "ผู้ช่วยเหลือระบบทำแทนกองในเรื่องของกอง",  # ADR 0007
     "staff_admin_waiting": "มีเรื่องรอแอดมิน",  # ADR 0030: LINE only
+    "staff_new_case": "เรื่องใหม่รอรับเรื่อง",  # ADR 0048: LINE only
 }
 CRITICAL = {"staff_hazard", "staff_escalated", "staff_routing"}
 
@@ -184,6 +185,8 @@ def plan_for_event(event):
             staff_line.plan(
                 "staff_admin_waiting", f"admin:{case.pk}", case, staff_line.admin_receivers(), True
             )
+        if case is not None:
+            _plan_new_case(case)
         floor = (
             CaseTriage.objects.filter(case=case).values_list("priority_floor", flat=True).first()
         )
@@ -194,6 +197,7 @@ def plan_for_event(event):
         desk_id = desk.pk if desk else case.owner_division_id
         # ADR 0031 Q15: email to the members; LINE to the person responsible, else the unit's
         # ผู้รับแจ้งเรื่องสำคัญ (which took over the division's ผู้รับแจ้งเรื่องฉุกเฉิน, Q12).
+        _copy_to_duty("staff_hazard", f"hazard:{case.pk}", case)
         return plan(
             "staff_hazard", f"hazard:{case.pk}", case, members(desk_id), division_id=desk_id
         )
@@ -227,8 +231,34 @@ def _plan_support(decision):
     )
 
 
+def _copy_to_duty(kind, key, case):
+    """ADR 0048: a copy for the แอดมินฝ่าย on duty, when Push Message keeps it on. The same key
+    as the main alert, so nobody told twice."""
+    from operations import duty, options, staff_line  # local: staff_line reads SUBJECTS here
+
+    if not case.is_example and options.push_on(kind, "duty"):
+        staff_line.plan(kind, key, case, duty.receivers(), True)
+
+
+def _plan_new_case(case):
+    """ADR 0048: a case now waits at รับเรื่อง of its owner division; LINE only, to the แอดมินฝ่าย
+    on duty and, when switched on, the division's แอดมินกอง. Filing and its skip_screening
+    decision both land here: one key per case and division, so each person is told once."""
+    from operations import options, staff_line
+
+    if case.status != Case.Status.AWAITING_APPROVAL or case.is_example:
+        return
+    key = f"new:{case.pk}:{case.owner_division_id}"
+    _copy_to_duty("staff_new_case", key, case)
+    if options.push_on("staff_new_case", "division_admin") and case.owner_division_id:
+        heads = members(case.owner_division_id, roles=[Role.SUPERVISOR])
+        staff_line.plan("staff_new_case", key, case, heads, True)
+
+
 def _plan_decision(decision):
     case, key = decision.case, f"decision:{decision.action_id}"
+    if decision.to_status == Case.Status.AWAITING_APPROVAL != decision.from_status:
+        _plan_new_case(case)  # skip_screening on filing, or routed to a division later
     if decision.action == "request_handoff":
         handoff = Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).first()
         if handoff:
@@ -258,6 +288,7 @@ def _plan_decision(decision):
             or ChildWork.objects.filter(case=case, status=ChildWork.Status.DISPUTED).exists()
         )
         if waiting:
+            _copy_to_duty("staff_routing", key, case)
             return plan("staff_routing", key, case, routing_holders(case))
     if case.held_by_admin and decision.action in ("dispute_resolution", "reopen"):
         from operations import staff_line  # local: staff_line reads subjects from here

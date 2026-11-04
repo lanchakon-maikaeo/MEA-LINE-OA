@@ -1,0 +1,77 @@
+{% extends "operations/admin_base.html" %}
+{% block title %}Push Message · แอดมิน · DED Center{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมิน</span>
+    <h1>Push Message</h1>
+    <p class="lede">ข้อความที่ระบบส่งเข้า LINE เองโดยผู้รับไม่ได้ทักมาก่อน กดสวิตช์เพื่อเปิดหรือปิดทีละชนิดทั้งระบบ ชนิดที่ปิดจะไม่ถูกส่ง แต่ข้อมูลยังอยู่ในเว็บและในเรื่องของฉัน ทุกการเปลี่ยนบันทึกในประวัติ</p>
+  </div>
+</div>
+{% if not line_on %}<p class="notice push-off">LINE push ปิดทั้งระบบอยู่ที่เซิร์ฟเวอร์ (LINE_PUSH_ENABLED) สวิตช์ในหน้านี้จะมีผลเมื่อเปิดแล้ว</p>{% endif %}
+
+{% for group_label, kinds in groups %}
+<section class="section" aria-labelledby="push-g{{ forloop.counter }}">
+  <div class="section-head"><h2 id="push-g{{ forloop.counter }}">{{ group_label }}</h2><span class="muted">{{ kinds|length }} ชนิด</span></div>
+  <ul class="push-list">
+  {% for k in kinds %}
+    <li class="push-row{% if not k.on %} is-off{% endif %}" id="push-{{ k.kind }}">
+      <div class="push-row__text">
+        <strong class="push-row__label">{{ k.label }}</strong>
+        <span class="push-row__who">ส่งถึง {{ k.who }} · เดือนนี้ส่งแล้ว {{ k.sent }}</span>
+        <span class="push-row__sample">{{ k.sample|linebreaksbr }}</span>
+      </div>
+      {% include "operations/_push_switch.html" with key=k.key on=k.on label=k.label anchor=k.kind %}
+      {% if k.recipients %}
+      <ul class="push-to" aria-label="ผู้รับของ {{ k.label }}">
+        {% for r in k.recipients %}
+        <li class="push-to__row{% if not r.on %} is-off{% endif %}">
+          <span>{{ r.label }}</span>
+          {% include "operations/_push_switch.html" with key=r.key on=r.on label=r.label anchor=k.kind %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endfor %}
+
+<section class="section" aria-labelledby="push-moved">
+  <div class="section-head"><h2 id="push-moved">ค่าอื่นของ Push Message</h2></div>
+  <p class="muted">การรับแจ้งรายคน (เรื่องรอแอดมิน คำขอลงทะเบียน) และผู้รับแจ้งของแต่ละหน่วย ตั้งที่การ์ดของคนและหน่วยใน <a href="{% url 'admin-org' %}">ผังบุคลากร</a> ส่วนแอดมินฝ่ายที่อยู่เวรตั้งใน <a href="{% url 'admin-duty' %}">ตารางเวร</a></p>
+  {% for key, option, current, row in moved %}
+  <details class="fold" id="opt-{{ key }}">
+    <summary>
+      <span class="fold__title">{{ option.label }}</span>
+      {% if current != option.default %}<span class="tag tag--outline">เปลี่ยนจากค่าเริ่มต้น</span>{% endif %}
+      <span class="fold__sub">ตอนนี้: {% for v, label, help in option.choices %}{% if v == current %}{{ label }}{% endif %}{% endfor %}</span>
+    </summary>
+    <div class="fold__body">
+    {% if option.help %}<p class="muted">{{ option.help }}</p>{% endif %}
+    <form method="post" action="{% url 'admin-push' %}">
+      {% csrf_token %}<input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="anchor" value="opt-{{ key }}">
+      <fieldset>
+        <legend class="visually-hidden">{{ option.label }}</legend>
+        {% for v, label, help in option.choices %}
+          <label class="choice"><input type="radio" name="value" value="{{ v }}"{% if v == current %} checked{% endif %} required> <span><strong>{{ label }}</strong>{% if forloop.first %} <span class="muted">(ค่าเริ่มต้น)</span>{% endif %}<br><span class="muted">{{ help }}</span></span></label>
+        {% endfor %}
+      </fieldset>
+      <div class="field"><label for="reason-{{ key }}">เหตุผล (ไม่บังคับ)</label><input id="reason-{{ key }}" name="reason" maxlength="500"></div>
+      <button class="btn btn--sm" type="submit">บันทึก</button>
+      {% if row and row.updated_by %}<p class="muted mt-8">เปลี่ยนล่าสุดโดย {{ row.updated_by.username }} · {{ row.updated_at|date:"Y-m-d H:i" }}</p>{% endif %}
+    </form>
+    </div>
+  </details>
+  {% endfor %}
+</section>
+
+<section class="section" aria-labelledby="push-history">
+  <div class="section-head"><h2 id="push-history">ประวัติการเปลี่ยน</h2></div>
+  <ul>
+    {% for e in history %}<li>{{ e.created_at|date:"Y-m-d H:i" }} · {{ e.actor.username|default:e.actor_label }} · {{ e.data.key|cut:"push:" }}: {{ e.data.previous }} → {{ e.data.value }}{% if e.reason %} · {{ e.reason }}{% endif %}</li>
+    {% empty %}<li class="muted">ยังไม่มีการเปลี่ยน ทุกชนิดใช้ค่าเริ่มต้น</li>{% endfor %}
+  </ul>
+</section>
+{% endblock %}

@@ -389,6 +389,8 @@ def _recipient_problem(delivery):
         return "channel not enabled"
     if not push_enabled():
         return "push disabled"
+    if not options.push_on(delivery.kind):
+        return "ปิดใน Push Message"  # ADR 0048
     identity = delivery.identity
     if identity is None:
         return "no LINE identity"

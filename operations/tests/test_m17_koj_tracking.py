@@ -595,10 +595,13 @@ class SourceTests(KojTestCase):
         self.source.provider = "google"
         self.source.spreadsheet_id = "synthetic-spreadsheet-id-0001"
         self.source.sheet_name = "ข้อมูลจำลอง"
-        with patch(
-            "google.oauth2.service_account.Credentials.from_service_account_file",
-            side_effect=PermissionError,
-        ), patch.dict("os.environ", {"KOJ_GOOGLE_CREDENTIALS_FILE": "/synthetic/key.json"}):
+        with (
+            patch(
+                "google.oauth2.service_account.Credentials.from_service_account_file",
+                side_effect=PermissionError,
+            ),
+            patch.dict("os.environ", {"KOJ_GOOGLE_CREDENTIALS_FILE": "/synthetic/key.json"}),
+        ):
             with self.assertRaisesMessage(ValidationError, "อ่านไฟล์กุญแจ Google ไม่ได้"):
                 koj_sheets.fetch(self.source)
 

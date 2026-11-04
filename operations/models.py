@@ -3537,6 +3537,43 @@ class Holiday(models.Model):
         return f"{self.day} {self.name}"
 
 
+class DutyShift(models.Model):
+    """ตารางเวร (ADR 0048): a แอดมินฝ่าย on duty from `start` to `end` (past midnight when `end`
+    is not after `start`), every `weekday` (0 Monday … 6 Sunday, 7 วันหยุด) or, as an exception,
+    on the day `on` only. A day with exceptions uses them alone; an exception with no `user`
+    says nobody is on duty that day."""
+
+    HOLIDAY = 7
+
+    weekday = models.PositiveSmallIntegerField(null=True, blank=True)
+    on = models.DateField(null=True, blank=True, db_index=True)
+    start = models.TimeField()
+    end = models.TimeField()
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["weekday", "on", "start", "pk"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(weekday__isnull=False, on__isnull=True, user__isnull=False)
+                    | models.Q(weekday__isnull=True, on__isnull=False)
+                ),
+                name="duty_shift_weekday_or_day",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(weekday__isnull=True) | models.Q(weekday__lte=7),
+                name="duty_shift_weekday_range",
+            ),
+        ]
+
+
 class EmergencyContact(models.Model):
     """ผู้รับแจ้งเรื่องฉุกเฉินของกอง (grill กคว. รอบใหม่ Q33). Since ADR 0031 (Q12) the rows were
     copied to the กอง cards as ผู้รับแจ้งเรื่องสำคัญ (UnitRecipient) and nothing reads them; the

@@ -56,6 +56,7 @@ IMPORTANT = {
     "staff_dispute": N.Level.NORMAL,
     "staff_reopen": N.Level.NORMAL,
     "staff_admin_waiting": N.Level.NORMAL,  # ADR 0030
+    "staff_new_case": N.Level.NORMAL,  # ADR 0048
 }
 # Alerts that may show what the requester typed, masked like text sent to the AI (owner, 29 Oct
 # 2569: an exception to the lock screen rule for the admins' waiting cases only).

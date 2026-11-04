@@ -125,6 +125,8 @@ def navigation(request):
             "registry": registry.may_open(user),
             # ADR 0033: a ผู้ดูแลชีท who is not an admin reaches the sheets from the top menu.
             "sheets": not scope.is_admin and sheet_access.may_open(user),
+            # ADR 0048: แอดมินฝ่าย keep their ตารางเวร themselves.
+            "duty": not scope.is_admin and scope.is_department_supervisor,
             "admin": admin_menu,
             "admin_waiting": _admin_waiting() if scope.sees_department else 0,
         }

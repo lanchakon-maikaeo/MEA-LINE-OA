@@ -10,7 +10,7 @@ from django.contrib.auth.views import PasswordChangeView
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DatabaseError, connection
 from django.db.migrations.executor import MigrationExecutor
-from django.db.models import Prefetch, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -1160,6 +1160,52 @@ def admin_monitoring_report(request):
     response["Content-Security-Policy"] = EVIDENTLY_CSP
     response["Cache-Control"] = "no-store"
     return response
+
+
+@admin_required
+def admin_push(request):
+    """Push Message (ADR 0048): each kind the system pushes to LINE, on or off for everyone, and
+    the ตัวเลือกระบบ about pushes; a change is an option change (history and audit)."""
+    if request.method == "POST":
+        key = request.POST.get("key", "")
+        if not (key.startswith(options.PUSH_PREFIX) or key in options.PUSH_MOVED):
+            key = ""  # this page changes only its own options
+        _run(
+            request,
+            lambda: options.change(
+                request.user, key, request.POST.get("value", ""), request.POST.get("reason", "")
+            ),
+            "บันทึกแล้ว",
+        )
+        return redirect(f"{reverse('admin-push')}#{request.POST.get('anchor', '')}")
+    month = notifications._month_start(timezone.now())
+    sent = dict(
+        NotificationDelivery.objects.filter(
+            channel=NotificationDelivery.Channel.LINE_PUSH,
+            status=NotificationDelivery.Status.SENT,
+            sent_at__gte=month,
+        )
+        .values_list("kind")
+        .annotate(n=Count("pk"))
+    )
+    moved = {r[0]: r for r in options.rows(push=True)}
+    history = (
+        AuditEvent.objects.filter(
+            action="option.changed", data__key__startswith=options.PUSH_PREFIX
+        )
+        .select_related("actor")
+        .order_by("-created_at")[:20]
+    )
+    return render(
+        request,
+        "operations/admin_push.html",
+        {
+            "groups": options.push_rows(sent),
+            "moved": [moved[k] for k in options.PUSH_MOVED],
+            "line_on": notifications.push_enabled(),
+            "history": history,
+        },
+    )
 
 
 @admin_required

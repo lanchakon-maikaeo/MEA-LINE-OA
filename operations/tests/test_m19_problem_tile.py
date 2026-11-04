@@ -143,17 +143,19 @@ class ChatTests(PickTestCase):
         )
         with patch("operations.staff_line.plan") as plan:
             staff_email.plan_for_event(event)
-        kind, key, planned, users, chosen = plan.call_args.args
+        calls = [c.args for c in plan.call_args_list if c.args[0] == "staff_admin_waiting"]
+        kind, key, planned, users, chosen = calls[0]
         self.assertEqual((kind, planned, chosen), ("staff_admin_waiting", case, True))
         self.assertIn(self.boss, users)
         self.assertNotIn(quiet, users)
-        mine, _ = self.file("กองเครื่องวัดหน่วยไฟฟ้า")  # a division was picked: no alert
+        mine, _ = self.file("กองเครื่องวัดหน่วยไฟฟ้า")  # a division was picked: no admin alert
         event = OutboxEvent.objects.get(
             event_type=orchestration.EVENT_CASE_SUBMITTED, subject_id=str(mine.pk)
         )
         with patch("operations.staff_line.plan") as plan:
             staff_email.plan_for_event(event)
-        self.assertFalse(plan.called)
+        kinds = {c.args[0] for c in plan.call_args_list}
+        self.assertNotIn("staff_admin_waiting", kinds)  # ADR 0048: staff_new_case instead
 
     def test_the_admin_alert_shows_the_start_of_the_text_masked(self):
         from operations import staff_line
