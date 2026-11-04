@@ -18,6 +18,10 @@ def _credentials(service_account):
         )
     except FileNotFoundError as exc:
         raise ValidationError("ยังไม่มีไฟล์กุญแจ Google สำหรับอ่านชีทบนเซิร์ฟเวอร์") from exc
+    except PermissionError as exc:  # 3 Nov 2569: the GCP move left the key root-only
+        raise ValidationError(
+            "เซิร์ฟเวอร์อ่านไฟล์กุญแจ Google ไม่ได้ ตรวจเจ้าของและสิทธิ์ของไฟล์และโฟลเดอร์ (uid 10001)"
+        ) from exc
 
 
 def reader_email():

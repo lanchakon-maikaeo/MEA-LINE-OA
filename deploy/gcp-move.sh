@@ -423,9 +423,13 @@ def h(v): return hashlib.sha256(v.encode()).hexdigest()[:16] if v else "EMPTY"
 for name in sorted(os.listdir(src)):
     s, d = os.path.join(src, name), os.path.join(dst, name)
     if os.path.isdir(s):
+        # copy2 keeps the mode but not the owner: the app (uid 10001) must still read env/google.
         os.makedirs(d, exist_ok=True)
+        os.chmod(d, os.stat(s).st_mode)
         for f in sorted(os.listdir(s)):
-            shutil.copy2(os.path.join(s, f), os.path.join(d, f))
+            sf, df = os.path.join(s, f), os.path.join(d, f)
+            shutil.copy2(sf, df)
+            os.chown(df, os.stat(sf).st_uid, os.stat(sf).st_gid)
             print(f"{name}/{f}: copied from E5")
         continue
     keep = KEEP.get(name, set())

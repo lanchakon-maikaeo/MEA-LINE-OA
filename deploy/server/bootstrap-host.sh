@@ -35,7 +35,8 @@ write_once() {  # path, mode, content — never overwrites
 
 mkdir -p "$FAOJ_ROOT"/{env,env/google,releases,run,drills,restore,tls/db} \
   "$FAOJ_ROOT"/data/{postgres,media,n8n,caddy,clamav,dumps,restic-cache,pgbackrest-spool}
-chmod 755 "$FAOJ_ROOT" "$FAOJ_ROOT/run"
+# env/google is bind-mounted into the app (uid 10001); under umask 077 it would be root-only.
+chmod 755 "$FAOJ_ROOT" "$FAOJ_ROOT/run" "$FAOJ_ROOT/env/google"
 if $LINUX; then
   chown 999:999 "$FAOJ_ROOT/data/postgres" "$FAOJ_ROOT/data/pgbackrest-spool"   # postgres in the db image
   chown 10001:10001 "$FAOJ_ROOT/data/media"                                    # app user in the app image

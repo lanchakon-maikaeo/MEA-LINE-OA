@@ -589,6 +589,19 @@ class SourceTests(KojTestCase):
             with self.assertRaisesMessage(ValidationError, "ยังไม่มีไฟล์กุญแจ Google"):
                 koj_sheets.read_columns("synthetic-spreadsheet-id-0001", "ข้อมูลจำลอง", ["J"])
 
+    def test_google_reader_with_an_unreadable_key_says_so(self):
+        from operations import koj_sheets
+
+        self.source.provider = "google"
+        self.source.spreadsheet_id = "synthetic-spreadsheet-id-0001"
+        self.source.sheet_name = "ข้อมูลจำลอง"
+        with patch(
+            "google.oauth2.service_account.Credentials.from_service_account_file",
+            side_effect=PermissionError,
+        ), patch.dict("os.environ", {"KOJ_GOOGLE_CREDENTIALS_FILE": "/synthetic/key.json"}):
+            with self.assertRaisesMessage(ValidationError, "อ่านไฟล์กุญแจ Google ไม่ได้"):
+                koj_sheets.fetch(self.source)
+
     def test_invalid_snapshot_is_atomic_and_keeps_previous_data(self):
         before = list(KojRecord.objects.values_list("row_key", "status"))
         changed = deepcopy(self.matrix)
