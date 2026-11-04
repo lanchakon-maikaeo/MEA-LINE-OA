@@ -1727,8 +1727,11 @@ button.ot__box:hover { border-color: var(--ink); }
 .duty-cal a.mcal__day:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
 .duty-mark { font-size: 11px; font-weight: 500; color: var(--danger-deep); }
 .duty-chip { background: var(--info-tint); border-left-color: var(--info); }
+.mcal__chip.duty-chip { white-space: normal; overflow-wrap: anywhere; }  /* who is on duty must show, not an ellipsis */
 .duty-chip--none { background: var(--cloud); border-left-color: var(--stone); color: var(--mute); }
 .duty-day { margin-top: var(--s-24); }
+/* A save returns to its row or day; keep it clear of the sticky top bar. */
+.push-row, .duty-day, #week, #s-numbers { scroll-margin-top: calc(var(--nav-h) + var(--s-18)); }
 .duty-rows { list-style: none; margin: 0 0 var(--s-12); padding: 0; display: grid; gap: var(--s-4); }
 .duty-rows__item { display: flex; align-items: center; gap: var(--s-8); }
 .duty-rows__time { font-variant-numeric: tabular-nums; color: var(--ash); min-width: 7.5em; }
@@ -1736,6 +1739,8 @@ button.ot__box:hover { border-color: var(--ink); }
 .duty-rows__remove button { min-width: 32px; min-height: 32px; border: 0; border-radius: 50%; background: var(--cloud); color: var(--ink); font-size: 18px; cursor: pointer; }
 .duty-rows__remove button:hover { background: var(--cloud-deep); }
 .duty-add { display: grid; gap: var(--s-12); margin-top: var(--s-12); }
+.duty-add > .btn { justify-self: start; }
+.duty-add + .cluster { margin-top: var(--s-18); padding-top: var(--s-12); border-top: 1px solid var(--hairline-soft); }
 .duty-add__times { display: flex; flex-wrap: wrap; gap: var(--s-12); }
 .duty-add__times .field { margin: 0; }
 .duty-add__people { display: flex; flex-wrap: wrap; gap: var(--s-8); border: 0; padding: 0; margin: 0; }

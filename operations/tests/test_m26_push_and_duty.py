@@ -10,6 +10,7 @@ from django.urls import reverse
 
 from operations import duty, notifications, options
 from operations.models import (
+    ChannelIdentity,
     DutyShift,
     Holiday,
     NotificationDelivery,
@@ -26,6 +27,14 @@ PUSH_ON = {"OUTBOUND_ENABLED": True, "LINE_CHANNEL_ACCESS_TOKEN": "x", "LINE_PUS
 
 def at(day, hour, minute=0):
     return datetime.combine(day, time(hour, minute), BKK)
+
+
+def on_line(user):
+    """The staff LINE registration that links a web account (the roster counts only these)."""
+    ChannelIdentity.objects.create(
+        channel="line", external_id=f"U{user.pk:032d}", staff_user=user, is_following=True
+    )
+    return user
 
 
 class PushSwitchTests(TestCase):
@@ -69,8 +78,9 @@ class PushSwitchTests(TestCase):
 class DutyTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.ann = make_staff("ann", (Role.DEPARTMENT_SUPERVISOR, None))
-        cls.bob = make_staff("bob", (Role.DEPARTMENT_SUPERVISOR, None))
+        cls.ann = on_line(make_staff("ann", (Role.DEPARTMENT_SUPERVISOR, None)))
+        cls.bob = on_line(make_staff("bob", (Role.DEPARTMENT_SUPERVISOR, None)))
+        cls.cat = make_staff("cat", (Role.DEPARTMENT_SUPERVISOR, None))  # not on LINE
         cls.member = make_staff("member")
 
     monday = date(2026, 11, 9)
@@ -106,6 +116,18 @@ class DutyTests(TestCase):
         duty.reset(self.ann, self.monday)
         self.assertEqual(duty.on_duty(at(self.monday, 9)), [self.ann])
 
+    def test_only_a_department_admin_registered_on_line_is_on_duty(self):
+        with self.assertRaisesMessage(ValidationError, "ลงทะเบียน LINE"):
+            duty.add(self.ann, "07:30", "15:30", [self.cat.pk], weekday=0)
+        DutyShift.objects.create(weekday=0, start=time(7, 30), end=time(15, 30), user=self.cat)
+        self.assertEqual(duty.on_duty(at(self.monday, 9)), [])  # left LINE: nobody, so everyone
+        self.assertNotIn(self.cat, duty.receivers(at(self.monday, 9)))
+        client = Client()
+        client.force_login(self.ann)
+        page = client.get(reverse("admin-duty"))
+        self.assertContains(page, "ยังไม่ลงทะเบียน LINE จึงยังจัดเวรไม่ได้: Cat")
+        self.assertContains(page, "ไม่มี LINE ไม่นับเป็นเวร")
+
     def test_only_admins_and_department_admins_edit(self):
         with self.assertRaises(ValidationError):
             duty.add(self.ann, "07:30", "07:30", [self.ann.pk], weekday=0)
@@ -135,7 +157,7 @@ class NewCaseAlertTests(PickTestCase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
-        cls.ann = make_staff("ann-dept", (Role.DEPARTMENT_SUPERVISOR, None))
+        cls.ann = on_line(make_staff("ann-dept", (Role.DEPARTMENT_SUPERVISOR, None)))
         cls.head = make_staff("kcw-head", (Role.SUPERVISOR, "กคว."))
 
     def planned(self, case):

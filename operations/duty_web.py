@@ -25,12 +25,14 @@ def _name(user):
     return profile.display_name if profile else user.username
 
 
-def _chips(rows):
+def _chips(rows, linked=None):
     return [
         {
             "pk": s.pk,
             "time": f"{s.start:%H:%M}–{s.end:%H:%M}",
             "name": _name(s.user),
+            # a person who left LINE stays in the roster but is not counted on duty
+            "unlinked": linked is not None and s.user_id not in linked,
         }
         for s in sorted(rows, key=lambda s: (s.start, s.pk))
         if s.user_id  # a day's "nobody on duty" mark has no person
@@ -82,6 +84,8 @@ def admin_duty(request):
     weekly = {}
     for s in DutyShift.objects.filter(weekday__isnull=False).select_related("user__staff_profile"):
         weekly.setdefault(s.weekday, []).append(s)
+    admins = duty.admins()
+    linked = {u.pk for u in admins}
 
     def cell(d):
         rows = exceptions.get(d)
@@ -92,7 +96,7 @@ def admin_duty(request):
             "holiday": off.get(d, ""),
             "label": calendars.day_label(d),
             "exception": rows is not None,
-            "chips": _chips(rows if rows is not None else usual),
+            "chips": _chips(rows if rows is not None else usual, linked),
         }
 
     weeks = [[cell(first + timedelta(days=w * 7 + i)) for i in range(7)] for w in range(6)]
@@ -110,9 +114,11 @@ def admin_duty(request):
             "today": today,
             "picked": cell(picked) if picked else None,
             "week": [
-                (i, label, _chips(weekly.get(i, []))) for i, label in enumerate(duty.WEEKDAYS)
+                (i, label, _chips(weekly.get(i, []), linked))
+                for i, label in enumerate(duty.WEEKDAYS)
             ],
-            "admins": [(u.pk, _name(u)) for u in duty.admins()],
+            "admins": [(u.pk, _name(u)) for u in admins],
+            "unlinked": [_name(u) for u in duty.admins(linked=False)],
             "now_on": [_name(u) for u in duty.on_duty()],
             "default_start": duty.DEFAULT_START,
             "default_end": duty.DEFAULT_END,

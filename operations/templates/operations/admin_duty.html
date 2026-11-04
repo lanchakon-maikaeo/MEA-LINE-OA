@@ -15,7 +15,8 @@
   {% if now_on %}ตอนนี้อยู่เวร: {% for n in now_on %}<span class="chip">{{ n }}</span>{% endfor %}
   {% else %}ตอนนี้ไม่มีใครอยู่เวร การแจ้งเตือนถึงแอดมินฝ่ายทุกคน ({{ admins|length }} คน){% endif %}
 </p>
-{% if not admins %}<p class="notice">ยังไม่มีแอดมินฝ่าย ตั้งบทบาทแอดมินฝ่ายในบัญชีเจ้าหน้าที่ก่อน</p>{% endif %}
+{% if not admins %}<p class="notice">ยังไม่มีแอดมินฝ่ายที่ลงทะเบียน LINE ตั้งบทบาทแอดมินฝ่ายในบัญชีเจ้าหน้าที่ แล้วให้ลงทะเบียนเจ้าหน้าที่ใน LINE</p>{% endif %}
+{% if unlinked %}<p class="muted">ยังไม่ลงทะเบียน LINE จึงยังจัดเวรไม่ได้: {{ unlinked|join:", " }}</p>{% endif %}
 
 <div class="cal-nav">
   <a class="btn btn--sm btn--secondary" href="?month={{ previous|date:'Y-m-d' }}">← เดือนก่อน</a>
@@ -28,8 +29,8 @@
   <div class="mcal__row">
     {% for d in week %}
     <a class="mcal__day{% if not d.in_month %} is-out{% endif %}{% if d.date == today %} is-today{% endif %}{% if d.holiday %} is-holiday{% endif %}{% if picked and d.date == picked.date %} is-picked{% endif %}" href="?month={{ month|date:'Y-m-d' }}&day={{ d.date|date:'Y-m-d' }}#day" aria-label="{{ d.label }}{% if d.holiday %} วันหยุด {{ d.holiday }}{% endif %}{% if d.exception %} มีข้อยกเว้น{% endif %}">
-      <span class="mcal__num">{{ d.date.day }}{% if d.exception %} <span class="duty-mark" title="ข้อยกเว้น">ยกเว้น</span>{% endif %}</span>
-      {% for c in d.chips %}<span class="mcal__chip duty-chip">{{ c.time }} {{ c.name }}</span>{% endfor %}
+      <span class="mcal__top"><span class="mcal__num">{{ d.date.day }}</span>{% if d.exception %}<span class="duty-mark">ยกเว้น</span>{% endif %}</span>
+      {% for c in d.chips %}<span class="mcal__chip duty-chip{% if c.unlinked %} duty-chip--none{% endif %}">{{ c.time }} {{ c.name }}</span>{% endfor %}
       {% if d.exception and not d.chips %}<span class="mcal__chip duty-chip duty-chip--none">ไม่มีเวร</span>{% endif %}
     </a>
     {% endfor %}

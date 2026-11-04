@@ -5,6 +5,8 @@ Alerts meant for แอดมินฝ่าย go to whoever is on duty now; wi
 A week has rows for Monday to Sunday and one for วันหยุด (the days in the holiday calendar); a
 day may have exceptions on the month calendar, which replace that day's rows. A shift whose end
 is not after its start runs past midnight. แอดมินระบบ and แอดมินฝ่าย edit; each change is audited.
+Only a แอดมินฝ่าย whose web account is linked to a followed LINE account counts: the alerts
+are LINE pushes, so someone on duty without LINE would leave an alert with nobody.
 """
 
 from datetime import datetime, time, timedelta
@@ -15,7 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from operations import identity
-from operations.models import AuditEvent, DutyShift, Holiday, Role, RoleGrant
+from operations.models import AuditEvent, ChannelIdentity, DutyShift, Holiday, Role, RoleGrant
 
 DEFAULT_START, DEFAULT_END = time(7, 30), time(15, 30)  # Q22
 WEEKDAYS = ("จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์", "วันหยุด")
@@ -31,16 +33,18 @@ def _require(user):
         raise PermissionDenied
 
 
-def admins():
-    """Every active แอดมินฝ่าย, in name order."""
+def admins(linked=True):
+    """Active แอดมินฝ่าย in name order: those registered on LINE, or (linked=False) the rest."""
     ids = RoleGrant.objects.filter(
         role=Role.DEPARTMENT_SUPERVISOR, revoked_at__isnull=True
     ).values_list("user_id", flat=True)
+    lines = ChannelIdentity.objects.filter(
+        channel=ChannelIdentity.Channel.LINE, is_following=True, staff_user__isnull=False
+    ).values_list("staff_user_id", flat=True)
+    people = get_user_model().objects.filter(pk__in=ids, is_active=True)
+    people = people.filter(pk__in=lines) if linked else people.exclude(pk__in=lines)
     return list(
-        get_user_model()
-        .objects.filter(pk__in=ids, is_active=True)
-        .select_related("staff_profile")
-        .order_by("staff_profile__display_name", "username")
+        people.select_related("staff_profile").order_by("staff_profile__display_name", "username")
     )
 
 
@@ -95,7 +99,7 @@ def _people(user_ids):
     allowed = {u.pk: u for u in admins()}
     people = [allowed[int(i)] for i in user_ids if str(i).isdigit() and int(i) in allowed]
     if not people:
-        raise ValidationError("เลือกแอดมินฝ่ายอย่างน้อยหนึ่งคน")
+        raise ValidationError("เลือกแอดมินฝ่ายที่ลงทะเบียน LINE แล้วอย่างน้อยหนึ่งคน")
     return people
 
 
