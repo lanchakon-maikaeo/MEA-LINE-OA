@@ -345,6 +345,8 @@ def plan(kind, key, case, users, chosen=False, division_id=None):
     people = (
         [u for u in users if u.is_active] if chosen else _important_people(case, users, division_id)
     )
+    # ADR 0049: the assignee's alert carries the รับงาน step, unless staff work on the web only.
+    take = kind == "staff_assigned" and options.get(options.STAFF_LINE_ACTIONS) == "act"
     for user in people:
         line = ChannelIdentity.objects.filter(staff_user=user, is_following=True).first()
         if line is None:
@@ -352,9 +354,9 @@ def plan(kind, key, case, users, chosen=False, division_id=None):
         token = _token(line, "staff_case", {"case": str(case.pk)}, now)
         text = _text(kind, case, user)
         buttons = [(f"ดูเรื่อง {case.number}", token)]
-        if kind == "staff_assigned" and user.pk == case.assignee_id:
-            take = {"case": str(case.pk), "action": "accept_assignment"}
-            buttons.insert(0, ("รับงาน", _token(line, "staff_step", take, now)))
+        if take and user.pk == case.assignee_id:
+            step = {"case": str(case.pk), "action": "accept_assignment"}
+            buttons.insert(0, ("รับงาน", _token(line, "staff_step", step, now)))
         level = IMPORTANT[kind]
         delay = timedelta(0) if level == N.Level.CRITICAL else timedelta(minutes=5)
         try:

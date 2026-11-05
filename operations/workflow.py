@@ -44,6 +44,9 @@ PAUSED = frozenset({S.AWAITING_INFO, S.ON_HOLD})
 TERMINAL = frozenset({S.CLOSED, S.REJECTED, S.CANCELLED})
 OPEN = frozenset(set(S) - TERMINAL)
 
+# ADR 0049 Q9: all a ผู้รับผิดชอบ may do before pressing รับงาน.
+ACCEPTANCE_STEPS = frozenset({"accept_assignment", "return_assignment"})
+
 # Placeholder target: return to the status recorded when the case was paused.
 RESUME = "resume"
 ENABLED_MODULES = frozenset({"M02", "M06", "M07", "M08", "M09"})
@@ -124,15 +127,16 @@ ACTIONS = {
         ActionSpec(
             "assign", "มอบหมายผู้รับผิดชอบเรื่อง", "M02", _per_kind(lambda k, st: _same(_working(st)))
         ),
-        # ADR 0049: the ผู้รับผิดชอบ presses รับงาน, or gives the case back with a reason.
+        # ADR 0049: the ผู้รับผิดชอบ presses รับงาน, or gives the case back with a reason, in any
+        # open status: the system may name them while the case still waits for screening.
         ActionSpec(
-            "accept_assignment", "รับงาน", "M02", _per_kind(lambda k, st: _same(_working(st)))
+            "accept_assignment", "รับงาน", "M02", _per_kind(lambda k, st: _same([*st, *PAUSED]))
         ),
         ActionSpec(
             "return_assignment",
             "ขอคืนงาน",
             "M02",
-            _per_kind(lambda k, st: _same(_working(st))),
+            _per_kind(lambda k, st: _same([*st, *PAUSED])),
             reason_required=True,
         ),
         ActionSpec(

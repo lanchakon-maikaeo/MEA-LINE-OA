@@ -491,7 +491,7 @@ def available(user, case, st=None):
     hidden = set() if options.old_stock() else STOCK
     waiting = _awaits_me(st)
     for name, rule in RULES.items():
-        if name in hidden or (waiting and name not in ("accept_assignment", "return_assignment")):
+        if name in hidden or (waiting and name not in workflow.ACCEPTANCE_STEPS):
             continue
         spec = workflow.ACTIONS.get(name)
         if (

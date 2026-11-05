@@ -293,7 +293,11 @@ def _plan_decision(decision):
     if decision.action == "assign":
         return _plan_assigned(decision, key)
     if decision.action == "return_assignment":  # ADR 0049 Q9: the แอดมินกอง assigns again
-        heads = members(case.owner_division_id, [Role.SUPERVISOR])
+        heads = [
+            u
+            for u in members(case.owner_division_id, [Role.SUPERVISOR])
+            if u.pk != decision.actor_id
+        ]
         detail = f"เหตุผล: {decision.reason}"
         return plan("staff_assignment_returned", key, case, heads, detail, chosen=True)
     if decision.action == "request_handoff":

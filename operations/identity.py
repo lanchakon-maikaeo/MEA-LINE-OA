@@ -845,6 +845,7 @@ def reset_password(actor, user, reason):
 @transaction.atomic
 def set_password(actor, user, password, reason):
     """ADR 0049 Q13: the admin types the password; it works once, then the person sets their own."""
+    require_admin(actor)  # before the password rules, so only an admin learns what they say
     password_validation.validate_password(password, user)
     _set_password(actor, user, password, reason, "staff.password_set")
 
@@ -874,6 +875,17 @@ def update_account(actor, user, username, display_name, email, reason=""):
     display_name = " ".join(display_name.split())
     if not username or not display_name:
         raise ValidationError("ต้องมีชื่อผู้ใช้และชื่อที่แสดง")
+    for value, model, name, label in (
+        (username, User, "username", "ชื่อผู้ใช้"),
+        (display_name, StaffProfile, "display_name", "ชื่อที่แสดง"),
+        (email, User, "email", "อีเมล"),
+    ):
+        limit = model._meta.get_field(name).max_length
+        if len(value) > limit:
+            raise ValidationError(f"{label}ยาวได้ไม่เกิน {limit} ตัวอักษร")
+    if username.lower().startswith(LINE_ACCOUNT) and username != user.username:
+        # merge_accounts folds `line-employee-…` accounts into a web account (ADR 0044).
+        raise ValidationError(f"ชื่อผู้ใช้ที่ขึ้นต้นด้วย {LINE_ACCOUNT} สงวนไว้ให้บัญชีที่สร้างจาก LINE")
     try:
         User.username_validator(username)
     except ValidationError:

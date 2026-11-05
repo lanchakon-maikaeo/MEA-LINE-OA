@@ -430,7 +430,12 @@ def _notify(kind, order, users, key):
                     message=text_message(body, [(f"ดูงาน {order.number}", button)]),
                 )
             )
-        if staff_email.enabled() and user.email and options.push_on(kind, "email"):
+        if (
+            staff_email.enabled()
+            and user.email
+            and options.push_on(kind)
+            and options.push_on(kind, "email")
+        ):
             # LINE gets a button instead (ADR 0041); the e-mail keeps the web link.
             path = reverse("order-detail", args=[order.number])
             link = f"{body}\nเปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}{path}"

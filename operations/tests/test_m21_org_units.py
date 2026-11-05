@@ -166,6 +166,7 @@ class AssignTests(UnitTestCase):
         self.work(self.repair, self.kae)
         caps = self.work(self.caps, self.kae2)
         case = self.problem()
+        self.act(self.kae, case, "accept_assignment")  # ADR 0049: รับงาน before any other step
         self.act(self.kae, case, "set_section", {"section": str(self.caps.pk)})
         case.refresh_from_db()
         self.assertEqual((case.section, case.assignee), (self.caps, self.kae2))

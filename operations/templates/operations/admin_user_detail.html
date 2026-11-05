@@ -39,7 +39,7 @@
     <p class="helptext">ผู้ใช้ต้องเปลี่ยนรหัสเองเมื่อเข้าระบบครั้งถัดไป และทุกเครื่องที่เข้าอยู่จะออกจากระบบ</p>
     <p><label for="u-pw">รหัสผ่านใหม่</label> <input id="u-pw" name="password" type="password" required autocomplete="new-password"></p>
     <p><label for="u-pw2">พิมพ์อีกครั้ง</label> <input id="u-pw2" name="password2" type="password" required autocomplete="new-password"></p>
-    <p><label for="u-pw-reason">เหตุผล</label> <input id="u-pw-reason" name="reason" maxlength="500"></p>
+    <p><label for="u-pw-reason">เหตุผล</label> <input id="u-pw-reason" name="reason" maxlength="500" required></p>
     <button type="submit">ตั้งรหัสผ่าน</button></fieldset>
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">

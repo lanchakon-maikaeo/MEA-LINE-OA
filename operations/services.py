@@ -878,6 +878,11 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         targets = spec.targets(case.kind, case.status)
         if not targets:
             fail(ErrorCode.INVALID_TRANSITION, f"{action} is not allowed while {case.status}.")
+        # ADR 0049 Q9: the ผู้รับผิดชอบ takes the case or gives it back before any other step;
+        # checked here, not only in the offered buttons, so no channel skips it.
+        awaiting = case.awaits_acceptance and ctx.user is not None
+        if awaiting and case.assignee_id == ctx.user.pk and action not in workflow.ACCEPTANCE_STEPS:
+            fail(ErrorCode.FORBIDDEN, "กดรับงานเรื่องนี้ก่อน แล้วจึงทำขั้นอื่นได้")
         # One target, or (M07) several the handler chooses from by the line counters; RESUME is
         # resolved by the handler.
         target = next(iter(targets)) if len(targets) == 1 else targets

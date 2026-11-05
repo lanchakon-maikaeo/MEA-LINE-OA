@@ -205,9 +205,10 @@ EXPECTED_SOURCES = {
     "start_triage": {k: {"submitted"} for k in K},
     "claim": {k: WORKING[k] | PAUSED for k in K},
     "assign": {k: WORKING[k] | PAUSED for k in K},
-    # ADR 0049: the ผู้รับผิดชอบ takes the case or gives it back wherever someone may hold it.
-    "accept_assignment": {k: WORKING[k] | PAUSED for k in K},
-    "return_assignment": {k: WORKING[k] | PAUSED for k in K},
+    # ADR 0049: the ผู้รับผิดชอบ takes the case or gives it back wherever someone may hold it,
+    # including a new case the system gave out before screening.
+    "accept_assignment": {k: WORKING[k] | PAUSED | {"submitted"} for k in K},
+    "return_assignment": {k: WORKING[k] | PAUSED | {"submitted"} for k in K},
     "request_info": {k: WORKING[k] - {"awaiting_confirmation"} for k in K},
     "info_received": {k: {"awaiting_info"} for k in K},
     "hold": {k: set(WORKING[k]) for k in K},
