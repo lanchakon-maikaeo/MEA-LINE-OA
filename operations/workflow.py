@@ -44,6 +44,9 @@ PAUSED = frozenset({S.AWAITING_INFO, S.ON_HOLD})
 TERMINAL = frozenset({S.CLOSED, S.REJECTED, S.CANCELLED})
 OPEN = frozenset(set(S) - TERMINAL)
 
+# ADR 0049 Q9: all a ผู้รับผิดชอบ may do before pressing รับงาน.
+ACCEPTANCE_STEPS = frozenset({"accept_assignment", "return_assignment"})
+
 # Placeholder target: return to the status recorded when the case was paused.
 RESUME = "resume"
 ENABLED_MODULES = frozenset({"M02", "M06", "M07", "M08", "M09"})
@@ -123,6 +126,18 @@ ACTIONS = {
         ),
         ActionSpec(
             "assign", "มอบหมายผู้รับผิดชอบเรื่อง", "M02", _per_kind(lambda k, st: _same(_working(st)))
+        ),
+        # ADR 0049: the ผู้รับผิดชอบ presses รับงาน, or gives the case back with a reason, in any
+        # open status: the system may name them while the case still waits for screening.
+        ActionSpec(
+            "accept_assignment", "รับงาน", "M02", _per_kind(lambda k, st: _same([*st, *PAUSED]))
+        ),
+        ActionSpec(
+            "return_assignment",
+            "ขอคืนงาน",
+            "M02",
+            _per_kind(lambda k, st: _same([*st, *PAUSED])),
+            reason_required=True,
         ),
         ActionSpec(
             "request_info",
@@ -239,15 +254,15 @@ ACTIONS = {
         # Lines are decided one by one; the case waits until every line is decided (Q3).
         ActionSpec(
             "approve",
-            "รับเรื่อง",
+            "ดำเนินการ",
             "M07",
             {
                 K.WITHDRAWAL: {
                     S.AWAITING_APPROVAL: frozenset(
-                        {S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.REJECTED}
+                        {S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.IN_PROGRESS, S.REJECTED}
                     )
                 },
-                K.RETURN: {S.AWAITING_APPROVAL: frozenset({S.AWAITING_EXECUTION})},
+                K.RETURN: {S.AWAITING_APPROVAL: frozenset({S.AWAITING_EXECUTION, S.IN_PROGRESS})},
                 K.PROBLEM: {S.AWAITING_APPROVAL: frozenset({S.IN_PROGRESS})},
             },
         ),
@@ -261,7 +276,7 @@ ACTIONS = {
         # emergency problem report without waiting (Q24). No person performs these.
         ActionSpec(
             "skip_screening",
-            "ข้ามขั้นคัดกรอง เข้ารอกองรับเรื่อง",
+            "ข้ามขั้นคัดกรอง เข้ารอรับเรื่อง",
             "M06",
             _per_kind(
                 lambda k, _: {S.SUBMITTED: {S.AWAITING_APPROVAL}, S.TRIAGE: {S.AWAITING_APPROVAL}}

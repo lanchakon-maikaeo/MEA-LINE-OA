@@ -421,7 +421,7 @@ def parse_submission(payload, on_behalf):
             fail(ErrorCode.VALIDATION_ERROR, "reported_at is required for the fallback form.")
     related = ""
     if "related_case_number" in spec["optional"]:
-        related = _text(payload, "related_case_number", False, 16)
+        related = _text(payload, "related_case_number", False, 48)
     division_code = _text(payload, "division_code", False, 16)
     menu_label = _text(payload, "menu_label", False, 120)
     meters = ()

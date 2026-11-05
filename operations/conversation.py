@@ -22,6 +22,7 @@ from django.utils import timezone
 from operations import identity as identity_services
 from operations import (
     line_api,
+    numbering,
     problem_pick,
     requester_steps,
     services,
@@ -63,7 +64,6 @@ CONFIRM_TTL = timedelta(minutes=30)
 BUTTON_TTL = timedelta(days=7)
 MAX_QUICK = 13
 MAX_LINES = 50
-CASE_NUMBER = re.compile(r"^[WRP]\d{2}-\d{6}$")
 SUMMARY_HEAD = "สรุปเรื่อง:"
 CONFIRM_LABEL = "ยืนยันส่งเรื่อง"
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
@@ -178,6 +178,12 @@ MENU_WORDS.update(
         "เมนูเพิ่มเติม": "m=roles",
     }
 )
+# 3 พ.ย. 2569: the way back to the employee check for someone not verified as an employee yet,
+# from any menu: the button on the reply, or one of these words typed.
+EMPLOYEE_WORDS = {"ลงทะเบียนพนักงาน", "ยืนยันพนักงาน", "ยืนยันตัวตนพนักงาน", "ยืนยันตัวตน", "เป็นพนักงาน"}
+EMPLOYEE_BUTTON = ("ยืนยันตัวตนพนักงาน", "m=employee")
+EMPLOYEE_HINT = "ถ้าเป็นพนักงาน กฟน. กด 'ยืนยันตัวตนพนักงาน' แล้วพิมพ์รหัสพนักงาน"
+NOT_AN_ID = re.compile(r"\s|[ก-๏]")  # a space or a Thai letter (Thai digits are allowed)
 # What typed text reads as besides an answer to the bot's question (ADR 0012): a question to the
 # bot, or a new request. Question words that also end plain descriptions ("ไม่รู้เป็นอะไร",
 # "ทำไม") are left out on purpose; "ไหม้" (burnt) is not "ไหม".
@@ -224,7 +230,12 @@ def _postback(label, data, display=None):
 def text_message(text, quick=None):
     message = {"type": "text", "text": text[:5000]}
     if quick:
-        message["quickReply"] = {"items": [_postback(*button) for button in quick][:MAX_QUICK]}
+        message["quickReply"] = {
+            "items": [
+                {"type": "action", "action": b} if isinstance(b, dict) else _postback(*b)
+                for b in quick
+            ][:MAX_QUICK]
+        }
     return message
 
 
@@ -417,11 +428,15 @@ def _dispatch(inbox, event_override=None, allow_agent=True):
         turn.say("ช่องทางนี้ใช้ติดตามใบเบิก ใบส่งคืน และแจ้งปัญหาหรือข้อเสนอแนะถึง ฝอจ.")
     command = (_event_text(turn) or "").strip()
     external = identity.requester_id and identity.requester.is_external
-    if command in {"ลงทะเบียนพนักงาน", "ยืนยันพนักงาน"} and (
+    data = (turn.event.get("postback") or {}).get("data", "")
+    if (command in EMPLOYEE_WORDS or data == EMPLOYEE_BUTTON[1]) and (
         identity.status != ChannelIdentity.Status.ACTIVE or external
     ):
         _ask_employee_id(turn, {})
         return turn.replies, True
+    if data and not data.startswith("t=") and conversation.prompt.startswith("reg_"):
+        # 3 พ.ย. 2569: a menu tap leaves the registration step (its own buttons are tokens).
+        turn.set_prompt()
     if external and (
         conversation.prompt.startswith("reg_")
         or command in {"สถานะลงทะเบียน", "ยกเลิกคำขอ"}
@@ -485,7 +500,7 @@ LINK_CODE = re.compile(r"^เชื่อม\s*([0-9๐-๙]{6})$")
 def _staff_turn(turn):
     """เจ้าหน้าที่ใน LINE (ADR 0010): linking, the staff menu and staff buttons. Returns True when
     this event belonged to the staff side; a LINE that is also a requester keeps that side."""
-    from operations import employees, options, staff_line, staff_work, work_orders
+    from operations import employees, options, staff_line, staff_work
 
     text = _event_text(turn)
     command = " ".join(text.split()) if text is not None else ""
@@ -661,16 +676,10 @@ def _staff_turn(turn):
     if command in STAFF_WORDS:
         staff_line.menu(turn, user)
         return True
-    if command and CASE_NUMBER.fullmatch(command.upper()) and turn.identity.requester_id is None:
-        case = staff_line._case_for(user, number=command.upper())
-        if case is not None:
-            staff_work.case_detail(turn, user, case)
-            return True
-    if command and staff_work.ORDER_NUMBER.fullmatch(command.upper()):
-        order = work_orders.visible(user).filter(number=command.upper()).first()
-        if order is not None:
-            staff_work.order_detail(turn, user, order)
-            return True
+    # A requester's own cases are theirs to open (ADR 0045); staff open cases and orders here.
+    cases = turn.identity.requester_id is None
+    if command and staff_work.open_number(turn, user, command, cases=cases):
+        return True
     from operations import agent_chat
 
     if command and not prompt and agent_chat.queue_staff(turn, command):
@@ -772,6 +781,7 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
                 if value.get("division")
                 else None,
                 confirmed=value.get("confirm", False),
+                urgent=value.get("urgent"),
             )
         return True
     if action == "staff_ow_start":
@@ -789,7 +799,13 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
             staff_work.step_start(turn, user, case, value.get("action", ""))
         return True
     if action == "staff_step_pick" and prompt == "staff_step":
-        staff_work.step_answer(turn, user, value.get("v", ""))
+        if value.get("date"):  # LINE's date picker puts the day it chose in the event
+            picked = ((turn.event or {}).get("postback") or {}).get("params", {}).get("date", "")
+            if not picked:
+                return True
+            staff_work.step_answer(turn, user, picked)
+        else:
+            staff_work.step_answer(turn, user, value.get("v", ""))
         return True
     if action == "staff_step_go" and prompt == "staff_step":
         staff_work.step_go(turn, user)
@@ -948,8 +964,14 @@ def _registration(turn):
         turn.set_prompt()
         return _menu(turn, "ลงทะเบียนแล้ว สามารถแจ้งปัญหาหรือข้อเสนอแนะได้")
     if prompt == "reg_employee":
-        if text and text.strip():
-            return _employee_id(turn, data, text.strip()[:32])
+        typed = (text or "").strip()
+        if typed and (len(typed) > 32 or NOT_AN_ID.search(typed)):
+            # 3 พ.ย. 2569: a sentence typed here is asked again, not counted as a failed check.
+            turn.say("ข้อความนี้ไม่ใช่รหัสพนักงาน รหัสพนักงานพิมพ์ติดกัน ไม่มีเว้นวรรค")
+        elif typed:
+            from operations import employees
+
+            return _employee_id(turn, data, typed.translate(employees.THAI_DIGITS))
         return _ask_employee_id(turn, data)
     if prompt == "reg_code" and text and text.strip():
         return _check_code(turn, data, text)
@@ -974,8 +996,6 @@ def _registration(turn):
 
         turn.say(f"พิมพ์{employees.check_label()}เพื่อยืนยัน")
         return
-    if prompt == "reg_location":  # left at the location step removed 31 ต.ค. 2569: go on
-        return _registration_next(turn, data)
     if prompt == "reg_name" and text:
         text = " ".join(text.split())
         if not 2 <= len(text) <= 200:
@@ -987,7 +1007,7 @@ def _registration(turn):
         return _ask_district(turn, name, **{k: v for k, v in data.items() if k == "checked"})
     if problem:
         turn.say(problem)
-    lead = "ยังไม่ได้ลงทะเบียนเป็นผู้แจ้ง"
+    lead = "ยังไม่ได้ลงทะเบียน"
     if latest is not None and latest.status == RegistrationRequest.Status.REJECTED:
         lead = "คำขอก่อนหน้าไม่ได้รับการรับรอง"
         if latest.decision_reason:
@@ -1007,7 +1027,11 @@ def _employee_path_on():
 def _ask_kind(turn, lead):
     turn.set_prompt("reg_kind")
     turn.say(
-        lead + "\nเลือกประเภทผู้ใช้ กดปุ่มหรือพิมพ์ พนักงาน / อื่น ๆ / ไม่ระบุตัวตน",
+        f"{lead}\nเป็นพนักงาน กฟน. ไหม\n"
+        "• พนักงาน: กด 'พนักงาน กฟน.' แล้วพิมพ์รหัสพนักงาน\n"
+        "• ไม่ใช่พนักงาน: กด 'อื่น ๆ' แล้วพิมพ์ชื่อ\n"
+        "• ไม่บอกชื่อ: กด 'ไม่ระบุตัวตน'\n"
+        "สองแบบหลังแจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ",
         [
             turn.button("พนักงาน กฟน.", "reg_as", {"who": "employee"}),
             turn.button("อื่น ๆ", "reg_as", {"who": "other"}),
@@ -1400,7 +1424,7 @@ def _requester_turn(turn):
 
         return koj_chat.on_text(turn, text)
     in_chat = chat is not None and turn.conversation.prompt == "case_chat"
-    if text is not None and in_chat and not CASE_NUMBER.fullmatch((command or "").upper()):
+    if text is not None and in_chat and not numbering.read(command):
         return case_chat.on_text(turn, chat, text, message)
     if text is not None and turn.conversation.prompt in ("track_slip", "track_meter"):
         from operations import case_search  # local: case_search builds on this module
@@ -1423,8 +1447,8 @@ def _requester_turn(turn):
         ):
             return _equipment_named(turn, text)
         turn.set_prompt()
-    if command and CASE_NUMBER.fullmatch(command.upper()) and not _expects_text(draft):
-        return _case_detail(turn, command.upper())
+    if command and not _expects_text(draft) and _typed_number(turn, command):
+        return
     if text is not None and turn.conversation.prompt in ("", "info_reply", "info_target"):
         # "ตอบกลับในแชตนี้ได้เลย": an answer to staff who asked for more, never a new draft.
         waiting = _awaiting_info(turn, draft)
@@ -1475,7 +1499,7 @@ def _free_text(turn, draft, text, message=None):
     if draft is not None and text is not None:
         return _draft_text(turn, draft, text)
     if turn.conversation.prompt == "track" and text:
-        turn.say("ไม่พบเรื่องที่มีเลขนี้ในเรื่องของคุณ พิมพ์เลขเรื่อง เช่น W69-000001 หรือเลข SAP")
+        turn.say("ไม่พบเรื่องที่มีเลขนี้ในเรื่องของคุณ พิมพ์เลขเรื่อง เช่น กคว.69-000001 หรือเลข SAP")
         return
     hint = ""
     if text and draft is None and not turn.conversation.prompt and not _open_drafts(turn).exists():
@@ -1551,8 +1575,7 @@ def _opening_case(turn):
     data = (event.get("postback") or {}).get("data", "")
     if data.startswith("c="):
         return data[2:].upper()
-    text = ((event.get("message") or {}).get("text") or "").strip().upper()
-    return text if CASE_NUMBER.fullmatch(text) else ""
+    return numbering.read((event.get("message") or {}).get("text"))
 
 
 def _awaiting_info(turn, draft):
@@ -1918,14 +1941,11 @@ def _menu_item(turn, pk, go=False):
     # 23 Oct 2569: a tile that asks for the equipment first also takes problem reports, so a
     # person who may only report problems opens it too (the withdrawal choices stay closed).
     equipment_first = any(c.action == A.EQUIPMENT for c in choices)
-    if (
-        turn.requester
-        and (turn.requester.is_external or turn.requester.is_anonymous)
-        and action in {A.TOPIC, A.RETURN}
-        and not equipment_first
-    ):
-        return _menu(turn, "บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ พิมพ์ ลงทะเบียนพนักงาน เพื่อยืนยัน")
+    if _not_employee(turn) and action in {A.TOPIC, A.RETURN} and not equipment_first:
+        return _menu(turn, "เมนูนี้ใช้ได้เฉพาะพนักงาน กฟน. ที่ยืนยันตัวตนแล้ว")
     if action == A.REGISTER:
+        if _not_employee(turn):  # 3 พ.ย. 2569: the type is chosen; the employee check is left
+            return _ask_employee_id(turn, {})
         return _ask_kind(turn, "ลงทะเบียนหรือยืนยันตัวตน")
     if action == A.TOPIC:
         if not choices:
@@ -1954,7 +1974,7 @@ def _menu_item(turn, pk, go=False):
         if item.topic not in TYPED_GROUPS:
             return _menu(turn, "เมนูนี้ปิดแล้ว เลือกเมนูอื่นได้")
         if _problems_only(turn):
-            turn.say("บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ")
+            turn.say(_problems_note(turn))
             return _typed_draft(turn, item, K.PROBLEM)
         return _action_card(turn, item)
     if action == A.NEW:
@@ -2014,6 +2034,18 @@ def _problems_only(turn):
     )
 
 
+def _not_employee(turn):
+    """An outside (อื่น ๆ) or anonymous reporter: someone who may still prove to be an employee."""
+    return bool(turn.requester and (turn.requester.is_external or turn.requester.is_anonymous))
+
+
+def _problems_note(turn):
+    """Said before a problem draft opens. Text only: LINE shows the quick replies of the last
+    message, and that is the draft's question (3 พ.ย. 2569 Q8)."""
+    note = "บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ"
+    return f"{note}\nถ้าเป็นพนักงาน กฟน. พิมพ์ ยืนยันตัวตนพนักงาน" if _not_employee(turn) else note
+
+
 def _card(turn, title, prompt, buttons, quick=()):
     """A choice of the menu as one message with its choices as quick replies (25 Oct 2569 Q1:
     the owner wants the "ปุ่ม bubble" instead of the Flex card of 23 Oct): the title and question
@@ -2054,7 +2086,7 @@ def _equipment_named(turn, text):
         turn.say(f"ชื่ออุปกรณ์พิมพ์ไม่เกิน {limit} ตัวอักษร กรุณาพิมพ์ใหม่")
         return
     if _problems_only(turn):
-        turn.say("บัญชีนี้แจ้งได้เฉพาะปัญหา/ข้อเสนอแนะ")
+        turn.say(_problems_note(turn))
         return _typed_draft(turn, item, K.PROBLEM, name=name)
     return _action_card(turn, item, name=name)
 
@@ -2218,8 +2250,9 @@ def _menu(turn, text):
     buttons = []
     if turn.requester and _open_drafts(turn).exists():
         buttons.append(("ร่างที่ยังไม่ส่ง", "m=new"))
-    if turn.requester and turn.requester.is_external:
-        text += "\nพิมพ์ ลงทะเบียนพนักงาน หากต้องการยืนยันตัวตน"
+    if _not_employee(turn):
+        text += f"\n{EMPLOYEE_HINT}"
+        buttons.append(EMPLOYEE_BUTTON)
     turn.say(text, [*buttons, *[turn.button(label, "staff_menu") for label, _ in extra]])
 
 
@@ -2323,7 +2356,7 @@ def _track_prompt(turn):
 
 def _search_cases(turn):
     turn.set_prompt("track")
-    turn.say("พิมพ์เลขเรื่องที่ต้องการติดตาม เช่น W69-000001 หรือเลขใบเบิก/ใบส่งคืน SAP")
+    turn.say("พิมพ์เลขเรื่องที่ต้องการติดตาม เช่น กคว.69-000001 หรือเลขใบเบิก/ใบส่งคืน SAP")
 
 
 def _sap_cases(turn, text):
@@ -2334,7 +2367,8 @@ def _sap_cases(turn, text):
         return False
     found = list(
         services.visible_cases(_actor(turn))
-        .filter(sap_number__iexact=number)
+        .filter(Q(sap_number__iexact=number) | Q(extra_numbers__number__iexact=number))
+        .distinct()
         .order_by("-submitted_at")[:5]
     )
     if len(found) == 1:
@@ -2350,6 +2384,35 @@ def _sap_cases(turn, text):
     return False
 
 
+def _typed_number(turn, text):
+    """A typed เลขเรื่อง opens the case. One typed without its division code (69-000001)
+    opens the requester's only match, or offers the matches (ADR 0045). False when the text
+    is no number or none of the requester's cases end with it."""
+    number = numbering.read(text)
+    if number:
+        _case_detail(turn, number)
+        return True
+    tail = numbering.tail(text)
+    found = (
+        list(
+            services.visible_cases(_actor(turn))
+            .filter(number__endswith=tail)
+            .order_by("-submitted_at")[:MAX_QUICK]
+        )
+        if tail
+        else []
+    )
+    if len(found) == 1:
+        _case_detail(turn, found[0].number)
+    elif found:
+        turn.set_prompt()
+        turn.say(
+            f"เลข {tail} มี {len(found)} เรื่อง กดเลขเรื่องเพื่อดูรายละเอียด",
+            [(c.number, f"c={c.number}") for c in found],
+        )
+    return bool(found)
+
+
 def _case_detail(turn, number):
     case = services.visible_cases(_actor(turn)).filter(number=number).first()
     turn.set_prompt()
@@ -2360,6 +2423,9 @@ def _case_detail(turn, number):
     files = case.attachments.count()
     sap_label = typed_lines.sap_label(case.kind, case.topic, case.sap_kind)
     sap = f"\n{sap_label}: {case.sap_number}" if case.sap_number and sap_label else ""
+    more = list(case.extra_numbers.values_list("number", flat=True)) if sap_label else []
+    if more:  # ADR 0047: the numbers staff added from the details
+        sap += f"\nเลขเพิ่มเติม: {', '.join(more)}"
     if case.meters:
         sap += f"\nเครื่องวัดฯ: {usage_meters.describe(case.meters)}"
     bar, status = requester_steps.bar(case.status), _status_label(case)

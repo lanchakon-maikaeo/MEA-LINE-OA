@@ -26,6 +26,7 @@ from operations import (
     coordination,
     fulfilment,
     identity,
+    numbering,
     policy,
     problems,
     registry,
@@ -57,7 +58,6 @@ from operations.models import (
     ActionReceipt,
     Case,
     CaseLine,
-    CaseNumberCounter,
     ChildWork,
     Decision,
     District,
@@ -72,7 +72,6 @@ from operations.models import (
 
 User = get_user_model()
 S = Case.Status
-NUMBER_PREFIX = {Case.Kind.WITHDRAWAL: "W", Case.Kind.RETURN: "R", Case.Kind.PROBLEM: "P"}
 
 
 def _dependency_guard(command):
@@ -333,18 +332,6 @@ def _receipt(ctx, action, key, request_hash, case, result):
 # --- Submission ------------------------------------------------------------------------------
 
 
-def _next_number(kind, now):
-    """Gap-free per prefix and Buddhist-era year: the counter row is locked and rolls back."""
-    prefix, year_be = NUMBER_PREFIX[kind], timezone.localtime(now).year + 543
-    CaseNumberCounter.objects.bulk_create(
-        [CaseNumberCounter(prefix=prefix, year_be=year_be)], ignore_conflicts=True
-    )
-    counter = CaseNumberCounter.objects.select_for_update().get(prefix=prefix, year_be=year_be)
-    counter.last_value += 1
-    counter.save(update_fields=["last_value"])
-    return f"{prefix}{year_be % 100:02d}-{counter.last_value:06d}"
-
-
 def _build_lines(submission):
     codes = [line.item_code for line in submission.lines]
     items = {i.code: i for i in EquipmentType.objects.filter(code__in=codes, is_active=True)}
@@ -560,7 +547,7 @@ def submit_case(actor, *, idempotency_key, payload):
         _check_meters(submission, fields, intake)
         for owner, group in routes:
             case = Case.objects.create(
-                number=_next_number(submission.kind, now),
+                number=uuid.uuid4().hex,  # ADR 0045: the number waits for the owner division
                 kind=submission.kind,
                 requester=requester,
                 district=requester.district,
@@ -586,7 +573,8 @@ def submit_case(actor, *, idempotency_key, payload):
                 case.owner_division = owner or _proposed_owner(case, coordinator, now)
                 case.section = units.section_for(case)  # ADR 0031 Q14
                 case.status = approvals.first_status(case)  # ADR 0025
-                case.save(update_fields=["owner_division", "section", "status"])
+            case.number = numbering.issue(case.owner_division, now)
+            case.save(update_fields=["owner_division", "section", "status", "number"])
             cases.append(case)
         numbers = [c.number for c in cases]
         results = []
@@ -632,6 +620,7 @@ def _take(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "You are already responsible for this case.")
     case.assignee = ctx.user
     case.auto_assigned = False  # ADR 0031 Q24: a person chose; the system leaves it alone
+    case.accepted_by, case.accepted_at = ctx.user, timezone.now()  # ADR 0049 Q10
     case.status = target
     return {"assignee_id": ctx.user.pk}
 
@@ -697,7 +686,28 @@ def _assign(ctx, case, payload, reason, target):
     previous = case.assignee_id
     case.assignee = assignee
     case.auto_assigned = False  # ADR 0031 Q24
+    # ADR 0049: the new ผู้รับผิดชอบ presses รับงาน; choosing yourself is taking it.
+    mine = assignee.pk == ctx.user.pk
+    case.accepted_by, case.accepted_at = (assignee, timezone.now()) if mine else (None, None)
     return {"assignee_id": assignee.pk, "previous_assignee_id": previous}
+
+
+def _accept_assignment(ctx, case, payload, reason, target):
+    if ctx.user is None or case.assignee_id != ctx.user.pk:
+        fail(ErrorCode.FORBIDDEN, "เฉพาะผู้รับผิดชอบเรื่องนี้กดรับงานได้")
+    if case.accepted_by_id:
+        fail(ErrorCode.VALIDATION_ERROR, "รับงานเรื่องนี้แล้ว")
+    case.accepted_by, case.accepted_at = ctx.user, timezone.now()
+    return {}
+
+
+def _return_assignment(ctx, case, payload, reason, target):
+    """ADR 0049 Q9: before รับงาน the ผู้รับผิดชอบ may give the case back; it waits for an
+    assignment again."""
+    if ctx.user is None or case.assignee_id != ctx.user.pk or case.accepted_by_id:
+        fail(ErrorCode.FORBIDDEN, "ขอคืนงานได้เฉพาะผู้รับผิดชอบที่ยังไม่ได้รับงาน")
+    case.assignee, case.auto_assigned = None, False
+    return {"previous_assignee_id": ctx.user.pk}
 
 
 def _pause(ctx, case, payload, reason, target):
@@ -744,6 +754,8 @@ HANDLERS = {
     "start_triage": _take,
     "claim": _take,
     "assign": _assign,
+    "accept_assignment": _accept_assignment,
+    "return_assignment": _return_assignment,
     "request_info": _pause,
     "hold": _pause,
     "info_received": _unpause,
@@ -866,6 +878,11 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         targets = spec.targets(case.kind, case.status)
         if not targets:
             fail(ErrorCode.INVALID_TRANSITION, f"{action} is not allowed while {case.status}.")
+        # ADR 0049 Q9: the ผู้รับผิดชอบ takes the case or gives it back before any other step;
+        # checked here, not only in the offered buttons, so no channel skips it.
+        awaiting = case.awaits_acceptance and ctx.user is not None
+        if awaiting and case.assignee_id == ctx.user.pk and action not in workflow.ACCEPTANCE_STEPS:
+            fail(ErrorCode.FORBIDDEN, "กดรับงานเรื่องนี้ก่อน แล้วจึงทำขั้นอื่นได้")
         # One target, or (M07) several the handler chooses from by the line counters; RESUME is
         # resolved by the handler.
         target = next(iter(targets)) if len(targets) == 1 else targets

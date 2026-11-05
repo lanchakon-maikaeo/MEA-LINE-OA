@@ -10,7 +10,7 @@ from django.core import mail
 from django.test import override_settings
 from django.utils import timezone
 
-from operations import identity, options, staff_line, staff_work, work_orders
+from operations import conversation, identity, options, staff_line, staff_work, work_orders
 from operations.models import (
     ChannelIdentity,
     Division,
@@ -122,13 +122,18 @@ class WorkTabTests(StaffChatTestCase):
         push = NotificationDelivery.objects.get(
             recipient_user=self.head, channel=NotificationDelivery.Channel.LINE_PUSH
         )
-        self.assertIn(f"ดูงาน {order.number}", buttons([push.message]))
+        self.assertIn(conversation._fit(f"ดูงาน {order.number}", 20), buttons([push.message]))
         reply = self.tile(A.WORK_ORDERS)
         detail = self.press(ALICE, order.number, reply)
         self.assertIn("เช็กสต็อกหม้อแปลง", texts(detail))
-        self.press(ALICE, "รับทราบ", detail)
-        self.assertEqual(WorkOrder.objects.get().status, S.ACKNOWLEDGED)
-        self.press(ALICE, "ทำเสร็จแล้ว")
+        urgency = self.press(ALICE, "ดำเนินการ", detail)  # ADR 0044: ด่วน or ปกติ first
+        self.assertEqual(WorkOrder.objects.get().status, S.ASSIGNED)
+        self.press(ALICE, "ด่วน", urgency)
+        self.assertEqual(
+            (WorkOrder.objects.get().status, WorkOrder.objects.get().is_urgent),
+            (S.IN_PROGRESS, True),
+        )
+        self.press(ALICE, "เสร็จสิ้น")
         self.type(ALICE, "นับครบแล้ว 12 ลูก")
         order.refresh_from_db()
         self.assertEqual((order.status, order.result), (S.DONE, "นับครบแล้ว 12 ลูก"))

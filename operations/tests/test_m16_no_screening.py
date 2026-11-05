@@ -1,6 +1,6 @@
-"""ไม่มีขั้นคัดกรอง (ADR 0025): a new case of any kind starts in its owner division at once
-(ADR 0042 Q10); for cases filed earlier that still wait, whoever holds the division's
-approval authority approves a case without item rows as a whole and sets the level in the same
+"""ไม่มีขั้นคัดกรอง (ADR 0025): a new case of any kind waits at รอรับเรื่อง in its owner
+division and an emergency starts at once (ADR 0044, which undid ADR 0042 Q10); whoever may
+press ดำเนินการ takes a case without item rows as a whole and sets the level in the same
 form, or many at once from the queue; not approving needs a reason; cases already waiting for
 screening move to approval; queues show the newest first with emergencies on top."""
 
@@ -55,11 +55,11 @@ class NoScreeningTestCase(FlowTestCase):
 
 
 class StatusTests(NoScreeningTestCase):
-    def test_every_kind_starts_in_its_division_at_once(self):
+    def test_every_kind_waits_to_be_received_but_an_emergency(self):
         case = self.withdraw("4500100001")
-        self.assertEqual(case.status, "in_progress")
+        self.assertEqual(case.status, "awaiting_approval")
         quiet = self.problem("ขอสอบถามการลงโปรแกรมอ่านมิเตอร์")
-        self.assertEqual(quiet.status, "in_progress")
+        self.assertEqual(quiet.status, "awaiting_approval")
         hazard = self.problem("สายไฟขาดห้อย มีประกายไฟ")
         self.assertEqual(hazard.status, "in_progress")
         self.assertEqual(
@@ -138,12 +138,13 @@ class ApprovalTests(NoScreeningTestCase):
         client = Client()
         client.force_login(self.approver)
         page = client.get("/divisions/กคว./").content.decode()
-        self.assertIn("รับเรื่องที่ติ๊ก", page)
+        self.assertIn("ดำเนินการเรื่องที่ติ๊ก", page)
         self.assertLess(page.index(second.number), page.index(first.number))  # newest first
         client.post("/divisions/กคว./approve/", {"case": [first.number, second.number]})
         for case in (first, second):
             case.refresh_from_db()
-            self.assertEqual(case.status, "awaiting_execution")
+            self.assertEqual(case.status, "in_progress")  # ADR 0044: at ปกติ
+            self.assertEqual(policy.state_for(case).confirmed_priority, "P3")
 
 
 class QueueOrderTests(NoScreeningTestCase):

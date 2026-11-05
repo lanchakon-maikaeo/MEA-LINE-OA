@@ -23,7 +23,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 
-from operations import ai, answers, identity, pii
+from operations import ai, answers, identity, numbering, pii
 from operations.models import AIConfigVersion, ChatAnswer
 
 PROMPT_VERSION = "answer-v2"  # v2: full answer text (with hours), no particles
@@ -97,7 +97,6 @@ STYLE = (
     "ในฐานะผู้ช่วย",
 )
 FOREIGN = re.compile(r"[^฀-๿\x00-\x7f‘-”…☀-➿️\U0001f300-\U0001faff]")
-CASE_NUMBER = re.compile(r"[WRP]\d{2}-\d{6}")
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 PARTICLE = re.compile(r"\s*(?:นะ)?(?:ครับ|ค่ะ|คะ|จ้ะ|จ้า)\s*$")
 
@@ -350,7 +349,7 @@ def reply_problem(reply, sources, own_numbers):
         return f"รับปากเกินอำนาจ ('{found}')"
     if "http" in reply.lower() or "www." in reply.lower():
         return "มีลิงก์"
-    others = set(CASE_NUMBER.findall(reply)) - set(own_numbers)
+    others = set(numbering.find(reply)) - set(own_numbers)
     if others:
         return f"มีเลขเรื่องที่ไม่ใช่ของผู้แจ้ง ({', '.join(sorted(others))})"
     allowed = set(re.findall(r"\d+", sources.translate(THAI_DIGITS)))
@@ -555,7 +554,7 @@ def run_once(version, sets, rows):
             continue
         for row in cases:
             facts = row.get("facts", [])
-            numbers = sorted(set(CASE_NUMBER.findall("\n".join(facts))))
+            numbers = sorted(set(numbering.find("\n".join(facts))))
             started = time.monotonic()
             result = answer(row["text"], rows, facts, numbers, version, "write")
             latencies.append(int((time.monotonic() - started) * 1000))

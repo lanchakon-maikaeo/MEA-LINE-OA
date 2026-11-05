@@ -18,6 +18,7 @@ from unittest.mock import patch
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.test import Client, TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from operations import (
@@ -284,7 +285,7 @@ class OwnerDeskTests(OrgTestCase):
         self.assertEqual(
             (meter.owner_division.code, fuses.owner_division.code), ("กคว.", "กองอุปกรณ์ฯ")
         )
-        self.assertRedirects(response, f"/cases/{fuses.number}/")
+        self.assertRedirects(response, reverse("case-detail", args=[fuses.number]))
         self.assertContains(response, f"{meter.number} (กคว.), {fuses.number} (กองอุปกรณ์ฯ)")
 
     def resolved(self):

@@ -14,17 +14,15 @@ from django.conf import settings
 from django.urls import reverse
 from django.utils import timezone
 
-from operations import identity, options, queues, staff_line, work_orders, workflow
+from operations import identity, numbering, options, queues, staff_line, work_orders, workflow
 from operations.models import Case, LineMenuItem, WorkOrder
 
 A = LineMenuItem.Action
 T = LineMenuItem.Tab
 MAX_BUTTONS = 12
-CHAT_KINDS = {"text", "textarea", "select", "radio", "number"}
-ORDER_NUMBER = re.compile(r"^T\d{2}-\d{6}$")
+CHAT_KINDS = {"text", "textarea", "select", "radio", "number", "date"}
 # LINE buttons hold 20 characters; these steps get a shorter name in chat.
 SHORT_LABELS = {
-    "approve": "ยืนยันรับเรื่อง",
     "admin_send": "ส่งต่อให้กอง",
     "complete_triage": "คัดกรองเสร็จ",
     "set_priority": "ยืนยันระดับ",
@@ -210,23 +208,47 @@ def due(turn, user):
 
 def find_prompt(turn):
     turn.set_prompt("staff_find")
-    turn.say("พิมพ์เลขเรื่อง (เช่น W69-000123) เลขงานสั่ง (เช่น T69-000001) หรือเลขใบเบิก/ใบส่งคืน SAP")
+    turn.say("พิมพ์เลขเรื่องหรือเลขงานสั่ง (เช่น กคว.69-000123) หรือเลขใบเบิก/ใบส่งคืน SAP")
+
+
+def open_number(turn, user, text, cases=True):
+    """A typed เลขเรื่อง or เลขงานสั่ง opens its card. One typed without its division code
+    (69-000123) opens the only match in the user's work, or offers the matches (ADR 0045).
+    False when nothing matches."""
+    number, tail = numbering.read(text), numbering.tail(text)
+    if not (number or tail):
+        return False
+    orders = work_orders.visible(user)
+    found = staff_line._cases(user) if cases else Case.objects.none()
+    if number:
+        orders, found = orders.filter(number=number), found.filter(number=number)
+    else:
+        orders, found = orders.filter(number__endswith=tail), found.filter(number__endswith=tail)
+    rows = [*found.order_by("-submitted_at"), *orders.order_by("-created_at")][:MAX_BUTTONS]
+    if not rows:
+        return False
+    turn.set_prompt()
+    if len(rows) == 1:
+        show = case_detail if isinstance(rows[0], Case) else order_detail
+        show(turn, user, rows[0])
+        return True
+    buttons = [
+        turn.button(r.number, "staff_case", {"case": str(r.pk)})
+        if isinstance(r, Case)
+        else turn.button(r.number, "staff_order", {"order": str(r.pk)})
+        for r in rows
+    ]
+    turn.say(f"เลข {tail} มี {len(rows)} รายการ กดเลขเพื่อดูรายละเอียด", buttons)
+    return True
 
 
 def find(turn, user, text):
-    number = text.strip().upper()
-    if ORDER_NUMBER.fullmatch(number):
-        order = work_orders.visible(user).filter(number=number).first()
-        if order is not None:
-            turn.set_prompt()
-            return order_detail(turn, user, order)
-    else:
-        case = staff_line._case_for(user, number=number) or staff_line._case_for(
-            user, sap_number=text.strip()
-        )
-        if case is not None:
-            turn.set_prompt()
-            return case_detail(turn, user, case)
+    if open_number(turn, user, text):
+        return None
+    case = staff_line._case_for(user, sap_number=text.strip())
+    if case is not None:
+        turn.set_prompt()
+        return case_detail(turn, user, case)
     turn.say("ไม่พบเลขเรื่อง งานสั่ง หรือเลข SAP ในสิทธิ์ กรุณาระบุเลขใหม่หรือเลือกเมนูอื่น")
 
 
@@ -269,11 +291,11 @@ def today_summary(turn, user):
 
 def assign_prompt(turn):
     turn.set_prompt("staff_assign")
-    turn.say("โปรดระบุเลขเรื่องที่จะมอบหมายให้ผู้รับผิดชอบในกอง (เช่น P69-000045)")
+    turn.say("โปรดระบุเลขเรื่องที่จะมอบหมายให้ผู้รับผิดชอบในกอง (เช่น กคว.69-000045)")
 
 
 def assign_case(turn, user, text):
-    case = staff_line._case_for(user, number=text.strip().upper())
+    case = staff_line._case_for(user, number=numbering.read(text))
     if case is None:
         turn.say("ไม่พบเรื่องนี้ในกองที่รับผิดชอบ กรุณาระบุเลขเรื่องใหม่")
         return
@@ -325,9 +347,27 @@ def order_step(
     page=1,
     division=None,
     confirmed=False,
+    urgent=None,
 ):
-    """One step of a งานสั่ง; steps that need words, a person or a division ask first."""
+    """One step of a งานสั่ง; steps that need words, a person, a division or (ดำเนินการ, ADR
+    0044) ด่วน or ปกติ ask first."""
     from django.core.exceptions import PermissionDenied, ValidationError
+
+    if step == "start" and urgent is None:
+        if step not in dict(work_orders.steps_for(user, order)):
+            turn.say("ไม่สามารถดำเนินการขั้นตอนนี้ได้แล้ว อาจมีผู้ดำเนินการไปก่อน")
+            return
+        key = {"order": str(order.pk), "step": step}
+        turn.say(
+            f"ดำเนินการงาน {order.number} · เลือกความเร่งด่วน "
+            f"(ตอนนี้: {'ด่วน' if order.is_urgent else 'ปกติ'})",
+            [
+                turn.button("ด่วน", "staff_os", {**key, "urgent": "1"}),
+                turn.button("ปกติ", "staff_os", {**key, "urgent": "0"}),
+                turn.button("กลับไปที่งาน", "staff_order", {"order": str(order.pk)}),
+            ],
+        )
+        return
 
     if (
         step in ("done", "send_back", "cancel")
@@ -396,6 +436,7 @@ def order_step(
             result=text if step == "done" else "",
             assignee=person,
             division=division,
+            urgent=urgent == "1" if urgent is not None else None,
         )
     except PermissionDenied:
         turn.set_prompt()
@@ -486,9 +527,21 @@ class _Post(dict):
         return value if isinstance(value, list) else [value]
 
 
+def card_label(action):
+    """The step's name on the LINE card: the web's button, shortened to fit where needed."""
+    from operations import web_actions
+
+    return (
+        SHORT_LABELS.get(action)
+        or web_actions.BUTTON_LABELS.get(action)
+        or workflow.ACTIONS[action].label
+    )
+
+
 def _askable(form):
-    """The required fields the chat asks (optional notes stay for the web), or None when the
-    step needs its web form: item lines, splits, files, or a long list to choose from."""
+    """The fields the chat asks one by one, an optional one with ข้าม (ADR 0044), or None when
+    the step needs its web form: item lines, splits, files, ticks, or a long list to choose from.
+    A step with no required field is done in one tap without them (step_start)."""
     fields = []
     for f in form.fields:
         if f.ui_only or f.kind == "hidden":
@@ -497,10 +550,11 @@ def _askable(form):
             continue
         if f.kind not in CHAT_KINDS:
             return None
-        if f.kind in ("select", "radio") and len(f.choices) > 10 and f.required:
-            return None
-        if f.required:
-            fields.append(f)
+        if f.kind in ("select", "radio") and len(f.choices) > 10:
+            if f.required:
+                return None
+            continue
+        fields.append(f)
     return fields
 
 
@@ -538,42 +592,43 @@ def reporter(case):
 def case_detail(turn, user, case):
     """The case, who reported it, and every step this person may take in chat (ADR 0042 Q5:
     no web links; a step that needs a long form stays on the web)."""
-    from operations import web_actions
+    from operations import case_numbers, staff_inbox, typed_lines, units, web_actions
 
     level = case.triage.effective_priority if hasattr(case, "triage") else ""
+    who = ""
+    if case.assignee:
+        who = f" · ผู้รับผิดชอบ {work_orders.name_of(case.assignee)}"
+        if case.awaits_acceptance:
+            who += " · รอรับงาน"
+        elif case.accepted_at:  # ADR 0049
+            at = timezone.localtime(case.accepted_at)
+            who += f" · รับงานแล้ว {units.thai_date(at.date())} {at:%H:%M} น."
     rows = [
         f"เรื่อง {case.number} · {case.get_kind_display()}",
         *reporter(case),
         f"สถานะ: {case.get_status_display()} · ระดับ{queues.level_name(level)}",
-        f"กอง {case.owner_division.code}"
-        + (f" · ผู้รับผิดชอบ {work_orders.name_of(case.assignee)}" if case.assignee else ""),
+        f"กอง {case.owner_division.code}{who}",
+        # The kind of number the requester picked, and the ones staff added (ADR 0047).
+        *(f"{label}: {', '.join(numbers)}" for label, numbers in case_numbers.by_kind(case)),
     ]
-    from operations import typed_lines
-
-    if case.sap_number and typed_lines.sap_label(case.kind, case.topic):
-        rows.append(f"{typed_lines.sap_label(case.kind, case.topic)}: {case.sap_number}")
     for line in case.lines.select_related("item"):
         for row in line.details:
             unit = line.item.unit if typed_lines.is_shared(line.item) else ""
             rows.append(f"· {typed_lines.label_of(row['group'])} {typed_lines.describe(row, unit)}")
-    text = (case.description or case.purpose or case.return_reason or "").strip()
-    if text:
-        rows.append(text[:300])
+    rows.append(f"รายละเอียด: {staff_inbox.details(case)[:300] or 'ไม่ระบุ'}")
     buttons = []
     if options.get(options.STAFF_LINE_ACTIONS) == "act":
-        st = web_actions.situation(user, case)
-        offers = web_actions.available(user, case, st)
-        priority = {"approve": 0, "admin_send": 1, "assign": 2}
-        offers.sort(key=lambda offer: priority.get(offer.name, 3))
+        # ADR 0044: the web's สิ่งที่ทำได้, ดำเนินการ first (เริ่มคัดกรอง only while the
+        # screening option is on); a step needing its web form, or one that cannot be undone,
+        # opens the form in the browser when tapped.
+        offers = web_actions.available(user, case)
+        priority = {"accept_assignment": -1, "approve": 0, "admin_send": 1, "assign": 2}
+        offers.sort(key=lambda offer: (offer.irreversible, priority.get(offer.name, 3)))
         for offer in offers[:10]:
-            form = web_actions.build_form(offer.name, st, {})
-            if _askable(form) is not None:
-                label = SHORT_LABELS.get(offer.name, offer.label)
-                buttons.append(
-                    turn.button(label, "staff_step", {"case": str(case.pk), "action": offer.name})
-                )
-    from operations import staff_inbox
-
+            label = card_label(offer.name)
+            buttons.append(
+                turn.button(label, "staff_step", {"case": str(case.pk), "action": offer.name})
+            )
     staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับไปที่รายการ", "staff_inbox")])
 
 
@@ -585,15 +640,15 @@ def step_start(turn, user, case, action):
     if form is None:
         turn.say("ท่านไม่สามารถดำเนินการขั้นตอนนี้ในเรื่องนี้ได้")
         return
-    if _askable(form) is None:
+    if _askable(form) is None or offer.irreversible:
         path = reverse("case-action", args=[case.number, action])
         turn.say(f"{offer.label} ต้องดำเนินการผ่านแบบฟอร์มบนเว็บ", [("เปิดฟอร์ม", web(path))])
         return
     turn.set_prompt(
         "staff_step", case=str(case.pk), action=action, revision=case.revision, values={}
     )
-    if not _askable(form) and not offer.irreversible:
-        step_go(turn, user)  # nothing to ask and nothing to undo: one tap does it
+    if not any(f.required for f in _askable(form)):
+        step_go(turn, user)  # nothing it needs: one tap does it, notes stay for the web
         return
     _ask_next(turn, user)
 
@@ -621,7 +676,20 @@ def _ask_next(turn, user):
         skip = [turn.button("ยกเลิก", "staff_step_cancel")]
         if values:
             skip.insert(0, turn.button("ย้อนกลับ", "staff_step_back"))
-        if f.kind in ("select", "radio"):
+        if not f.required:
+            skip.insert(0, turn.button("ข้าม", "staff_step_pick", {"v": ""}))
+        if f.kind == "date":
+            today = timezone.localdate().isoformat()
+            picker = {
+                "type": "datetimepicker",
+                "label": "เลือกวันที่",
+                "data": turn.button("เลือกวันที่", "staff_step_pick", {"date": "1"})[1],
+                "mode": "date",
+                "initial": str(f.initial or "") or today,
+                "min": today,
+            }
+            turn.say(lead + "\nกดเลือกวันที่ หรือพิมพ์ วัน/เดือน/ปี", [picker, *skip])
+        elif f.kind in ("select", "radio"):
             choices = sorted(f.choices, key=lambda c: str(c[0]) != str(f.initial or ""))
             turn.say(
                 lead,
@@ -680,10 +748,23 @@ def step_answer(turn, user, value):
             if f.required and not value:
                 turn.say("โปรดระบุข้อมูลในข้อนี้")
                 return
+            if f.kind == "date" and value:
+                day = _iso_date(value) or _typed_date(value)
+                if day is None:
+                    turn.say("โปรดเลือกวันที่จากปุ่ม หรือพิมพ์ วัน/เดือน/ปี เช่น 15/11/2569")
+                    return
+                value = day.isoformat()
             values[f.name] = value[:2000]
             break
     turn.set_prompt("staff_step", **{**data, "values": values})
     _ask_next(turn, user)
+
+
+def _iso_date(text):
+    try:
+        return date.fromisoformat(text.strip())
+    except ValueError:
+        return None
 
 
 def step_go(turn, user):

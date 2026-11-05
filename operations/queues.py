@@ -11,7 +11,17 @@ from datetime import date, timedelta
 from django.db.models import Count, Exists, OuterRef, Q
 from django.utils import timezone
 
-from operations import fulfilment, identity, policy, returns, services, work_orders, workflow
+from operations import (
+    fulfilment,
+    identity,
+    policy,
+    returns,
+    roster,
+    services,
+    units,
+    work_orders,
+    workflow,
+)
 from operations.contracts import Actor
 from operations.models import (
     AckClock,
@@ -29,6 +39,7 @@ from operations.models import (
 
 S = Case.Status
 K = Case.Kind
+ORDER_KIND = "order"  # the kind filter's งานสั่ง: work orders only (user, 4 Nov 2569)
 WAITING_DISTRICT = frozenset({S.AWAITING_INFO, S.AWAITING_CONFIRMATION})
 CLOSED_DAYS = 30
 PAGE_SIZE = 50
@@ -153,6 +164,7 @@ class Filters:
     district: str = ""
     section: str = ""  # a แผนก pk, or "none" for cases without one (real structure Q12)
     overdue: bool = False
+    today: bool = False  # filed today (3 Nov 2569 Q5)
     preset: bool = False
 
     @property
@@ -164,6 +176,7 @@ class Filters:
             or self.district
             or self.section
             or self.overdue
+            or self.today
         )
 
     def query(self, **extra):
@@ -174,6 +187,7 @@ class Filters:
             "district": self.district,
             "section": self.section,
             "overdue": "1" if self.overdue else "",
+            "today": "1" if self.today else "",
             "preset": "1" if self.preset else "",
             **extra,
         }
@@ -182,7 +196,7 @@ class Filters:
 
 def read_filters(params, roles):
     """Filters from the query string; a lone duty role presets them on a bare visit."""
-    keys = ("kind", "priority", "status", "district", "section", "overdue", "tab", "page")
+    keys = ("kind", "priority", "status", "district", "section", "overdue", "today", "tab", "page")
     if not any(params.get(k) for k in keys) and not params.get("clear"):
         duties = set(roles) - {Role.STAFF, Role.SUPERVISOR}
         if len(roles) == 1 and len(duties) == 1:
@@ -192,7 +206,7 @@ def read_filters(params, roles):
     priority = params.get("priority", "")
     section = params.get("section") or ""
     filters = Filters(
-        kind=params.get("kind", "") if params.get("kind") in K.values else "",
+        kind=params.get("kind", "") if params.get("kind") in [*K.values, ORDER_KIND] else "",
         priority=priority if priority in [*Priority.values, "none"] else "",
         status=params.get("status", "")
         if params.get("status") in [*S.values, *WorkOrder.Status.values]
@@ -200,6 +214,7 @@ def read_filters(params, roles):
         district=params.get("district", "") if (params.get("district") or "").isdigit() else "",
         section=section if section == "none" or section.isdigit() else "",
         overdue=params.get("overdue") == "1",
+        today=params.get("today") == "1",
     )
     preset = ROLE_PRESETS.get(next(iter(roles))) if len(roles) == 1 else None
     if params.get("preset") == "1" and preset:
@@ -210,6 +225,8 @@ def read_filters(params, roles):
 
 
 def apply_filters(cases, filters):
+    if filters.kind == ORDER_KIND:
+        return cases.none()
     if filters.kind:
         cases = cases.filter(kind=filters.kind)
     if filters.status:
@@ -240,7 +257,13 @@ def apply_filters(cases, filters):
                 )
             )
         )
+    if filters.today:
+        cases = cases.filter(submitted_at__gte=start_of_today())
     return cases
+
+
+def start_of_today():
+    return timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def order_condition(tab, division, user, now, scope=None):
@@ -271,7 +294,7 @@ def order_queryset(user, tab, division, now, filters=None):
         if filters.district or filters.section not in ("", "none"):
             return orders.none()
         if not filters.preset:
-            if filters.kind:
+            if filters.kind not in ("", ORDER_KIND):
                 return orders.none()
             if filters.status:
                 orders = orders.filter(status=filters.status)
@@ -283,6 +306,8 @@ def order_queryset(user, tab, division, now, filters=None):
             return orders.none()
         if filters.overdue:
             orders = orders.filter(status__in=WorkOrder.OPEN, due_on__lt=timezone.localdate(now))
+        if filters.today:
+            orders = orders.filter(created_at__gte=start_of_today())
     return orders.select_related("division", "assignee__staff_profile", "issued_by__staff_profile")
 
 
@@ -299,6 +324,14 @@ def counts(user, division, now, keys, admin_all=False):
         key: base.filter(tab_condition(key, division, user, now, admin_all)).count() + orders[key]
         for key in keys
     }
+
+
+def host_by_kind(user, division, now):
+    """[(kind, n)] of the งานของกอง tab, งานสั่ง last: the one-division overview's pie."""
+    cases = visible(user).filter(tab_condition("host", division, user, now)).order_by()
+    by_kind = dict(cases.values_list("kind").annotate(n=Count("pk")))
+    orders = order_queryset(user, "host", division, now).count()
+    return [(kind, by_kind.get(kind, 0)) for kind in K.values] + [(ORDER_KIND, orders)]
 
 
 def overdue_count(user, division, now, admin_all=False):
@@ -324,12 +357,41 @@ class Row:
     flags: list = field(default_factory=list)
     handoff: dict | None = None
     order: WorkOrder | None = None
+    request: dict | None = None  # what the requester picked (3 Nov 2569 Q3)
+    reporter: str = ""
 
 
 def level_of(triage):
     if triage is None:
         return ""
     return triage.effective_priority or triage.suggested_priority
+
+
+def picks(case):
+    """The requester's picks as the case page shows them, or the menu path they came from."""
+    from operations import casepage  # local: casepage builds on this module
+
+    request = casepage.line_request(case, [])
+    if request is not None:
+        return request
+    tile, *rest = (case.menu_label or "").split(" · ")
+    return {"tile": tile, "picks": rest} if tile else None
+
+
+def reporter(case, names=None):
+    """ชื่อ (รหัส) · ตำแหน่ง · ฝ่าย กอง (3 Nov 2569 Q4); never who an anonymous reporter is.
+    names: roster.unit_names(), the ชื่อย่อ of units outside the system."""
+    requester = case.requester
+    if requester.is_anonymous:
+        return "ผู้แจ้งไม่ระบุตัวตน"
+    employee = requester.employee
+    if employee is None:
+        return requester.display_name
+    name = requester.display_name
+    if employee.employee_id not in name:
+        name = f"{name} ({employee.employee_id})"
+    unit = " ".join(x for x in roster.employee_path(employee, names)[:2] if x != units.NA)
+    return " · ".join(x for x in (name, employee.position, unit) if x)
 
 
 def summary_text(case):
@@ -446,6 +508,7 @@ def build_rows(cases, now):
         [c.pk for c in cases if c.status == Case.Status.AWAITING_INFO]
     )
     calendar = calendar_now()
+    names = roster.unit_names()
     rows = []
     for case in cases:
         triage = triages.get(case.pk)
@@ -461,6 +524,8 @@ def build_rows(cases, now):
             # Past due now (a later policy may have moved a reminded deadline).
             overdue=not case.is_example and any(c.due_at <= now for c in running),
             escalated=any(c.escalated_at for c in open_clocks),
+            request=picks(case),
+            reporter=reporter(case, names),
         )
         recommendation = triage.current_recommendation if triage else None
         if case.is_example:
@@ -564,7 +629,11 @@ def page(cases, tab, number, orders=(), sort="newest", shown=0):
 
 def prefetch(cases):
     return cases.select_related(
-        "district", "owner_division", "section", "assignee__staff_profile"
+        "district",
+        "owner_division",
+        "section",
+        "assignee__staff_profile",
+        "requester__employee__division",
     ).prefetch_related("lines__item")
 
 

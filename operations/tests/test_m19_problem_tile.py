@@ -92,7 +92,7 @@ class ChatTests(PickTestCase):
         case = Case.objects.get()
         self.assertEqual(
             (case.owner_division.code, case.topic, case.held_by_admin, case.status),
-            ("กคว.", "general", False, "in_progress"),
+            ("กคว.", "general", False, "awaiting_approval"),  # ADR 0044: รอรับเรื่อง
         )
         self.assertIn(
             f"ส่งเรื่อง {case.number} ถึงกองเครื่องวัดหน่วยไฟฟ้าแล้ว ดูความคืบหน้าได้ที่ เรื่องของฉัน",
@@ -143,17 +143,19 @@ class ChatTests(PickTestCase):
         )
         with patch("operations.staff_line.plan") as plan:
             staff_email.plan_for_event(event)
-        kind, key, planned, users, chosen = plan.call_args.args
+        calls = [c.args for c in plan.call_args_list if c.args[0] == "staff_admin_waiting"]
+        kind, key, planned, users, chosen, _ = calls[0]
         self.assertEqual((kind, planned, chosen), ("staff_admin_waiting", case, True))
         self.assertIn(self.boss, users)
         self.assertNotIn(quiet, users)
-        mine, _ = self.file("กองเครื่องวัดหน่วยไฟฟ้า")  # a division was picked: no alert
+        mine, _ = self.file("กองเครื่องวัดหน่วยไฟฟ้า")  # a division was picked: no admin alert
         event = OutboxEvent.objects.get(
             event_type=orchestration.EVENT_CASE_SUBMITTED, subject_id=str(mine.pk)
         )
         with patch("operations.staff_line.plan") as plan:
             staff_email.plan_for_event(event)
-        self.assertFalse(plan.called)
+        kinds = {c.args[0] for c in plan.call_args_list}
+        self.assertNotIn("staff_admin_waiting", kinds)  # ADR 0048: staff_new_case instead
 
     def test_the_admin_alert_shows_the_start_of_the_text_masked(self):
         from operations import staff_line
@@ -191,7 +193,7 @@ class AdminTests(PickTestCase):
         case.refresh_from_db()
         self.assertEqual(
             (case.held_by_admin, case.owner_division.code, case.status),
-            (False, "กคว.", "in_progress"),  # ADR 0042 Q10
+            (False, "กคว.", "awaiting_approval"),  # ADR 0044: รอรับเรื่อง
         )
 
     def test_an_admin_answers_a_held_case_and_says_it_is_a_suggestion(self):

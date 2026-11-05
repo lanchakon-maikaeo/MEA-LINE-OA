@@ -5,10 +5,10 @@ for แอดมินฝ่าย (every กอง, or one) and แอดมิ
 once (Q10), so there is no รอรับเรื่อง tab; the few cases still waiting show under กำลังดำเนินการ."""
 
 from django.core.paginator import Paginator
-from django.db.models import CharField, F, Value
+from django.db.models import CharField, F, Q, Value
 from django.db.models.functions import Cast
 
-from operations import identity, queues, work_orders, workflow
+from operations import case_numbers, identity, queues, work_orders, workflow
 from operations.models import Division, WorkOrder
 
 FILTERS = {"active": "กำลังดำเนินการ", "unassigned": "รอมอบหมาย", "all": "ทั้งหมด"}
@@ -33,8 +33,10 @@ def sources(user, status="active", division=None):
     if status == "active":
         cases = cases.filter(status__in=workflow.OPEN)
         orders = orders.filter(status__in=WorkOrder.OPEN)
-    elif status == "unassigned":
-        cases = cases.filter(status__in=workflow.OPEN, assignee__isnull=True)
+    elif status == "unassigned":  # ADR 0049: and the ones whose ผู้รับผิดชอบ has not taken them
+        cases = cases.filter(status__in=workflow.OPEN).filter(
+            Q(assignee__isnull=True) | Q(accepted_by__isnull=True)
+        )
         orders = orders.filter(status__in=WorkOrder.OPEN, assignee__isnull=True)
     return cases, orders
 
@@ -60,6 +62,7 @@ def page_for(user, status="active", division=None, page=1):
     case_rows = (
         cases.filter(pk__in=[r["ref"] for r in entries if r["source"] == "case"])
         .select_related("owner_division", "assignee__staff_profile")
+        .prefetch_related("extra_numbers")
         .in_bulk()
     )
     order_rows = (
@@ -79,14 +82,28 @@ def _tap(label, data, shown=None):
     return {"type": "postback", "label": label[:40], "data": data, "displayText": shown or label}
 
 
+def details(case):
+    """What the requester wrote, or "" when they skipped it with "-"."""
+    text = (case.description or case.purpose or case.return_reason or "").strip()
+    return "" if text == "-" else text
+
+
+def title(case):
+    """The number in the kind the requester picked ("+N" more), else the details, else the kind
+    (grill 5 Nov 2569 Q4)."""
+    numbers = case_numbers.by_kind(case)
+    if numbers:
+        label, first = numbers[0][0], numbers[0][1][0]
+        more = sum(len(n) for _, n in numbers) - 1
+        return f"{label} {first}" + (f" +{more}" if more else "")
+    return details(case) or case.get_kind_display()
+
+
 def row(turn, source, item):
     """One line: number, title, status; the whole line opens the item."""
     is_case = source == "case"
-    title = (
-        (item.description or item.purpose or item.return_reason or item.get_kind_display())
-        if is_case
-        else item.title
-    )
+    text = title(item) if is_case else item.title
+    status = "รอรับงาน" if is_case and item.awaits_acceptance else item.get_status_display()
     _, data = turn.button(
         item.number, "staff_case" if is_case else "staff_order", {source: str(item.pk)}
     )
@@ -99,10 +116,10 @@ def row(turn, source, item):
         "action": _tap(item.number, data),
         "contents": [
             {"type": "text", "text": item.number, "size": "xs", "color": GREEN, "flex": 0},
-            {"type": "text", "text": " ".join(title.split())[:60], "size": "sm", "flex": 5},
+            {"type": "text", "text": " ".join(text.split())[:60], "size": "sm", "flex": 5},
             {
                 "type": "text",
-                "text": item.get_status_display(),
+                "text": status,
                 "size": "xxs",
                 "color": "#888888",
                 "flex": 2,
@@ -213,7 +230,7 @@ def detail(turn, rows, buttons):
             {
                 "type": "button",
                 "height": "sm",
-                "style": "primary" if label == "ยืนยันรับเรื่อง" else "link",
+                "style": "primary" if label == "ดำเนินการ" else "link",
                 "color": "#16804A",
                 "action": action,
             }

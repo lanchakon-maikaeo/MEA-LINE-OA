@@ -129,7 +129,7 @@ class DepartmentTransferTests(WebTestCase):
         director = make_staff("department", (Role.DEPARTMENT_SUPERVISOR, None))
         for supervisor in (director, self.supervisor):
             order = work_orders.create(director, "ตรวจสอบข้อมูล", self.mtr, assignee=self.meter)
-            order = work_orders.act(supervisor, order, "acknowledge")
-            self.assertEqual(order.status, WorkOrder.Status.ACKNOWLEDGED)
+            order = work_orders.act(supervisor, order, "start")
+            self.assertEqual(order.status, WorkOrder.Status.IN_PROGRESS)
             self.assertEqual(order.acknowledged_by, supervisor)
             self.assertEqual(order.assignee, self.meter)

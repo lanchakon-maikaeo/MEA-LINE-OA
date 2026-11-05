@@ -13,6 +13,7 @@ number, and admins change the fields, units and the division switch (StaffAndAdm
 import uuid
 
 from django.test import Client, override_settings
+from django.urls import reverse
 
 from operations import line_menu_catalog, options, services
 from operations.contracts import Actor, CommandFailed
@@ -557,7 +558,7 @@ class StaffAndAdminTests(KcwTestCase):
         self.assertContains(page, "4500012345")
         self.assertRedirects(
             self.client.get("/cases/?q=4500012345"),
-            f"/cases/{case.number}/",
+            reverse("case-detail", args=[case.number]),
             fetch_redirect_response=False,
         )
         response = self.client.post(

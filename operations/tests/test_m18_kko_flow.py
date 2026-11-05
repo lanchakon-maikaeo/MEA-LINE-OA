@@ -13,7 +13,8 @@ from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
 
-from operations import line_flows, sheet_lookup, typed_input, warehouse
+from operations import line_flows, services, sheet_lookup, typed_input, warehouse
+from operations.contracts import Actor
 from operations.models import (
     Appointment,
     AuditEvent,
@@ -74,7 +75,17 @@ class KkoTestCase(FlowTestCase):
             self.type(user, number)  # 30 ต.ค. 2569: the summary comes right after the number
         self.press(user, "ยืนยันส่งเรื่อง")
         case = Case.objects.order_by("-submitted_at").first()
-        self.assertEqual(case.status, Case.Status.IN_PROGRESS)  # ADR 0042 Q10: no acceptance step
+        self.assertEqual(case.status, Case.Status.AWAITING_APPROVAL)  # ADR 0044: รอรับเรื่อง
+        services.perform_form_action(  # ดำเนินการ, at ปกติ
+            Actor.staff(self.kko_approver),
+            case.pk,
+            "approve",
+            expected_revision=case.revision,
+            idempotency_key=f"start-{case.pk}",
+            payload={"priority": "P3"},
+        )
+        case.refresh_from_db()
+        self.assertEqual(case.status, Case.Status.IN_PROGRESS)
         return case
 
 
@@ -301,6 +312,37 @@ class RepairSheetTests(KkoTestCase):
         self.assertIn("ไม่พบ คีม ที่หมายเลข NC001 ในเขตคุณ แสดงทุกเครื่องมือที่ใช้หมายเลขนี้", said)
         self.assertIn("NC001 (CLIP ON VOLT AMMETER 600A.600V.): ซ่อมเสร็จ รอส่งคืน", said)
         self.assertIn("NC001 (HV.DETECTOR (NOISY TESTER)): กำลังซ่อม", said)
+
+    def test_a_near_miss_offers_the_askers_closest_rows(self):
+        # ADR 0046: NC8O1 (a letter O) is not NC801; the closest rows of ฟข. come as buttons.
+        self.assertEqual(sheet_lookup.code_key("nc_801\u200b"), "NC801")
+        self.assertTrue(sheet_lookup._slip("NC810", "NC801"))  # neighbours swapped
+        self.assertTrue(sheet_lookup._slip("NC8O1", "NC801"))  # a letter O for the zero
+        self.assertFalse(sheet_lookup._slip("NC811", "NC801"))
+        self.assertEqual(sheet_lookup.name_key("ทํางาน"), sheet_lookup.name_key("ทำงาน"))
+        self.load()
+        reply = self.ask("safety belt, NC8O1")
+        said = texts(reply)
+        self.assertIn("ไม่พบหมายเลขอุปกรณ์ NC8O1", said)
+        self.assertIn("กดหมายเลขที่ใกล้เคียงด้านล่างเพื่อค้นอีกครั้ง", said)
+        near = [
+            i["action"]
+            for m in reply
+            for i in m.get("quickReply", {}).get("items", [])
+            if i["action"]["type"] == "message"
+        ]
+        self.assertEqual(
+            near[0], {"type": "message", "label": "NC801 SAFETY BELT", "text": "SAFETY BELT, NC801"}
+        )
+        self.assertLessEqual(len(near), sheet_lookup.NEAR_K)
+        # NC001 is two tools: one button with the number alone, whose answer lists both
+        self.assertIn({"type": "message", "label": "NC001", "text": "NC001"}, near)
+        self.assertNotIn("XY900", str(near))  # another ฟข.'s row
+        self.assertIn("ส่งให้ คม. ตรวจ", list(buttons(reply)))
+        said = texts(self.type(ALICE, near[0]["text"]))
+        self.assertIn("หมายเลขอุปกรณ์ NC801 (SAFETY BELT): ซ่อมเสร็จ ส่งคืน ฟข. แล้ว", said)
+        reply = self.type(ALICE, "ZZ9999")
+        self.assertNotIn("ใกล้เคียง", texts(reply))
 
     def test_dates_and_names(self):
         self.assertEqual(sheet_lookup.iso_date("17/11/2566"), "2023-11-17")

@@ -225,12 +225,12 @@ class CanvasFlowTests(KojTestCase):
         self.type(BOB, "ไม่ระบุตัวตน")
         drafts_before = ConversationDraft.objects.count()
         reply = self.open(BOB)
-        self.assertIn("ยืนยันตัวตนพนักงานก่อนติดตามงาน กอจ.", texts(reply))
+        self.assertIn("ติดตามงาน กอจ. ใช้ได้เฉพาะพนักงาน", texts(reply))
         self.assertNotIn("หม้อแปลง", buttons(reply))
         self.assertEqual(ConversationDraft.objects.count(), drafts_before)
         # A typed or old postback cannot reach the lookup either.
         reply = self.say(self.postback(BOB, "m=koj&do=equipment&key=transformer"))
-        self.assertIn("ยืนยันตัวตนพนักงานก่อนติดตามงาน กอจ.", texts(reply))
+        self.assertIn("ติดตามงาน กอจ. ใช้ได้เฉพาะพนักงาน", texts(reply))
 
     def test_a_problem_only_account_cannot_read_koj_external_documents(self):
         self.publish()
@@ -588,6 +588,22 @@ class SourceTests(KojTestCase):
                 koj_sheets.fetch(self.source)
             with self.assertRaisesMessage(ValidationError, "ยังไม่มีไฟล์กุญแจ Google"):
                 koj_sheets.read_columns("synthetic-spreadsheet-id-0001", "ข้อมูลจำลอง", ["J"])
+
+    def test_google_reader_with_an_unreadable_key_says_so(self):
+        from operations import koj_sheets
+
+        self.source.provider = "google"
+        self.source.spreadsheet_id = "synthetic-spreadsheet-id-0001"
+        self.source.sheet_name = "ข้อมูลจำลอง"
+        with (
+            patch(
+                "google.oauth2.service_account.Credentials.from_service_account_file",
+                side_effect=PermissionError,
+            ),
+            patch.dict("os.environ", {"KOJ_GOOGLE_CREDENTIALS_FILE": "/synthetic/key.json"}),
+        ):
+            with self.assertRaisesMessage(ValidationError, "อ่านไฟล์กุญแจ Google ไม่ได้"):
+                koj_sheets.fetch(self.source)
 
     def test_invalid_snapshot_is_atomic_and_keeps_previous_data(self):
         before = list(KojRecord.objects.values_list("row_key", "status"))

@@ -317,9 +317,19 @@ def _set(case, person, why):
         return False
     case.assignee = person
     case.auto_assigned = person is not None
+    case.accepted_by = case.accepted_at = None  # ADR 0049: the new person presses รับงาน
     case.revision += 1
     case.updated_at = timezone.now()
-    case.save(update_fields=["assignee", "auto_assigned", "revision", "updated_at"])
+    case.save(
+        update_fields=[
+            "assignee",
+            "auto_assigned",
+            "accepted_by",
+            "accepted_at",
+            "revision",
+            "updated_at",
+        ]
+    )
     services.record_system(
         case,
         "assign",

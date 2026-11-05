@@ -1,5 +1,6 @@
 """Clickable LINE navigation and locally configurable material groups (18 Oct 2026)."""
 
+import re
 from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -24,6 +25,8 @@ from operations.tests import test_m13_staff_chat as staff_tests
 from operations.tests.test_m02_cases import make_staff, withdrawal
 from operations.tests.test_m03_line import ALICE, BOB, buttons, texts
 
+NUMBER = re.compile(r"\d{2}-\d{6}$")  # a case or order number button (ADR 0045)
+
 
 @override_settings(LINE_TYPED_SLIPS=True)  # ADR 0032: the earlier typed intake
 class TrackingTests(menu_tests.MenuTestCase):
@@ -39,9 +42,9 @@ class TrackingTests(menu_tests.MenuTestCase):
         other = self.create_case(self.approve(BOB), "other")
         first = self.type(ALICE, "เรื่องของฉัน")
         self.assertIn("6 เรื่อง", texts(first))
-        self.assertEqual(sum(label.startswith("W") for label in buttons(first)), 5)
+        self.assertEqual(sum(bool(NUMBER.search(label)) for label in buttons(first)), 5)
         second = self.press(ALICE, "ถัดไป")
-        self.assertEqual(sum(label.startswith("W") for label in buttons(second)), 1)
+        self.assertEqual(sum(bool(NUMBER.search(label)) for label in buttons(second)), 1)
         self.assertNotIn(other.number, texts(first) + texts(second))
         closed = self.press(ALICE, "เรื่องที่จบแล้ว")
         self.assertIn(mine[0].number, buttons(closed))
@@ -67,7 +70,7 @@ class TrackingTests(menu_tests.MenuTestCase):
                     case.pk,
                     action,
                     expected_revision=case.revision,
-                    idempotency_key=f"info-{case.number}-{action}",
+                    idempotency_key=f"info-{case.pk}-{action}",
                     payload=payload,
                 )
         self.say(self.postback(ALICE, f"c={first.number}"))
@@ -294,9 +297,9 @@ class StaffButtonsTests(staff_tests.StaffChatTestCase):
         ]
         self.type(ALICE, "งานของกอง")
         first = self.press(ALICE, "งานที่ฉันสั่ง")
-        self.assertEqual(sum(label.startswith("T") for label in buttons(first)), 5)
+        self.assertEqual(sum(bool(NUMBER.search(label)) for label in buttons(first)), 5)
         second = self.press(ALICE, "ถัดไป")
-        self.assertEqual(sum(label.startswith("T") for label in buttons(second)), 2)
+        self.assertEqual(sum(bool(NUMBER.search(label)) for label in buttons(second)), 2)
         self.assertIn(orders[-1].number, texts(first) + texts(second))
         menu = self.say(self.postback(ALICE, "m=roles"))
         self.press(ALICE, "สั่งงาน", menu)
@@ -323,7 +326,7 @@ class StaffButtonsTests(staff_tests.StaffChatTestCase):
         people = [make_staff(f"member-{n}", (Role.STAFF, self.kae.code)) for n in range(7)]
         order = work_orders.create(self.director, "ตรวจอุปกรณ์", self.kae)
         self.type(ALICE, order.number)
-        reply = self.press(ALICE, "มอบให้คนในกอง")
+        reply = self.press(ALICE, "มอบหมายผู้รับผิดชอบ")
         label = f"{people[-1].pk} {work_orders.name_of(people[-1])}"[:20]
         while label not in buttons(reply):
             reply = self.press(ALICE, "ถัดไป")

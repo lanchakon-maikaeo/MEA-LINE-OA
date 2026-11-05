@@ -148,16 +148,16 @@ class RegistrationTests(PeopleTestCase):
         page.force_login(self.admin)
         self.assertNotContains(page.get("/console/admin/options/"), "ตำแหน่งของผู้ลงทะเบียน")
 
-    def test_a_registration_left_at_the_old_location_step_goes_on(self):
+    def test_a_registration_left_at_the_old_location_step_starts_again(self):
+        # 3 พ.ย. 2569: the location step is gone; whoever was left there chooses the type again.
         self.register(BOB)
         Conversation.objects.filter(identity__external_id=BOB).update(
             prompt="reg_location",
             prompt_data={"name": "ผู้ลงทะเบียน ทดสอบ", "district": "D01", "checked": True},
         )
         reply = self.say(self.location(BOB))
-        self.assertIn("ส่งคำขอให้แอดมินตรวจแล้ว", texts(reply))
-        registration = RegistrationRequest.objects.get(identity__external_id=BOB)
-        self.assertEqual((registration.status, registration.latitude), ("pending", None))
+        self.assertIn("เป็นพนักงาน กฟน. ไหม", texts(reply))
+        self.assertFalse(RegistrationRequest.objects.filter(identity__external_id=BOB).exists())
 
 
 class UnverifiedTagTests(PeopleTestCase):
@@ -290,12 +290,14 @@ class StaffLineTests(PeopleTestCase):
         self.assertNotIn("เริ่มคัดกรอง", buttons(detail))
         options.change(None, options.STAFF_LINE_ACTIONS, "act", "ทำใน LINE")  # the default
         detail = self.press(ALICE, case.number, reply)
-        self.press(ALICE, "เริ่มคัดกรอง", detail)  # nothing to ask: one tap
+        self.press(ALICE, "เริ่มคัดกรอง", detail)  # nothing it needs: one tap
         self.assertEqual(Case.objects.get(pk=case.pk).status, "triage")
         detail = self.press(ALICE, case.number, reply)
         self.press(ALICE, "ขอข้อมูลเพิ่ม", detail)
-        self.type(ALICE, "ขอรูปหม้อแปลง")
-        self.press(ALICE, "บันทึก")
+        asked = self.type(ALICE, "ขอรูปหม้อแปลง")
+        while "ข้าม" in buttons(asked):  # an optional field (ADR 0044)
+            asked = self.press(ALICE, "ข้าม", asked)
+        self.press(ALICE, "บันทึก", asked)
         self.assertEqual(Case.objects.get(pk=case.pk).status, "awaiting_info")
 
     def test_a_requester_line_can_also_be_staff(self):

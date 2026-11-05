@@ -24,12 +24,13 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from operations import (
     admin_nav,
     approvals,
+    case_numbers,
     casepage,
     charts,
     employees,
     identity,
+    numbering,
     options,
-    policy,
     queues,
     registry,
     reports,
@@ -47,7 +48,6 @@ from operations import (
 from operations.contracts import Actor, CommandFailed, ErrorCode
 from operations.models import (
     VIEWER_ROLES,
-    AuthorityGrant,
     Case,
     District,
     Division,
@@ -62,6 +62,8 @@ REFERENCE_URLS = {"pii", "routing-words", "duties", "knowledge"}
 ALL_QUEUE = "*"  # the remembered queue is ทุกกอง (an admin's every-division queue)
 ALL_QUEUE_URLS = {"queue-all", "queue-all-export"}
 # ADR 0030 Q12: ปัญหาและข้อเสนอแนะ is a tab of its own after คิวงาน, for admins only.
+# The queue's kind filter and the one-division pie: the LINE short names, then งานสั่ง.
+KINDS = [*units.KIND_SHORT.items(), (queues.ORDER_KIND, "งานสั่ง")]
 PROBLEM_URLS = {"admin-problems", "admin-problems-csv", "admin-problems-send"}
 
 
@@ -124,6 +126,8 @@ def navigation(request):
             "registry": registry.may_open(user),
             # ADR 0033: a ผู้ดูแลชีท who is not an admin reaches the sheets from the top menu.
             "sheets": not scope.is_admin and sheet_access.may_open(user),
+            # ADR 0048: แอดมินฝ่าย keep their ตารางเวร themselves.
+            "duty": not scope.is_admin and scope.is_department_supervisor,
             "admin": admin_menu,
             "admin_waiting": _admin_waiting() if scope.sees_department else 0,
         }
@@ -216,9 +220,35 @@ def home(request):
         open_count=open_count,
         new_link=link("new", "window"),
         ended_link=link("ended", "window"),
+        # Each division/centre's share of the open work, above สถานะ (user, 3 Nov 2569); one
+        # division's share by kind, each kind in its own colour (user, 4 Nov 2569).
+        share=_kind_share(request.user, context["chosen"], now)
+        if context["chosen"]
+        else charts.pie(
+            [
+                (
+                    c["division"].code,
+                    c["open"],
+                    reverse("division-detail", args=[c["division"].code]) + "?tab=host",
+                )
+                for c in cards
+            ],
+            other_href=reverse("queue-all") if scope.sees_department else "",
+        ),
         today=now,
     )
     return render(request, "operations/console.html", context)
+
+
+def _kind_share(user, division, now):
+    names = dict(KINDS)
+    queue = reverse("division-detail", args=[division.code])
+    return charts.pie(
+        [
+            (names[kind], n, f"{queue}?{urlencode({'tab': 'host', 'kind': kind})}", f"c{i + 1}")
+            for i, (kind, n) in enumerate(queues.host_by_kind(user, division, now))
+        ]
+    )
 
 
 def _attention(user, scope, report, link):
@@ -281,19 +311,18 @@ def _queue(request, division, admin_all=False):
         "tabs": [(key, queues.TAB_LABELS[key], tally[key]) for key in keys],
         "filters": filters,
         "base_query": urlencode(filters.query()),
+        "today_query": urlencode(filters.query(today="" if filters.today else "1")),
         "rows": queues.build_rows(items, now),
         "pager": pager,
         "shown": shown,
         "now": now,
-        "kinds": list(units.KIND_SHORT.items()),
+        "kinds": KINDS,
         "levels": [(p, queues.level_name(p)) for p in Priority.values] + [("none", "ยังไม่ตั้งระดับ")],
         "sort": sort,
         "sorts": queues.SORTS.items(),
         "may_approve": bool(division)
         and approvals.no_screening()
-        and policy.has_authority(
-            request.user, AuthorityGrant.Activity.WITHDRAWAL_APPROVAL, division.pk
-        ),
+        and approvals.may_start(request.user, division.pk),
         "statuses": [
             *Case.Status.choices,
             *(
@@ -480,6 +509,7 @@ def case_detail(request, number):
             "hints": web_actions.hints(st, offers),
             "can_upload": uploads.may_upload(st),
             "panel": warehouse_web.case_panel(request.user, case),
+            "tracking_numbers": case_numbers.panel(request.user, case),
             # Zero trust (31 ต.ค. 2569 Q2): a typed name is not checked against the roster.
             "unverified": not (case.requester.is_anonymous or case.requester.is_internal)
             and employees.identity_state(case.requester) != "verified",
@@ -610,6 +640,31 @@ def case_action(request, number, action):
 
 
 @login_required
+@require_POST
+def case_number_edit(request, number):
+    """ADR 0047: add the numbers the requester typed in the details, or remove one with a reason."""
+    case = _visible_case(request, number)
+    try:
+        if request.POST.get("remove"):
+            case_numbers.remove(
+                request.user, case, int(request.POST["remove"]), request.POST.get("reason")
+            )
+            messages.success(request, "ลบเลขแล้ว")
+        else:
+            kind = request.POST.get("kind", "")
+            typed = case_numbers.split(request.POST.get("typed", ""), kind)
+            typed += request.POST.getlist("found")
+            added = case_numbers.add(request.user, case, kind, typed)
+            messages.success(request, "เพิ่มเลข " + ", ".join(n for n, _ in added) + " แล้ว")
+            for n, others in added:
+                if others:
+                    messages.warning(request, f"เลข {n} ซ้ำกับเรื่อง {', '.join(others)} ที่ยังไม่ปิด")
+    except (ValidationError, PermissionDenied, ValueError) as exc:
+        messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์ทำรายการนี้"])))
+    return redirect(f"{reverse('case-detail', args=[case.number])}#s-numbers")
+
+
+@login_required
 @require_safe
 def case_revision(request, number):
     """Round 1 Q15: polled every 30 s; a banner (never a reload) when the case changed."""
@@ -631,18 +686,23 @@ def case_search(request):
     scope = _scope(request)
     if not scope.may_read:
         raise Http404
-    query = (request.GET.get("q") or "").strip().upper()[:20]
+    typed = (request.GET.get("q") or "").strip()[:48]
+    # ADR 0045: กคว69-142 reads as กคว.69-000142, and 69-142 finds every number ending so.
+    query = numbering.read(typed) or numbering.tail(typed) or typed.upper()
     rows = []
     order = work_orders.visible(request.user).filter(number=query).first() if query else None
-    if order is not None:  # งานสั่ง numbers (T69-000001) open the order
+    if order is not None:  # a งานสั่ง number opens the order
         return redirect("order-detail", number=order.number)
     if query:
         # 23 Oct 2569: a SAP slip number finds its case too.
         visible = queues.visible(request.user)
-        cases = visible.filter(Q(number__icontains=query) | Q(sap_number__iexact=query))
+        # ADR 0047: a number staff added finds the case too.
+        cited = Q(sap_number__iexact=typed) | Q(extra_numbers__number__iexact=typed)
+        cases = visible.filter(Q(number__icontains=query) | cited).distinct()
         exact = cases.filter(number=query).first()
-        if exact is None and visible.filter(sap_number__iexact=query).count() == 1:
-            exact = visible.get(sap_number__iexact=query)
+        citing = visible.filter(cited).distinct()
+        if exact is None and citing.count() == 1:
+            exact = citing.get()
         if exact is not None:
             return redirect("case-detail", number=exact.number)
         orders = (
@@ -1008,7 +1068,8 @@ def case_new(request):
             if value:
                 payload[name] = value
         if (data.get("related_case_number") or "").strip():
-            payload["related_case_number"] = data["related_case_number"].strip().upper()
+            typed = data["related_case_number"]
+            payload["related_case_number"] = numbering.read(typed) or typed.strip().upper()
         if kind == Case.Kind.PROBLEM and data.get("topic"):
             payload["topic"] = data["topic"]
         lines = []

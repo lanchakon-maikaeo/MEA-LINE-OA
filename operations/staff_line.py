@@ -24,6 +24,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
+from django.urls import reverse
 from django.utils import timezone
 
 from operations import identity, options, orchestration, queues, units
@@ -55,6 +56,9 @@ IMPORTANT = {
     "staff_dispute": N.Level.NORMAL,
     "staff_reopen": N.Level.NORMAL,
     "staff_admin_waiting": N.Level.NORMAL,  # ADR 0030
+    "staff_new_case": N.Level.NORMAL,  # ADR 0048
+    "staff_assigned": N.Level.NORMAL,  # ADR 0049
+    "staff_assignment_returned": N.Level.NORMAL,  # ADR 0049
 }
 # Alerts that may show what the requester typed, masked like text sent to the AI (owner, 29 Oct
 # 2569: an exception to the lock screen rule for the admins' waiting cases only).
@@ -312,9 +316,13 @@ def admin_receivers():
     )
 
 
-def _text(kind, case):
+def _text(kind, case, user=None):
     from operations.staff_email import SUBJECTS
 
+    if kind == "staff_assigned" and case.assignee_id:  # ADR 0049 Q5: worded for the ผู้รับผิดชอบ
+        mine = user is not None and user.pk == case.assignee_id
+        head = "มีเรื่องมอบหมายให้คุณ" if mine else f"มอบหมายเรื่องให้ {units.display(case.assignee)}"
+        return f"{head}\nเรื่อง {case.number} · กอง {case.owner_label}"
     if kind in SHOWS_TYPED:
         from operations import pii  # local: pii reads the database for names
 
@@ -337,12 +345,18 @@ def plan(kind, key, case, users, chosen=False, division_id=None):
     people = (
         [u for u in users if u.is_active] if chosen else _important_people(case, users, division_id)
     )
+    # ADR 0049: the assignee's alert carries the รับงาน step, unless staff work on the web only.
+    take = kind == "staff_assigned" and options.get(options.STAFF_LINE_ACTIONS) == "act"
     for user in people:
         line = ChannelIdentity.objects.filter(staff_user=user, is_following=True).first()
         if line is None:
             continue
         token = _token(line, "staff_case", {"case": str(case.pk)}, now)
-        text = _text(kind, case)
+        text = _text(kind, case, user)
+        buttons = [(f"ดูเรื่อง {case.number}", token)]
+        if take and user.pk == case.assignee_id:
+            step = {"case": str(case.pk), "action": "accept_assignment"}
+            buttons.insert(0, ("รับงาน", _token(line, "staff_step", step, now)))
         level = IMPORTANT[kind]
         delay = timedelta(0) if level == N.Level.CRITICAL else timedelta(minutes=5)
         try:
@@ -355,7 +369,7 @@ def plan(kind, key, case, users, chosen=False, division_id=None):
                     recipient_user=user,
                     case=case,
                     text=text,
-                    message=text_message(text, [(f"ดูเรื่อง {case.number}", token)]),
+                    message=text_message(text, buttons),
                     source_event=uuid.uuid5(NAMESPACE, f"{key}:{user.pk}"),
                     send_after=now + delay,
                 )
@@ -453,16 +467,21 @@ def budget_allows(level, now):
 # --- The staff side of a LINE chat ---------------------------------------------------------------
 
 
-def _case_for(user, case_id=None, number=None, sap_number=None):
+def _cases(user):
     from operations import services
     from operations.contracts import Actor
 
-    cases = services.visible_cases(Actor.staff(user))
+    return services.visible_cases(Actor.staff(user))
+
+
+def _case_for(user, case_id=None, number=None, sap_number=None):
+    cases = _cases(user)
     if case_id:
         return cases.filter(pk=case_id).first()
     if sap_number:
         # The newest case citing this SAP slip (an older one may be closed already).
-        return cases.filter(sap_number__iexact=sap_number).order_by("-submitted_at").first()
+        cited = Q(sap_number__iexact=sap_number) | Q(extra_numbers__number__iexact=sap_number)
+        return cases.filter(cited).order_by("-submitted_at").first()
     return cases.filter(number=number).first()
 
 
@@ -493,7 +512,7 @@ def case_detail(turn, user, case):
                 buttons.append(
                     turn.button(label, "staff_act", {"case": str(case.pk), "action": action})
                 )
-    url = f"{settings.STAFF_WEB_BASE_URL.rstrip('/')}/cases/{case.number}/"
+    url = f"{settings.STAFF_WEB_BASE_URL.rstrip('/')}{reverse('case-detail', args=[case.number])}"
     buttons.append(("เปิดในเว็บ", url))
     turn.say("\n".join(lines), buttons)
 

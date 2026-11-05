@@ -51,12 +51,14 @@ from operations import (
     identity,
     line,
     line_menu_catalog,
+    numbering,
     options,
     policy,
     problem_pick,
     services,
     staff_email,
     staff_line,
+    staff_work,
 )
 from operations.contracts import Actor, CommandFailed
 from operations.models import (
@@ -195,7 +197,7 @@ def validate_graph(doc):
         raise ValidationError(problems)
 
 
-SENT = re.compile(r"ส่งเรื่อง [WRP]\d{2}-\d{6}")
+SENT = re.compile(r"ส่งเรื่อง \S+\d{2}-\d{6}")  # ADR 0045: กคว.69-000001 or W69-000001
 
 
 def graph_step(step):
@@ -1629,7 +1631,7 @@ def i_press_staff_case(d):
     if not d.goal.dual:
         d.flags["viewed"] = d.target.number
         return d.text("press_staff_case", d.target.number)
-    other = next((label for label in offered if conversation.CASE_NUMBER.match(label)), None)
+    other = next((label for label in offered if numbering.read(label)), None)
     if other is None:
         raise Finding("staff", "งานของกองไม่มีเรื่องให้กดดู")
     d.flags["viewed"] = other
@@ -1659,7 +1661,8 @@ def i_press_staff_action(d):
     if "acted" in d.flags:
         return None
     offered = d.buttons(d.last)
-    for action, label in staff_line.LINE_ACTIONS.items():
+    for action in staff_line.LINE_ACTIONS:
+        label = staff_work.card_label(action)
         if label in offered and action != "request_info":
             d.flags["acted"] = action
             return d.press("press_staff_action", label)

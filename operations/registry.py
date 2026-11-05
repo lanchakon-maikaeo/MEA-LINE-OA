@@ -23,7 +23,7 @@ from django.db import connection, transaction
 from django.db.models import Exists, Max, OuterRef, Q
 from django.utils import timezone
 
-from operations import attachments, identity, inventory, options, policy
+from operations import attachments, identity, inventory, numbering, options, policy
 from operations.contracts import ErrorCode, fail
 from operations.models import (
     Attachment,
@@ -44,7 +44,6 @@ MAX_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 50_000
 MAX_EVIDENCE = 5
 UNRECONCILED_DAYS = 7  # Q11: older than this and in no export yet
-CASE_NUMBER = re.compile(r"\b([WRP]\d{2}-\d{6})\b")
 # Actions whose fact cites a registry document in manual_reference mode (Q13).
 EVIDENCE_ACTIONS = frozenset(
     {
@@ -514,6 +513,7 @@ def import_documents(actor, name, data, exported_at, period_from, period_to, now
     headers, rows = read_table(data, name)
     columns = map_columns(headers, RegistryImport.Kind.DOCUMENTS, row)
     lines, problems, ignored = [], [], 0
+    known = numbering.codes()
     for number, values in enumerate(rows, start=2):
 
         def get(field, values=values):
@@ -536,7 +536,7 @@ def import_documents(actor, name, data, exported_at, period_from, period_to, now
         if kind == L.OTHER:
             ignored += 1
         reference = get("reference")
-        match = CASE_NUMBER.search(reference.upper())
+        cited = numbering.find(reference, known)[:1]  # ADR 0045: new and old shapes
         lines.append(
             RegistryDocumentLine(
                 document_number=document[:64],
@@ -548,7 +548,7 @@ def import_documents(actor, name, data, exported_at, period_from, period_to, now
                 serials=_serials(get("serial")),
                 posting_date=posting,
                 reference=reference[:200],
-                case_number=match.group(1) if match else "",
+                case_number=cited[0] if cited else "",
                 reversed_document=get("reversed_document")[:64],
                 plant=get("plant")[:16],
                 storage_location=get("storage_location")[:16],

@@ -21,7 +21,7 @@
   <dl class="facts">
     <div><dt>กองเจ้าภาพ</dt><dd>{% if case.held_by_admin %}แอดมิน <span class="muted">(รอแอดมินตอบหรือส่งให้กอง)</span>{% else %}{{ case.owner_division.code }} {{ case.owner_division.name }}{% endif %}{% if case.section %}<br><span class="muted">{{ case.section.name }}</span>{% endif %}</dd></div>
     {% if case.topic == "usage" %}<div><dt>หัวข้อ</dt><dd>การใช้ไฟฟ้า{% if page.usage_private %} <span class="muted">(ไม่ส่งให้ AI)</span>{% endif %}</dd></div>{% endif %}
-    <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}<br>{{ case.assignee|unit_path }}{% if case.auto_assigned %} <span class="tag tag--outline">ระบบมอบตามงานที่หน่วยรับ</span>{% endif %}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
+    <div><dt>ผู้รับผิดชอบ</dt><dd>{% if case.assignee %}{{ case.assignee.staff_profile.display_name|default:case.assignee.username }}<br>{{ case.assignee|unit_path }}{% if case.auto_assigned %} <span class="tag tag--outline">ระบบมอบตามงานที่หน่วยรับ</span>{% endif %}{% if case.awaits_acceptance %} <span class="tag tag--alert">รอรับงาน</span>{% elif case.accepted_at %}<br><span class="muted">รับงานแล้ว {{ case.accepted_at|date:"j M Y H:i" }}</span>{% endif %}{% else %}<span class="muted">ยังไม่มี</span>{% endif %}</dd></div>
     <div><dt>หน่วยงาน (เขต/ฝ่าย)</dt><dd>{{ case.district.name }}</dd></div>
     <div><dt>ผู้แจ้ง</dt><dd>{% if case.requester.is_anonymous %}<span class="tag">ไม่ระบุตัวตน</span>{% else %}{{ case.requester.display_name }}{% if unverified %} <span class="tag tag--outline">ยังไม่ยืนยันตัวตน</span>{% endif %}{% with e=case.requester.employee %}{% if e %}<br><span class="muted">{{ e.position }}{% if e.position and e.department %} · {% endif %}{{ e.department }}</span>{% endif %}{% endwith %}{% endif %}</dd></div>
     {% if case.latitude %}<div><dt>ตำแหน่งที่แจ้ง</dt><dd><a href="https://www.google.com/maps?q={{ case.latitude }},{{ case.longitude }}" target="_blank" rel="noopener">เปิดแผนที่</a></dd></div>{% endif %}
@@ -61,6 +61,7 @@
     {% elif r.no_number %}
     <p class="tracking tracking--none">ไม่มีเลขติดตาม เจ้าหน้าที่ค้นหาเอกสารจากรายละเอียดที่ผู้แจ้งระบุ</p>
     {% endif %}
+    {% include "operations/_case_numbers.html" %}
     <div class="labelled"><p class="labelled__label">รายละเอียดที่ผู้แจ้งระบุ</p>{% if r.details %}<div class="prose-block">{{ r.details }}</div>{% else %}<p class="muted">ผู้แจ้งไม่ได้ระบุรายละเอียดเพิ่มเติม</p>{% endif %}</div>
     {% if r.photos %}
     <div class="labelled"><p class="labelled__label">รูปที่ผู้แจ้งแนบ</p>
@@ -71,6 +72,7 @@
   {% endif %}{% endwith %}
   <div class="detail__main">
     <div id="action-slot" aria-live="polite"></div>
+    {% if not page.line_request %}{% include "operations/_case_numbers.html" %}{% endif %}
 
     {% include "operations/_case_panel.html" %}
 

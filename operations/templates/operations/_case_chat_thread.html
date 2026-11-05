@@ -1,11 +1,18 @@
-{% load ui %}<div class="chat__list" data-last="{{ last }}" data-fresh="{{ fresh|yesno:'1,' }}" data-more="10" data-more-end data-more-noun="ข้อความ" data-more-key="chat">
+{% load ui %}{# ADR 0044: a messenger — the requester on the left, staff on the right, a name and a round initial once per run of messages, a line for each new day. #}<div class="chat__list" data-last="{{ last }}" data-fresh="{{ fresh|yesno:'1,' }}" data-more="10" data-more-end data-more-noun="ข้อความ" data-more-key="chat">
   {% for m in items %}
+    {% if m.day %}<div class="chat__day" data-more-item><span>{{ m.day }}</span></div>{% endif %}
     {% if m.who == "status" %}
-    <div class="chat__strip" data-more-item>{{ m.at|thai_short }} · เปลี่ยนเป็น <strong>{{ m.meta }}</strong>{% if m.text %}<span class="chat__strip-text">{{ m.text|linebreaksbr }}</span>{% endif %}</div>
+    <div class="chat__strip" data-more-item>{{ m.at|date:"H:i" }} น. · เปลี่ยนเป็น <strong>{{ m.meta }}</strong>{% if m.text %}<span class="chat__strip-text">{{ m.text|linebreaksbr }}</span>{% endif %}</div>
     {% else %}
-    <div class="chat__msg chat__msg--{{ m.who }}{% if m.faint %} is-faint{% endif %}" data-more-item>
-      <div class="chat__bubble">{{ m.text|linebreaksbr }}{% if m.contact %}<div class="chat__contact">ติดต่อ: {{ m.contact }}</div>{% endif %}</div>
-      <div class="chat__meta">{{ m.meta }} · {{ m.at|thai_short }}</div>
+    <div class="chat__msg chat__msg--{{ m.who }}{% if m.first %} is-first{% endif %}{% if m.faint %} is-faint{% endif %}" data-more-item>
+      {% if m.first %}<span class="chat__avatar" aria-hidden="true">{{ m.name|slice:":1" }}</span>{% endif %}
+      <div class="chat__col">
+        {% if m.first %}<div class="chat__name">{{ m.name }}{% if m.note %}<span class="chat__note"> · {{ m.note }}</span>{% endif %}</div>{% endif %}
+        <div class="chat__row">
+          <div class="chat__bubble">{{ m.text|linebreaksbr }}{% if m.contact %}<div class="chat__contact">ติดต่อ: {{ m.contact }}</div>{% endif %}</div>
+          <time class="chat__time" datetime="{{ m.at|date:'c' }}" title="{{ m.at|thai_datetime }}">{{ m.at|date:"H:i" }}</time>
+        </div>
+      </div>
     </div>
     {% endif %}
   {% empty %}<p class="chat__empty">ยังไม่มีข้อความ</p>{% endfor %}

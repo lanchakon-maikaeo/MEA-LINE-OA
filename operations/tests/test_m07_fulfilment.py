@@ -1312,7 +1312,7 @@ class AdminAndCommandTests(FulfilmentTestCase):
         self.assertIn("MTR_SYN_A: ขอ 3 อนุมัติ 2 (ไม่อนุมัติ 1) จ่าย 1 รับ 1 ค้างจ่าย 1", text)
         self.assertIn("FUSE_SYN_A: ขอ 50 อนุมัติ 50 (ไม่อนุมัติ 0) จ่าย 40 รับ 0 ค้างจ่าย 10", text)
         self.assertIn("Q8", text)
-        self.assertEqual(Case.objects.filter(number__startswith="W").count(), 2)
+        self.assertEqual(Case.objects.filter(kind=Case.Kind.WITHDRAWAL).count(), 2)
 
 
 # --- Concurrency (race) -------------------------------------------------------------------------

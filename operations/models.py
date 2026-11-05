@@ -122,6 +122,17 @@ class WorkGroup(models.Model):
         return self.code or self.name
 
 
+class RosterUnitName(models.Model):
+    """ชื่อย่อ of a unit the system does not hold, outside ฝอจ. (ADR 0044), by its roster path
+    (ฝ่าย › กอง › แผนก › กลุ่มงาน). Its people only file cases, like a district."""
+
+    path = models.CharField(max_length=500, unique=True)
+    short_name = models.CharField(max_length=32)
+
+    def __str__(self):
+        return self.short_name
+
+
 class Role(models.TextChoices):
     # Global roles (division must be empty).
     ADMIN = "admin", "แอดมินระบบ"
@@ -489,7 +500,7 @@ class Case(models.Model):
     class Status(models.TextChoices):
         SUBMITTED = "submitted", "รอคัดกรอง"
         TRIAGE = "triage", "กำลังคัดกรอง"
-        AWAITING_APPROVAL = "awaiting_approval", "รอกองรับเรื่อง"
+        AWAITING_APPROVAL = "awaiting_approval", "รอรับเรื่อง"
         AWAITING_EXECUTION = "awaiting_execution", "รอดำเนินการ"
         IN_PROGRESS = "in_progress", "กำลังดำเนินการ"
         AWAITING_CONFIRMATION = "awaiting_confirmation", "รอหน่วยงาน (เขต/ฝ่าย)ยืนยัน"
@@ -526,7 +537,7 @@ class Case(models.Model):
         FALLBACK_FORM = "fallback_form", "แบบฟอร์มสำรอง"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    number = models.CharField(max_length=16, unique=True)
+    number = models.CharField(max_length=48, unique=True)  # ADR 0045: กคว.69-000142
     kind = models.CharField(max_length=16, choices=Kind.choices)
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.SUBMITTED)
     # Where awaiting_info/on_hold returns to; set exactly while paused.
@@ -549,6 +560,12 @@ class Case(models.Model):
         "UnitWork", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     auto_assigned = models.BooleanField(default=False)
+    # รับงาน (ADR 0049): who pressed it for the current assignee and when; every assignment
+    # clears both, so each ผู้รับผิดชอบ presses it once more.
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    accepted_at = models.DateTimeField(null=True, blank=True)
     # Empty when the requester submitted on LINE; the staff member when filed on their behalf.
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
@@ -635,6 +652,11 @@ class Case(models.Model):
         """The owner as people read it: แอดมิน for a case an admin holds (ADR 0030 Q19)."""
         return "แอดมิน" if self.held_by_admin else self.owner_division.code
 
+    @property
+    def awaits_acceptance(self):
+        """รอรับงาน (ADR 0049): someone is responsible and has not pressed รับงาน yet."""
+        return bool(self.assignee_id) and not self.accepted_by_id
+
 
 class CaseLine(models.Model):
     """รายการของในเรื่อง. Problem lines may omit quantity.
@@ -719,9 +741,10 @@ class CaseLine(models.Model):
 
 
 class CaseNumberCounter(models.Model):
-    """Gap-free sequence per case prefix and Buddhist-era year (row-locked when issuing)."""
+    """Gap-free sequence per prefix and Buddhist-era year (row-locked when issuing): a division's
+    code for its cases and orders (ADR 0045), W R P T for numbers issued before, I for the store."""
 
-    prefix = models.CharField(max_length=1)
+    prefix = models.CharField(max_length=32)
     year_be = models.PositiveSmallIntegerField()
     last_value = models.PositiveIntegerField(default=0)
 
@@ -1749,7 +1772,7 @@ class AckClock(models.Model):
         HANDOFF = "handoff", "รอตอบรับการส่งต่อ"
         FIRST_RESPONSE = "first_response", "ตรวจครั้งแรก"
         RESOLVE = "resolve", "แก้ไข"
-        APPROVAL = "approval", "รอกองรับเรื่อง"
+        APPROVAL = "approval", "รอรับเรื่อง"
         ISSUE = "issue", "รอจ่าย"
         INSPECTION = "inspection", "รอตรวจของคืน"
         CHILD_ACCEPT = "child_accept", "รอตอบรับงานย่อย"
@@ -2660,7 +2683,7 @@ class RegistryDocumentLine(models.Model):
     serials = models.JSONField(default=list, blank=True)
     posting_date = models.DateField(null=True, blank=True)
     reference = models.CharField(max_length=200, blank=True)
-    case_number = models.CharField(max_length=16, blank=True)
+    case_number = models.CharField(max_length=48, blank=True)
     reversed_document = models.CharField(max_length=64, blank=True)
     plant = models.CharField(max_length=16, blank=True)
     storage_location = models.CharField(max_length=16, blank=True)
@@ -3144,14 +3167,14 @@ class AIRoutingRun(models.Model):
 
 class WorkOrder(models.Model):
     """Work a Supervisor gives a division or one of its members: not a case, so it never counts
-    in the district reports. มอบหมาย → รับทราบ → กำลังทำ → เสร็จ; the assignee may send it back
-    with a reason, and a Supervisor closes or cancels it."""
+    in the district reports. มอบหมาย → กำลังดำเนินการ → เสร็จสิ้น → ปิดงาน; the assignee may send
+    it back with a reason, and a Supervisor closes or cancels it."""
 
     class Status(models.TextChoices):
         ASSIGNED = "assigned", "มอบหมายแล้ว"
-        ACKNOWLEDGED = "acknowledged", "รับทราบแล้ว"
-        IN_PROGRESS = "in_progress", "กำลังทำ"
-        DONE = "done", "ทำเสร็จแล้ว"
+        ACKNOWLEDGED = "acknowledged", "รับทราบแล้ว"  # before ADR 0044 only
+        IN_PROGRESS = "in_progress", "กำลังดำเนินการ"
+        DONE = "done", "เสร็จสิ้น"
         SENT_BACK = "sent_back", "ส่งกลับ"
         CLOSED = "closed", "ปิดงาน"
         CANCELLED = "cancelled", "ยกเลิก"
@@ -3160,7 +3183,7 @@ class WorkOrder(models.Model):
         LINE = "line", "LINE"
         WEB = "web", "เว็บ"
 
-    number = models.CharField(max_length=16, unique=True)
+    number = models.CharField(max_length=48, unique=True)  # ADR 0045
     title = models.CharField(max_length=200)
     detail = models.TextField(blank=True)
     division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="work_orders")
@@ -3443,6 +3466,22 @@ class Appointment(models.Model):
         ordering = ["-requested_at"]
 
 
+class CaseNumber(models.Model):
+    """เลขติดตามที่เจ้าหน้าที่เพิ่มเข้าเรื่อง (ADR 0047): the first number stays Case.sap_number."""
+
+    case = models.ForeignKey("Case", on_delete=models.CASCADE, related_name="extra_numbers")
+    kind = models.CharField(max_length=16)  # a sap_kind: slip, work_order, memo, meter, ...
+    number = models.CharField(max_length=60, db_index=True)
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["added_at", "pk"]
+        constraints = [models.UniqueConstraint(fields=["case", "number"], name="case_number_once")]
+
+
 class CaseMilestone(models.Model):
     """ขั้นงานคลังของใบเบิก (Q16, Q18): staff record each stage, many slips at once. `on` is the
     day it happened; for คีย์จ่ายแล้ว `planned_on` is the issue day กคว. set (Q20)."""
@@ -3464,11 +3503,13 @@ class CaseMilestone(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
     )
     recorded_at = models.DateTimeField(auto_now_add=True)
+    # ADR 0047: คีย์จ่ายแล้ว comes once per number of a withdrawal; "" is the case's first number.
+    number = models.CharField(max_length=60, blank=True, default="")
 
     class Meta:
         ordering = ["case", "on", "pk"]
         constraints = [
-            models.UniqueConstraint(fields=["case", "stage"], name="case_milestone_once")
+            models.UniqueConstraint(fields=["case", "stage", "number"], name="case_milestone_once")
         ]
 
     @property
@@ -3480,7 +3521,7 @@ class CaseMilestone(models.Model):
 
 
 class DivisionSchedule(models.Model):
-    """ตารางของกอง (Q17, Q30, Q45): กำหนดจ่ายตามขนาด (working days after วันรับงาน), the
+    """ตารางของกอง (Q17, Q30, Q45): กำหนดจ่ายตามขนาด (working days after วันรับใบเบิก), the
     weekdays it issues, and วันส่งรถ of each ฟข. Staff of the division edit it with a reason."""
 
     division = models.OneToOneField(Division, on_delete=models.PROTECT, related_name="schedule")
@@ -3523,6 +3564,43 @@ class Holiday(models.Model):
 
     def __str__(self):
         return f"{self.day} {self.name}"
+
+
+class DutyShift(models.Model):
+    """ตารางเวร (ADR 0048): a แอดมินฝ่าย on duty from `start` to `end` (past midnight when `end`
+    is not after `start`), every `weekday` (0 Monday … 6 Sunday, 7 วันหยุด) or, as an exception,
+    on the day `on` only. A day with exceptions uses them alone; an exception with no `user`
+    says nobody is on duty that day."""
+
+    HOLIDAY = 7
+
+    weekday = models.PositiveSmallIntegerField(null=True, blank=True)
+    on = models.DateField(null=True, blank=True, db_index=True)
+    start = models.TimeField()
+    end = models.TimeField()
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["weekday", "on", "start", "pk"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(weekday__isnull=False, on__isnull=True, user__isnull=False)
+                    | models.Q(weekday__isnull=True, on__isnull=False)
+                ),
+                name="duty_shift_weekday_or_day",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(weekday__isnull=True) | models.Q(weekday__lte=7),
+                name="duty_shift_weekday_range",
+            ),
+        ]
 
 
 class EmergencyContact(models.Model):

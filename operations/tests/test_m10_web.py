@@ -7,6 +7,7 @@ are admin-only (GuardTests); the AI/rule proposal is shown apart from people's d
 """
 
 import ast
+import itertools
 import tempfile
 import uuid
 from datetime import timedelta
@@ -28,6 +29,7 @@ from operations import (
     policy,
     staff_email,
     wording,
+    work_orders,
 )
 from operations.models import (
     AckClock,
@@ -621,7 +623,7 @@ class FriendlyFlowTests(WebTestCase):
         )
         for user in (self.trf_staff, self.intake):
             page = self.client_for(user).get(f"/cases/{case.number}/")
-            self.assertContains(page, "ผู้แจ้งตอบผลใน LINE ได้เอง กด “ยอมรับผล”")
+            self.assertContains(page, "ผู้แจ้งตอบผลใน LINE ได้เอง กด “ยืนยัน”")
             self.assertNotContains(page, "ไม่ได้ผูก LINE")
 
     def test_the_step_tracker_follows_the_case(self):
@@ -940,7 +942,83 @@ class NavigationTests(WebTestCase):
         self.assertEqual([c["ended_total"] for c in trend["columns"]], [0, 1, 3])
         self.assertEqual([c["new"] for c in trend["columns"]], [2, 0, 3])
         self.assertEqual((trend["total_new"], trend["total_ended"]), (5, 3))
-        self.assertEqual(trend["ends"][0]["y"], trend["top"])  # the new line ends at the top
+        self.assertEqual(trend["gap"], "+2")
+        tick = {t["label"]: t["y"] for t in trend["ticks"]}
+        self.assertEqual(list(tick), ["0", "1", "2", "3", "4", "5"])
+        # The new line ends on the top tick, below the frame, and steps up at the third day's edge.
+        self.assertEqual(trend["ends"][0]["y"], tick["5"])
+        self.assertGreater(tick["5"], trend["top"])
+        edge = trend["columns"][2]["x"]
+        self.assertIn(f"L{edge} {tick['2']} L{edge} {tick['5']}", trend["new_path"])
+
+    def test_pie_shares_the_open_work_and_folds_the_rest(self):
+        # 3 Nov 2569: each division's share of the open work; past five the smallest are อื่นๆ.
+        rows = [(f"D{n}", n, f"/d/{n}") for n in (0, 1, 2, 3, 4, 10, 20, 60)]
+        pie = charts.pie(rows, other_href="/all/")
+        labels = [(s["label"], s["n"], s["percent"], s["tone"]) for s in pie["slices"]]
+        self.assertEqual(pie["total"], 100)
+        self.assertEqual(
+            labels,
+            [
+                ("D60", 60, "60%", "c1"),
+                ("D20", 20, "20%", "c2"),
+                ("D10", 10, "10%", "c3"),
+                ("D4", 4, "4%", "c4"),
+                ("D3", 3, "3%", "c5"),
+                ("อื่นๆ", 3, "3%", "other"),
+            ],
+        )
+        self.assertEqual(pie["slices"][-1]["href"], "/all/")
+        self.assertIn(" 0 1 ", pie["slices"][0]["path"])  # 60% takes the long way round
+        # Each % sits at the end of a leader line, on its slice's side; small slices never touch.
+        self.assertEqual(pie["slices"][0]["anchor"], "start")  # 0-60% clockwise: mostly right
+        self.assertEqual(pie["slices"][-1]["anchor"], "end")
+        for anchor in ("start", "end"):
+            ys = sorted(s["label_y"] for s in pie["slices"] if s["anchor"] == anchor)
+            self.assertTrue(all(b - a >= charts.LABEL_GAP for a, b in itertools.pairwise(ys)))
+        alone = charts.pie([("D1", 0, ""), ("D2", 5, "")])["slices"]
+        self.assertEqual([(s["label"], s["percent"]) for s in alone], [("D2", "100%")])
+        self.assertEqual(alone[0]["path"].count("A"), 2)  # a whole disc, drawn as two halves
+
+    def test_overview_shows_the_share_instead_of_the_ack_average(self):
+        self.at_meter(), self.at_transformer()
+        page = self.client_for(self.admin).get("/console/")
+        self.assertNotContains(page, "ตอบรับเฉลี่ย</span>")
+        self.assertContains(page, "สัดส่วนงานแต่ละกอง")
+        self.assertContains(page, 'href="/divisions/SIM-MTR/?tab=host" aria-label="SIM-MTR')
+
+    def test_one_division_shows_its_share_by_kind(self):
+        # 4 Nov 2569: one division's pie is by kind, งานสั่ง too, each kind in its own colour;
+        # the kind bars go, and each slice opens the queue filtered to that kind.
+        case = self.at_meter()
+        order = work_orders.create(self.admin, "งานทดสอบ", case.owner_division)
+        head = make_staff("mtr-head", (Role.SUPERVISOR, "SIM-MTR"))
+        page = self.client_for(head).get("/console/")
+        self.assertContains(page, "สัดส่วนงานตามชนิด")
+        self.assertNotContains(page, 'id="r-kind"')
+        tones = {s["label"]: s["tone"] for s in page.context["share"]["slices"]}
+        self.assertEqual(tones, {"เบิก": "c1", "งานสั่ง": "c4"})
+        self.assertContains(page, 'href="/divisions/SIM-MTR/?tab=host&amp;kind=order"')
+        queue = self.client_for(head).get("/divisions/SIM-MTR/", {"tab": "host", "kind": "order"})
+        self.assertContains(queue, order.number)
+        self.assertNotContains(queue, case.number)
+        queue = self.client_for(head).get("/divisions/SIM-MTR/", {"kind": "withdrawal"})
+        self.assertContains(queue, case.number)
+        self.assertNotContains(queue, order.number)
+        ranked = charts.pie([("A", 1, "", "c1"), ("B", 3, "", "c2")])["slices"]
+        self.assertEqual([(s["label"], s["tone"]) for s in ranked], [("B", "c2"), ("A", "c1")])
+
+    def test_trend_legend_stays_off_the_lines(self):
+        # Rising lines leave the upper left free; one line along the top and one along the bottom
+        # leave only the middle height.
+        days = [timezone.localdate() - timedelta(days=n) for n in range(29, -1, -1)]
+        link = lambda metric, day: ""  # noqa: E731
+        rising = charts.trend([(d, 1, 0) for d in days], link)["legend"]
+        early = charts.trend([(d, 9 if i == 0 else 0, 0) for i, d in enumerate(days)], link)
+        self.assertEqual((rising["x"], rising["y"]), (charts.LEFT + 10, charts.TOP + 10))
+        self.assertGreater(early["legend"]["y"], charts.TOP + 10)
+        self.assertLess(early["legend"]["y"] + early["legend"]["height"], early["bottom"] - 10)
+        self.assertEqual([i["label"] for i in rising["items"]], ["เข้า 30", "จบ 0", "ส่วนต่าง +30"])
 
 
 class FoundationTests(TestCase):

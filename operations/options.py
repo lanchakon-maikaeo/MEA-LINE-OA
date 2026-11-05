@@ -81,7 +81,7 @@ OPTIONS = {
         (
             (
                 "off",
-                "ไม่มีขั้นคัดกรอง: เรื่องใหม่เข้ารอกองรับเรื่องของกองเจ้าภาพทันที",
+                "ไม่มีขั้นคัดกรอง: เรื่องใหม่เข้ารอรับเรื่องของกองเจ้าภาพทันที",
                 "กองตั้งระดับความเร่งด่วนตอนรับเรื่อง เรื่องฉุกเฉินเริ่มงานทันที "
                 "เรื่องที่ระบบบอกกองไม่ได้ยังรอผู้ประสานก่อน (ADR 0025)",
             ),
@@ -270,7 +270,7 @@ OPTIONS = {
                 "ทุกคนรู้พร้อมกัน แต่ใช้โควตาข้อความ LINE มากขึ้นตามจำนวนคน",
             ),
         ),
-        "ผู้สั่งได้ข้อความเมื่อมีคนรับทราบ ทำเสร็จ หรือส่งงานกลับเสมอ",
+        "ผู้สั่งได้ข้อความเมื่อมีคนกดดำเนินการ เสร็จสิ้น หรือส่งงานกลับเสมอ",
     ),
     ORDER_REMIND: Option(
         "เตือนงานสั่งก่อนถึงกำหนด",
@@ -669,7 +669,7 @@ STEP_CHOICES = {
 STEP_DEFAULTS = (
     ("submitted", "รอคัดกรอง", "received", "ADR 0028"),
     ("triage", "กำลังคัดกรอง", "received", "ADR 0028"),
-    ("awaiting_approval", "รอกองรับเรื่อง", "working", "30 ต.ค. 2569"),
+    ("awaiting_approval", "รอรับเรื่อง", "working", "30 ต.ค. 2569"),
     ("awaiting_execution", "รอดำเนินการ", "working", "30 ต.ค. 2569"),
     ("in_progress", "กำลังดำเนินการ", "working", "ADR 0028"),
     ("on_hold", "พักเรื่อง", "working", "ADR 0028"),
@@ -687,17 +687,260 @@ for _status, _label, _default, _agreed in STEP_DEFAULTS:
     )
 
 # 30 ต.ค. 2569: a case waiting for its division reads กำลังดำเนินการ to the LINE user; staff
-# pages keep รอกองรับเรื่อง and its queue. รอดำเนินการ is then at the same step, so the bar
+# pages keep รอรับเรื่อง and its queue. รอดำเนินการ is then at the same step, so the bar
 # never goes back once the division takes the case.
 LINE_AWAITING = "line_awaiting_approval"
 OPTIONS[LINE_AWAITING] = Option(
-    "สถานะที่ผู้ใช้ LINE เห็นเมื่อเรื่องรอกองรับเรื่อง",
+    "สถานะที่ผู้ใช้ LINE เห็นเมื่อเรื่องรอรับเรื่อง",
     (
         ("working", "กำลังดำเนินการ", "ค่าที่ตกลงไว้ (30 ต.ค. 2569)"),
-        ("real", "รอกองรับเรื่อง", "คำเดียวกับหน้าเว็บเจ้าหน้าที่"),
+        ("real", "รอรับเรื่อง", "คำเดียวกับหน้าเว็บเจ้าหน้าที่"),
     ),
-    "ใช้ในข้อความหลังส่งเรื่อง ใน เรื่องของฉัน และในผลค้นเรื่อง หน้าเว็บเจ้าหน้าที่ยังเห็นรอกองรับเรื่อง",
+    "ใช้ในข้อความหลังส่งเรื่อง ใน เรื่องของฉัน และในผลค้นเรื่อง หน้าเว็บเจ้าหน้าที่ยังเห็นรอรับเรื่อง",
 )
+
+
+# ADR 0048: Push Message, each kind on or off for the whole system (checked when it is sent).
+PUSH_PREFIX = "push:"
+PUSH_GROUPS = (
+    ("requester", "ถึงผู้แจ้ง"),
+    ("staff", "ถึงเจ้าหน้าที่"),
+    ("order", "งานสั่ง"),
+    ("koj", "งานติดตาม กอจ."),
+)
+# (kind, group, label, who gets it, a sample, on by default)
+PUSH_KINDS = (
+    (
+        "request_info",
+        "requester",
+        "เจ้าหน้าที่ขอข้อมูลเพิ่ม",
+        "ผู้แจ้ง",
+        "เรื่อง กคว.69-000142: เจ้าหน้าที่ขอข้อมูลเพิ่ม",
+        True,
+    ),
+    (
+        "case_declined",
+        "requester",
+        "ไม่รับเรื่อง",
+        "ผู้แจ้ง",
+        "เรื่อง กคว.69-000142 ไม่ได้รับเรื่อง เหตุผล: …",
+        True,
+    ),
+    (
+        "case_cancelled",
+        "requester",
+        "เจ้าหน้าที่ยกเลิกเรื่อง",
+        "ผู้แจ้ง",
+        "เรื่อง กคว.69-000142 ถูกยกเลิกโดยเจ้าหน้าที่ เหตุผล: …",
+        False,
+    ),
+    (
+        "case_not_approved",
+        "requester",
+        "เรื่องไม่ได้รับอนุมัติ",
+        "ผู้แจ้ง",
+        "เรื่อง กคว.69-000142 ไม่ได้รับอนุมัติ",
+        True,
+    ),
+    (
+        "resolution_request",
+        "requester",
+        "ผลการแก้ปัญหา รอผู้แจ้งยืนยัน",
+        "ผู้แจ้ง",
+        "เรื่อง กคว.69-000142 แก้ไขแล้ว กดยืนยันหรือแจ้งว่ายังไม่หาย",
+        True,
+    ),
+    (
+        "receipt_request",
+        "requester",
+        "จ่ายของแล้ว รอยืนยันรับ",
+        "ผู้แจ้ง",
+        "เรื่อง กคว.69-000142 จ่ายของแล้ว กดยืนยันเมื่อได้รับ",
+        True,
+    ),
+    (
+        "return_instructions",
+        "requester",
+        "วิธีส่งคืนของ",
+        "ผู้แจ้ง",
+        "เรื่อง กคว.69-000142 ส่งคืนของได้ที่ …",
+        True,
+    ),
+    ("case_closed", "requester", "ปิดเรื่อง", "ผู้แจ้ง", "เรื่อง กคว.69-000142 เสร็จสิ้นแล้ว", True),
+    (
+        "hazard_ack",
+        "requester",
+        "รับแจ้งเหตุอันตราย",
+        "ผู้แจ้งที่เจ้าหน้าที่บันทึกเรื่องแทน",
+        "รับแจ้งเหตุแล้ว ระหว่างรอให้ …",
+        True,
+    ),
+    (
+        "registration_result",
+        "requester",
+        "ผลการลงทะเบียน",
+        "ผู้ขอลงทะเบียน",
+        "ลงทะเบียนเรียบร้อยแล้ว กด 'ส่งเรื่องใหม่' เพื่อแจ้งเรื่องได้เลย",
+        True,
+    ),
+    (
+        "case_chat",
+        "requester",
+        "ข้อความจากเจ้าหน้าที่ในเรื่อง",
+        "ผู้แจ้งที่ไม่ได้พิมพ์มาเกิน 50 วินาที",
+        "ข้อความที่เจ้าหน้าที่พิมพ์จากหน้าต่างแชตบนเว็บ",
+        True,
+    ),
+    (
+        "staff_new_case",
+        "staff",
+        "เรื่องใหม่รอรับเรื่อง",
+        "เลือกผู้รับด้านล่าง",
+        "เรื่องใหม่รอรับเรื่อง\nเรื่อง กคว.69-000142 · กอง กคว.",
+        True,
+    ),
+    (
+        "staff_assigned",
+        "staff",
+        "มอบหมายผู้รับผิดชอบ",
+        "เลือกผู้รับด้านล่าง",
+        "มีเรื่องมอบหมายให้คุณ\nเรื่อง กคว.69-000142 · กอง กคว. [รับงาน] [ดูเรื่อง]",
+        True,
+    ),
+    (
+        "staff_assignment_returned",
+        "staff",
+        "ผู้รับผิดชอบขอคืนงาน",
+        "แอดมินกองของกองเจ้าภาพ",
+        "ผู้รับผิดชอบขอคืนงาน\nเรื่อง กคว.69-000142 · กอง กคว.",
+        True,
+    ),
+    (
+        "staff_hazard",
+        "staff",
+        "เรื่องใหม่แจ้งเหตุอันตราย (ฉุกเฉิน)",
+        "ผู้รับผิดชอบ หรือผู้รับแจ้งเรื่องสำคัญของหน่วย",
+        "เรื่องใหม่แจ้งเหตุอันตราย (ฉุกเฉิน)",
+        True,
+    ),
+    ("staff_routing", "staff", "เรื่องรอผู้ประสานตัดสิน", "ผู้มีอำนาจตัดสินกอง", "มีเรื่องรอผู้ประสานตัดสิน", True),
+    ("staff_escalated", "staff", "เรื่องถูกยกระดับ", "ผู้ที่เรื่องยกระดับมาถึง", "เรื่องถูกยกระดับมาถึงคุณ", True),
+    ("staff_handoff", "staff", "เรื่องส่งต่อมาถึงกอง", "ผู้รับแจ้งของกองที่รับ", "มีเรื่องส่งต่อมาถึงกอง", True),
+    ("staff_child_work", "staff", "งานย่อยใหม่ถึงกอง", "ผู้รับแจ้งของกองที่รับ", "มีงานย่อยใหม่ถึงกอง", True),
+    ("staff_dispute", "staff", "ผู้แจ้งไม่ยอมรับผล", "ผู้รับผิดชอบเรื่อง", "ผู้แจ้งยังไม่ยอมรับผลการแก้ปัญหา", True),
+    ("staff_reopen", "staff", "ผู้แจ้งเปิดเรื่องใหม่", "ผู้รับผิดชอบเรื่อง", "ผู้แจ้งเปิดเรื่องใหม่", True),
+    (
+        "staff_admin_waiting",
+        "staff",
+        "เรื่องรอแอดมิน",
+        "แอดมินระบบที่เปิดรับแจ้งไว้",
+        "มีเรื่องรอแอดมิน กคว.69-000142",
+        True,
+    ),
+    (
+        "staff_registration",
+        "staff",
+        "คำขอลงทะเบียนจาก LINE",
+        "แอดมินระบบที่เปิดรับแจ้งไว้",
+        "คำขอลงทะเบียน #12: รอรับรอง",
+        True,
+    ),
+    ("staff_order_new", "order", "มีงานสั่งถึงคุณ", "ผู้รับงาน", "มีงานสั่งถึงคุณ", True),
+    ("staff_order_ack", "order", "งานที่สั่งเริ่มดำเนินการ", "ผู้สั่ง", "งานที่คุณสั่งเริ่มดำเนินการแล้ว", True),
+    ("staff_order_done", "order", "งานที่สั่งเสร็จสิ้น", "ผู้สั่ง", "งานที่คุณสั่งเสร็จสิ้นแล้ว", True),
+    ("staff_order_back", "order", "งานที่สั่งถูกส่งกลับ", "ผู้สั่ง", "งานที่คุณสั่งถูกส่งกลับ", True),
+    ("staff_order_soon", "order", "งานสั่งใกล้ถึงกำหนด", "ผู้รับงาน", "งานสั่งใกล้ถึงกำหนด", True),
+    ("staff_order_late", "order", "งานสั่งเกินกำหนด", "ผู้รับงาน", "งานสั่งเกินกำหนดแล้ว", True),
+    ("koj_started", "koj", "เริ่มติดตามงาน", "ผู้ติดตามและผู้รับแจ้งงานติดตาม", "กอจ. · เริ่มติดตามงาน", True),
+    (
+        "koj_changed",
+        "koj",
+        "สถานะงานเปลี่ยน",
+        "ผู้ติดตามและผู้รับแจ้งงานติดตาม",
+        "กอจ. · สถานะงานเปลี่ยน",
+        True,
+    ),
+    ("koj_completed", "koj", "ติดตามจบแล้ว", "ผู้ติดตามและผู้รับแจ้งงานติดตาม", "กอจ. · ติดตามจบแล้ว", True),
+)
+# Kinds whose people are picked here as well: (group, label, on by default).
+PUSH_RECIPIENTS = {
+    "staff_assigned": (
+        ("assignee", "ผู้รับผิดชอบที่ถูกมอบหมาย", True),
+        ("duty", "สำเนาถึงแอดมินฝ่ายที่อยู่เวร", True),
+    ),
+    "staff_new_case": (
+        ("duty", "แอดมินฝ่ายที่อยู่เวร", True),
+        ("division_admin", "แอดมินกองของกองเจ้าภาพ", False),
+    ),
+    "staff_hazard": (("duty", "สำเนาถึงแอดมินฝ่ายที่อยู่เวร", True),),
+    "staff_routing": (("duty", "สำเนาถึงแอดมินฝ่ายที่อยู่เวร", True),),
+}
+# The ตัวเลือกระบบ about pushes, shown on the Push Message page instead.
+PUSH_MOVED = (STAFF_LINE_BUDGET, STAFF_NOTIFY, ORDER_REMIND, CATCH_UP, CATCH_UP_APOLOGY)
+
+
+def _switch(label, on):
+    choices = (("on", "ส่ง", ""), ("off", "ไม่ส่ง", ""))
+    return Option(label, choices if on else choices[::-1])
+
+
+# ADR 0049 Q6: staff and order kinds may go by email too (when the server sends staff email);
+# the ones that went by LINE only before start off.
+EMAIL_GROUPS = ("staff", "order")
+EMAIL_OFF = {"staff_new_case", "staff_admin_waiting", "staff_registration"}
+
+for _kind, _group, _label, _who, _sample, _on in PUSH_KINDS:
+    OPTIONS[PUSH_PREFIX + _kind] = _switch(f"Push Message: {_label}", _on)
+    if _group in EMAIL_GROUPS:
+        OPTIONS[f"{PUSH_PREFIX}{_kind}:email"] = _switch(
+            f"Push Message: {_label} → อีเมล", _kind not in EMAIL_OFF
+        )
+    for _to, _to_label, _to_on in PUSH_RECIPIENTS.get(_kind, ()):
+        OPTIONS[f"{PUSH_PREFIX}{_kind}:{_to}"] = _switch(
+            f"Push Message: {_label} → {_to_label}", _to_on
+        )
+
+
+def push_on(kind, to=""):
+    """ADR 0048: is this kind (or its recipient group `to`) sent? Kinds not listed are sent."""
+    key = PUSH_PREFIX + kind + (f":{to}" if to else "")
+    return key not in OPTIONS or get(key) == "on"
+
+
+def push_rows(sent):
+    """The Push Message page: [(group label, [kind dict])]; `sent` counts this month's by kind."""
+    groups = []
+    for group, group_label in PUSH_GROUPS:
+        kinds = [
+            {
+                "kind": kind,
+                "label": label,
+                "who": who,
+                "sample": sample,
+                "key": PUSH_PREFIX + kind,
+                "on": push_on(kind),
+                "sent": sent.get(kind, 0),
+                "recipients": [
+                    {"key": f"{PUSH_PREFIX}{kind}:{to}", "label": to_label, "on": push_on(kind, to)}
+                    for to, to_label, _ in PUSH_RECIPIENTS.get(kind, ())
+                ]
+                + (
+                    [
+                        {
+                            "key": f"{PUSH_PREFIX}{kind}:email",
+                            "label": "อีเมล",
+                            "on": push_on(kind, "email"),
+                        }
+                    ]
+                    if g in EMAIL_GROUPS
+                    else []
+                ),
+            }
+            for kind, g, label, who, sample, _ in PUSH_KINDS
+            if g == group
+        ]
+        groups.append((group_label, kinds))
+    return groups
 
 
 def get(key):
@@ -754,8 +997,9 @@ def change(actor, key, value, reason):
     return row
 
 
-def rows():
-    """(key, option, current value, stored row or None) for the settings page."""
+def rows(push=False):
+    """(key, option, current value, stored row or None) for the settings page; `push`: the
+    Push Message page's own instead (ADR 0048)."""
     stored = {row.key: row for row in SystemOption.objects.select_related("updated_by")}
     # Historical settings remain readable for migrations, but cannot override ADR 0019; LINE
     # registration asks no location since 31 ต.ค. 2569, whatever the stored value.
@@ -764,5 +1008,5 @@ def rows():
     return [
         (key, option, get(key), stored.get(key))
         for key, option in OPTIONS.items()
-        if key not in retired
+        if key not in retired and (key.startswith(PUSH_PREFIX) or key in PUSH_MOVED) == push
     ]

@@ -1,13 +1,14 @@
-"""เรื่องใหม่เข้ากองเจ้าภาพทันที (ADR 0025, grill กคว. 27 ต.ค. 2569 Q13, Q18, Q23–Q26; ADR 0042).
+"""เรื่องใหม่เข้ากองเจ้าภาพทันที (ADR 0025, grill กคว. 27 ต.ค. 2569 Q13, Q18, Q23–Q26; ADR 0044).
 
-With ตัวเลือกระบบ "screening" off (the default) a new case skips รอคัดกรอง. Since 1 Nov 2569
-(ADR 0042 Q10) it skips รอกองรับเรื่อง too: once its owner division is known it starts work at
-once, and the division sets the level and the person with the usual buttons. A case whose
-division was not clear still waits with the coordinator, and starts when the coordinator sends
-it on.
+With ตัวเลือกระบบ "screening" off (the default) a new case skips รอคัดกรอง and waits at
+รอรับเรื่อง of its owner division until the division's แอดมินกอง, or a แอดมินฝ่าย, presses
+ดำเนินการ with the level (ADR 0044 undid ADR 0042 Q10, which started every case at once). An
+emergency still starts at once. A case whose division was not clear still waits with the
+coordinator, and comes to รอรับเรื่อง when the coordinator sends it on.
 """
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from operations import identity, options, policy, routing_words
@@ -17,6 +18,7 @@ from operations.models import AuthorityGrant, Case
 S = Case.Status
 A = AuthorityGrant.Activity
 EMERGENCY = "P0"
+NORMAL = "P3"  # ปกติ: where ดำเนินการ starts, unless the rule floor is higher (ADR 0044)
 
 
 def no_screening():
@@ -34,9 +36,10 @@ def first_status(case):
 
 
 def after_move(case):
-    """A case the coordinator sent on starts work in the new owner division (ADR 0042 Q10)."""
+    """A case the coordinator sent on waits for ดำเนินการ in the new owner division; an
+    emergency starts at once (ADR 0044)."""
     if no_screening() and case.status == S.SUBMITTED and first_status(case) != S.SUBMITTED:
-        case.status = S.IN_PROGRESS
+        case.status = S.IN_PROGRESS if is_emergency(case) else S.AWAITING_APPROVAL
 
 
 def is_emergency(case):
@@ -45,11 +48,11 @@ def is_emergency(case):
 
 
 def start_at_once(case):
-    """ADR 0042 Q10: a new case does not wait for the division to accept it (Q24 did this for
-    emergency problem reports only). Returns True if moved."""
+    """An emergency does not wait for ดำเนินการ (Q24; ADR 0044 keeps only this part of ADR 0042
+    Q10). Returns True if moved."""
     from operations import services  # local: services calls this module
 
-    if not (no_screening() and case.status == S.AWAITING_APPROVAL):
+    if not (no_screening() and case.status == S.AWAITING_APPROVAL and is_emergency(case)):
         return False
     with transaction.atomic():
         case = Case.objects.select_for_update().get(pk=case.pk)
@@ -59,16 +62,12 @@ def start_at_once(case):
         case.revision += 1
         case.updated_at = timezone.now()
         case.save(update_fields=["status", "revision", "updated_at"])
-        emergency = is_emergency(case)
-        context = services._Context(label="ระบบ (เรื่องฉุกเฉิน)" if emergency else "ระบบ")
         services._record(
-            context,
+            services._Context(label="ระบบ (เรื่องฉุกเฉิน)"),
             case,
             "start_work",
             S.AWAITING_APPROVAL,
-            "เรื่องฉุกเฉินเริ่มงานทันที"
-            if emergency
-            else "ระบบรับเรื่องเข้ากองเจ้าภาพอัตโนมัติ กองกำหนดระดับความเร่งด่วนและผู้รับผิดชอบภายหลัง",
+            "เรื่องฉุกเฉินเริ่มงานทันที",
             {},
             services.EVENT_DECISION_RECORDED,
             None,
@@ -120,10 +119,24 @@ def system_only(ctx, case, payload, reason, target):
     fail(ErrorCode.FORBIDDEN, "ระบบทำขั้นนี้เอง")
 
 
-def may_approve(user, case):
+def may_start(user, division_id):
+    """ดำเนินการ in a กอง (ADR 0044): its แอดมินกอง, a แอดมินฝ่าย, or someone an admin granted the
+    authority on กติกาและอำนาจ. Being a member no longer brings it."""
+    scope = identity.staff_scope(user)
     return (
-        whole(case) and identity.staff_scope(user).is_department_supervisor
-    ) or policy.has_authority(user, A.WITHDRAWAL_APPROVAL, case.owner_division_id)
+        scope.is_support
+        or division_id in scope.overseen
+        or policy.active_grants(user, A.WITHDRAWAL_APPROVAL)
+        .filter(Q(division__isnull=True) | Q(division_id=division_id), member_of__isnull=True)
+        .exists()
+    )
+
+
+def may_approve(user, case):
+    """Item rows (the hidden stock work) still go by the authority grant of each line."""
+    if not whole(case):
+        return policy.has_authority(user, A.WITHDRAWAL_APPROVAL, case.owner_division_id)
+    return may_start(user, case.owner_division_id)
 
 
 def whole(case):
@@ -141,13 +154,12 @@ NEXT = {
 
 def approve_case(ctx, case, payload, reason, target):
     _check(ctx, case)
-    case.status = NEXT[case.kind]
+    # ADR 0044: ดำเนินการ lands where ADR 0042 Q10 put every new case, กำลังดำเนินการ.
+    case.status = S.IN_PROGRESS if no_screening() else NEXT[case.kind]
     return {"whole": True}
 
 
 def deny_case(ctx, case, payload, reason, target):
-    if not policy.has_authority(ctx.user, A.WITHDRAWAL_APPROVAL, case.owner_division_id):
-        fail(ErrorCode.FORBIDDEN, "ไม่มีอำนาจปฏิเสธเรื่องของกองนี้")
     _check(ctx, case)
     if not reason:
         fail(ErrorCode.VALIDATION_ERROR, "บอกเหตุผลที่ไม่รับเรื่อง")
@@ -163,19 +175,19 @@ def _check(ctx, case):
 
 
 def bulk_approve(actor, cases):
-    """Q26: approve many at the level the system proposed; returns (approved, [(case, why)])."""
+    """Q26: ดำเนินการ many at ปกติ, or at the rule floor (ADR 0044); returns (done, [(case, why)])."""
     from operations import services  # local: services calls this module
     from operations.contracts import Actor, CommandFailed
 
     done, skipped = [], []
     for case in cases:
         if case.status != S.AWAITING_APPROVAL or not whole(case):
-            skipped.append((case, "รับเรื่องจากคิวได้เฉพาะเรื่องที่รอกองรับเรื่องทั้งเรื่อง"))
+            skipped.append((case, "กดดำเนินการจากคิวได้เฉพาะเรื่องที่รอรับเรื่องทั้งเรื่อง"))
             continue
         payload = {}
         state = policy.state_for(case)
-        if not state.confirmed_priority and state.suggested_priority:
-            payload["priority"] = state.suggested_priority
+        if not state.confirmed_priority:
+            payload["priority"] = state.priority_floor or NORMAL
         try:
             services.perform_form_action(
                 Actor.staff(actor),

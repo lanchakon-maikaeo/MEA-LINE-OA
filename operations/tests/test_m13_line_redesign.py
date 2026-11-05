@@ -299,3 +299,62 @@ class ServiceMenuFlowTests(MenuTestCase):
         reply = self.press(BOB, "หม้อแปลง")
         self.assertIn("เฉพาะปัญหา", texts(reply))
         self.assertNotIn("ติดตามใบเบิก", buttons(reply))
+        self.assertIn("พิมพ์ ยืนยันตัวตนพนักงาน", texts(reply))  # 3 พ.ย. 2569 Q8: text only
+
+    def test_a_new_user_is_asked_first_whether_they_are_an_employee(self):
+        # 3 พ.ย. 2569 Q6, Q9: any menu, or "ลงทะเบียน" typed, asks the type with what comes next.
+        from operations.tests.test_m03_line import BOB
+
+        reply = self.type(BOB, "ตรวจสอบการใช้ไฟฟ้า")
+        self.assertIn("เป็นพนักงาน กฟน. ไหม", texts(reply))
+        self.assertIn("กด 'พนักงาน กฟน.' แล้วพิมพ์รหัสพนักงาน", texts(reply))
+        self.assertIn("พนักงาน กฟน.", buttons(reply))
+        self.assertIn("เป็นพนักงาน กฟน. ไหม", texts(self.type(BOB, "ลงทะเบียน")))
+
+    def test_a_reporter_not_yet_an_employee_finds_the_employee_check_from_any_menu(self):
+        # 3 พ.ย. 2569 Q1–Q5, Q7: "อื่น ๆ" and anonymous reporters get a button back to the
+        # employee check on a refused menu, and words they may type instead.
+        from operations.models import Conversation
+        from operations.tests.test_m03_line import BOB, CAROL
+
+        self.type(BOB, "เริ่ม")
+        self.type(BOB, "อื่น ๆ")
+        reply = self.type(BOB, "ผู้แจ้ง ทดสอบ")
+        self.assertIn("ลงทะเบียนแล้ว", texts(reply))
+        self.assertIn("ยืนยันตัวตนพนักงาน", buttons(reply))
+        self.type(CAROL, "เริ่ม")
+        self.type(CAROL, "ไม่ระบุตัวตน")
+        for user in (BOB, CAROL):
+            with self.subTest(user=user):
+                reply = self.type(user, "ตรวจสอบการใช้ไฟฟ้า")
+                self.assertIn("เมนูนี้ใช้ได้เฉพาะพนักงาน กฟน. ที่ยืนยันตัวตนแล้ว", texts(reply))
+                self.assertIn("แล้วพิมพ์รหัสพนักงาน", texts(reply))
+                self.assertIn("พิมพ์รหัสพนักงาน", texts(self.press(user, "ยืนยันตัวตนพนักงาน")))
+                for typed in ("ลงทะเบียน", "ยืนยันตัวตน", "เป็นพนักงาน"):
+                    Conversation.objects.filter(identity__external_id=user).update(
+                        prompt="", prompt_data={}
+                    )
+                    self.assertIn("พิมพ์รหัสพนักงาน", texts(self.type(user, typed)), typed)
+
+    def test_a_menu_tap_leaves_the_employee_id_step(self):
+        # 3 พ.ย. 2569: someone asked for their employee ID who taps a menu gets that menu, not
+        # the same question again; a new user gets the type chooser.
+        from operations.tests.test_m03_line import BOB, CAROL
+
+        dave = "U" + "d" * 32
+        self.type(BOB, "เริ่ม")
+        self.type(BOB, "อื่น ๆ")
+        self.type(BOB, "ผู้แจ้ง ทดสอบ")
+        self.type(CAROL, "เริ่ม")
+        self.type(CAROL, "ไม่ระบุตัวตน")
+        for user in (BOB, CAROL):
+            with self.subTest(user=user):
+                self.assertIn("พิมพ์รหัสพนักงาน", texts(self.type(user, "ยืนยันตัวตน")))
+                reply = self.type(user, "ตรวจสอบการใช้ไฟฟ้า")
+                self.assertIn("เมนูนี้ใช้ได้เฉพาะพนักงาน กฟน.", texts(reply))
+                self.assertNotIn("พิมพ์รหัสพนักงานของคุณ", texts(reply))
+        with self.settings(LINE_ALLOWED_RECIPIENTS=frozenset({dave})):
+            self.type(dave, "เริ่ม")
+            self.assertIn("พิมพ์รหัสพนักงาน", texts(self.press(dave, "พนักงาน กฟน.")))
+            reply = self.type(dave, "ตรวจสอบการใช้ไฟฟ้า")
+            self.assertIn("เป็นพนักงาน กฟน. ไหม", texts(reply))

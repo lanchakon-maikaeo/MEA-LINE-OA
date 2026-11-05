@@ -18,11 +18,11 @@
   <p class="lede">{{ order.title }}</p>
   <dl class="facts">
     <div><dt>สั่งถึง</dt><dd>{{ order.division.code }} {{ order.division.name }}</dd></div>
-    <div><dt>คนทำ</dt><dd>{% if order.assignee %}{{ order.assignee.staff_profile.display_name|default:order.assignee.username }}{% else %}<span class="muted">ทั้งกอง (ยังไม่ระบุคน)</span>{% endif %}</dd></div>
+    <div><dt>ผู้รับผิดชอบ</dt><dd>{% if order.assignee %}{{ order.assignee.staff_profile.display_name|default:order.assignee.username }}{% else %}<span class="muted">ทั้งกอง (ยังไม่ระบุคน)</span>{% endif %}</dd></div>
     <div><dt>สั่งเมื่อ</dt><dd class="num">{{ order.created_at|thai_datetime }}</dd></div>
     <div><dt>กำหนดเสร็จ</dt><dd class="num">{% if order.due_on %}{% if late %}<span class="due due--over">{{ order.due_on|thai_date }} (เกินกำหนด)</span>{% else %}{{ order.due_on|thai_date }}{% endif %}{% else %}<span class="muted">ไม่กำหนด</span>{% endif %}</dd></div>
-    {% if order.acknowledged_at %}<div><dt>รับทราบ</dt><dd>{{ order.acknowledged_by.staff_profile.display_name|default:order.acknowledged_by.username }}<br><span class="muted num">{{ order.acknowledged_at|thai_datetime }}</span></dd></div>{% endif %}
-    {% if order.done_at %}<div><dt>ทำเสร็จ</dt><dd class="num">{{ order.done_at|thai_datetime }}</dd></div>{% endif %}
+    {% if order.acknowledged_at %}<div><dt>เริ่มดำเนินการ</dt><dd>{{ order.acknowledged_by.staff_profile.display_name|default:order.acknowledged_by.username }}<br><span class="muted num">{{ order.acknowledged_at|thai_datetime }}</span></dd></div>{% endif %}
+    {% if order.done_at %}<div><dt>เสร็จสิ้น</dt><dd class="num">{{ order.done_at|thai_datetime }}</dd></div>{% endif %}
     {% if order.ended_at %}<div><dt>{{ order.get_status_display }}เมื่อ</dt><dd class="num">{{ order.ended_at|thai_datetime }}</dd></div>{% endif %}
   </dl>
   <ol class="journey" aria-label="ขั้นของงาน">
@@ -46,7 +46,7 @@
     {% endif %}
     {% if order.result %}
     <section class="section" aria-labelledby="s-result">
-      <div class="section-head"><h2 id="s-result">ผลการทำ</h2></div>
+      <div class="section-head"><h2 id="s-result">ผลการดำเนินงาน</h2></div>
       <div class="prose-block">{{ order.result }}</div>
     </section>
     {% endif %}
@@ -100,15 +100,15 @@
     <section class="panel" aria-labelledby="a-steps">
       <div class="panel__head"><h2 id="a-steps">สิ่งที่ทำได้</h2></div>
       {% if steps %}
-        <div class="stack">
-        {% for s in steps %}{% if not s.tucked %}{% include "operations/_order_step.html" %}{% endif %}{% endfor %}
+        {% for s in steps %}{% if s.primary %}{% include "operations/_order_step.html" %}{% endif %}{% endfor %}
+        <div class="action-list mt-8">
+          {% for s in steps %}{% if not s.primary %}{% if s.needs %}<button type="button" class="btn--secondary btn--sm" popovertarget="os-{{ s.name }}">{{ s.label }}</button>{% else %}{% include "operations/_order_step.html" %}{% endif %}{% endif %}{% endfor %}
         </div>
-        {% if tucked %}
-        <details class="more mt-18">
-          <summary class="muted">ตัวเลือกอื่น</summary>
-          <div class="stack mt-18">{% for s in steps %}{% if s.tucked %}{% include "operations/_order_step.html" %}{% endif %}{% endfor %}</div>
-        </details>
-        {% endif %}
+        {% for s in steps %}{% if s.needs and not s.primary %}<div class="org-pop" id="os-{{ s.name }}" popover>
+          <button type="button" class="org-pop__close" popovertarget="os-{{ s.name }}" popovertargetaction="hide" aria-label="ปิด"><span aria-hidden="true">×</span></button>
+          <header class="org-pop__head"><h3>{{ s.label }}</h3><p class="muted">{{ order.number }} · {{ order.title }}</p></header>
+          {% include "operations/_order_step.html" with pop=True %}
+        </div>{% endif %}{% endfor %}
       {% else %}
         <p class="muted">{% if order.status == "closed" or order.status == "cancelled" %}งานนี้จบแล้ว{% elif order.status == "done" %}รอผู้สั่งปิดงาน{% elif order.status == "sent_back" %}รอผู้สั่งสั่งใหม่หรือยกเลิก{% else %}ตอนนี้คุณไม่มีขั้นที่ต้องทำในงานนี้{% endif %}</p>
       {% endif %}

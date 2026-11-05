@@ -28,6 +28,7 @@
             <p class="drawer__group">อื่น ๆ</p>
             {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน (SAP)</a>{% endif %}
             {% if nav.sheets %}<a href="{% url 'sheets' %}"{% if nav.url_name == 'sheets' %} aria-current="page"{% endif %}>ชีทที่ระบบอ่าน</a>{% endif %}
+            {% if nav.duty %}<a href="{% url 'admin-duty' %}"{% if nav.url_name == 'admin-duty' %} aria-current="page"{% endif %}>ตารางเวร</a>{% endif %}
             {% if nav.is_intake %}<a href="{% url 'case-new' %}">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
             {% if nav.registrations %}<a href="{% url 'admin-registrations' %}">ผู้ใช้ LINE OA</a>{% endif %}
             {% if nav.scope.is_admin %}<a href="{% url 'admin-home' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>ตั้งค่าระบบ (แอดมิน)</a>{% endif %}
@@ -55,6 +56,7 @@
           {% if nav.scope.sees_department %}<a href="{% url 'admin-problems' %}"{% if nav.section == 'problems' %} aria-current="page"{% endif %}>ปัญหาและข้อเสนอแนะ{% if nav.admin_waiting %} <span class="chip__count chip__count--alert">{{ nav.admin_waiting }}</span>{% endif %}</a>{% endif %}
           {% if nav.registry %}<a href="{% url 'registry' %}"{% if nav.section == 'registry' %} aria-current="page"{% endif %}>ทะเบียน</a>{% endif %}
           {% if nav.sheets %}<a href="{% url 'sheets' %}"{% if nav.url_name == 'sheets' %} aria-current="page"{% endif %}>ชีท</a>{% endif %}
+          {% if nav.duty %}<a href="{% url 'admin-duty' %}"{% if nav.url_name == 'admin-duty' %} aria-current="page"{% endif %}>ตารางเวร</a>{% endif %}
           {% if nav.scope.is_admin %}<a href="{% url 'admin-home' %}"{% if nav.section == 'admin' %} aria-current="page"{% endif %}>แอดมิน</a>{% elif nav.registrations %}<a href="{% url 'admin-registrations' %}"{% if nav.url_name == 'admin-registrations' %} aria-current="page"{% endif %}>ผู้ใช้ LINE OA</a>{% endif %}
         </nav>
         <div class="topbar__tools">
@@ -108,7 +110,7 @@
       <div class="messages" role="status">
         {% for message in messages %}
           <div class="notice{% if message.tags == 'error' %} notice--error{% elif message.tags == 'success' %} notice--success{% endif %}">
-            {% if message.tags == 'error' %}{% icon "alert" %}{% else %}{% icon "check" %}{% endif %}
+            {% if message.tags == 'error' or message.tags == 'warning' %}{% icon "alert" %}{% else %}{% icon "check" %}{% endif %}
             <div class="notice__body">{{ message }}</div>
           </div>
         {% endfor %}

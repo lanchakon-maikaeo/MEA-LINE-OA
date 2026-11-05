@@ -35,23 +35,24 @@ from operations.models import (
 K = Case.Kind
 S = Case.Status
 
-# The main path of each kind, for the step tracker at the top of the case page.
+# The main path of each kind, for the step tracker at the top of the case page. Every case starts
+# at รับเรื่อง (ADR 0044); a case from before still in screening shows there too.
+RECEIVE = ("รับเรื่อง", {S.SUBMITTED, S.TRIAGE, S.AWAITING_APPROVAL})
 JOURNEY = {
     K.PROBLEM: [
-        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
+        RECEIVE,
         ("แก้ปัญหา", {S.IN_PROGRESS}),
         ("รอหน่วยงาน (เขต/ฝ่าย)ยืนยันผล", {S.AWAITING_CONFIRMATION}),
         ("ปิดเรื่อง", {S.CLOSED}),
     ],
     K.WITHDRAWAL: [
-        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
-        ("กองรับเรื่อง", {S.AWAITING_APPROVAL}),
+        RECEIVE,
         ("จ่ายของ", {S.AWAITING_EXECUTION, S.IN_PROGRESS}),
         ("รอหน่วยงาน (เขต/ฝ่าย)ยืนยันรับ", {S.AWAITING_CONFIRMATION}),
         ("ปิดเรื่อง", {S.CLOSED}),
     ],
     K.RETURN: [
-        ("คัดกรอง", {S.SUBMITTED, S.TRIAGE}),
+        RECEIVE,
         ("รอของคืน", {S.AWAITING_EXECUTION}),
         ("รับคืนและตรวจสภาพ", {S.IN_PROGRESS}),
         ("ปิดเรื่อง", {S.CLOSED}),
@@ -102,6 +103,9 @@ SYSTEM_EVENTS = {
     "case.escalation_held": "ระบบมีปัญหา จึงยังไม่ยกระดับ",
     "case.repeat_dispute": "ผู้แจ้งโต้แย้งผลซ้ำ",
 }
+
+# ADR 0047: staff add and remove เลขติดตาม; the timeline names who did it.
+NUMBER_EVENTS = {"case.number_added": "เพิ่มเลข", "case.number_removed": "ลบเลข"}
 
 TEXT_FIELDS = [
     ("purpose", "จุดประสงค์"),
@@ -238,6 +242,19 @@ def timeline(case):
                 "why": event.reason,
                 "status": " · ".join(parts),
                 "system": True,
+            }
+        )
+    for event in AuditEvent.objects.filter(
+        target_type="Case", target_id=str(case.pk), action__in=list(NUMBER_EVENTS)
+    ).select_related("actor__staff_profile"):
+        entries.append(
+            {
+                "at": event.created_at,
+                "what": f"{NUMBER_EVENTS[event.action]} {event.data.get('number', '')}",
+                "who": _who(event.actor, event.actor_label, case),
+                "why": event.reason,
+                "status": "",
+                "system": False,
             }
         )
     for reply in case.info_replies.order_by("created_at"):

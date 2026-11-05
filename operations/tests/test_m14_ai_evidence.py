@@ -291,6 +291,31 @@ class ReleaseEvidenceTests(EvidenceTestCase):
             ai_evidence.import_release(self.dev, self.raw, "ซ้ำ")
         self.assertTrue(AuditEvent.objects.filter(action="ai.release_imported").exists())
 
+    def test_the_command_saves_the_gemini_key_then_tests_and_uses_the_imported_release(self):
+        gemini = AICredential.objects.get(name="gemini")
+        ai.remove_key(self.dev, gemini, "production ยังไม่มีคีย์")
+        args = ("import_ai_config", "--provider", "gemini", "--username", "dev")
+        key = "AIza" + "p" * 35  # pragma: allowlist secret
+        with patch.dict(os.environ, {"GOOGLE_GEMINI_API_KEY": key}):
+            out = StringIO()
+            call_command(*args, "--reason", "ใส่คีย์ production", stdout=out)
+            self.assertIn("key saved", out.getvalue())
+            call_command(*args, "--reason", "ซ้ำ", stdout=out)
+            self.assertIn("key unchanged", out.getvalue())
+            with (
+                patch.object(ai_release, "eval_blocker", return_value=None),
+                patch.object(ai, "eval_blocker", return_value=None),
+            ):
+                label = ai_evidence.import_release(self.dev, self.raw, "นำเข้ารุ่นรวม")
+                call_command(
+                    *args, "--reason", "ใช้รุ่นใหม่", "--release", label, "--activate", stdout=out
+                )
+        self.assertEqual(ai_release.current(), label)
+        routing = ai_release.members(label)[AIConfigVersion.Task.ROUTING]
+        self.assertNotEqual(routing.status, AIConfigVersion.Status.ACTIVE)  # not ready stays off
+        with self.assertRaisesMessage(CommandError, "Evaluate a release on the Mac"):
+            call_command(*args, "--reason", "x", "--evaluate", stdout=StringIO())
+
     def test_a_missing_provider_is_named(self):
         ai.remove_key(self.dev, AICredential.objects.get(name="gemini"), "เครื่องนี้ยังไม่มีคีย์")
         with self.assertRaisesMessage(ValidationError, "generativelanguage.googleapis.com"):

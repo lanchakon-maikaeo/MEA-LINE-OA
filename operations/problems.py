@@ -119,7 +119,7 @@ def _requester_or_intake(ctx, case, payload):
 
 
 def confirm(ctx, case, payload, reason, target):
-    """ยอมรับผล: the requester accepts the resolution; the case closes."""
+    """ยืนยัน (ยอมรับผล until 4 Nov 2569): the requester accepts the resolution; the case closes."""
     data = _requester_or_intake(ctx, case, payload)
     resolution = latest(case)
     case.status = target

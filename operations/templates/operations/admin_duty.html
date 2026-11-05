@@ -1,0 +1,72 @@
+{% extends "operations/admin_base.html" %}
+{% load static %}
+{% block title %}ตารางเวร · DED Center{% endblock %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}">{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head__text">
+    <span class="eyebrow">แอดมินฝ่าย</span>
+    <h1>ตารางเวร</h1>
+    <p class="lede">การแจ้งเตือนที่ส่งถึงแอดมินฝ่าย เช่น เรื่องใหม่รอรับเรื่อง ส่งถึงคนที่อยู่เวรตอนนั้นเท่านั้น ทุกคนยังเห็นและรับเรื่องได้ตามปกติ ช่วงที่ไม่มีใครอยู่เวร ระบบส่งถึงแอดมินฝ่ายทุกคน เลือกชนิดที่ส่งได้ใน Push Message</p>
+  </div>
+</div>
+
+<p class="duty-now" role="status">
+  {% if now_on %}ตอนนี้อยู่เวร: {% for n in now_on %}<span class="chip">{{ n }}</span>{% endfor %}
+  {% else %}ตอนนี้ไม่มีใครอยู่เวร การแจ้งเตือนถึงแอดมินฝ่ายทุกคน ({{ admins|length }} คน){% endif %}
+</p>
+{% if not admins %}<p class="notice">ยังไม่มีแอดมินฝ่ายที่ลงทะเบียน LINE ตั้งบทบาทแอดมินฝ่ายในบัญชีเจ้าหน้าที่ แล้วให้ลงทะเบียนเจ้าหน้าที่ใน LINE</p>{% endif %}
+{% if unlinked %}<p class="muted">ยังไม่ลงทะเบียน LINE จึงยังจัดเวรไม่ได้: {{ unlinked|join:", " }}</p>{% endif %}
+
+<div class="cal-nav">
+  <a class="btn btn--sm btn--secondary" href="?month={{ previous|date:'Y-m-d' }}">← เดือนก่อน</a>
+  <strong class="cal-nav__month">{{ month_label }}</strong>
+  <a class="btn btn--sm btn--secondary" href="?month={{ next|date:'Y-m-d' }}">เดือนถัดไป →</a>
+</div>
+<div class="mcal duty-cal">
+  <div class="mcal__row mcal__row--head">{% for w in weekdays %}<div class="mcal__head">{{ w }}</div>{% endfor %}</div>
+  {% for week in weeks %}
+  <div class="mcal__row">
+    {% for d in week %}
+    <a class="mcal__day{% if not d.in_month %} is-out{% endif %}{% if d.date == today %} is-today{% endif %}{% if d.holiday %} is-holiday{% endif %}{% if picked and d.date == picked.date %} is-picked{% endif %}" href="?month={{ month|date:'Y-m-d' }}&day={{ d.date|date:'Y-m-d' }}#day" aria-label="{{ d.label }}{% if d.holiday %} วันหยุด {{ d.holiday }}{% endif %}{% if d.exception %} มีข้อยกเว้น{% endif %}">
+      <span class="mcal__top"><span class="mcal__num">{{ d.date.day }}</span>{% if d.exception %}<span class="duty-mark">ยกเว้น</span>{% endif %}</span>
+      {% for c in d.chips %}<span class="mcal__chip duty-chip{% if c.unlinked %} duty-chip--none{% endif %}">{{ c.time }} {{ c.name }}</span>{% endfor %}
+      {% if d.exception and not d.chips %}<span class="mcal__chip duty-chip duty-chip--none">ไม่มีเวร</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+{% if picked %}
+<section class="panel duty-day" id="day" aria-labelledby="day-title">
+  <div class="panel__head"><h2 id="day-title">{{ picked.label }}{% if picked.holiday %} · วันหยุด {{ picked.holiday }}{% endif %}</h2>
+    <span class="muted">{% if picked.exception %}ใช้ข้อยกเว้นของวันนี้{% else %}ใช้เวรประจำ{% if picked.holiday %}วันหยุด{% else %}สัปดาห์{% endif %}{% endif %}</span></div>
+  {% include "operations/_duty_rows.html" with chips=picked.chips editable=picked.exception %}
+  {% if not picked.exception %}<p class="muted">แก้วันนี้วันเดียว: เพิ่มคนด้านล่าง หรือกดไม่มีเวรวันนี้ ระบบเริ่มจากเวรประจำของวันนี้ให้ก่อน</p>{% endif %}
+  {% include "operations/_duty_add.html" with day=picked.date weekday="" %}
+  <form method="post" class="cluster">
+    {% csrf_token %}<input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}">
+    <button class="btn btn--sm btn--secondary" type="submit" name="action" value="nobody">ไม่มีเวรวันนี้</button>
+    {% if picked.exception %}<button class="btn btn--sm btn--ghost" type="submit" name="action" value="reset">กลับไปใช้เวรประจำ</button>{% endif %}
+  </form>
+</section>
+{% endif %}
+
+<section class="section" id="week" aria-labelledby="week-title">
+  <div class="section-head"><h2 id="week-title">เวรประจำสัปดาห์</h2><span class="muted">วันในปฏิทินวันหยุดใช้แถววันหยุด เวลาจบก่อนเวลาเริ่มคือเวรข้ามเที่ยงคืน</span></div>
+  <ul class="duty-week">
+  {% for i, label, chips in week %}
+    <li class="duty-week__row">
+      <strong class="duty-week__day">{{ label }}</strong>
+      <div class="duty-week__body">
+        {% include "operations/_duty_rows.html" with chips=chips editable=True %}
+        <details class="duty-week__add"><summary class="btn btn--sm btn--secondary">เพิ่มเวร{{ label }}</summary>
+          {% include "operations/_duty_add.html" with day="" weekday=i %}
+        </details>
+      </div>
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endblock %}

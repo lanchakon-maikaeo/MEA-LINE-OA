@@ -12,7 +12,7 @@
 {% if rows %}
   <ol class="queue" aria-label="ผลการค้นหา">{% for row in rows %}{% include "operations/_queue_row.html" %}{% endfor %}</ol>
 {% elif query %}
-  <div class="empty"><strong>ไม่พบเรื่อง</strong>ตรวจเลขเรื่องอีกครั้ง เช่น W69-000001</div>
+  <div class="empty"><strong>ไม่พบเรื่อง</strong>ตรวจเลขเรื่องอีกครั้ง เช่น กคว.69-000001</div>
 {% else %}
   <div class="empty"><strong>พิมพ์เลขเรื่องในช่องค้นหาด้านบน</strong>กด / เพื่อไปที่ช่องค้นหา</div>
 {% endif %}

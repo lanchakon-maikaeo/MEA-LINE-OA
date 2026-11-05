@@ -1,0 +1,12 @@
+<form method="post" class="duty-add">
+  {% csrf_token %}<input type="hidden" name="action" value="add">
+  {% if day %}<input type="hidden" name="day" value="{{ day|date:'Y-m-d' }}">{% else %}<input type="hidden" name="weekday" value="{{ weekday }}">{% endif %}
+  <div class="duty-add__times">
+    <div class="field"><label for="ds-{{ weekday }}{{ day|date:'Ymd' }}">เริ่ม</label><input type="time" id="ds-{{ weekday }}{{ day|date:'Ymd' }}" name="start" value="{{ default_start|time:'H:i' }}" required></div>
+    <div class="field"><label for="de-{{ weekday }}{{ day|date:'Ymd' }}">จบ</label><input type="time" id="de-{{ weekday }}{{ day|date:'Ymd' }}" name="end" value="{{ default_end|time:'H:i' }}" required></div>
+  </div>
+  <fieldset class="duty-add__people"><legend>แอดมินฝ่าย</legend>
+    {% for pk, name in admins %}<label class="chip-check"><input type="checkbox" name="user" value="{{ pk }}"> {{ name }}</label>{% empty %}<span class="muted">ยังไม่มีแอดมินฝ่ายที่ลงทะเบียน LINE</span>{% endfor %}
+  </fieldset>
+  <button class="btn btn--sm" type="submit">เพิ่มเวร</button>
+</form>

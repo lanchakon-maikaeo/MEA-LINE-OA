@@ -7,6 +7,7 @@ every calendar of the division (Q6); "แสดงเพิ่มเติม" o
 from datetime import date, timedelta
 
 from django.test import Client
+from django.urls import reverse
 from django.utils import timezone
 
 from operations import queues, warehouse
@@ -64,10 +65,10 @@ class WarehousePageTests(WorkTestCase):
         done, skipped = warehouse.record(self.kcw, [waiting], S.RECEIVED, timezone.localdate())
         self.assertEqual(
             (done, [why for _, why in skipped]),
-            ([], ["ยังรอกองรับเรื่อง บันทึกขั้นงานคลังได้หลังกองรับเรื่องแล้ว"]),
+            ([], ["ยังรอรับเรื่อง บันทึกขั้นงานคลังได้หลังรับเรื่องแล้ว"]),
         )
         card = self.client.get(f"/cases/{waiting.number}/")
-        self.assertContains(card, "บันทึกขั้นงานคลังได้หลังกองรับเรื่องแล้ว")
+        self.assertContains(card, "บันทึกขั้นงานคลังได้หลังรับเรื่องแล้ว")
 
     def test_the_row_button_records_the_next_stage_and_comes_back(self):
         case = self.withdraw("4500100003")
@@ -92,7 +93,7 @@ class WarehousePageTests(WorkTestCase):
                 "back": "https://example.com/",
             },
         )
-        self.assertTrue(response.url.startswith(f"/cases/{case.number}/"))
+        self.assertTrue(response.url.startswith(reverse("case-detail", args=[case.number])))
 
     def test_late_slips_are_marked(self):
         case = self.withdraw("4500100004")

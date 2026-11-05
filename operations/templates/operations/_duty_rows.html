@@ -1,0 +1,7 @@
+<ul class="duty-rows">
+{% for c in chips %}
+  <li class="duty-rows__item"><span class="duty-rows__time">{{ c.time }}</span> <span>{{ c.name }}</span>{% if c.unlinked %} <span class="tag tag--alert">ไม่มี LINE ไม่นับเป็นเวร</span>{% endif %}
+    {% if editable %}<form method="post" class="duty-rows__remove">{% csrf_token %}<input type="hidden" name="shift" value="{{ c.pk }}">{% if picked %}<input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}">{% endif %}<button type="submit" name="action" value="remove" aria-label="เอา {{ c.name }} {{ c.time }} ออก">×</button></form>{% endif %}
+  </li>
+{% empty %}<li class="muted">ไม่มีเวร</li>{% endfor %}
+</ul>

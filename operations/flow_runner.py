@@ -23,6 +23,7 @@ taken at once while the box's sheet is not set up; what was typed goes on to the
 import re
 from datetime import timedelta
 
+from django.db.models import Q
 from django.utils import timezone
 
 from operations import (
@@ -967,6 +968,18 @@ def _lookup(turn, draft, state, box, text):
         hint = f"ตรวจหมายเลขอีกครั้ง หรือกด {handoff['label']}"
         if source.contact:  # ADR 0034 Q25: the unit's phone, once its sheet editor sets it
             hint += f"\nหรือโทร {source.contact}"
+    # ADR 0046: a tap sends the row as if typed, so this box looks it up again.
+    near = sheet_lookup.near(source, items, district)
+    if near:
+        hint = "\n".join(filter(None, ["กดหมายเลขที่ใกล้เคียงด้านล่างเพื่อค้นอีกครั้ง", hint]))
+    quick = [
+        {
+            "type": "message",
+            "label": sheet_lookup.near_label(name, number),
+            "text": f"{name[:200]}, {number}" if name else number,
+        }
+        for name, number in near
+    ] + quick
     follow_up = config.get("follow_up") or sheet_lookup.FOLLOW_UP
     turn.say(sheet_lookup.answer(items, extra, note, follow_up=follow_up, hint=hint), quick)
     if source.ai_words:
@@ -1023,7 +1036,8 @@ def _tracking_notes(turn, values, target):
     if not number:
         return
     config = target["config"] if target else {}
-    found = Case.objects.filter(sap_number__iexact=number).exclude(status__in=workflow.TERMINAL)
+    cited = Q(sap_number__iexact=number) | Q(extra_numbers__number__iexact=number)  # ADR 0047
+    found = Case.objects.filter(cited).exclude(status__in=workflow.TERMINAL).distinct()
     kind = values.get("case_kind") or config.get("case_kind")
     if kind:
         found = found.filter(kind=kind)

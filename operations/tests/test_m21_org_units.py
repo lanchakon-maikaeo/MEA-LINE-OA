@@ -94,7 +94,7 @@ class AssignTests(UnitTestCase):
     def test_a_new_case_goes_to_the_work_owner_at_once(self):
         work = self.work(self.repair, self.kae)
         case = self.problem()
-        self.assertEqual(case.status, Case.Status.IN_PROGRESS)
+        self.assertEqual(case.status, Case.Status.AWAITING_APPROVAL)  # ADR 0044: รอรับเรื่อง
         case.refresh_from_db()
         self.assertEqual((case.assignee, case.auto_assigned), (self.kae, True))
         self.assertEqual((case.section, case.unit_work), (self.repair, work))
@@ -166,6 +166,7 @@ class AssignTests(UnitTestCase):
         self.work(self.repair, self.kae)
         caps = self.work(self.caps, self.kae2)
         case = self.problem()
+        self.act(self.kae, case, "accept_assignment")  # ADR 0049: รับงาน before any other step
         self.act(self.kae, case, "set_section", {"section": str(self.caps.pk)})
         case.refresh_from_db()
         self.assertEqual((case.section, case.assignee), (self.caps, self.kae2))
@@ -260,9 +261,9 @@ class PageTests(UnitTestCase):
         self.assertEqual(client.get("/console/admin/org/").status_code, 403)
         client.force_login(self.admin)
         page = client.get("/console/admin/org/").content.decode()
-        self.assertIn("ผังหน่วยงาน", page)
-        self.assertIn("ปัญหา/ข้อเสนอแนะ · หม้อแปลง", page)
-        self.assertIn("ยังไม่ได้จัดหน่วย", page)
+        self.assertIn("ผังบุคลากร", page)
+        self.assertIn("ปัญหา/ข้อเสนอแนะ · หม้อแปลง", page)  # on the unit's card
+        self.assertNotIn("ยังไม่ได้จัดหน่วย", page)  # ADR 0044: the roster places everyone
         response = client.post(
             "/console/admin/org/",
             {
@@ -272,7 +273,7 @@ class PageTests(UnitTestCase):
                 "unit": f"s{self.repair.pk}",
             },
         )
-        self.assertRedirects(response, f"/console/admin/org/#u-s{self.repair.pk}")
+        self.assertRedirects(response, "/console/admin/org/#org-tree")
         self.assertEqual([o.user for o in work.owners.order_by("order")], [self.kae2, self.kae])
         client.post(
             "/console/admin/org/",
@@ -280,14 +281,14 @@ class PageTests(UnitTestCase):
         )
         self.kae.staff_profile.refresh_from_db()
         self.assertEqual(self.kae.staff_profile.section, self.repair)
-        self.assertContains(client.get("/console/admin/"), "ผังหน่วยงาน")
+        self.assertContains(client.get("/console/admin/"), "ผังบุคลากร")
 
     def test_the_old_alert_forms_point_to_the_chart(self):
         client = Client()
         client.force_login(self.admin)
-        self.assertContains(client.get("/console/admin/divisions/"), "ดูในผังหน่วยงาน")
+        self.assertContains(client.get("/console/admin/divisions/"), "ดูในผังบุคลากร")
         self.assertEqual(client.post(f"/koj/recipients/{self.kae.pk}/").status_code, 404)
-        self.assertContains(client.get(f"/console/admin/users/{self.kae.pk}/"), "ผังหน่วยงาน")
+        self.assertContains(client.get(f"/console/admin/users/{self.kae.pk}/"), "ผังบุคลากร")
 
 
 class MigrationTests(UnitTestCase):

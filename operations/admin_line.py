@@ -3,8 +3,10 @@
 import re
 import uuid
 
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.urls import reverse
 from django.utils import timezone
 
 from operations import identity, orchestration
@@ -95,6 +97,24 @@ def notify(registration):
                 payload={"delivery_id": delivery.pk},
                 occurred_at=timezone.now(),
             )
+    from operations import staff_email  # local: staff_email builds on identity
+
+    # ADR 0049 Q6: by email too, when Push Message turns it on for this kind.
+    admins = [
+        p.user
+        for p in StaffProfile.objects.filter(
+            notify_registrations=True, user__is_active=True
+        ).select_related("user")
+        if identity.staff_scope(p.user).is_admin
+    ]
+    link = f"{settings.STAFF_WEB_BASE_URL.rstrip('/')}{reverse('admin-registrations')}"
+    staff_email.mail(
+        "staff_registration",
+        f"registration:{registration.pk}:{registration.status}",
+        None,
+        admins,
+        text=f"คำขอลงทะเบียน #{registration.pk}: {registration.get_status_display()}\nเปิดดู: {link}",
+    )
 
 
 def nav_button(turn, label, view, **values):

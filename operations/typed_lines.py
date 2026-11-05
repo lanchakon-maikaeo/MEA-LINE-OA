@@ -18,6 +18,7 @@ import secrets
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 
 from operations import identity, workflow
 from operations.models import Case, CaseLine, Division, EntryField, EquipmentType
@@ -84,14 +85,14 @@ def identified(lines):
 
 
 def sap_label(kind, topic="", sap_kind=""):
-    """What this case's SAP number is called, or "" when this kind of case has none. A
-    withdrawal or return filed from a LINE flow says the kind of number picked (ADR 0036)."""
+    """What this case's SAP number is called, or "" when this kind of case has none. A case
+    filed from a LINE flow says the kind of number picked (ADR 0036), whatever its kind."""
     if kind == K.PROBLEM and topic == Case.Topic.REPAIR:
         return REPAIR_SAP_LABEL
-    if kind in SAP_LABELS and sap_kind:
+    if sap_kind:
         from operations.flow_runner import TRACKING_LABELS  # local: flow_runner builds on this
 
-        return TRACKING_LABELS.get(sap_kind, SAP_LABELS[kind])
+        return TRACKING_LABELS.get(sap_kind, SAP_LABELS.get(kind, ""))
     return SAP_LABELS.get(kind, "")
 
 
@@ -106,7 +107,8 @@ def clean_sap(text):
 def sap_in_use(number, requester, exclude=None):
     """Why this SAP number cannot start another case, or "". An open case of this requester is
     named; anyone else's is not."""
-    found = Case.objects.filter(sap_number=number).exclude(status__in=workflow.TERMINAL)
+    found = Case.objects.filter(Q(sap_number=number) | Q(extra_numbers__number=number))
+    found = found.exclude(status__in=workflow.TERMINAL).distinct()  # ADR 0047: added ones too
     if exclude is not None:
         found = found.exclude(pk=exclude.pk)
     own = found.filter(requester=requester).first() if requester is not None else None

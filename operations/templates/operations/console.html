@@ -71,11 +71,6 @@
       <span class="kpi__value">{{ dash.trend.total_ended }}</span>
       <span class="kpi__note">{{ days }} วัน</span>
     </a>
-    <a class="kpi" href="{{ dash.times.ack }}">
-      <span class="kpi__label">ตอบรับเฉลี่ย</span>
-      <span class="kpi__value kpi__value--text">{{ report.avg_ack|duration }}</span>
-      <span class="kpi__note">{{ report.ack_count }} ครั้ง</span>
-    </a>
   </div>
 </section>
 
@@ -83,23 +78,36 @@
 <div class="ov-grid">
   <section class="panel viz ov-trend" aria-labelledby="r-trend">
     <div class="panel__head"><h3 id="r-trend">เข้าและจบสะสม</h3></div>
-    <ul class="legend" aria-label="คำอธิบายสี">
-      <li><span class="legend__key legend__key--new" aria-hidden="true"></span>เข้า {{ t.total_new }}</li>
-      <li><span class="legend__key legend__key--ended" aria-hidden="true"></span>จบ {{ t.total_ended }}</li>
-    </ul>
     <div class="chart" data-chart>
       <svg viewBox="0 0 {{ t.width }} {{ t.height }}" role="img" aria-labelledby="r-trend r-trend-desc">
-        <desc id="r-trend-desc">กราฟเส้นจำนวนเรื่องเข้าและเรื่องจบสะสมตั้งแต่วันแรกของช่วง ช่องว่างระหว่างสองเส้นคือเรื่องที่ยังไม่จบ ตัวเลขรายวันอยู่ในตารางใต้กราฟ</desc>
+        <desc id="r-trend-desc">กราฟเส้นขั้นบันไดของจำนวนเรื่องเข้าและเรื่องจบสะสมตั้งแต่วันแรกของช่วง พื้นที่แรเงาระหว่างสองเส้นคือส่วนต่างของเรื่องเข้ากับเรื่องจบ ตอนนี้ {% for item in t.legend.items %}{{ item.label }} {% endfor %}ตัวเลขรายวันอยู่ในตารางใต้กราฟ</desc>
         {% for tick in t.ticks %}
           <line class="chart__grid" x1="{{ t.left }}" x2="{{ t.right }}" y1="{{ tick.y }}" y2="{{ tick.y }}"/>
           <text class="chart__tick" x="{{ t.tick_x }}" y="{{ tick.y }}" text-anchor="end" dominant-baseline="middle">{{ tick.label }}</text>
         {% endfor %}
-        <line class="chart__base" x1="{{ t.left }}" x2="{{ t.right }}" y1="{{ t.bottom }}" y2="{{ t.bottom }}"/>
-        {% for label in t.labels %}<text class="chart__tick" x="{{ label.x }}" y="{{ t.label_y }}" text-anchor="middle">{{ label.label }}</text>{% endfor %}
+        {% for label in t.labels %}
+          <line class="chart__grid" x1="{{ label.x }}" x2="{{ label.x }}" y1="{{ t.top }}" y2="{{ t.bottom }}"/>
+          <text class="chart__tick" x="{{ label.x }}" y="{{ t.label_y }}" text-anchor="middle">{{ label.label }}</text>
+        {% endfor %}
+        <rect class="chart__frame" x="{{ t.left }}" y="{{ t.top }}" width="{{ t.plot_w }}" height="{{ t.plot_h }}"/>
+        <text class="chart__axis" x="{{ t.axis_x }}" y="{{ t.axis_x_y }}" text-anchor="middle">วันที่</text>
+        <text class="chart__axis" transform="translate({{ t.axis_y_x }} {{ t.axis_y_y }}) rotate(-90)" text-anchor="middle" dominant-baseline="middle">จำนวนเรื่องสะสม</text>
         <line class="chart__cross" x1="0" x2="0" y1="{{ t.top }}" y2="{{ t.bottom }}" visibility="hidden" data-cross/>
+        <path class="chart__gap" d="{{ t.gap_path }}"/>
         <path class="chart__line chart__line--ended" d="{{ t.ended_path }}"/>
         <path class="chart__line chart__line--new" d="{{ t.new_path }}"/>
-        {% for end in t.ends %}<circle class="chart__dot chart__dot--{{ end.series }}" cx="{{ end.x }}" cy="{{ end.y }}" r="4"/>{% endfor %}
+        {% for end in t.ends %}
+          <circle class="chart__dot chart__dot--{{ end.series }}" cx="{{ end.x }}" cy="{{ end.y }}" r="4.5"/>
+          <text class="chart__end" x="{{ t.end_x }}" y="{{ end.label_y }}" dominant-baseline="middle">{{ end.value }}</text>
+        {% endfor %}
+        {% with l=t.legend %}
+          <rect class="chart__legend" x="{{ l.x }}" y="{{ l.y }}" width="{{ l.width }}" height="{{ l.height }}" rx="4"/>
+          {% for item in l.items %}
+            {% if item.series == "gap" %}<rect class="chart__gap" x="{{ l.key_x }}" y="{{ item.box_y }}" width="22" height="11"/>
+            {% else %}<line class="chart__line chart__line--{{ item.series }}" x1="{{ l.key_x }}" x2="{{ l.key_end }}" y1="{{ item.y }}" y2="{{ item.y }}"/>{% endif %}
+            <text class="chart__legend-text" x="{{ l.text_x }}" y="{{ item.y }}" dominant-baseline="middle">{{ item.label }}</text>
+          {% endfor %}
+        {% endwith %}
         {% for c in t.columns %}
           <a class="chart__hit" href="{{ c.href }}" data-x="{{ c.center }}" data-day="{{ c.day }}" data-new="{{ c.new }}" data-ended="{{ c.ended }}" data-new-total="{{ c.new_total }}" data-ended-total="{{ c.ended_total }}" aria-label="{{ c.day }}: สะสมเข้า {{ c.new_total }} จบ {{ c.ended_total }} เรื่อง วันนั้นเข้า {{ c.new }} จบ {{ c.ended }} เปิดรายการเรื่องเข้าวันนั้น"><rect x="{{ c.x }}" y="{{ t.top }}" width="{{ c.width }}" height="{{ t.plot_h }}"/></a>
         {% endfor %}
@@ -119,6 +127,34 @@
     </details>
   </section>
 
+  <div class="ov-side">
+  {% if share %}
+  <section class="panel viz ov-share" aria-labelledby="r-share">
+    <div class="panel__head"><h3 id="r-share">{% if chosen %}สัดส่วนงานตามชนิด{% else %}สัดส่วนงานแต่ละกอง{% endif %}</h3><span class="muted">{{ share.total }} เรื่องที่ต้องทำ</span></div>
+    {% if share.slices %}
+    <div class="pie">
+      <svg viewBox="0 0 {{ share.width }} {{ share.height }}" role="img" aria-labelledby="r-share r-share-desc">
+        <desc id="r-share-desc">วงกลมแบ่งเรื่องที่ต้องทำตาม{% if chosen %}ชนิด{% else %}กอง{% endif %} {% for s in share.slices %}{{ s.label }} {{ s.percent }} {% endfor %}</desc>
+        {% for s in share.slices %}
+          {% if s.href %}<a href="{{ s.href }}" aria-label="{{ s.label }} {{ s.n }} เรื่อง {{ s.percent }}">{% endif %}
+          <path class="pie__slice pie__slice--{{ s.tone }}" d="{{ s.path }}"><title>{{ s.label }} {{ s.n }} เรื่อง ({{ s.percent }})</title></path>
+          {% if s.href %}</a>{% endif %}
+        {% endfor %}
+        {% for s in share.slices %}
+          <polyline class="pie__leader" points="{{ s.leader }}"/>
+          <text class="pie__label" x="{{ s.label_x }}" y="{{ s.label_y }}" text-anchor="{{ s.anchor }}" dominant-baseline="middle">{{ s.percent }}</text>
+        {% endfor %}
+      </svg>
+      <ul class="pie__legend">
+        {% for s in share.slices %}
+          <li><span class="pie__key pie__slice--{{ s.tone }}" aria-hidden="true"></span><span class="pie__name" title="{{ s.label }}">{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</span><span class="num">{{ s.percent }}</span><span class="muted num">{{ s.n }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% else %}<p class="muted">ไม่มีเรื่องที่ต้องทำ</p>{% endif %}
+  </section>
+  {% endif %}
+
   <section class="panel viz" aria-labelledby="r-status">
     <div class="panel__head"><h3 id="r-status">สถานะ</h3><span class="muted">{{ report.total }} เรื่อง</span></div>
     <div class="viz-bars">
@@ -127,6 +163,7 @@
       {% empty %}<p class="muted">ไม่มีเรื่องที่เปิดอยู่</p>{% endfor %}
     </div>
   </section>
+  </div>
 </div>
 {% endwith %}
 
@@ -189,6 +226,7 @@
       </div>
     </section>
 
+    {% if not chosen %}{# one division: the pie by kind says it (user, 4 Nov 2569) #}
     <section class="panel" aria-labelledby="r-kind">
       <div class="panel__head"><h3 id="r-kind">ชนิดเรื่อง</h3></div>
       <div class="viz-bars">
@@ -197,6 +235,7 @@
         {% endfor %}
       </div>
     </section>
+    {% endif %}
 
     <section class="panel" aria-labelledby="r-items">
       <div class="panel__head"><h3 id="r-items">ของที่ขอบ่อย</h3></div>

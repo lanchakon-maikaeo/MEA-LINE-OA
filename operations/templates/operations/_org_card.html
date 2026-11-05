@@ -115,5 +115,5 @@
     </div>
   </details>
 
-  {% if c.groups %}<div class="org-sub">{% for g in c.groups %}{% include "operations/_org_card.html" with c=g division=division %}{% endfor %}</div>{% endif %}
+  {% if c.groups and not popup %}<div class="org-sub">{% for g in c.groups %}{% include "operations/_org_card.html" with c=g division=division %}{% endfor %}</div>{% endif %}
 </article>
