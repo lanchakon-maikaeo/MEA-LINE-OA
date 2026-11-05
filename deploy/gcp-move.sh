@@ -61,13 +61,13 @@ on_gcp() {
 # hour of faoj-deployer (IAP ssh, Cloud Run; no IAM) and revokes the owner's. When Google's hour is
 # up, nothing here (a script, an agent, malware) reaches production until the owner signs in again.
 login() {
+  # Whatever happens after the browser, the owner's grant does not outlive this command.
+  trap 'gcloud auth revoke --all --quiet >/dev/null 2>&1 || echo "gcp-move: the owner'"'"'s refresh token is still on this Mac: gcloud auth revoke --all" >&2; rm -f "$TOKEN.new"' EXIT
   gcloud auth login "$ACCOUNT" --force --brief
   mkdir -p "${TOKEN%/*}"
-  gcloud auth print-access-token --impersonate-service-account "$DEPLOYER" 2>/dev/null \
-    | tr -d '\n' > "$TOKEN.new"
-  gcloud auth revoke --all --quiet >/dev/null 2>&1 \
-    || die "the owner's refresh token is still on this Mac: gcloud auth revoke --all"
-  [ -s "$TOKEN.new" ] || die "no token for $DEPLOYER (deploy/gcp-move.sh deployer-setup?)"
+  gcloud auth print-access-token --impersonate-service-account "$DEPLOYER" \
+    2> >(grep -v 'using service account impersonation' >&2) | tr -d '\n' > "$TOKEN.new" || true
+  [ -s "$TOKEN.new" ] || die "no token for $DEPLOYER (just ran deployer-setup? wait 2 minutes and log in again)"
   mv "$TOKEN.new" "$TOKEN"
   say "signed in as faoj-deployer until about $(date -v+55M +%H:%M); deploy/gcp-move.sh logout when done"
 }
