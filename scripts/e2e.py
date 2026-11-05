@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import unquote
 from urllib.request import urlopen
 
 from playwright.sync_api import expect, sync_playwright
@@ -19,15 +20,17 @@ REAL_ACCOUNTS = {"e2e-kcw": "กคว.", "e2e-kae": "กองอุปกร�
 REAL_SETUP = (
     "import os\n"
     "from operations.management.commands.seed_org_demo import _account\n"
-    f"for name, code in {REAL_ACCOUNTS!r}.items():\n"
-    "    _account(name, code, os.environ['E2E_PASSWORD'])\n"
     "from django.contrib.auth import get_user_model\n"
     "from operations import work_orders\n"
     "from operations.models import Division, Role, RoleGrant, WorkOrder\n"
+    f"for name, code in {REAL_ACCOUNTS!r}.items():\n"
+    "    user = _account(name, code, os.environ['E2E_PASSWORD'])\n"
+    "    # ADR 0044: ดำเนินการ is the แอดมินกอง's; being a member no longer brings it.\n"
+    "    member = RoleGrant.objects.get(user=user, role=Role.STAFF, revoked_at=None)\n"
+    "    RoleGrant.objects.get_or_create(user=user, role=Role.SUPERVISOR,\n"
+    "        division=member.division, revoked_at=None)\n"
     "actor = get_user_model().objects.get(username='e2e-kcw')\n"
     "division = Division.objects.get(code='กคว.')\n"
-    "RoleGrant.objects.get_or_create(user=actor, role=Role.SUPERVISOR,\n"
-    "    division=division, revoked_at=None)\n"
     "# ADR 0040: only a department supervisor issues work orders.\n"
     "issuer = get_user_model().objects.get_or_create(username='e2e-dept')[0]\n"
     "RoleGrant.objects.get_or_create(user=issuer, role=Role.DEPARTMENT_SUPERVISOR,\n"
@@ -140,7 +143,8 @@ def file_case(page, base_url, kind, rows, **fields):
     """File a case the filer's division owns; the next page is that case."""
     submit_case(page, base_url, kind, rows, **fields)
     number = page.locator("h1").inner_text().strip()
-    assert page.url.endswith(f"/cases/{number}/"), page.url
+    # ADR 0045: numbers start with the Thai division code, which the URL percent-encodes.
+    assert unquote(page.url).endswith(f"/cases/{number}/"), page.url
     return number
 
 
@@ -177,7 +181,7 @@ def journeys(browser, base_url, password):
     triage_to(browser, base_url, password, number, "SIM-EQP", "e2e-eqp")
     approver = sign_in(browser, base_url, "e2e-approver", password)
     open_case(approver, base_url, number)
-    act(approver, "รับเรื่อง", [lambda f: f.locator("[name=line-1-quantity]").fill("10")])
+    act(approver, "ดำเนินการ", [lambda f: f.locator("[name=line-1-quantity]").fill("10")])
     issuer = sign_in(browser, base_url, "e2e-issuer", password)
     open_case(issuer, base_url, number)
     act(
@@ -281,13 +285,14 @@ def journeys(browser, base_url, password):
 
 
 def take_case(page, section=None):
-    """Owner division (ADR 0032, ADR 0042 Q10): the case is already in progress; optionally name
-    the แผนก, then set the level at P3."""
+    """Owner division (ADR 0044): the case waits for รับเรื่อง; ดำเนินการ starts it at P3, then
+    optionally name the แผนก."""
+    expect(page.locator(".case-head__title")).to_contain_text("รอรับเรื่อง")
+    act(page, "ดำเนินการ", [lambda f: f.locator("[name=priority]").select_option("P3")])
     expect(page.locator(".case-head__title")).to_contain_text("กำลังดำเนินการ")
     if section:
         act(page, "ระบุแผนก", [lambda f: f.locator("[name=section]").select_option(label=section)])
         expect(page.locator("dl.facts dd").first).to_contain_text(section)
-    act(page, "ตั้งระดับความเร่งด่วน", [lambda f: f.locator("[name=priority]").select_option("P3")])
 
 
 def answer_for_district(page):
@@ -317,7 +322,7 @@ def real_structure(browser, base_url, password):
     )
     notice = kcw.locator(".notice--success")
     expect(notice).to_contain_text("แยกเป็น 2 เรื่องตามกอง")
-    fuses = next(n for n in re.findall(r"W\d{2}-\d{6}", notice.inner_text()) if n != meter)
+    fuses = next(n for n in re.findall(r"\S+\d{2}-\d{6}", notice.inner_text()) if n != meter)
     expect(kcw.locator("dl.facts dd").first).to_contain_text("กคว. กองเครื่องวัดหน่วยไฟฟ้า")
     take_case(kcw)
     assert kcw.goto(f"{base_url}/cases/{fuses}/").status == 404
