@@ -21,7 +21,9 @@ E5 (`168-107-70-170.sslip.io`) หยุดรับงานแล้ว ฐา
 
 ## ก่อนเริ่ม
 
-1. เจ้าของ login ด้วย `gcloud auth login` บน Mac
+1. เจ้าของรัน `deploy/gcp-move.sh login` บน Mac เบราว์เซอร์จะเปิดหน้า login ของ Google ให้เลือกบัญชี `mea.amr2026@gmail.com` แล้วกด Allow หลังจากนั้น Mac จะใช้ได้ประมาณ 55 นาที เมื่อหมดเวลาให้รัน `login` ใหม่ ถ้าทำงานเสร็จก่อน ให้รัน `deploy/gcp-move.sh logout`
+
+   บัญชีนี้เป็น Owner ของโปรเจกต์ จึงไม่เก็บ refresh token ไว้บน Mac เมื่อหมดเวลา ไม่มีสคริปต์ agent หรือโปรแกรมใดบนเครื่องเข้า production ได้จนกว่าเจ้าของจะ login อีกครั้ง ห้ามรัน `gcloud auth login` ตรงๆ เพราะคำสั่งนั้นจะเก็บ refresh token ไว้ถาวร ถ้าจำเป็นต้องรัน ให้ตามด้วย `gcloud auth revoke --all` ทุกครั้ง
 2. ทุกคำสั่งรันจาก repository บน Mac ผ่าน `deploy/gcp-move.sh` ซึ่งเข้าเครื่องผ่าน IAP ด้วย key `~/.ssh/faoj_gcp_ed25519` เครื่องไม่เปิดพอร์ต SSH สู่อินเทอร์เน็ต และไม่ต้องแก้ allow list เมื่อ IP ของ Mac เปลี่ยน (ต่างจาก Bastion ของ E5)
 3. ถ้าต้องการ shell บนเครื่อง ใช้ `deploy/gcp-move.sh ssh` ถ้าต้องการรันคำสั่งเดียว ใช้ `deploy/gcp-move.sh ssh '<คำสั่ง>'` คำสั่ง `faoj` ต้องใช้ `sudo`
 
@@ -130,7 +132,11 @@ ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:ec9a92d9f70e… release_ok: 
 
 ใช้ได้เฉพาะ image ที่ Release workflow สร้างและสแกนแล้ว ห้ามใช้ image ที่ build บนเครื่องหรือบน Mac
 
-1. Deploy โดยใส่ว่าใครอนุมัติเมื่อไร ข้อความนี้จะอยู่ใน release record
+1. Login (ถ้ายังไม่ได้ login หรือเกินเวลาแล้ว) จากนั้น deploy โดยใส่ว่าใครอนุมัติเมื่อไร ข้อความนี้จะอยู่ใน release record
+
+   ```bash
+   deploy/gcp-move.sh login
+   ```
 
    ```bash
    GCP_APPROVAL="owner in chat <วันที่>: <PR หรือเหตุผล>" deploy/gcp-move.sh deploy ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:<digest>
@@ -168,6 +174,12 @@ ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:ec9a92d9f70e… release_ok: 
    ```
 
    **ถ้าถูกต้อง** `current:` เป็น 12 ตัวแรกของ digest ใหม่ maintenance เป็น `off` ทุก service ขึ้น `Up` และ `curl` ได้ `{"status": "ok"}` worker ที่เพิ่งเริ่มจะเผยแพร่ Rich Menu ของรุ่นใหม่ทันที
+
+4. Logout เมื่อเสร็จ
+
+   ```bash
+   deploy/gcp-move.sh logout
+   ```
 
 `faoj auto-promote` และ `faoj auto-deploy` ปิดอยู่บน GCP ระบบจึงไม่รับรุ่นใหม่เอง ทุกรุ่นต้อง deploy ด้วยมือตามขั้นข้างบน
 
@@ -297,7 +309,8 @@ files: last copy 2026-11-02 23:13
 
 | เห็นอะไร | แปลว่า | แก้อย่างไร |
 |---|---|---|
-| gcloud ขึ้นข้อความเรื่อง auth tokens หรือให้ login ใหม่ | session ของ gcloud หมดอายุ | เจ้าของรัน `gcloud auth login` แล้วลองใหม่ |
+| `not signed in, or the hour is up` | ยังไม่ได้ login หรือเกินเวลาแล้ว | เจ้าของรัน `deploy/gcp-move.sh login` แล้วลองใหม่ |
+| gcloud ขึ้นข้อความเรื่อง auth tokens หรือ `invalid_grant` ทั้งที่เพิ่ง login | token ถูก revoke ไปแล้ว หรือนาฬิกาของ Mac คลาดเคลื่อน | รัน `deploy/gcp-move.sh login` ใหม่ |
 | ssh ผ่าน IAP ค้างหรือต่อไม่ติด | IAP หรือเครื่องยังไม่พร้อม หรือเครื่องหยุด | ลองใหม่อีกครั้ง ถ้ายังไม่ได้ ดูสถานะเครื่องด้วย `gcloud compute instances list --project mea-ded-center-line-oa` |
 | เครื่องหยุด (`TERMINATED` หรือ `SUSPENDED`) และทุกอย่างล่ม | เครดิต Free Trial อาจหมด | เปิดหน้า Billing ของ GCP ดูเครดิต ห้ามกด Upgrade และแจ้งเจ้าของทันที ข้อมูลยังอยู่ใน backup ที่ OCI และ standby บน Mac |
 
