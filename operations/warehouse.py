@@ -1,8 +1,8 @@
 """งานคลังของใบเบิก กคว. (grill กคว. 27 ต.ค. 2569 Q16 ถึง Q20, Q27, Q30, Q31, Q45, Q46).
 
-Staff record the stages of many slips at once: รับใบเบิกแล้ว (วันรับงาน, the day the issue
+Staff record the stages of many slips at once: รับใบเบิกแล้ว (วันรับใบเบิก, the day the issue
 time starts), คีย์จ่ายแล้ว with the issue day they set, จ่ายแล้ว and เขตได้รับแล้ว. The issue
-day suggested is วันรับงาน plus the working days of the slowest row (กำหนดจ่ายตามขนาด), moved to
+day suggested is วันรับใบเบิก plus the working days of the slowest row (กำหนดจ่ายตามขนาด), moved to
 the next day the division issues. Setting it sends ฟข. one message: the day, the truck day of
 its district and a choice to come and collect (Q27, Q46); the choice is the confirmation. จ่ายแล้ว
 tells them too. Every message is a held reply (ADR 0024), never a push.

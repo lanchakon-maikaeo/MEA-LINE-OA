@@ -124,6 +124,17 @@ ACTIONS = {
         ActionSpec(
             "assign", "มอบหมายผู้รับผิดชอบเรื่อง", "M02", _per_kind(lambda k, st: _same(_working(st)))
         ),
+        # ADR 0049: the ผู้รับผิดชอบ presses รับงาน, or gives the case back with a reason.
+        ActionSpec(
+            "accept_assignment", "รับงาน", "M02", _per_kind(lambda k, st: _same(_working(st)))
+        ),
+        ActionSpec(
+            "return_assignment",
+            "ขอคืนงาน",
+            "M02",
+            _per_kind(lambda k, st: _same(_working(st))),
+            reason_required=True,
+        ),
         ActionSpec(
             "request_info",
             "ขอข้อมูลเพิ่ม",

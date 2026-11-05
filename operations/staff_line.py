@@ -57,6 +57,8 @@ IMPORTANT = {
     "staff_reopen": N.Level.NORMAL,
     "staff_admin_waiting": N.Level.NORMAL,  # ADR 0030
     "staff_new_case": N.Level.NORMAL,  # ADR 0048
+    "staff_assigned": N.Level.NORMAL,  # ADR 0049
+    "staff_assignment_returned": N.Level.NORMAL,  # ADR 0049
 }
 # Alerts that may show what the requester typed, masked like text sent to the AI (owner, 29 Oct
 # 2569: an exception to the lock screen rule for the admins' waiting cases only).
@@ -314,9 +316,13 @@ def admin_receivers():
     )
 
 
-def _text(kind, case):
+def _text(kind, case, user=None):
     from operations.staff_email import SUBJECTS
 
+    if kind == "staff_assigned" and case.assignee_id:  # ADR 0049 Q5: worded for the ผู้รับผิดชอบ
+        mine = user is not None and user.pk == case.assignee_id
+        head = "มีเรื่องมอบหมายให้คุณ" if mine else f"มอบหมายเรื่องให้ {units.display(case.assignee)}"
+        return f"{head}\nเรื่อง {case.number} · กอง {case.owner_label}"
     if kind in SHOWS_TYPED:
         from operations import pii  # local: pii reads the database for names
 
@@ -344,7 +350,11 @@ def plan(kind, key, case, users, chosen=False, division_id=None):
         if line is None:
             continue
         token = _token(line, "staff_case", {"case": str(case.pk)}, now)
-        text = _text(kind, case)
+        text = _text(kind, case, user)
+        buttons = [(f"ดูเรื่อง {case.number}", token)]
+        if kind == "staff_assigned" and user.pk == case.assignee_id:
+            take = {"case": str(case.pk), "action": "accept_assignment"}
+            buttons.insert(0, ("รับงาน", _token(line, "staff_step", take, now)))
         level = IMPORTANT[kind]
         delay = timedelta(0) if level == N.Level.CRITICAL else timedelta(minutes=5)
         try:
@@ -357,7 +367,7 @@ def plan(kind, key, case, users, chosen=False, division_id=None):
                     recipient_user=user,
                     case=case,
                     text=text,
-                    message=text_message(text, [(f"ดูเรื่อง {case.number}", token)]),
+                    message=text_message(text, buttons),
                     source_event=uuid.uuid5(NAMESPACE, f"{key}:{user.pk}"),
                     send_after=now + delay,
                 )

@@ -800,6 +800,22 @@ PUSH_KINDS = (
         True,
     ),
     (
+        "staff_assigned",
+        "staff",
+        "มอบหมายผู้รับผิดชอบ",
+        "เลือกผู้รับด้านล่าง",
+        "มีเรื่องมอบหมายให้คุณ\nเรื่อง กคว.69-000142 · กอง กคว. [รับงาน] [ดูเรื่อง]",
+        True,
+    ),
+    (
+        "staff_assignment_returned",
+        "staff",
+        "ผู้รับผิดชอบขอคืนงาน",
+        "แอดมินกองของกองเจ้าภาพ",
+        "ผู้รับผิดชอบขอคืนงาน\nเรื่อง กคว.69-000142 · กอง กคว.",
+        True,
+    ),
+    (
         "staff_hazard",
         "staff",
         "เรื่องใหม่แจ้งเหตุอันตราย (ฉุกเฉิน)",
@@ -848,6 +864,10 @@ PUSH_KINDS = (
 )
 # Kinds whose people are picked here as well: (group, label, on by default).
 PUSH_RECIPIENTS = {
+    "staff_assigned": (
+        ("assignee", "ผู้รับผิดชอบที่ถูกมอบหมาย", True),
+        ("duty", "สำเนาถึงแอดมินฝ่ายที่อยู่เวร", True),
+    ),
     "staff_new_case": (
         ("duty", "แอดมินฝ่ายที่อยู่เวร", True),
         ("division_admin", "แอดมินกองของกองเจ้าภาพ", False),
@@ -864,8 +884,17 @@ def _switch(label, on):
     return Option(label, choices if on else choices[::-1])
 
 
+# ADR 0049 Q6: staff and order kinds may go by email too (when the server sends staff email);
+# the ones that went by LINE only before start off.
+EMAIL_GROUPS = ("staff", "order")
+EMAIL_OFF = {"staff_new_case", "staff_admin_waiting", "staff_registration"}
+
 for _kind, _group, _label, _who, _sample, _on in PUSH_KINDS:
     OPTIONS[PUSH_PREFIX + _kind] = _switch(f"Push Message: {_label}", _on)
+    if _group in EMAIL_GROUPS:
+        OPTIONS[f"{PUSH_PREFIX}{_kind}:email"] = _switch(
+            f"Push Message: {_label} → อีเมล", _kind not in EMAIL_OFF
+        )
     for _to, _to_label, _to_on in PUSH_RECIPIENTS.get(_kind, ()):
         OPTIONS[f"{PUSH_PREFIX}{_kind}:{_to}"] = _switch(
             f"Push Message: {_label} → {_to_label}", _to_on
@@ -894,7 +923,18 @@ def push_rows(sent):
                 "recipients": [
                     {"key": f"{PUSH_PREFIX}{kind}:{to}", "label": to_label, "on": push_on(kind, to)}
                     for to, to_label, _ in PUSH_RECIPIENTS.get(kind, ())
-                ],
+                ]
+                + (
+                    [
+                        {
+                            "key": f"{PUSH_PREFIX}{kind}:email",
+                            "label": "อีเมล",
+                            "on": push_on(kind, "email"),
+                        }
+                    ]
+                    if g in EMAIL_GROUPS
+                    else []
+                ),
             }
             for kind, g, label, who, sample, _ in PUSH_KINDS
             if g == group

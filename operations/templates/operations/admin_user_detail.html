@@ -26,7 +26,23 @@
 </table></div>
 
 <div class="form-grid">
-    <form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">
+<form method="post" action="{% url 'admin-user-action' target.pk 'account' %}">
+  <fieldset><legend>ข้อมูลบัญชี</legend>{% csrf_token %}
+    <p><label for="u-username">ชื่อผู้ใช้ (ใช้เข้าระบบ)</label> <input id="u-username" name="username" maxlength="150" value="{{ target.username }}" required autocomplete="off"></p>
+    <p><label for="u-name">ชื่อที่แสดง</label> <input id="u-name" name="display_name" maxlength="200" value="{{ target.staff_profile.display_name }}" required></p>
+    <p><label for="u-email">อีเมล</label> <input id="u-email" name="email" type="email" maxlength="254" value="{{ target.email }}"></p>
+    <p><label for="u-acc-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-acc-reason" name="reason" maxlength="500"></p>
+    <button type="submit">บันทึก</button></fieldset>
+</form>
+<form method="post" action="{% url 'admin-user-action' target.pk 'set-password' %}">
+  <fieldset><legend>ตั้งรหัสผ่านใหม่</legend>{% csrf_token %}
+    <p class="helptext">ผู้ใช้ต้องเปลี่ยนรหัสเองเมื่อเข้าระบบครั้งถัดไป และทุกเครื่องที่เข้าอยู่จะออกจากระบบ</p>
+    <p><label for="u-pw">รหัสผ่านใหม่</label> <input id="u-pw" name="password" type="password" required autocomplete="new-password"></p>
+    <p><label for="u-pw2">พิมพ์อีกครั้ง</label> <input id="u-pw2" name="password2" type="password" required autocomplete="new-password"></p>
+    <p><label for="u-pw-reason">เหตุผล</label> <input id="u-pw-reason" name="reason" maxlength="500"></p>
+    <button type="submit">ตั้งรหัสผ่าน</button></fieldset>
+</form>
+<form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">
   <fieldset><legend>แจ้งเตือนแอดมินทาง LINE</legend>{% csrf_token %}
     <p>บัญชีผู้รับต้องเป็นแอดมินและเชื่อม LINE แล้ว ระบบตรวจสิทธิ์อีกครั้งก่อนส่ง</p>
     <label><input type="checkbox" name="enabled" value="1"{% if target.staff_profile.notify_registrations %} checked{% endif %}> รับแจ้งคำขอลงทะเบียนและผลการอนุมัติ</label>

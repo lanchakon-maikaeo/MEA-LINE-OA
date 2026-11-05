@@ -57,6 +57,8 @@ BUTTON_LABELS = {
     "start_triage": "เริ่มคัดกรอง",
     "claim": "รับเป็นผู้รับผิดชอบ",
     "assign": "มอบหมายผู้รับผิดชอบ",
+    "accept_assignment": "รับงาน",
+    "return_assignment": "ขอคืนงาน",
     "request_info": "ขอข้อมูลเพิ่มจากหน่วยงาน (เขต/ฝ่าย)",
     "info_received": "ได้ข้อมูลครบแล้ว",
     "hold": "พักเรื่องไว้ก่อน",
@@ -135,6 +137,7 @@ IRREVERSIBLE = frozenset(
 
 # Round 2 Q6: the one black button, first match wins.
 PRIMARY_ORDER = [
+    "accept_assignment",
     "start_triage",
     "accept_handoff",
     "accept_child_work",
@@ -325,6 +328,8 @@ RULES = {
     "start_triage": lambda st: st.member(st.owner),
     "claim": lambda st: st.member(st.owner) and st.case.assignee_id != st.user.pk,
     "assign": lambda st: st.member(st.owner, [Role.SUPERVISOR]),
+    "accept_assignment": lambda st: _awaits_me(st),
+    "return_assignment": lambda st: _awaits_me(st),
     "request_info": lambda st: st.member(st.owner),
     "hold": lambda st: st.member(st.owner),
     "info_received": lambda st: st.member(st.owner),
@@ -474,13 +479,19 @@ class Offer:
     irreversible: bool = False
 
 
+def _awaits_me(st):
+    return st.case.awaits_acceptance and st.case.assignee_id == st.user.pk
+
+
 def available(user, case, st=None):
-    """Actions this viewer may start now, the primary one first (empty for read-only viewers)."""
+    """Actions this viewer may start now, the primary one first (empty for read-only viewers).
+    ADR 0049 Q9: a ผู้รับผิดชอบ who has not pressed รับงาน may only take it or give it back."""
     st = st or situation(user, case)
     names = []
     hidden = set() if options.old_stock() else STOCK
+    waiting = _awaits_me(st)
     for name, rule in RULES.items():
-        if name in hidden:
+        if name in hidden or (waiting and name not in ("accept_assignment", "return_assignment")):
             continue
         spec = workflow.ACTIONS.get(name)
         if (
@@ -709,6 +720,8 @@ def build_form(action, st, params, demo=False):
         "reopen",
     ):
         add(_reason(True))
+    elif action == "return_assignment":
+        add(Field("reason", "เหตุผลที่ขอคืนงาน", "textarea", True, help="แอดมินกองเห็นเหตุผลนี้"))
     elif action == "cancel":
         if case.kind == K.WITHDRAWAL and st.deliveries:
             add(

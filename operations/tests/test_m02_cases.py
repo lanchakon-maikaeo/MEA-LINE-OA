@@ -205,6 +205,9 @@ EXPECTED_SOURCES = {
     "start_triage": {k: {"submitted"} for k in K},
     "claim": {k: WORKING[k] | PAUSED for k in K},
     "assign": {k: WORKING[k] | PAUSED for k in K},
+    # ADR 0049: the ผู้รับผิดชอบ takes the case or gives it back wherever someone may hold it.
+    "accept_assignment": {k: WORKING[k] | PAUSED for k in K},
+    "return_assignment": {k: WORKING[k] | PAUSED for k in K},
     "request_info": {k: WORKING[k] - {"awaiting_confirmation"} for k in K},
     "info_received": {k: {"awaiting_info"} for k in K},
     "hold": {k: set(WORKING[k]) for k in K},
@@ -229,6 +232,7 @@ class TransitionMatrixTests(CaseTestCase):
             "hold": (self.meter, {"reason": "รอของเข้าคลัง"}),
             "cancel": (self.meter, {"reason": "เขตแจ้งยกเลิก"}),
             "decline": (self.meter, {"reason": "เรื่องซ้ำ"}),
+            "return_assignment": (self.meter, {"reason": "ลาพัก"}),
         }
         user, payload = payloads.get(action, (self.meter, None))
         return self.as_staff(user), payload
@@ -254,6 +258,8 @@ class TransitionMatrixTests(CaseTestCase):
                 for status in S:
                     with self.subTest(action=action, kind=kind, status=status):
                         case = self.make_case(kind, status)
+                        if action.endswith("_assignment"):  # held by the actor, not taken yet
+                            Case.objects.filter(pk=case.pk).update(assignee=self.meter)
                         allowed = status in EXPECTED_SOURCES[action][kind]
                         if not allowed:
                             self.assertFails(

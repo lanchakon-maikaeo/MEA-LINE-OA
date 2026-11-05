@@ -560,6 +560,12 @@ class Case(models.Model):
         "UnitWork", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     auto_assigned = models.BooleanField(default=False)
+    # รับงาน (ADR 0049): who pressed it for the current assignee and when; every assignment
+    # clears both, so each ผู้รับผิดชอบ presses it once more.
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    accepted_at = models.DateTimeField(null=True, blank=True)
     # Empty when the requester submitted on LINE; the staff member when filed on their behalf.
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
@@ -645,6 +651,11 @@ class Case(models.Model):
     def owner_label(self):
         """The owner as people read it: แอดมิน for a case an admin holds (ADR 0030 Q19)."""
         return "แอดมิน" if self.held_by_admin else self.owner_division.code
+
+    @property
+    def awaits_acceptance(self):
+        """รอรับงาน (ADR 0049): someone is responsible and has not pressed รับงาน yet."""
+        return bool(self.assignee_id) and not self.accepted_by_id
 
 
 class CaseLine(models.Model):
@@ -3510,7 +3521,7 @@ class CaseMilestone(models.Model):
 
 
 class DivisionSchedule(models.Model):
-    """ตารางของกอง (Q17, Q30, Q45): กำหนดจ่ายตามขนาด (working days after วันรับงาน), the
+    """ตารางของกอง (Q17, Q30, Q45): กำหนดจ่ายตามขนาด (working days after วันรับใบเบิก), the
     weekdays it issues, and วันส่งรถ of each ฟข. Staff of the division edit it with a reason."""
 
     division = models.OneToOneField(Division, on_delete=models.PROTECT, related_name="schedule")

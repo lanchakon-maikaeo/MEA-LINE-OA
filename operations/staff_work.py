@@ -592,42 +592,43 @@ def reporter(case):
 def case_detail(turn, user, case):
     """The case, who reported it, and every step this person may take in chat (ADR 0042 Q5:
     no web links; a step that needs a long form stays on the web)."""
-    from operations import web_actions
+    from operations import case_numbers, staff_inbox, typed_lines, units, web_actions
 
     level = case.triage.effective_priority if hasattr(case, "triage") else ""
+    who = ""
+    if case.assignee:
+        who = f" · ผู้รับผิดชอบ {work_orders.name_of(case.assignee)}"
+        if case.awaits_acceptance:
+            who += " · รอรับงาน"
+        elif case.accepted_at:  # ADR 0049
+            at = timezone.localtime(case.accepted_at)
+            who += f" · รับงานแล้ว {units.thai_date(at.date())} {at:%H:%M} น."
     rows = [
         f"เรื่อง {case.number} · {case.get_kind_display()}",
         *reporter(case),
         f"สถานะ: {case.get_status_display()} · ระดับ{queues.level_name(level)}",
-        f"กอง {case.owner_division.code}"
-        + (f" · ผู้รับผิดชอบ {work_orders.name_of(case.assignee)}" if case.assignee else ""),
+        f"กอง {case.owner_division.code}{who}",
+        # The kind of number the requester picked, and the ones staff added (ADR 0047).
+        *(f"{label}: {', '.join(numbers)}" for label, numbers in case_numbers.by_kind(case)),
     ]
-    from operations import typed_lines
-
-    if case.sap_number and typed_lines.sap_label(case.kind, case.topic):
-        rows.append(f"{typed_lines.sap_label(case.kind, case.topic)}: {case.sap_number}")
     for line in case.lines.select_related("item"):
         for row in line.details:
             unit = line.item.unit if typed_lines.is_shared(line.item) else ""
             rows.append(f"· {typed_lines.label_of(row['group'])} {typed_lines.describe(row, unit)}")
-    text = (case.description or case.purpose or case.return_reason or "").strip()
-    if text:
-        rows.append(text[:300])
+    rows.append(f"รายละเอียด: {staff_inbox.details(case)[:300] or 'ไม่ระบุ'}")
     buttons = []
     if options.get(options.STAFF_LINE_ACTIONS) == "act":
         # ADR 0044: the web's สิ่งที่ทำได้, ดำเนินการ first (เริ่มคัดกรอง only while the
         # screening option is on); a step needing its web form, or one that cannot be undone,
         # opens the form in the browser when tapped.
         offers = web_actions.available(user, case)
-        priority = {"approve": 0, "admin_send": 1, "assign": 2}
+        priority = {"accept_assignment": -1, "approve": 0, "admin_send": 1, "assign": 2}
         offers.sort(key=lambda offer: (offer.irreversible, priority.get(offer.name, 3)))
         for offer in offers[:10]:
             label = card_label(offer.name)
             buttons.append(
                 turn.button(label, "staff_step", {"case": str(case.pk), "action": offer.name})
             )
-    from operations import staff_inbox
-
     staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับไปที่รายการ", "staff_inbox")])
 
 

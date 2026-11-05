@@ -49,7 +49,9 @@ SUBJECTS = {
     "staff_registry": "พบส่วนต่างทะเบียนใหม่จากไฟล์ SAP",  # M11 Q19: one per import
     "staff_support": "ผู้ช่วยเหลือระบบทำแทนกองในเรื่องของกอง",  # ADR 0007
     "staff_admin_waiting": "มีเรื่องรอแอดมิน",  # ADR 0030: LINE only
-    "staff_new_case": "เรื่องใหม่รอรับเรื่อง",  # ADR 0048: LINE only
+    "staff_new_case": "เรื่องใหม่รอรับเรื่อง",  # ADR 0048
+    "staff_assigned": "มอบหมายผู้รับผิดชอบเรื่อง",  # ADR 0049
+    "staff_assignment_returned": "ผู้รับผิดชอบขอคืนงาน",  # ADR 0049
 }
 CRITICAL = {"staff_hazard", "staff_escalated", "staff_routing"}
 
@@ -136,7 +138,15 @@ def plan(kind, key, case, users, detail="", text=None, chosen=False, division_id
     if case is not None and case.is_example:
         return []  # ตัวอย่าง (15 ต.ค. 2569 Q33): no email or LINE about it
     staff_line.plan(kind, key, case, users, chosen, division_id)
-    if not enabled():
+    return mail(kind, key, case, users, detail, text)
+
+
+def mail(kind, key, case, users, detail="", text=None):
+    """The email half of `plan`: nothing while staff email is off, or while Push Message keeps
+    this kind's email switch off (ADR 0049 Q6)."""
+    from operations import options  # local: options reads this module's subjects
+
+    if not (enabled() and options.push_on(kind) and options.push_on(kind, "email")):
         return []
     now = timezone.now()
     text = text or _text(kind, case, detail)
@@ -181,9 +191,13 @@ def plan_for_event(event):
         if case is not None and case.held_by_admin and not case.is_example:
             from operations import staff_line  # local: staff_line reads subjects from here
 
-            # ADR 0030 Q21, Q25: LINE to the admins who keep this on (no email, no division).
-            staff_line.plan(
-                "staff_admin_waiting", f"admin:{case.pk}", case, staff_line.admin_receivers(), True
+            # ADR 0030 Q21, Q25: to the admins who keep this on (no division).
+            plan(
+                "staff_admin_waiting",
+                f"admin:{case.pk}",
+                case,
+                staff_line.admin_receivers(),
+                chosen=True,
             )
         if case is not None:
             _plan_new_case(case)
@@ -231,20 +245,20 @@ def _plan_support(decision):
     )
 
 
-def _copy_to_duty(kind, key, case):
+def _copy_to_duty(kind, key, case, detail=""):
     """ADR 0048: a copy for the แอดมินฝ่าย on duty, when Push Message keeps it on. The same key
     as the main alert, so nobody told twice."""
-    from operations import duty, options, staff_line  # local: staff_line reads SUBJECTS here
+    from operations import duty, options
 
     if not case.is_example and options.push_on(kind, "duty"):
-        staff_line.plan(kind, key, case, duty.receivers(), True)
+        plan(kind, key, case, duty.receivers(), detail, chosen=True)
 
 
 def _plan_new_case(case):
-    """ADR 0048: a case now waits at รับเรื่อง of its owner division; LINE only, to the แอดมินฝ่าย
+    """ADR 0048: a case now waits at รับเรื่อง of its owner division; to the แอดมินฝ่าย
     on duty and, when switched on, the division's แอดมินกอง. Filing and its skip_screening
     decision both land here: one key per case and division, so each person is told once."""
-    from operations import options, staff_line
+    from operations import options
 
     if case.status != Case.Status.AWAITING_APPROVAL or case.is_example:
         return
@@ -252,13 +266,36 @@ def _plan_new_case(case):
     _copy_to_duty("staff_new_case", key, case)
     if options.push_on("staff_new_case", "division_admin") and case.owner_division_id:
         heads = members(case.owner_division_id, roles=[Role.SUPERVISOR])
-        staff_line.plan("staff_new_case", key, case, heads, True)
+        plan("staff_new_case", key, case, heads, chosen=True)
+
+
+def _plan_assigned(decision, key):
+    """ADR 0049 Q5: the new ผู้รับผิดชอบ, with a รับงาน button on LINE, and a copy for the
+    แอดมินฝ่าย on duty. Nobody hears of a case they took themselves, or one passed on since."""
+    from operations import options, work_orders
+
+    case, person = decision.case, decision.case.assignee
+    data = decision.data if isinstance(decision.data, dict) else {}
+    if person is None or person.pk != data.get("assignee_id") or person.pk == decision.actor_id:
+        return []
+    detail = f"ผู้รับผิดชอบ: {work_orders.name_of(person)}"
+    told = []
+    if options.push_on("staff_assigned", "assignee"):  # first, so a duty admin gets the button
+        told = plan("staff_assigned", key, case, [person], detail, chosen=True)
+    _copy_to_duty("staff_assigned", key, case, detail)
+    return told
 
 
 def _plan_decision(decision):
     case, key = decision.case, f"decision:{decision.action_id}"
     if decision.to_status == Case.Status.AWAITING_APPROVAL != decision.from_status:
         _plan_new_case(case)  # skip_screening on filing, or routed to a division later
+    if decision.action == "assign":
+        return _plan_assigned(decision, key)
+    if decision.action == "return_assignment":  # ADR 0049 Q9: the แอดมินกอง assigns again
+        heads = members(case.owner_division_id, [Role.SUPERVISOR])
+        detail = f"เหตุผล: {decision.reason}"
+        return plan("staff_assignment_returned", key, case, heads, detail, chosen=True)
     if decision.action == "request_handoff":
         handoff = Handoff.objects.filter(case=case, status=Handoff.Status.PENDING).first()
         if handoff:
@@ -294,8 +331,7 @@ def _plan_decision(decision):
         from operations import staff_line  # local: staff_line reads subjects from here
 
         kind = "staff_dispute" if decision.action == "dispute_resolution" else "staff_reopen"
-        staff_line.plan(kind, key, case, staff_line.admin_receivers(), True)  # ADR 0030
-        return []
+        return plan(kind, key, case, staff_line.admin_receivers(), chosen=True)  # ADR 0030
     if decision.action == "dispute_resolution":
         return plan("staff_dispute", key, case, _assignee_or_owner(case))
     if decision.action == "reopen":

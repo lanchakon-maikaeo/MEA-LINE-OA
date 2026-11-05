@@ -35,6 +35,7 @@ from operations import (
     queues,
     roster,
     sealing,
+    staff_email,
     units,
 )
 from operations.models import (
@@ -362,6 +363,28 @@ def admin_user_action(request, pk, action):
             lambda: identity.revoke_sessions(actor, target, reason),
             "ออกจากระบบทุกเครื่องแล้ว",
         )
+    elif action == "account":  # ADR 0049 Q12
+        _run(
+            request,
+            lambda: identity.update_account(
+                actor,
+                target,
+                data.get("username", ""),
+                data.get("display_name", ""),
+                data.get("email", ""),
+                reason,
+            ),
+            "บันทึกข้อมูลบัญชีแล้ว",
+        )
+    elif action == "set-password":  # ADR 0049 Q13
+        if data.get("password", "") != data.get("password2", ""):
+            messages.error(request, "รหัสผ่านสองช่องไม่ตรงกัน")
+        else:
+            _run(
+                request,
+                lambda: identity.set_password(actor, target, data.get("password", ""), reason),
+                "ตั้งรหัสผ่านแล้ว ผู้ใช้ต้องเปลี่ยนรหัสเมื่อเข้าระบบครั้งถัดไป",
+            )
     elif action == "reset-password":
         password = _run(
             request,
@@ -1203,6 +1226,7 @@ def admin_push(request):
             "groups": options.push_rows(sent),
             "moved": [moved[k] for k in options.PUSH_MOVED],
             "line_on": notifications.push_enabled(),
+            "email_on": staff_email.enabled(),
             "history": history,
         },
     )

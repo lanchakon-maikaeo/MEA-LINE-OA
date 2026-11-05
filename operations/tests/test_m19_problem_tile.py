@@ -144,7 +144,7 @@ class ChatTests(PickTestCase):
         with patch("operations.staff_line.plan") as plan:
             staff_email.plan_for_event(event)
         calls = [c.args for c in plan.call_args_list if c.args[0] == "staff_admin_waiting"]
-        kind, key, planned, users, chosen = calls[0]
+        kind, key, planned, users, chosen, _ = calls[0]
         self.assertEqual((kind, planned, chosen), ("staff_admin_waiting", case, True))
         self.assertIn(self.boss, users)
         self.assertNotIn(quiet, users)

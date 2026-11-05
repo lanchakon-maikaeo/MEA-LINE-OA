@@ -620,6 +620,7 @@ def _take(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "You are already responsible for this case.")
     case.assignee = ctx.user
     case.auto_assigned = False  # ADR 0031 Q24: a person chose; the system leaves it alone
+    case.accepted_by, case.accepted_at = ctx.user, timezone.now()  # ADR 0049 Q10
     case.status = target
     return {"assignee_id": ctx.user.pk}
 
@@ -685,7 +686,28 @@ def _assign(ctx, case, payload, reason, target):
     previous = case.assignee_id
     case.assignee = assignee
     case.auto_assigned = False  # ADR 0031 Q24
+    # ADR 0049: the new ผู้รับผิดชอบ presses รับงาน; choosing yourself is taking it.
+    mine = assignee.pk == ctx.user.pk
+    case.accepted_by, case.accepted_at = (assignee, timezone.now()) if mine else (None, None)
     return {"assignee_id": assignee.pk, "previous_assignee_id": previous}
+
+
+def _accept_assignment(ctx, case, payload, reason, target):
+    if ctx.user is None or case.assignee_id != ctx.user.pk:
+        fail(ErrorCode.FORBIDDEN, "เฉพาะผู้รับผิดชอบเรื่องนี้กดรับงานได้")
+    if case.accepted_by_id:
+        fail(ErrorCode.VALIDATION_ERROR, "รับงานเรื่องนี้แล้ว")
+    case.accepted_by, case.accepted_at = ctx.user, timezone.now()
+    return {}
+
+
+def _return_assignment(ctx, case, payload, reason, target):
+    """ADR 0049 Q9: before รับงาน the ผู้รับผิดชอบ may give the case back; it waits for an
+    assignment again."""
+    if ctx.user is None or case.assignee_id != ctx.user.pk or case.accepted_by_id:
+        fail(ErrorCode.FORBIDDEN, "ขอคืนงานได้เฉพาะผู้รับผิดชอบที่ยังไม่ได้รับงาน")
+    case.assignee, case.auto_assigned = None, False
+    return {"previous_assignee_id": ctx.user.pk}
 
 
 def _pause(ctx, case, payload, reason, target):
@@ -732,6 +754,8 @@ HANDLERS = {
     "start_triage": _take,
     "claim": _take,
     "assign": _assign,
+    "accept_assignment": _accept_assignment,
+    "return_assignment": _return_assignment,
     "request_info": _pause,
     "hold": _pause,
     "info_received": _unpause,

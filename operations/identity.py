@@ -9,8 +9,9 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -777,6 +778,7 @@ def merge_accounts(actor, employee, user, reason=""):
                 else:
                     model.objects.filter(pk=row.pk).update(user=user)
         Case.objects.filter(assignee=old, ended_at__isnull=True).update(assignee=user)
+        Case.objects.filter(accepted_by=old, ended_at__isnull=True).update(accepted_by=user)
         WorkOrder.objects.filter(assignee=old, ended_at__isnull=True).update(assignee=user)
         if old.is_active:
             set_staff_active(actor, old, False, reason)
@@ -835,19 +837,72 @@ def revoke_sessions(actor, user, reason):
 @transaction.atomic
 def reset_password(actor, user, reason):
     """Admin-initiated reset: one-time password, forced change, and all sessions ended."""
+    password = _new_temporary_password()
+    _set_password(actor, user, password, reason, "staff.password_reset")
+    return password
+
+
+@transaction.atomic
+def set_password(actor, user, password, reason):
+    """ADR 0049 Q13: the admin types the password; it works once, then the person sets their own."""
+    password_validation.validate_password(password, user)
+    _set_password(actor, user, password, reason, "staff.password_set")
+
+
+def _set_password(actor, user, password, reason, action):
     reason = _require_reason(reason)
     require_admin(actor)
     _require_account_admin(actor, user, _lock_active_admins())
     user = User.objects.select_for_update().get(pk=user.pk)
-    password = _new_temporary_password()
     user.set_password(password)
     user.save(update_fields=["password"])
     profile = _profile(user)
     profile.must_change_password = True
     profile.sessions_valid_after = timezone.now()
     profile.save(update_fields=["must_change_password", "sessions_valid_after"])
-    audit(actor, "staff.password_reset", user, reason)
-    return password
+    audit(actor, action, user, reason)
+
+
+@transaction.atomic
+def update_account(actor, user, username, display_name, email, reason=""):
+    """ADR 0049 Q12: an admin corrects the sign-in name, the name people see and the email. A
+    `line-employee-…` account given another name counts as a web account from then on."""
+    require_admin(actor)
+    _require_account_admin(actor, user, _lock_active_admins())
+    user = User.objects.select_for_update().get(pk=user.pk)
+    username, email = username.strip(), email.strip()
+    display_name = " ".join(display_name.split())
+    if not username or not display_name:
+        raise ValidationError("ต้องมีชื่อผู้ใช้และชื่อที่แสดง")
+    try:
+        User.username_validator(username)
+    except ValidationError:
+        raise ValidationError("ชื่อผู้ใช้ใช้ได้เฉพาะตัวอักษร ตัวเลข และ @ . + - _") from None
+    if email:
+        try:
+            validate_email(email)
+        except ValidationError:
+            raise ValidationError("อีเมลไม่ถูกต้อง") from None
+    if User.objects.filter(username__iexact=username).exclude(pk=user.pk).exists():
+        raise ValidationError("ชื่อผู้ใช้นี้มีบัญชีอื่นใช้แล้ว")
+    profile = _profile(user)
+    before = {"username": user.username, "display_name": profile.display_name, "email": user.email}
+    after = {"username": username, "display_name": display_name, "email": email}
+    changed = {k: v for k, v in after.items() if before[k] != v}
+    if not changed:
+        raise ValidationError("ข้อมูลเหมือนเดิม")
+    user.username, user.email = username, email
+    user.save(update_fields=["username", "email"])
+    profile.display_name = display_name
+    profile.save(update_fields=["display_name"])
+    audit(
+        actor,
+        "staff.account_changed",
+        user,
+        reason,
+        **changed,
+        **{f"previous_{k}": before[k] for k in changed},
+    )
 
 
 def password_changed(user):

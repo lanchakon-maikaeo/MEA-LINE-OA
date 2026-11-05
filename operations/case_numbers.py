@@ -28,6 +28,18 @@ def kinds(case):
     return [(k, TRACKING_LABELS[k]) for k in KINDS.get(case.kind, OTHER_KINDS)]
 
 
+def by_kind(case):
+    """[(label, numbers)]: the first number and the added ones, one row for each kind, named as
+    the requester or staff picked it."""
+    rows = {}
+    first = typed_lines.sap_label(case.kind, case.topic, case.sap_kind)
+    if case.sap_number and first:
+        rows[first] = [case.sap_number]
+    for n in case.extra_numbers.all():
+        rows.setdefault(TRACKING_LABELS.get(n.kind, n.kind), []).append(n.number)
+    return list(rows.items())
+
+
 def may_edit(user, case):
     scope = identity.staff_scope(user)
     return (
