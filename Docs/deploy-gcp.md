@@ -17,7 +17,7 @@
 | เครื่องสำรอง | Mac (`~/faoj-standby`) ดึง WAL ของ `production-gcp` มาทุก 5 นาที |
 | เครดิต | Free Trial ของ GCP หมดราวปลาย ม.ค. 2570 ห้ามกด Upgrade และห้ามผูก billing account อื่น ต้องย้ายออกให้ได้ภายในกลาง ม.ค. |
 
-E5 (`168-107-70-170.sslip.io`) หยุดรับงานแล้ว ฐานข้อมูลเป็น read-only และทุกหน้าแสดงข้อความว่าย้ายไปที่อยู่ใหม่ เก็บไว้ถึงวันที่ 10 พ.ย. ห้าม deploy หรือแก้อะไรบน E5 ถ้าเจ้าของไม่ได้สั่ง
+เจ้าของลบ VM `faoj-prod-e5` (E5) แล้วเมื่อ 5 พ.ย. 2569 จึงย้ายกลับ E5 (`gcp-move.sh reverse-move`) ไม่ได้อีก และ `168-107-70-170.sslip.io` เปิดไม่ได้แล้ว ที่ OCI ยังเก็บ data volume `faoj-prod-e5-data` (ฐานข้อมูล E5 ตอน freeze), boot volume, reserved IP 168.107.70.170, bucket `faoj-backup` และ `faoj-files` (GCP ยัง backup ลงที่นี่) และ OCIR (GCP ดึง image จากที่นี่) ห้ามลบของเหล่านี้
 
 ## ก่อนเริ่ม
 

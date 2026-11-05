@@ -38,8 +38,9 @@
 
 ## วันที่ 10 พ.ย. 2569
 
-- ☐ ก่อน E5 หยุด รันซ้ำว่า restore drill บน GCP ยังผ่าน และ Mac standby ยังตามทัน
-- ☐ E5 หยุดเองเมื่อเครดิตหมด จากนั้นเปิด PR เอา `faoj-prod-e5` ออกจาก Terraform (แก้ `prevent_destroy` ใน commit ที่ตรวจแล้ว) แล้ว**เจ้าของกด apply** โดยเก็บ bucket, OCIR และ Vault ไว้
+- ☐ รันซ้ำว่า restore drill บน GCP ยังผ่าน และ Mac standby ยังตามทัน
+- ☑ 5 พ.ย.: เจ้าของ terminate VM `faoj-prod-e5` ด้วย `--preserve-boot-volume true` ก่อนเครดิตหมด หลังจากนั้นยังเหลือ data volume 100 GB, boot volume 50 GB, reserved IP 168.107.70.170, bucket และ OCIR ตอนลบ standby บน Mac ตามหลัง GCP 4 นาทีครึ่ง และ run.app `/health/ready/` ตอบ 200
+- ☐ เปิด PR เอา `faoj-prod-e5` ออกจาก Terraform (แก้ `prevent_destroy` ใน commit ที่ตรวจแล้ว) แล้ว**เจ้าของกด apply** โดยเก็บ bucket, OCIR และ Vault ไว้ ก่อน PR นี้ อย่ากด Apply ใน Resource Manager เพราะ `hosts.auto.tfvars.json` ยังมี `faoj-prod-e5` อยู่ Terraform จะสร้าง VM ใหม่
 - ☐ หมุน Customer Secret Key ของ backup-writer ใส่ key ใหม่บน GCP แล้วลบ key เก่า
 
 ## 30 วันหลังย้าย
