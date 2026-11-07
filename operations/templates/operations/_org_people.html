@@ -1,0 +1,5 @@
+{# ADR 0050 Q4: the people of one unit in a column; a person opens their card. #}
+<ul class="ot__people">{% for p in people %}<li>
+  <button type="button" class="ot__person" popovertarget="op-{{ p.employee.pk }}"><span class="ot__avatar" aria-hidden="true">{{ p.name|slice:":1" }}</span><span><span class="ot__name">{{ p.name }}</span>{% if p.role != "employee" %}<span class="ot__role">{{ p.role_label }}</span>{% endif %}<span class="ot__pos">{{ p.employee.position|default:"ไม่ระบุตำแหน่ง" }}</span></span></button>
+  {% include "operations/_org_person.html" %}
+</li>{% endfor %}</ul>

@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -30,6 +30,7 @@ from operations.models import (
     DivisionSchedule,
     Holiday,
 )
+from operations.templatetags.ui import thai_short
 from operations.views import admin_required
 
 S = CaseMilestone.Stage
@@ -571,13 +572,68 @@ def _next_stage(case, done):
     return None
 
 
+def case_steps(case, panel):
+    """ADR 0051 Q1, Q8, Q9: the appointment and warehouse buttons of สิ่งที่ทำได้, an appointment
+    the requester waits on first. Each opens its form in the action slot."""
+    if not panel["can_act"]:
+        return []
+    steps = [
+        {
+            "label": f"{a.calendar.name} {thai_short(a.slot.starts_at)} น."
+            if a.slot
+            else f"{a.calendar.name} (ยังไม่มีช่วงเวลา)",
+            "url": f"{reverse('case-appointment', args=[case.number])}?appointment={a.pk}",
+            "appointment": a,
+        }
+        for a in panel["waiting"]
+    ]
+    if panel["warehouse"] and case.status not in (
+        Case.Status.AWAITING_APPROVAL,
+        Case.Status.CLOSED,
+    ):
+        url = reverse("case-stage", args=[case.number])
+        if panel["next_stage"]:
+            steps.append(
+                {"label": f"บันทึก{panel['next_label']}", "url": url, "stage": panel["next_stage"]}
+            )
+        if panel["more_keyed"]:
+            steps.append(
+                {
+                    "label": f"บันทึก{panel['keyed_label']}",
+                    "url": f"{url}?stage={S.KEYED}",
+                    "stage": S.KEYED,
+                }
+            )
+    return steps
+
+
+def _step_page(request, case, context):
+    """The form of one step: a partial for the action slot, the whole page without HTMX."""
+    partial = request.headers.get("HX-Request") == "true"
+    template = "operations/_step_form.html" if partial else "operations/case_step.html"
+    return render(request, template, {"case": case, **context})
+
+
 @login_required
-@require_POST
 def case_stage(request, number):
-    """Q38 (Q9): the next warehouse stage of one case, from its card."""
+    """Q38 (Q9): the next warehouse stage of one case, from its card. GET: its form (ADR 0051 Q1);
+    ?demo=1 an example for สาธิตการใช้งาน that cannot be sent."""
     case = queues.visible(request.user).filter(number=number).first()
     if case is None:
         raise Http404
+    if request.method == "GET":
+        panel = case_panel(request.user, case)
+        demo = request.GET.get("demo") == "1"
+        stage = request.GET.get("stage") or panel["next_stage"] or (S.RECEIVED if demo else "")
+        if stage not in S.values or case.kind not in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN):
+            raise Http404
+        if not demo and stage not in {s.get("stage") for s in case_steps(case, panel)}:
+            raise PermissionDenied
+        label = warehouse.stage_label(case, stage)
+        context = {"panel": panel, "stage": stage, "label": label, "title": f"บันทึก{label}"}
+        return _step_page(request, case, {**context, "demo": demo})
+    if request.method != "POST":
+        return HttpResponse(status=405)
     on = _day(request.POST.get("on"), timezone.localdate())
     planned = _day(request.POST.get("planned_on"))
     numbers = request.POST.getlist("number")
@@ -611,12 +667,23 @@ def case_stage(request, number):
 
 
 @login_required
-@require_POST
 def case_appointment(request, number):
-    """Q9: confirm, move or reject this case's appointment, from its card."""
+    """Q9: confirm, move or reject this case's appointment, from its card. GET: its form for the
+    action slot (ADR 0051 Q9)."""
     case = queues.visible(request.user).filter(number=number).first()
     if case is None:
         raise Http404
+    if request.method == "GET":
+        panel = case_panel(request.user, case)
+        wanted = request.GET.get("appointment", "")
+        steps = [s for s in case_steps(case, panel) if "appointment" in s]
+        step = next((s for s in steps if str(s["appointment"].pk) == wanted), None)
+        if step is None:
+            raise PermissionDenied
+        context = {"panel": panel, "a": step["appointment"], "title": step["label"]}
+        return _step_page(request, case, context)
+    if request.method != "POST":
+        return HttpResponse(status=405)
     appointment = get_object_or_404(Appointment, pk=request.POST.get("appointment"), case=case)
     action = request.POST.get("action", "")
     slot = None
@@ -684,4 +751,7 @@ def case_panel(user, case):
         "appointments": open_appointments,
         "warehouse": case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
         and warehouse.schedule_of(case.owner_division) is not None,
+        "calendar": bool(open_appointments)
+        or case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
+        and case.owner_division.calendars.exists(),
     }

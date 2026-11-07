@@ -5,38 +5,56 @@
   <div class="page-head__text">
     <span class="eyebrow">แอดมิน</span>
     <h1>Push Message</h1>
-    <p class="lede">ข้อความที่ระบบส่งเข้า LINE เองโดยผู้รับไม่ได้ทักมาก่อน งานของเจ้าหน้าที่และงานสั่งส่งทางอีเมลได้ด้วย กดสวิตช์เพื่อเปิดหรือปิดทีละชนิดทั้งระบบ ชนิดที่ปิดจะไม่ถูกส่ง แต่ข้อมูลยังอยู่ในเว็บและในเรื่องของฉัน ทุกการเปลี่ยนบันทึกในประวัติ</p>
+    <p class="lede">ข้อความที่ระบบส่งเข้า LINE หรืออีเมลเอง โดยผู้รับไม่ได้ทักมาก่อน แต่ละชนิดเปิดปิด LINE กับอีเมลแยกกันได้ กดสวิตช์แล้วบันทึกทันทีและลงประวัติ ชนิดที่ปิดไว้จะไม่ถูกส่ง แต่ข้อมูลยังอยู่ในเว็บ</p>
   </div>
 </div>
-{% if not line_on %}<p class="notice push-off">LINE push ปิดทั้งระบบอยู่ที่เซิร์ฟเวอร์ (LINE_PUSH_ENABLED) สวิตช์ในหน้านี้จะมีผลเมื่อเปิดแล้ว</p>{% endif %}
+{% if not line_on %}<p class="notice push-off">LINE push ปิดทั้งระบบอยู่ที่เซิร์ฟเวอร์ (LINE_PUSH_ENABLED) สวิตช์ LINE ในหน้านี้จะมีผลเมื่อเปิดแล้ว</p>{% endif %}
 {% if not email_on %}<p class="notice push-off">อีเมลถึงเจ้าหน้าที่ปิดอยู่ที่เซิร์ฟเวอร์ (STAFF_EMAIL_ENABLED) สวิตช์อีเมลในหน้านี้จะมีผลเมื่อเปิดแล้ว</p>{% endif %}
 
-{% for group_label, kinds in groups %}
-<section class="section" aria-labelledby="push-g{{ forloop.counter }}">
-  <div class="section-head"><h2 id="push-g{{ forloop.counter }}">{{ group_label }}</h2><span class="muted">{{ kinds|length }} ชนิด</span></div>
-  <ul class="push-list">
+<div class="push-bar">
+  <div class="push-self" id="push-self">
+    <div class="push-self__text"><strong>แจ้งเรื่องที่ตัวเองทำ</strong><span class="muted">ถ้าปิด คนที่เพิ่งมอบหมาย สั่งงาน หรือรับเรื่องเองจะไม่ได้ข้อความของขั้นนั้น</span></div>
+    {% include "operations/_push_switch.html" with key=self_key on=self_on label="แจ้งเรื่องที่ตัวเองทำ" %}
+    {% include "operations/_push_form.html" with key=self_key on=self_on anchor="push-self" %}
+  </div>
+  <div class="push-bar__tools"><button type="button" class="btn btn--ghost btn--sm" data-push-all="open">ขยายทั้งหมด</button><button type="button" class="btn btn--ghost btn--sm" data-push-all="close">ย่อทั้งหมด</button></div>
+</div>
+<p class="muted push-note">ถึงเจ้าหน้าที่และงานสั่งส่งถึงแอดมินฝ่ายที่อยู่เวรใน<a href="{% url 'admin-duty' %}">ตารางเวร</a> ช่วงที่ไม่มีใครอยู่เวรส่งถึงแอดมินฝ่ายทุกคน คนอื่นเปิดดูงานเองในเว็บหรือเมนู LINE เปิดผู้รับเดิมของแต่ละชนิดเพิ่มได้ในแถวของชนิดนั้น</p>
+
+{% for group, group_label, kinds, counts in groups %}
+<details class="push-group" id="pg-{{ group }}" data-remember open>
+  <summary class="push-group__head">
+    <span class="push-chev" aria-hidden="true"></span>
+    <h2 class="push-group__title">{{ group_label }}</h2>
+    <span class="push-group__meta">LINE เปิด <span data-count="LINE">{{ counts.line }}</span>/{{ kinds|length }}{% if counts.has_email %} · อีเมลเปิด <span data-count="อีเมล">{{ counts.email }}</span>/{{ kinds|length }}{% endif %} · เดือนนี้ส่ง LINE {{ counts.sent }}</span>
+  </summary>
+  <div class="push-cols" aria-hidden="true"><span>ชนิด</span><span>LINE</span>{% if counts.has_email %}<span>อีเมล</span>{% endif %}</div>
+  <ul class="push-kinds">
   {% for k in kinds %}
-    <li class="push-row{% if not k.on %} is-off{% endif %}" id="push-{{ k.kind }}">
-      <div class="push-row__text">
-        <strong class="push-row__label">{{ k.label }}</strong>
-        <span class="push-row__who">ส่งถึง {{ k.who }} · เดือนนี้ส่งแล้ว {{ k.sent }}</span>
-        <span class="push-row__sample">{{ k.sample|linebreaksbr }}</span>
-      </div>
-      {% include "operations/_push_switch.html" with key=k.key on=k.on label=k.label anchor=k.kind %}
-      {% if k.recipients %}
-      <ul class="push-to" aria-label="ผู้รับของ {{ k.label }}">
-        {% for r in k.recipients %}
-        <li class="push-to__row{% if not r.on %} is-off{% endif %}">
-          <span>{{ r.label }}</span>
-          {% include "operations/_push_switch.html" with key=r.key on=r.on label=r.label anchor=k.kind %}
-        </li>
-        {% endfor %}
-      </ul>
-      {% endif %}
+    <li class="push-kind{% if not k.line.on and not k.email.on %} is-off{% endif %}" id="push-{{ k.kind }}">
+      <details class="push-kind__fold" data-remember id="pk-{{ k.kind }}">
+        <summary class="push-kind__head">
+          <span class="push-chev" aria-hidden="true"></span>
+          <span class="push-kind__text"><strong class="push-kind__label">{{ k.label }}</strong><span class="push-kind__who">ถึง <span data-reach>{{ k.reach }}</span> · LINE เดือนนี้ {{ k.sent }}</span></span>
+          <span class="push-kind__sw" data-channel="LINE">{% include "operations/_push_switch.html" with key=k.line.key on=k.line.on label="LINE: "|add:k.label %}</span>
+          {% if k.email %}<span class="push-kind__sw" data-channel="อีเมล">{% include "operations/_push_switch.html" with key=k.email.key on=k.email.on label="อีเมล: "|add:k.label %}</span>{% elif counts.has_email %}<span class="push-kind__sw"></span>{% endif %}
+        </summary>
+        <div class="push-kind__body">
+          <p class="push-kind__sample"><span class="muted">ตัวอย่างข้อความ</span>{{ k.sample|linebreaksbr }}</p>
+          {% if k.recipients %}<h3 class="push-kind__h">ผู้รับ</h3>
+          <ul class="push-to" aria-label="ผู้รับของ {{ k.label }}">
+            {% for r in k.recipients %}<li class="push-to__row{% if not r.on %} is-off{% endif %}"><span>{{ r.label }}</span>{% include "operations/_push_switch.html" with key=r.key on=r.on label=r.label %}</li>{% endfor %}
+          </ul>
+          <p class="muted push-kind__hint">ผู้รับชุดนี้ใช้ทั้ง LINE และอีเมล</p>{% else %}<p class="muted push-kind__hint">ส่งถึง {{ k.who }}</p>{% endif %}
+        </div>
+      </details>
+      {% include "operations/_push_form.html" with key=k.line.key on=k.line.on anchor="push-"|add:k.kind %}
+      {% if k.email %}{% include "operations/_push_form.html" with key=k.email.key on=k.email.on anchor="push-"|add:k.kind %}{% endif %}
+      {% for r in k.recipients %}{% include "operations/_push_form.html" with key=r.key on=r.on anchor="push-"|add:k.kind %}{% endfor %}
     </li>
   {% endfor %}
   </ul>
-</section>
+</details>
 {% endfor %}
 
 <section class="section" aria-labelledby="push-moved">

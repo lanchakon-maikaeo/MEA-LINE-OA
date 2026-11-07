@@ -1,0 +1,1 @@
+<form id="pf-{{ key|slugify }}" method="post" action="{% url 'admin-push' %}" class="push-form" data-push-switch>{% csrf_token %}<input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="value" value="{% if on %}off{% else %}on{% endif %}"><input type="hidden" name="anchor" value="{{ anchor }}"></form>

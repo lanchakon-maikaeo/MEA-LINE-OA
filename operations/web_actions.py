@@ -326,7 +326,11 @@ def _unit_division(st, unit):
 
 RULES = {
     "start_triage": lambda st: st.member(st.owner),
-    "claim": lambda st: st.member(st.owner) and st.case.assignee_id != st.user.pk,
+    # ADR 0050 Q20: a แอดมินฝ่าย may take a case of a กอง they oversee.
+    "claim": lambda st: (
+        (st.member(st.owner) or st.member(st.owner, [Role.SUPERVISOR]))
+        and st.case.assignee_id != st.user.pk
+    ),
     "assign": lambda st: st.member(st.owner, [Role.SUPERVISOR]),
     "accept_assignment": lambda st: _awaits_me(st),
     "return_assignment": lambda st: _awaits_me(st),

@@ -612,9 +612,12 @@ def _require_owner_staff(ctx, case):
         fail(ErrorCode.FORBIDDEN, "Only staff of the owner division can do this.")
 
 
-def _take(ctx, case, payload, reason, target):
-    # Becoming the responsible person needs real membership of the owner division.
-    if not _is_member(ctx, case.owner_division_id):
+def _take(ctx, case, payload, reason, target, overseer=False):
+    # Becoming the responsible person needs real membership of the owner division, or, for
+    # รับงานเอง, a แอดมินฝ่าย over it (ADR 0050 Q20; แอดมินระบบ too, ADR 0041).
+    owner = case.owner_division_id
+    allowed = _is_member(ctx, owner) or (overseer and _is_member(ctx, owner, [Role.SUPERVISOR]))
+    if not allowed:
         fail(ErrorCode.FORBIDDEN, "Only staff of the owner division can take a case.")
     if case.assignee_id == ctx.user.pk:
         fail(ErrorCode.VALIDATION_ERROR, "You are already responsible for this case.")
@@ -623,6 +626,10 @@ def _take(ctx, case, payload, reason, target):
     case.accepted_by, case.accepted_at = ctx.user, timezone.now()  # ADR 0049 Q10
     case.status = target
     return {"assignee_id": ctx.user.pk}
+
+
+def _claim(ctx, case, payload, reason, target):
+    return _take(ctx, case, payload, reason, target, overseer=True)
 
 
 def route_by_ai(case_id, run):
@@ -752,7 +759,7 @@ def _decline(ctx, case, payload, reason, target):
 
 HANDLERS = {
     "start_triage": _take,
-    "claim": _take,
+    "claim": _claim,
     "assign": _assign,
     "accept_assignment": _accept_assignment,
     "return_assignment": _return_assignment,

@@ -28,6 +28,7 @@ from operations.models import (
 )
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import ALICE, BOB, CAROL, buttons, texts
+from operations.tests.test_m13_work_orders import keep_original_recipients
 from operations.tests.test_m16_kcw_work import WorkTestCase
 from operations.tests.test_m21_org_units import UnitTestCase
 
@@ -150,6 +151,9 @@ class AcceptTests(AcceptTestCase):
         self.assertEqual(case.accepted_by, self.head)
 
     def test_giving_it_back_needs_a_reason_and_tells_the_division_admin(self):
+        # ADR 0050 Q6: the แอดมินกอง hear of it while their switch is on (off by default).
+        keep_original_recipients(["staff_assignment_returned"])
+        options.change(None, "push:staff_assignment_returned:duty", "off", "")
         case = self.assign(self.withdraw("4500070103"), self.kcw)
         with self.assertRaises(CommandFailed):
             self.act(self.kcw, case, "return_assignment")
@@ -189,13 +193,16 @@ class AssignAlertTests(AcceptTestCase):
         self.assertNotIn("รับงาน", buttons([told.message]))
 
     @override_settings(STAFF_EMAIL_ENABLED=True)
-    def test_a_work_order_kind_switched_off_sends_no_email_either(self):
+    def test_a_work_order_email_follows_its_own_switch(self):
+        """ADR 0050 Q7: switching LINE off no longer stops the email; the email switch does."""
         get_user_model().objects.filter(pk=self.head.pk).update(email="head@example.test")
         self.head.refresh_from_db()
+        keep_original_recipients(["staff_order_new"])
         mails = N.objects.filter(kind="staff_order_new", channel=N.Channel.EMAIL)
+        options.change(None, "push:staff_order_new", "off", "")
         work_orders.create(self.duty, "เช็กสต็อกมิเตอร์ (ทดสอบ)", self.division)
         self.assertEqual(mails.count(), 1)
-        options.change(None, "push:staff_order_new", "off", "")
+        options.change(None, "push:staff_order_new:email", "off", "")
         work_orders.create(self.duty, "เช็กสต็อกมิเตอร์อีกรอบ (ทดสอบ)", self.division)
         self.assertEqual(mails.count(), 1)
 

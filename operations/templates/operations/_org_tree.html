@@ -1,30 +1,28 @@
-{# ADR 0041, 0044: one level of the tree of registered people; recursive. A unit opens its next level (the tree starts at the ฝ่าย), and its link opens its card: settings for a unit of the system, people and ชื่อย่อ for one outside it. A person opens their card. #}
-{% if node.people %}<ul class="ot__people">{% for p in node.people %}<li>
-  <button type="button" class="ot__person" popovertarget="op-{{ p.employee.pk }}"><span class="ot__avatar" aria-hidden="true">{{ p.name|slice:":1" }}</span><span><span class="ot__name">{{ p.name }}</span>{% if p.role != "employee" %}<span class="ot__role">{{ p.role_label }}</span>{% endif %}<span class="ot__pos">{{ p.employee.position|default:"ไม่ระบุตำแหน่ง" }}</span></span></button>
-  {% include "operations/_org_person.html" %}
-</li>{% endfor %}</ul>{% endif %}
-{% if node.children %}<ul class="ot__kids">{% for c in node.children %}<li class="ot__item">
-  {% if c.children or c.people %}<details class="ot__fold" data-key="{{ c.key }}"{% if c.open %} open{% endif %}>
-    <summary class="ot__box{% if c.card %} ot__box--sys{% elif not c.path %} ot__box--line{% endif %}"><span class="ot__label">{{ c.label }}</span>{% if c.short %}<span class="ot__short">{{ c.short }}</span>{% endif %}<span class="ot__n" title="คนที่ลงทะเบียน LINE">{{ c.count }}</span></summary>
-    {% if c.card or c.path %}<button type="button" class="link-btn ot__cardlink" popovertarget="ou-{{ c.id }}">{% if c.card %}ตั้งค่าหน่วย{% else %}ชื่อย่อและรายชื่อ{% endif %}</button>{% endif %}
-    {% include "operations/_org_tree.html" with node=c %}
-  </details>
-  {% elif c.card or c.path %}<button type="button" class="ot__box{% if c.card %} ot__box--sys{% endif %}" popovertarget="ou-{{ c.id }}"><span class="ot__label">{{ c.label }}</span>{% if c.short %}<span class="ot__short">{{ c.short }}</span>{% endif %}<span class="ot__n" title="คนที่ลงทะเบียน LINE">{{ c.count }}</span></button>
-  {% else %}<span class="ot__box ot__box--line"><span class="ot__label">{{ c.label }}</span><span class="ot__n" title="คนที่ลงทะเบียน LINE">{{ c.count }}</span></span>{% endif %}
-  {% if c.card %}<div class="org-pop org-pop--wide" id="ou-{{ c.id }}" popover>
-    <button type="button" class="org-pop__close" popovertarget="ou-{{ c.id }}" popovertargetaction="hide" aria-label="ปิด"><span aria-hidden="true">×</span></button>
-    {% include "operations/_org_card.html" with c=c.card division=c.division popup=True %}
-  </div>{% elif c.path %}<div class="org-pop" id="ou-{{ c.id }}" popover>
-    <button type="button" class="org-pop__close" popovertarget="ou-{{ c.id }}" popovertargetaction="hide" aria-label="ปิด"><span aria-hidden="true">×</span></button>
-    <header class="org-pop__head"><h3>{{ c.label }}</h3><p class="muted">{{ c.path }}</p></header>
-    <p class="org-pop__note">หน่วยนอก ฝอจ. คนในหน่วยแจ้งเรื่องและติดตามได้เหมือนผู้ใช้ไฟฟ้าเขต แต่ไม่รับเรื่อง</p>
-    <form class="org-pop__form" method="post">{% csrf_token %}<input type="hidden" name="action" value="unit_name"><input type="hidden" name="path" value="{{ c.path }}">
-      <div class="field"><label for="un-{{ c.id }}">ชื่อย่อ</label><input id="un-{{ c.id }}" name="value" maxlength="32" value="{{ c.short }}" placeholder="เว้นว่างได้ ระบบจะแสดงชื่อเต็ม"><p class="helptext">ใช้ในบรรทัดผู้แจ้งของการ์ดงานในคิว</p></div>
-      <div class="field"><label for="ur-{{ c.id }}">เหตุผล (ไม่บังคับ)</label><input id="ur-{{ c.id }}" name="reason" maxlength="500"></div>
-      <div class="org-pop__actions"><button class="btn btn--sm" type="submit">บันทึกชื่อย่อ</button></div>
-    </form>
-    <h4 class="org-pop__h">คนในหน่วย {{ c.count }} คน</h4>
-    {% if c.people %}<ul class="org-pop__people">{% for p in c.people %}<li><button type="button" class="link-btn" popovertarget="op-{{ p.employee.pk }}">{{ p.name }}</button> <span class="muted">{{ p.employee.position|default:"ไม่ระบุตำแหน่ง" }}</span></li>{% endfor %}</ul>{% endif %}
-    {% if c.children %}<p class="muted">หน่วยย่อย: {% for k in c.children %}{{ k.label }} ({{ k.count }}){% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
-  </div>{% endif %}
-</li>{% endfor %}</ul>{% endif %}
+{% load ui %}{# ADR 0050 Q3–Q5: one level of the chart of people registered in LINE, recursive. Only units with someone in them show. A unit's card opens its branch below it (app.js keeps one open per level and the card where it was); the branch starts with the button to the unit's settings (ADR 0051 Q4). People sit in a column: under the card when the unit has no level below, else as the first branch. #}
+{% if node.children %}<ul class="ot__kids">
+  {% if node.people %}<li class="ot__node ot__node--people">{% include "operations/_org_people.html" with people=node.people %}</li>{% endif %}
+  {% for c in node.children %}<li class="ot__node" data-key="{{ c.key }}">
+    <div class="ot__card">
+      <button type="button" class="ot__box{% if c.depth == 1 %} ot__box--line{% elif c.home %} ot__box--sys{% endif %}" aria-expanded="{{ c.open|yesno:'true,false' }}" data-ot-toggle><span class="ot__label">{{ c.label }}</span>{% if c.short %}<span class="ot__short">{{ c.short }}</span>{% endif %}<span class="ot__n" title="คนที่ลงทะเบียน LINE">{{ c.count }}</span><span class="ot__caret" aria-hidden="true"></span></button>
+      {% if c.card %}<div class="org-pop org-pop--wide" id="ou-{{ c.id }}" popover>
+        <button type="button" class="org-pop__close" popovertarget="ou-{{ c.id }}" popovertargetaction="hide" aria-label="ปิด"><span aria-hidden="true">×</span></button>
+        {% include "operations/_org_card.html" with c=c.card division=c.division popup=True %}
+      </div>{% elif c.path %}<div class="org-pop" id="ou-{{ c.id }}" popover>
+        <button type="button" class="org-pop__close" popovertarget="ou-{{ c.id }}" popovertargetaction="hide" aria-label="ปิด"><span aria-hidden="true">×</span></button>
+        <header class="org-pop__head"><h3>{{ c.label }}</h3><p class="muted">{{ c.path }}</p></header>
+        <p class="org-pop__note">หน่วยนอก ฝอจ. คนในหน่วยแจ้งเรื่องและติดตามได้เหมือนผู้ใช้ไฟฟ้าเขต แต่ไม่รับเรื่อง</p>
+        <form class="org-pop__form" method="post">{% csrf_token %}<input type="hidden" name="action" value="unit_name"><input type="hidden" name="path" value="{{ c.path }}">
+          <div class="field"><label for="un-{{ c.id }}">ชื่อย่อ</label><input id="un-{{ c.id }}" name="value" maxlength="32" value="{{ c.short }}" placeholder="เว้นว่างได้ ระบบจะแสดงชื่อเต็ม"><p class="helptext">ใช้ในบรรทัดผู้แจ้งของการ์ดงานในคิว</p></div>
+          <div class="field"><label for="ur-{{ c.id }}">เหตุผล (ไม่บังคับ)</label><input id="ur-{{ c.id }}" name="reason" maxlength="500"></div>
+          <div class="org-pop__actions"><button class="btn btn--sm" type="submit">บันทึกชื่อย่อ</button></div>
+        </form>
+        <h4 class="org-pop__h">คนในหน่วย {{ c.count }} คน</h4>
+        {% if c.children %}<p class="muted">หน่วยย่อย: {% for k in c.children %}{{ k.label }} ({{ k.count }}){% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+      </div>{% endif %}
+    </div>
+    <div class="ot__below"{% if not c.open %} hidden{% endif %}>
+      {% if c.card or c.path %}<div class="ot__set"><button type="button" class="btn btn--secondary btn--sm" popovertarget="ou-{{ c.id }}">{% icon "sliders" "sm" %} ตั้งค่า {% if c.card %}{{ c.card.unit.label }}{% else %}{{ c.short|default:c.label }}{% endif %}</button></div>{% endif %}
+      {% if c.children %}{% include "operations/_org_tree.html" with node=c %}{% else %}{% include "operations/_org_people.html" with people=c.people %}{% endif %}
+    </div>
+  </li>{% endfor %}
+</ul>{% elif node.people %}{% include "operations/_org_people.html" with people=node.people %}{% endif %}

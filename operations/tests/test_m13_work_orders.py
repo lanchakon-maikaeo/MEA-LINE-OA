@@ -28,10 +28,18 @@ N = NotificationDelivery
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 
 
+def keep_original_recipients(kinds=None):
+    """ADR 0050 Q6: a kind's own people start off and the แอดมินฝ่าย on duty get it; tests about
+    who those people are switch them back on."""
+    for kind in kinds or options.ROUTED:
+        options.change(None, f"{options.PUSH_PREFIX}{kind}:{options.original(kind)}", "on", "")
+
+
 @override_settings(STAFF_EMAIL_ENABLED=True)
 class OrderTestCase(OrgTestCase):
     def setUp(self):
         super().setUp()
+        keep_original_recipients()
         self.kcw_division = Division.objects.get(code="กคว.")
         self.ktf_division = Division.objects.get(code="กตฟ.")
         self.director = make_staff("director")

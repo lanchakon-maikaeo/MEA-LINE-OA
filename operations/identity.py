@@ -307,6 +307,9 @@ def create_staff_user(actor, username, display_name, email=""):
     user = User.objects.create_user(username=username, email=email.strip(), password=password)
     StaffProfile.objects.create(user=user, display_name=display_name, must_change_password=True)
     audit(actor, "staff.created", user, username=username)
+    from operations import roster_match  # local: roster_match builds on identity
+
+    roster_match.link(user, actor)  # ADR 0050 Q1: the สังกัด comes from the roster by itself
     return user, password
 
 
@@ -731,6 +734,11 @@ def set_employee_id(actor, user, employee_id, reason=""):
     profile.employee_id = employee_id
     profile.save(update_fields=["employee_id"])
     audit(actor, "staff.employee_id_set", user, reason, previous=previous, value=employee_id)
+    employee = Employee.objects.filter(employee_id=employee_id).first() if employee_id else None
+    if employee is not None:
+        from operations import units  # local: units builds on identity
+
+        units.bind_from_roster(user, employee)  # ADR 0050 Q1
 
 
 @transaction.atomic
@@ -915,6 +923,10 @@ def update_account(actor, user, username, display_name, email, reason=""):
         **changed,
         **{f"previous_{k}": before[k] for k in changed},
     )
+    if "email" in changed:
+        from operations import roster_match  # local: roster_match builds on identity
+
+        roster_match.link(user, actor)  # ADR 0050 Q1
 
 
 def password_changed(user):
@@ -1410,6 +1422,10 @@ def _approve(actor, registration, reason="", automatic=False):
         requester_id=requester.pk,
         employee=registration.employee.employee_id if registration.employee else None,
     )
+    if requester.employee_id:
+        from operations import roster_match  # local: roster_match builds on identity
+
+        roster_match.link_requester(requester, actor)
     return requester
 
 
@@ -1535,6 +1551,9 @@ def link_requester_employee(actor, requester, employee_id, reason):
         requester.district = employee.district
     requester.save(update_fields=["employee", "employee_link", "district"])
     audit(actor, "requester.employee_linked", requester, reason, employee=employee.employee_id)
+    from operations import roster_match  # local: roster_match builds on identity
+
+    roster_match.link_requester(requester, actor)
     lines = list(
         ChannelIdentity.objects.select_for_update().filter(
             requester=requester, status=ChannelIdentity.Status.ACTIVE

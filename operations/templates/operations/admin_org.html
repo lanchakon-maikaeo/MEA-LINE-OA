@@ -1,6 +1,7 @@
 {% extends "operations/admin_base.html" %}
 {% load ui %}
 {% block title %}ผังบุคลากร · แอดมิน · DED Center{% endblock %}
+{% block page_class %}page--chart{% endblock %}
 {% block scripts %}{{ unit_tree|json_script:"org-units" }}{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -15,9 +16,11 @@
 <section class="section" id="org-tree" aria-labelledby="org-tree-h">
   <div class="section-head"><h2 id="org-tree-h">คนที่ลงทะเบียน LINE</h2><span class="muted">{{ tree.count }} คน · กดที่หน่วยหรือคนเพื่อดูและแก้ไข</span></div>
   {% if tree.children or tree.people %}
-  <div class="ot">
-    <div class="ot__root"><span class="ot__box ot__box--root">{{ tree.label }}<span class="ot__n">{{ tree.count }}</span></span></div>
-    {% include "operations/_org_tree.html" with node=tree %}
+  <div class="ot" data-ot tabindex="0" aria-label="ผังคนที่ลงทะเบียน LINE เลื่อนซ้ายขวาได้">
+    <div class="ot__canvas">
+      <div class="ot__root"><span class="ot__box ot__box--root">{{ tree.label }}<span class="ot__n">{{ tree.count }}</span></span></div>
+      {% include "operations/_org_tree.html" with node=tree %}
+    </div>
   </div>
   <datalist id="org-positions">{% for p in positions %}<option value="{{ p }}"></option>{% endfor %}</datalist>
   {% else %}

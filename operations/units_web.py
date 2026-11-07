@@ -230,8 +230,8 @@ ROOT = "ผู้ว่าการ"
 def _tree(cards):
     """The registered people (a LINE OA user tied to the roster) by their roster path. Empty
     levels are skipped and a level named like its parent (สายงาน รผง. › ฝ่าย รผง.) is one node.
-    Every unit of the system is a node with its card, people or not; a unit outside it carries
-    its roster path, for its ชื่อย่อ (ADR 0044)."""
+    Only units with someone in them show (ADR 0050 Q3): a unit of the system carries its card,
+    one outside it its roster path, for its ชื่อย่อ (ADR 0044)."""
     link = Requester.EmployeeLink
     requesters = (
         Requester.objects.filter(
@@ -283,25 +283,6 @@ def _tree(cards):
         return found
 
     root = node_of(ROOT)
-    for d in cards.values():
-        if d[0] is not d[1]:
-            continue
-        division = d[0]["unit"].division
-        top = (
-            Employee.objects.filter(division=division, is_active=True, is_synthetic=False)
-            .values("line_of_work", "department")
-            .first()
-        ) or {}
-        node, seen = root, [ROOT]
-        for label in (top.get("line_of_work"), top.get("department")):
-            if label and label != seen[-1]:
-                seen.append(label)
-                node = child(node, label)
-        node = child(node, f"{units.short(division)} : {division.name}", d[0]["key"])
-        for section in d[0]["sections"]:
-            below = child(node, section["unit"].name, section["key"])
-            for group in section["groups"]:
-                child(below, group["unit"].name, group["key"])
 
     groups = {}
     for requester in sorted(requesters, key=lambda r: r.display_name):
@@ -359,14 +340,20 @@ def _tree(cards):
         node["people"].append(_person(requester, employee, profile, role, cards, division is None))
 
     def listed(node, depth=0, key=""):
-        # ADR 0044 (4 Nov 2569): the tree first shows each สายงาน's ฝ่าย; a click opens a level.
-        node["key"], node["open"] = key, depth == 1
+        node["key"], node["open"], node["depth"] = key, False, depth
         node["children"] = [
             listed(c, depth + 1, f"{key}›{c['label']}") for c in node["children"].values()
         ]
+        # ฝอจ. and the units of the system take one colour on the chart.
+        node["home"] = bool(node.get("card")) or any(c["home"] for c in node["children"])
         return node
 
-    return listed(root)
+    listed(root)
+    # ADR 0050 Q4, Q5: the page opens on ผู้ว่าการ › สายงาน › ฝ่าย with one branch open per
+    # level, so of the สายงาน only the one with the most people shows its ฝ่าย.
+    if root["children"]:
+        max(root["children"], key=lambda c: c["count"])["open"] = True
+    return root
 
 
 def _person(requester, employee, profile, role, cards, outside):

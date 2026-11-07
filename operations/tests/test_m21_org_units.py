@@ -45,6 +45,26 @@ def line(user):
     )
 
 
+def on_chart(division, section_name, approver):
+    """Someone in the roster who registered on LINE: the chart shows only their units."""
+    from operations.models import District, Requester
+
+    employee = Employee.objects.create(
+        employee_id=f"E-{uuid.uuid4().hex[:6]}", division=division, section_name=section_name
+    )
+    requester = Requester.objects.create(
+        display_name="ผู้ใช้ LINE",
+        district=District.objects.first(),
+        approved_by=approver,
+        employee=employee,
+        employee_link=Requester.EmployeeLink.VERIFIED,
+    )
+    ChannelIdentity.objects.create(
+        channel="line", external_id=f"U{uuid.uuid4().hex}", requester=requester, status="active"
+    )
+    return requester
+
+
 class UnitTestCase(OrgTestCase):
     @classmethod
     def setUpTestData(cls):
@@ -260,6 +280,9 @@ class PageTests(UnitTestCase):
         client.force_login(self.kae)
         self.assertEqual(client.get("/console/admin/org/").status_code, 403)
         client.force_login(self.admin)
+        page = client.get("/console/admin/org/").content.decode()
+        self.assertNotIn("ปัญหา/ข้อเสนอแนะ · หม้อแปลง", page)  # ADR 0050 Q3: nobody there yet
+        on_chart(self.division, self.repair.name, self.admin)
         page = client.get("/console/admin/org/").content.decode()
         self.assertIn("ผังบุคลากร", page)
         self.assertIn("ปัญหา/ข้อเสนอแนะ · หม้อแปลง", page)  # on the unit's card

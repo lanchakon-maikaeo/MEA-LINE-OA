@@ -23,6 +23,7 @@ from operations.models import (
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import ALICE, BOB, buttons, texts
 from operations.tests.test_m13_roster import RosterTestCase
+from operations.tests.test_m13_work_orders import keep_original_recipients
 
 S = WorkOrder.Status
 A = LineMenuItem.Action
@@ -31,6 +32,7 @@ A = LineMenuItem.Action
 class StaffChatTestCase(RosterTestCase):
     def setUp(self):
         super().setUp()
+        keep_original_recipients()  # these tests follow each kind's own people (ADR 0050 Q6)
         self.load()  # the roster: 510001 one@example.test, 510002 two@example.test
         self.kae = Division.objects.get(code="กองอุปกรณ์ฯ")
         self.head = make_staff("kaehead", (Role.SUPERVISOR, "กองอุปกรณ์ฯ"))

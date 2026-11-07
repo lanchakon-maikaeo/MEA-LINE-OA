@@ -1,30 +1,11 @@
 {% load ui %}
-{% if panel.warehouse or panel.milestones or panel.appointments %}
+{% if panel.warehouse or panel.milestones or panel.appointments %}{# ADR 0051 Q10: the record only; its buttons are in สิ่งที่ทำได้. #}
 <section data-tour="stages" class="section" aria-labelledby="s-warehouse">
-  <div class="section-head"><h2 id="s-warehouse">งานคลังและนัด</h2>{% if panel.warehouse %}<a class="btn btn--ghost btn--sm" href="{% url 'warehouse' case.owner_division.code %}">ไปหน้างานคลัง</a>{% endif %}</div>
+  <div class="section-head"><h2 id="s-warehouse">งานคลังและนัด</h2></div>
   {% if panel.milestones %}<ol class="wh-steps">{% for m in panel.milestones %}<li><strong>{{ m.label }}</strong>{% if panel.per_number and m.stage == "keyed" %} {{ m.number|default:case.sap_number }}{% endif %} {{ m.on|thai_date }}{% if m.planned_on %} · วันจ่าย {{ m.planned_on|thai_date }}{% endif %}{% if m.note %} · {{ m.note }}{% endif %} <span class="muted">{{ m.recorded_by.staff_profile.display_name|default:m.recorded_by.username }}</span></li>{% endfor %}</ol>{% elif panel.warehouse %}<p class="muted">ยังไม่ได้บันทึกขั้นงานคลัง</p>{% endif %}
-  {% if panel.warehouse and case.status == "awaiting_approval" %}<p class="muted">เรื่องนี้ยังรอรับเรื่อง บันทึกขั้นงานคลังได้หลังรับเรื่องแล้ว</p>
-  {% elif panel.warehouse and panel.can_act and case.status != "closed" %}
-  {% if panel.next_stage %}{% include "operations/_stage_form.html" with stage=panel.next_stage label=panel.next_label pre="st" %}{% endif %}
-  {% if panel.more_keyed %}{% include "operations/_stage_form.html" with stage="keyed" label=panel.keyed_label pre="sk" %}{% endif %}
-  {% endif %}
   {% for a in panel.appointments %}
   <div class="wh-appt">
     <p>{{ a.calendar.name }}: {% if a.slot %}{{ a.slot.starts_at|thai_datetime }}{% else %}ยังไม่มีช่วงเวลา{% endif %}{% if a.method %} · {{ a.get_method_display }}{% endif %} · <span class="tag">{{ a.get_status_display }}</span>{% if a.note %} <span class="muted">{{ a.note }}</span>{% endif %}</p>
-    {% if panel.can_act and a.status == "requested" %}
-    <form method="post" action="{% url 'case-appointment' case.number %}" class="cal-req__form">
-      {% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}">
-      <label class="visually-hidden" for="cm{{ a.pk }}">วิธีรับของ</label>
-      <select id="cm{{ a.pk }}" name="method"><option value="">วิธีรับเดิม</option>{% for v, l in panel.methods %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select>
-      <label class="visually-hidden" for="cs{{ a.pk }}">ช่วงใหม่</label>
-      <select id="cs{{ a.pk }}" name="slot"><option value="">ช่วงใหม่ (เปลี่ยนนัด)</option>{% for k, slots in panel.free.items %}{% if k == a.pk %}{% for s in slots %}<option value="{{ s.pk }}">{{ s.starts_at|thai_datetime }}</option>{% endfor %}{% endif %}{% endfor %}</select>
-      <label class="visually-hidden" for="cn{{ a.pk }}">หมายเหตุถึงผู้แจ้ง</label>
-      <input type="text" id="cn{{ a.pk }}" name="note" placeholder="หมายเหตุถึงผู้แจ้ง (ไม่รับนัดต้องใส่)">
-      <button class="btn btn--sm" name="action" value="confirm" type="submit">ยืนยันนัด</button>
-      <button class="btn btn--sm btn--secondary" name="action" value="move" type="submit">เปลี่ยนเป็นช่วงที่เลือก</button>
-      <button class="btn btn--sm btn--ghost" name="action" value="reject" type="submit">ไม่รับนัด</button>
-    </form>
-    {% endif %}
   </div>
   {% endfor %}
 </section>

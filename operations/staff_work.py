@@ -11,7 +11,6 @@ import re
 from datetime import date
 
 from django.conf import settings
-from django.urls import reverse
 from django.utils import timezone
 
 from operations import identity, numbering, options, queues, staff_line, work_orders, workflow
@@ -20,6 +19,10 @@ from operations.models import Case, LineMenuItem, WorkOrder
 A = LineMenuItem.Action
 T = LineMenuItem.Tab
 MAX_BUTTONS = 12
+MAX_QUICK = 13  # LINE's quick reply holds 13 buttons
+# ADR 0050 Q18: a list of choices longer than one screen of buttons gets ถัดไป ›; past this
+# many it is still a web form.
+MAX_CHOICES = 44
 CHAT_KINDS = {"text", "textarea", "select", "radio", "number", "date"}
 # LINE buttons hold 20 characters; these steps get a shorter name in chat.
 SHORT_LABELS = {
@@ -73,7 +76,7 @@ def handle_item(turn, user, item):
         turn.say("การสั่งงานสงวนสิทธิ์สำหรับแอดมินฝ่ายและแอดมินระบบ")
         return
     if item.tab == T.ORDER and not identity.staff_scope(user).overseen:
-        turn.say("เมนูนี้สงวนสิทธิ์สำหรับแอดมินกองและแอดมินฝ่ายเท่านั้น", [web_button()])
+        turn.say("เมนูนี้สงวนสิทธิ์สำหรับแอดมินกองและแอดมินฝ่ายเท่านั้น")
         return
     turn.set_prompt()
     {
@@ -286,7 +289,7 @@ def today_summary(turn, user):
         f"งานสั่ง: ค้าง {orders.filter(status__in=WorkOrder.OPEN).count()} · "
         f"เสร็จวันนี้ {orders.filter(done_at__gte=start).count()}"
     )
-    turn.say("\n".join(rows), [web_button("ดูรายงานในเว็บ", "/console/")])
+    turn.say("\n".join(rows))
 
 
 def assign_prompt(turn):
@@ -550,7 +553,7 @@ def _askable(form):
             continue
         if f.kind not in CHAT_KINDS:
             return None
-        if f.kind in ("select", "radio") and len(f.choices) > 10:
+        if f.kind in ("select", "radio") and len(f.choices) > MAX_CHOICES:
             if f.required:
                 return None
             continue
@@ -565,7 +568,52 @@ def _form(user, case, action):
     offers = {o.name: o for o in web_actions.available(user, case, st)}
     if action not in offers:
         return None, None, None
-    return web_actions.build_form(action, st, {}), offers[action], st
+    form = web_actions.build_form(action, st, {})
+    if action == "approve":  # ADR 0050 Q16: the level, then ยืนยัน; the note stays on the web
+        form.fields = [f for f in form.fields if f.required]
+    if action == "assign":
+        # ADR 0050 Q17: pick a name, then confirm; the note stays on the web form.
+        heads = identity.staff_scope(user).is_department_supervisor
+        form.fields = [f for f in form.fields if f.name == "assignee_id"]
+        for field in form.fields:
+            field.choices = assignees(case, heads)
+            field.help = "ตัวเลขในวงเล็บคืองานที่ค้างอยู่"
+            if heads:
+                field.label = "มอบหมายให้แอดมินกอง"
+    return form, offers[action], st
+
+
+def assignees(case, heads=False):
+    """Who a case may go to from LINE, each with how many open cases they hold (ADR 0050 Q17):
+    the owner กอง's people, those of the case's แผนก first; for a แอดมินฝ่าย, only its แอดมินกอง,
+    who hand it on (Q18). Nobody marked away."""
+    from django.db.models import Count
+
+    from operations import units
+    from operations.models import Role, RoleGrant
+    from operations.web_actions import VIEWER_ROLES
+
+    grants = RoleGrant.objects.filter(
+        division_id=case.owner_division_id, revoked_at__isnull=True, user__is_active=True
+    ).exclude(role__in=VIEWER_ROLES)
+    if heads:
+        grants = grants.filter(role=Role.SUPERVISOR)
+    grants = grants.select_related("user__staff_profile")
+    people = {g.user_id: g.user for g in grants if not units.away_until(g.user)}
+    held = dict(
+        Case.objects.filter(assignee__in=people, status__in=workflow.OPEN)
+        .values("assignee")
+        .annotate(n=Count("pk"))
+        .values_list("assignee", "n")
+    )
+
+    def order(user):
+        profile = getattr(user, "staff_profile", None)
+        other = not (case.section_id and profile and profile.section_id == case.section_id)
+        return (other, work_orders.name_of(user))
+
+    named = sorted(people.values(), key=order)
+    return [(str(u.pk), f"{work_orders.name_of(u)} ({held.get(u.pk, 0)})") for u in named]
 
 
 def reporter(case):
@@ -641,8 +689,7 @@ def step_start(turn, user, case, action):
         turn.say("ท่านไม่สามารถดำเนินการขั้นตอนนี้ในเรื่องนี้ได้")
         return
     if _askable(form) is None or offer.irreversible:
-        path = reverse("case-action", args=[case.number, action])
-        turn.say(f"{offer.label} ต้องดำเนินการผ่านแบบฟอร์มบนเว็บ", [("เปิดฟอร์ม", web(path))])
+        turn.say(f"{offer.label}: ขั้นนี้ทำในเว็บ")  # ADR 0050 Q21: no web link in LINE
         return
     turn.set_prompt(
         "staff_step", case=str(case.pk), action=action, revision=case.revision, values={}
@@ -691,17 +738,25 @@ def _ask_next(turn, user):
             turn.say(lead + "\nกดเลือกวันที่ หรือพิมพ์ วัน/เดือน/ปี", [picker, *skip])
         elif f.kind in ("select", "radio"):
             choices = sorted(f.choices, key=lambda c: str(c[0]) != str(f.initial or ""))
-            turn.say(
-                lead,
-                [
-                    turn.button(str(label), "staff_step_pick", {"v": str(value)})
-                    for value, label in choices
-                    if str(value) != ""
-                ][:MAX_BUTTONS]
-                + skip,
-            )
+            picks = [(str(label), str(value)) for value, label in choices if str(value) != ""]
+            if not picks:
+                turn.say(lead + "\nยังไม่มีรายชื่อให้เลือก", skip)
+                return
+            turn.say(lead, _page(turn, picks, skip, data.get("page", 0)))
         else:
             turn.say(lead + "\nโปรดพิมพ์คำตอบ", skip)
+        return
+    if offer.name == "assign":  # ADR 0050 Q17: one question, then ยืนยัน
+        chosen = dict(_askable(form)[0].choices).get(values.get("assignee_id"), "")
+        name = re.sub(r" \(\d+\)$", "", chosen)
+        turn.say(
+            f"มอบหมายเรื่อง {case.number} ให้ {name} ใช่ไหม",
+            [
+                turn.button("ยืนยัน", "staff_step_go"),
+                turn.button("เลือกใหม่", "staff_step_back"),
+                turn.button("ยกเลิก", "staff_step_cancel"),
+            ],
+        )
         return
     rows = [f"โปรดตรวจสอบก่อนบันทึก: {offer.label} เรื่อง {case.number}"]
     for f in _askable(form):
@@ -721,6 +776,30 @@ def _ask_next(turn, user):
     )
 
 
+def _page(turn, picks, skip, page):
+    """ADR 0050 Q18: the choices that fit beside the other buttons, then ถัดไป › to the next
+    ones (the last page leads back to the first)."""
+    room = MAX_QUICK - len(skip)
+    pages = 1 if len(picks) <= room else -(-len(picks) // (room - 1))
+    room = room if pages == 1 else room - 1
+    page = page % pages
+    shown = [
+        turn.button(label, "staff_step_pick", {"v": value})
+        for label, value in picks[page * room : (page + 1) * room]
+    ]
+    if pages == 1:
+        return shown + skip
+    after = (page + 1) % pages
+    label = "ถัดไป ›" if after else "‹ หน้าแรก"
+    return [*shown, turn.button(label, "staff_step_page", {"p": after}), *skip]
+
+
+def step_page(turn, user, page):
+    data = turn.conversation.prompt_data
+    turn.set_prompt("staff_step", **{**data, "page": page})
+    _ask_next(turn, user)
+
+
 def step_back(turn, user):
     case, form, _, data = _state(turn, user)
     if form is None:
@@ -731,7 +810,7 @@ def step_back(turn, user):
         if field.name in values:
             values.pop(field.name)
             break
-    turn.set_prompt("staff_step", **{**data, "values": values})
+    turn.set_prompt("staff_step", **{**data, "values": values, "page": 0})
     _ask_next(turn, user)
 
 
@@ -756,7 +835,7 @@ def step_answer(turn, user, value):
                 value = day.isoformat()
             values[f.name] = value[:2000]
             break
-    turn.set_prompt("staff_step", **{**data, "values": values})
+    turn.set_prompt("staff_step", **{**data, "values": values, "page": 0})
     _ask_next(turn, user)
 
 

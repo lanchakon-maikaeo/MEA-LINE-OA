@@ -226,6 +226,21 @@ class OrgTests(NoScreeningTestCase):
         self.assertEqual(roster.unit_names(), {"ฝ่ายนอก": "ฝน."})
 
     def test_the_tree_opens_at_the_ฝ่าย_level(self):
+        from operations.models import District
+
+        employee = Employee.objects.get(employee_id="900000")
+        employee.line_of_work = "สายงานนอก"
+        employee.save(update_fields=["line_of_work"])
+        requester = Requester.objects.create(
+            display_name="คนที่ 0",
+            district=District.objects.first(),
+            approved_by=self.admin,
+            employee=employee,
+            employee_link=Requester.EmployeeLink.VERIFIED,
+        )
+        ChannelIdentity.objects.create(
+            channel="line", external_id=f"U{uuid.uuid4().hex}", requester=requester, status="active"
+        )
         client = Client()
         client.force_login(self.flow_admin)
         tree = client.get("/console/admin/org/").context["tree"]

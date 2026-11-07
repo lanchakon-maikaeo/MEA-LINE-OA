@@ -24,7 +24,6 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
-from django.urls import reverse
 from django.utils import timezone
 
 from operations import identity, options, orchestration, queues, units
@@ -72,6 +71,16 @@ LINE_ACTIONS = {
     "accept_handoff": "รับงานที่ส่งต่อ",
     "request_info": "ขอข้อมูลเพิ่ม",
 }
+# ADR 0050 Q14, Q20: the steps on the on-duty แอดมินฝ่าย's alert, in this order; a step shows
+# only when it is open to them when the alert is planned (the tap checks again).
+DUTY_STEPS = (
+    ("approve", "ดำเนินการ"),
+    ("assign", "มอบหมายให้แอดมินกอง"),
+    ("claim", "รับงานเอง"),
+    ("admin_send", "ส่งต่อกองอื่น"),
+    ("request_handoff", "ส่งต่อกองอื่น"),
+    ("request_info", "ขอข้อมูลเพิ่ม"),
+)
 
 
 # --- Linking ------------------------------------------------------------------------------------
@@ -111,6 +120,9 @@ def _link(identity_row, user, method):
     identity_row.staff_user, identity_row.staff_linked_at = user, timezone.now()
     identity_row.save(update_fields=["staff_user", "staff_linked_at"])
     identity.audit(user, "staff.line_linked", identity_row, actor_label="line", method=method)
+    from operations import roster_match  # local: roster_match builds on identity
+
+    roster_match.link(user)  # ADR 0050 Q1: a LINE that passed the employee check names the row
     _relink(identity_row)
 
 
@@ -332,10 +344,26 @@ def _text(kind, case, user=None):
     return f"{SUBJECTS[kind]}\nเรื่อง {case.number} · กอง {case.owner_label}"
 
 
-def plan(kind, key, case, users, chosen=False, division_id=None):
+def _duty_steps(line, user, case, now):
+    """ADR 0050 Q20: the on-duty แอดมินฝ่าย's steps, each opening the same chat step as the
+    case card."""
+    from operations import web_actions
+
+    offered = {o.name for o in web_actions.available(user, case)}
+    buttons, labels = [], set()
+    for action, label in DUTY_STEPS:
+        if action in offered and label not in labels:
+            labels.add(label)
+            step = {"case": str(case.pk), "action": action}
+            buttons.append((label, _token(line, "staff_step", step, now)))
+    return buttons
+
+
+def plan(kind, key, case, users, chosen=False, division_id=None, duty=False):
     """LINE deliveries for staff with a linked LINE; nothing when the budget option is 0.
     `chosen`: the people were picked by an admin (Q33), so each of them is told. `division_id`:
-    the กอง being told (a handoff's target), when it is not the owner."""
+    the กอง being told (a handoff's target), when it is not the owner. `duty`: they are the
+    แอดมินฝ่าย on duty, whose alert carries the steps they may take (ADR 0050 Q14)."""
     if kind not in IMPORTANT or case is None or options.get(options.STAFF_LINE_BUDGET) == "0":
         return []
     from operations.conversation import text_message
@@ -346,7 +374,8 @@ def plan(kind, key, case, users, chosen=False, division_id=None):
         [u for u in users if u.is_active] if chosen else _important_people(case, users, division_id)
     )
     # ADR 0049: the assignee's alert carries the รับงาน step, unless staff work on the web only.
-    take = kind == "staff_assigned" and options.get(options.STAFF_LINE_ACTIONS) == "act"
+    acts = options.get(options.STAFF_LINE_ACTIONS) == "act"
+    take = kind == "staff_assigned" and acts
     for user in people:
         line = ChannelIdentity.objects.filter(staff_user=user, is_following=True).first()
         if line is None:
@@ -357,6 +386,8 @@ def plan(kind, key, case, users, chosen=False, division_id=None):
         if take and user.pk == case.assignee_id:
             step = {"case": str(case.pk), "action": "accept_assignment"}
             buttons.insert(0, ("รับงาน", _token(line, "staff_step", step, now)))
+        elif duty and acts:
+            buttons += _duty_steps(line, user, case, now)
         level = IMPORTANT[kind]
         delay = timedelta(0) if level == N.Level.CRITICAL else timedelta(minutes=5)
         try:
@@ -489,32 +520,6 @@ def menu(turn, user):
     from operations import staff_work
 
     staff_work.list_page(turn, user)
-
-
-def case_detail(turn, user, case):
-    from operations import web_actions
-
-    level = case.triage.effective_priority if hasattr(case, "triage") else ""
-    lines = [
-        f"เรื่อง {case.number} · {case.get_kind_display()}",
-        f"สถานะ: {case.get_status_display()} · ระดับ{queues.level_name(level)}",
-        f"กอง {case.owner_division.code}"
-        + (f" · ผู้รับผิดชอบ {case.assignee.staff_profile.display_name}" if case.assignee else ""),
-    ]
-    text = (case.description or case.purpose or case.return_reason or "").strip()
-    if text:
-        lines.append(text[:300])
-    buttons = []
-    if options.get(options.STAFF_LINE_ACTIONS) == "act":
-        offered = {o.name for o in web_actions.available(user, case)}
-        for action, label in LINE_ACTIONS.items():
-            if action in offered:
-                buttons.append(
-                    turn.button(label, "staff_act", {"case": str(case.pk), "action": action})
-                )
-    url = f"{settings.STAFF_WEB_BASE_URL.rstrip('/')}{reverse('case-detail', args=[case.number])}"
-    buttons.append(("เปิดในเว็บ", url))
-    turn.say("\n".join(lines), buttons)
 
 
 def act(turn, user, case, action, reason=""):

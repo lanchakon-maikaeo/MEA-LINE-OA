@@ -14,12 +14,17 @@
     {% endif %}
   </div>
   <div class="page-head__actions">
-    <a class="chip{% if filters.today %} is-active{% endif %}" href="?tab={{ tab }}{% if today_query %}&amp;{{ today_query }}{% endif %}&amp;sort={{ sort }}">{% if filters.today %}{% icon "check" "sm" %} {% endif %}วันนี้<span class="visually-hidden">{% if filters.today %} (กรองอยู่ กดเพื่อดูทุกวัน){% else %} (กรองเฉพาะเรื่องที่เข้าวันนี้){% endif %}</span></a>
-    {% if division.schedule %}<a class="btn btn--secondary" href="{% url 'warehouse' division.code %}">งานคลัง</a>{% endif %}
-    {% if division.calendars.exists %}<a class="btn btn--secondary" href="{% url 'calendar' division.code %}">ปฏิทินนัด</a>{% endif %}
-    {% if may_order %}<a class="btn btn--secondary" href="{% url 'order-new' %}{% if division %}?to=d:{{ division.pk }}{% endif %}">{% if division %}สั่งงานถึงกองนี้{% else %}สั่งงานใหม่{% endif %}</a>{% endif %}
+    {# ADR 0051 Q12: the one main button, and the division's other pages and tools in one menu. #}
     {% if nav.is_intake and division.is_intake or nav.is_intake and not nav.has_intake %}<a class="btn" href="{% url 'case-new' %}" data-tour="new-case-button">บันทึกเรื่องแทนผู้แจ้ง</a>{% endif %}
-    <a class="btn btn--secondary" href="{% if division %}{% url 'division-export' division.code %}{% else %}{% url 'queue-all-export' %}{% endif %}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}" data-tour="export">ดาวน์โหลด CSV</a>
+    <details class="menu" data-tour="queue-menu">
+      <summary class="btn btn--secondary">สิ่งที่ทำได้ <span aria-hidden="true">▾</span></summary>
+      <div class="menu__panel">
+        {% if division.schedule %}<a class="menu__item" href="{% url 'warehouse' division.code %}">งานคลัง</a>{% endif %}
+        {% if division.calendars.exists %}<a class="menu__item" href="{% url 'calendar' division.code %}">ปฏิทินนัด</a>{% endif %}
+        {% if may_order %}<a class="menu__item" href="{% url 'order-new' %}{% if division %}?to=d:{{ division.pk }}{% endif %}">{% if division %}สั่งงานถึงกองนี้{% else %}สั่งงานใหม่{% endif %}</a>{% endif %}
+        <a class="menu__item" href="{% if division %}{% url 'division-export' division.code %}{% else %}{% url 'queue-all-export' %}{% endif %}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}" data-tour="export">ดาวน์โหลด CSV</a>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -57,6 +62,7 @@
     </select>
     {% endif %}
     <label class="check-pill"><input type="checkbox" name="overdue" value="1"{% if filters.overdue %} checked{% endif %}> เกินกรอบเวลา</label>
+    <a class="chip{% if filters.today %} is-active{% endif %}" href="?tab={{ tab }}{% if today_query %}&amp;{{ today_query }}{% endif %}&amp;sort={{ sort }}">{% if filters.today %}{% icon "check" "sm" %} {% endif %}วันนี้<span class="visually-hidden">{% if filters.today %} (กรองอยู่ กดเพื่อดูทุกวัน){% else %} (กรองเฉพาะเรื่องที่เข้าวันนี้){% endif %}</span></a>
     <button class="btn btn--sm filters__apply" type="submit">ใช้ตัวกรอง</button>
     {% if filters.active %}<a class="btn btn--ghost btn--sm" href="?tab={{ tab }}&amp;clear=1">ล้างตัวกรอง</a>{% endif %}
   </div>

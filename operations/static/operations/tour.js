@@ -59,8 +59,8 @@
           body: "ระบบเสนอระดับไว้ให้ เจ้าหน้าที่เป็นผู้ยืนยัน หากเลือกต่างจากที่ระบบเสนอ โปรดระบุเหตุผล" },
         { page: "case", kind: "withdrawal", show: { action: "assign" }, stage: 2, title: "4. มอบหมายผู้รับผิดชอบ",
           body: "หากกองกำหนดผู้รับผิดชอบประจำงานไว้ ระบบมอบหมายให้ทันที หากยังไม่มี แอดมินกองเลือกผู้รับผิดชอบจากแบบฟอร์มนี้" },
-        { page: "case", kind: "withdrawal", target: "[data-tour=stages]", stage: 3, title: "5. บันทึกขั้นงานคลัง",
-          body: "บันทึกตามลำดับ ได้แก่ รับใบเบิกแล้ว คีย์จ่ายแล้ว และจ่ายแล้ว เมื่อบันทึกวันจ่าย ผู้แจ้งจะได้รับข้อความแจ้งวันจ่ายทาง LINE" },
+        { page: "case", kind: "withdrawal", show: { form: "stage/" }, stage: 3, title: "5. บันทึกขั้นงานคลัง",
+          body: "กดปุ่มบันทึกขั้นในส่วนสิ่งที่ทำได้ แบบฟอร์มจะเปิดในหน้านี้ บันทึกตามลำดับ ได้แก่ รับใบเบิกแล้ว คีย์จ่ายแล้ว และจ่ายแล้ว เมื่อบันทึกวันจ่าย ผู้แจ้งจะได้รับข้อความแจ้งวันจ่ายทาง LINE" },
         { page: "case", kind: "withdrawal", target: "[data-tour=timeline]", show: { open: "[data-tour=timeline] details" }, stage: 4, title: "6. ปิดเรื่อง",
           body: "เมื่อบันทึกว่าเขตได้รับของแล้ว ระบบปิดเรื่องโดยอัตโนมัติ ทุกขั้นบันทึกในไทม์ไลน์พร้อมชื่อผู้ดำเนินการ" }
       ]
@@ -78,8 +78,8 @@
           body: "ส่วนนี้แสดงเลขใบส่งคืน SAP และรายการที่ผู้แจ้งระบุ" },
         { page: "case", kind: "return", show: { action: "return_instructions" }, stage: 2, title: "3. แจ้งวิธีส่งคืน",
           body: "ระบุสถานที่และช่วงวันส่งของ ระบบส่งข้อความถึงผู้แจ้งทาง LINE ให้" },
-        { page: "case", kind: "return", target: "[data-tour=stages]", stage: 3, title: "4. บันทึกขั้นงานคลัง",
-          body: "เมื่อรับของคืน ให้บันทึกขั้นงานตามลำดับในส่วนนี้ ชื่อของแต่ละขั้นเป็นไปตามที่กองกำหนด" },
+        { page: "case", kind: "return", show: { form: "stage/" }, stage: 3, title: "4. บันทึกขั้นงานคลัง",
+          body: "เมื่อรับของคืน กดปุ่มบันทึกขั้นในส่วนสิ่งที่ทำได้ แล้วบันทึกตามลำดับในแบบฟอร์มนี้ ชื่อของแต่ละขั้นเป็นไปตามที่กองกำหนด" },
         { page: "case", kind: "return", target: "[data-tour=timeline]", show: { open: "[data-tour=timeline] details" }, stage: 4, title: "5. ปิดเรื่อง",
           body: "เมื่อบันทึกขั้นสุดท้ายแล้ว ระบบปิดเรื่องโดยอัตโนมัติ" }
       ]
@@ -226,7 +226,8 @@
   // Change the screen for the step: open sections, focus a field, or show an example form.
   function prepare(step) {
     var show = step.show || {};
-    if (!show.action) clearDemo();
+    var form = show.form || (show.action ? "act/" + show.action + "/" : "");
+    if (!form) clearDemo();
     if (show.open) {
       document.querySelectorAll(show.open).forEach(function (node) { node.open = true; });
     }
@@ -235,8 +236,9 @@
       if (field) field.focus({ preventScroll: true });
     }
     var slot = document.getElementById("action-slot");
-    if (!show.action || page() !== "case" || !slot) return Promise.resolve();
-    var url = "/cases/" + encodeURIComponent(caseNumber()) + "/act/" + show.action + "/?demo=1";
+    if (!form || page() !== "case" || !slot) return Promise.resolve();
+    // ADR 0051 Q11: show.form is a step outside the action list, e.g. "stage/" (งานคลัง).
+    var url = "/cases/" + encodeURIComponent(caseNumber()) + "/" + form + "?demo=1";
     return fetch(url, { headers: { "HX-Request": "true" }, credentials: "same-origin" })
       .then(function (response) { return response.ok ? response.text() : ""; })
       .then(function (html) { slot.innerHTML = html; })
@@ -244,7 +246,8 @@
   }
 
   function target(step) {
-    var selector = step.target || (step.show && step.show.action ? "#action-slot [data-demo]" : "");
+    var demo = step.show && (step.show.action || step.show.form);
+    var selector = step.target || (demo ? "#action-slot [data-demo]" : "");
     if (!selector) return null;
     // "a || b": the first selector on the page wins (a selector list goes by document order).
     var options = selector.split("||");
@@ -345,7 +348,7 @@
     cardNode.appendChild(title);
     cardNode.appendChild(el("p", "tour__body", step.body));
     var node = target(step);
-    if ((step.target || (step.show && step.show.action)) && !node) {
+    if ((step.target || (step.show && (step.show.action || step.show.form))) && !node) {
       cardNode.appendChild(el("p", "tour__note", "เรื่องที่เปิดอยู่ยังไม่มีส่วนนี้ให้ดู หรือคิวของคุณยังไม่มีเรื่องชนิดนี้ อ่านคำอธิบายแล้วไปขั้นถัดไปได้"));
     }
     var bar = el("div", "tour__bar");

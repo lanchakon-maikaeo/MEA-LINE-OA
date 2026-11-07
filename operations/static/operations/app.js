@@ -514,20 +514,141 @@
       if (select) fillUnits(select.closest("[data-cascade]"), Number(select.getAttribute("data-level")));
     });
   }
-  // ADR 0044: the tree keeps the units opened in this tab, so a saved card does not fold it again.
-  var folds = document.querySelectorAll(".ot__fold[data-key]");
-  if (folds.length) {
-    var opened = {};
-    try { opened = JSON.parse(sessionStorage.getItem("ot-open") || "{}"); } catch (e) { opened = {}; }
-    folds.forEach(function (fold) {
-      var key = fold.getAttribute("data-key");
-      if (Object.prototype.hasOwnProperty.call(opened, key)) fold.open = opened[key];
+  // ADR 0050 Q4, Q5: the chart opens one branch per level, and the tapped card stays where it
+  // was on screen (the chart scrolls by however far the card would move). The open branches and
+  // the sideways scroll last for this tab, so a saved card finds the chart as it was.
+  var chart = document.querySelector("[data-ot]");
+  if (chart) {
+    var canvas = chart.querySelector(".ot__canvas");
+    var state = {};
+    try { state = JSON.parse(sessionStorage.getItem("ot-chart") || "{}"); } catch (e) { state = {}; }
+    var branch = function (node, on) {
+      var below = node.querySelector(":scope > .ot__below");
+      var toggle = node.querySelector(":scope > .ot__card > [data-ot-toggle]");
+      if (!below || !toggle) return;
+      below.hidden = !on;
+      toggle.setAttribute("aria-expanded", on ? "true" : "false");
+    };
+    var save = function () {
+      var open = [].map.call(chart.querySelectorAll(".ot__node[data-key] > .ot__below:not([hidden])"), function (below) {
+        return below.parentNode.getAttribute("data-key");
+      });
+      try { sessionStorage.setItem("ot-chart", JSON.stringify({ open: open, left: chart.scrollLeft })); } catch (e) { /* private mode */ }
+    };
+    // Room on both sides, so the chart can always scroll to hold a card still.
+    var pad = function () { canvas.style.setProperty("--ot-pad", Math.round(chart.clientWidth / 2) + "px"); };
+    if (Array.isArray(state.open)) {
+      chart.querySelectorAll(".ot__node[data-key]").forEach(function (node) {
+        branch(node, state.open.indexOf(node.getAttribute("data-key")) !== -1);
+      });
+    }
+    pad();
+    if (typeof state.left === "number") {
+      chart.scrollLeft = state.left;
+    } else {
+      // The whole tree in the middle of the frame, or from its left edge when it is wider.
+      var pad0 = parseFloat(getComputedStyle(canvas).paddingLeft) || 0;
+      var wide = canvas.scrollWidth - 2 * pad0;
+      chart.scrollLeft = wide <= chart.clientWidth ? pad0 + wide / 2 - chart.clientWidth / 2 : pad0 - 16;
+    }
+    // ADR 0051 Q7: the account page links to a person's card (#op-<employee>); open the
+    // branches down to it and the card itself.
+    var person = /^#op-\d+$/.test(location.hash) && document.getElementById(location.hash.slice(1));
+    if (person && chart.contains(person) && person.showPopover) {
+      for (var up = person.closest(".ot__node[data-key]"); up; up = up.parentNode.closest(".ot__node[data-key]")) {
+        [].forEach.call(up.parentNode.children, function (other) { if (other !== up) branch(other, false); });
+        branch(up, true);
+      }
+      save();
+      var opener = chart.querySelector('[popovertarget="' + person.id + '"]');
+      if (opener) opener.scrollIntoView({ block: "center", inline: "center" });
+      person.showPopover();
+    }
+    chart.addEventListener("click", function (event) {
+      var toggle = event.target.closest("[data-ot-toggle]");
+      if (!toggle) return;
+      var node = toggle.closest(".ot__node"), before = toggle.getBoundingClientRect();
+      var on = toggle.getAttribute("aria-expanded") !== "true";
+      if (on) {
+        [].forEach.call(node.parentNode.children, function (other) { if (other !== node) branch(other, false); });
+      }
+      branch(node, on);
+      var after = toggle.getBoundingClientRect();
+      chart.scrollLeft += after.left - before.left;
+      if (after.top !== before.top) window.scrollBy(0, after.top - before.top);
+      save();
+    });
+    var wait;
+    chart.addEventListener("scroll", function () { clearTimeout(wait); wait = setTimeout(save, 150); }, { passive: true });
+    window.addEventListener("resize", function () {
+      var left = chart.scrollLeft - parseFloat(getComputedStyle(canvas).paddingLeft || 0);
+      pad();
+      chart.scrollLeft = left + parseFloat(getComputedStyle(canvas).paddingLeft || 0);
+    });
+  }
+  // ADR 0050 Q10: a Push Message switch saves at once without a reload; the row, its group and
+  // the people line follow. On an error the form posts as before, so the page shows the message.
+  var pushRow = function (kind) {
+    if (!kind) return;
+    var on = function (sel) { return kind.querySelector(sel + ' .switch[aria-checked="true"]'); };
+    kind.classList.toggle("is-off", !on('.push-kind__sw[data-channel="LINE"]') && !on('.push-kind__sw[data-channel="อีเมล"]'));
+    var reach = kind.querySelector("[data-reach]"), rows = kind.querySelectorAll(".push-to__row");
+    if (reach && rows.length) {
+      var names = [].filter.call(rows, function (row) {
+        return row.querySelector('.switch[aria-checked="true"]');
+      }).map(function (row) { return row.firstElementChild.textContent; });
+      reach.textContent = names.length ? names[0] + (names.length > 1 ? " +" + (names.length - 1) : "") : "ยังไม่มีผู้รับ";
+    }
+    var group = kind.closest(".push-group");
+    if (group) group.querySelectorAll("[data-count]").forEach(function (count) {
+      var channel = count.getAttribute("data-count");
+      count.textContent = group.querySelectorAll('.push-kind__sw[data-channel="' + channel + '"] .switch[aria-checked="true"]').length;
+    });
+  };
+  document.addEventListener("submit", function (event) {
+    var form = event.target;
+    if (!form.matches || !form.matches("form[data-push-switch]") || !window.fetch) return;
+    event.preventDefault();
+    var switches = document.querySelectorAll('button[form="' + form.id + '"]');
+    switches.forEach(function (b) { b.disabled = true; });
+    fetch(form.action, { method: "POST", body: new FormData(form), credentials: "same-origin", headers: { "X-Requested-With": "fetch" } })
+      .then(function (response) {
+        if (!response.ok) throw new Error("save failed");
+        return response.json();
+      })
+      .then(function (data) {
+        var on = data.value === "on";
+        form.elements.value.value = on ? "off" : "on";
+        switches.forEach(function (b) {
+          b.setAttribute("aria-checked", on ? "true" : "false");
+          b.querySelector(".switch__text").textContent = on ? "ส่ง" : "ไม่ส่ง";
+          var row = b.closest(".push-to__row");
+          if (row) row.classList.toggle("is-off", !on);
+          pushRow(b.closest(".push-kind"));
+        });
+      })
+      .catch(function () { HTMLFormElement.prototype.submit.call(form); })
+      .then(function () { switches.forEach(function (b) { b.disabled = false; }); });
+  });
+  document.addEventListener("click", function (event) {
+    var all = event.target.closest && event.target.closest("[data-push-all]");
+    if (!all) return;
+    var open = all.getAttribute("data-push-all") === "open";
+    document.querySelectorAll(".push-group, .push-kind__fold").forEach(function (fold) { fold.open = open; });
+  });
+  // Folds marked data-remember keep their open state for this tab.
+  var remembered = document.querySelectorAll("details[data-remember][id]");
+  if (remembered.length) {
+    var folds = {};
+    try { folds = JSON.parse(sessionStorage.getItem("folds:" + location.pathname) || "{}"); } catch (e) { folds = {}; }
+    remembered.forEach(function (fold) {
+      if (Object.prototype.hasOwnProperty.call(folds, fold.id)) fold.open = folds[fold.id];
     });
     document.addEventListener("toggle", function (event) {
       var fold = event.target;
-      if (!fold.matches || !fold.matches(".ot__fold[data-key]")) return;
-      opened[fold.getAttribute("data-key")] = fold.open;
-      try { sessionStorage.setItem("ot-open", JSON.stringify(opened)); } catch (e) { /* private mode */ }
+      if (!fold.matches || !fold.matches("details[data-remember][id]")) return;
+      folds[fold.id] = fold.open;
+      try { sessionStorage.setItem("folds:" + location.pathname, JSON.stringify(folds)); } catch (e) { /* private mode */ }
     }, true);
   }
   // A link to the page we came from steps back instead, so that page comes back as it was.

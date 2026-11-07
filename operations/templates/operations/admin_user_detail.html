@@ -2,9 +2,41 @@
 {% block title %}{{ target.staff_profile.display_name|default:target.username }} · บัญชีเจ้าหน้าที่ · แอดมิน · DED Center{% endblock %}
 {% load units_ui %}
 {% block content %}
-<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · บัญชีเจ้าหน้าที่</span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span></p></div></div>
+<div class="page-head"><div class="page-head__text"><span class="eyebrow">แอดมิน · <a href="{% url 'admin-users' %}">บัญชีเจ้าหน้าที่</a></span><h1>{{ target.staff_profile.display_name|default:target.username }}</h1><p class="lede">{{ target.username }} · {{ target.email|default:"ไม่มีอีเมล" }} · <span class="tag{% if not target.is_active %} tag--muted{% endif %}">{{ target.is_active|yesno:"ใช้งาน,ระงับ" }}</span> <span class="tag{% if line %} tag--closed{% else %} tag--muted{% endif %}">{% if line %}เชื่อม LINE แล้ว{% else %}ยังไม่เชื่อม LINE{% endif %}</span></p></div>
+  {% if roster.employee %}<div class="page-head__actions"><a class="btn btn--secondary" href="{% url 'admin-org' %}#op-{{ roster.employee.pk }}">ดูในผังบุคลากร ›</a></div>{% endif %}</div>
+<nav class="chips mb-24" aria-label="ส่วนของหน้านี้"><a class="chip" href="#u-account">ข้อมูลบัญชีและสังกัด</a><a class="chip" href="#u-roles">บทบาท</a><a class="chip" href="#u-line">LINE และการแจ้งเตือน</a><a class="chip" href="#u-security">ความปลอดภัย</a></nav>
 
-<h2>บทบาท</h2>
+{# ADR 0051 Q7: the same forms in four groups, from the most used down to the ones that lock the account. #}
+<section class="section user-part" aria-labelledby="u-account">
+<h2 id="u-account">ข้อมูลบัญชีและสังกัด</h2>
+<div class="form-grid">
+<fieldset class="org-here"><legend id="u-unit">สังกัด</legend>
+  <p>{{ target|unit_path }}</p>
+  {% if roster.merge_from %}<div class="notice notice--warning"><p class="notice__body">สังกัดนี้มาจากทะเบียนพนักงานรหัส {{ roster.employee.employee_id }} ที่ตรงกับ{% if roster.how == "line" %} LINE ที่ยืนยันตัวตนแล้ว{% else %}อีเมล{% endif %}ของบัญชีนี้ แต่รหัสนี้อยู่ในบัญชี {{ roster.merge_from.username }} ที่ระบบสร้างตอนเขาเข้ามาทาง LINE การรวมบัญชีจะย้าย LINE บทบาท งานประจำ ผู้รับแจ้ง และเรื่องที่ค้างมาไว้ที่บัญชีนี้ แล้วปิดบัญชีเดิม ย้อนกลับไม่ได้</p>
+    <form method="post" action="{% url 'admin-user-action' target.pk 'employee-id' %}">{% csrf_token %}<input type="hidden" name="employee_id" value="{{ roster.employee.employee_id }}"><input type="hidden" name="reason" value="รวมบัญชีตามทะเบียนพนักงาน"><button class="btn btn--sm" type="submit">รวมบัญชี</button></form></div>
+  {% elif roster.employee %}<p class="muted">มาจากทะเบียนพนักงานรหัส {{ roster.employee.employee_id }}</p>
+  {% elif roster.reason %}<p class="muted">ยังจับคู่กับทะเบียนพนักงานไม่ได้ เพราะ{{ roster.reason }}</p>{% endif %}
+  <p class="muted">ย้ายหน่วย ตั้งเป็นผู้รับผิดชอบประจำงาน หรือผู้รับแจ้งเรื่องสำคัญ ได้ที่<a href="{% url 'admin-org' %}">ผังบุคลากร</a> การย้ายหน่วยไม่เปลี่ยนสิทธิ์</p>
+</fieldset>
+<form method="post" action="{% url 'admin-user-action' target.pk 'account' %}">
+  <fieldset><legend>ข้อมูลบัญชี</legend>{% csrf_token %}
+    <p><label for="u-username">ชื่อผู้ใช้ (ใช้เข้าระบบ)</label> <input id="u-username" name="username" maxlength="150" value="{{ target.username }}" required autocomplete="off"></p>
+    <p><label for="u-name">ชื่อที่แสดง</label> <input id="u-name" name="display_name" maxlength="200" value="{{ target.staff_profile.display_name }}" required></p>
+    <p><label for="u-email">อีเมล</label> <input id="u-email" name="email" type="email" maxlength="254" value="{{ target.email }}"></p>
+    <p><label for="u-acc-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-acc-reason" name="reason" maxlength="500"></p>
+    <button type="submit">บันทึก</button></fieldset>
+</form>
+<form method="post" action="{% url 'admin-user-action' target.pk 'employee-id' %}">
+  <fieldset><legend>รหัสพนักงาน (ใช้เชื่อม LINE ด้วยการยืนยันกับทะเบียนพนักงาน)</legend>{% csrf_token %}
+    <p><label for="u-emp">รหัสพนักงาน</label> <input id="u-emp" name="employee_id" maxlength="32" value="{{ target.staff_profile.employee_id }}"></p>
+    <p><label for="u-emp-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-emp-reason" name="reason" maxlength="500"></p>
+    <button type="submit">บันทึก</button></fieldset>
+</form>
+</div>
+</section>
+
+<section class="section user-part" aria-labelledby="u-roles">
+<h2 id="u-roles">บทบาท</h2>
 <div class="table-wrap"><table>
   <thead><tr><th scope="col">บทบาท</th><th scope="col">กอง</th><th scope="col">สถานะ</th><th scope="col">จัดการ</th></tr></thead>
   <tbody>
@@ -24,45 +56,15 @@
   {% endfor %}
   </tbody>
 </table></div>
-
-<div class="form-grid">
-<form method="post" action="{% url 'admin-user-action' target.pk 'account' %}">
-  <fieldset><legend>ข้อมูลบัญชี</legend>{% csrf_token %}
-    <p><label for="u-username">ชื่อผู้ใช้ (ใช้เข้าระบบ)</label> <input id="u-username" name="username" maxlength="150" value="{{ target.username }}" required autocomplete="off"></p>
-    <p><label for="u-name">ชื่อที่แสดง</label> <input id="u-name" name="display_name" maxlength="200" value="{{ target.staff_profile.display_name }}" required></p>
-    <p><label for="u-email">อีเมล</label> <input id="u-email" name="email" type="email" maxlength="254" value="{{ target.email }}"></p>
-    <p><label for="u-acc-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-acc-reason" name="reason" maxlength="500"></p>
-    <button type="submit">บันทึก</button></fieldset>
-</form>
-<form method="post" action="{% url 'admin-user-action' target.pk 'set-password' %}">
-  <fieldset><legend>ตั้งรหัสผ่านใหม่</legend>{% csrf_token %}
-    <p class="helptext">ผู้ใช้ต้องเปลี่ยนรหัสเองเมื่อเข้าระบบครั้งถัดไป และทุกเครื่องที่เข้าอยู่จะออกจากระบบ</p>
-    <p><label for="u-pw">รหัสผ่านใหม่</label> <input id="u-pw" name="password" type="password" required autocomplete="new-password"></p>
-    <p><label for="u-pw2">พิมพ์อีกครั้ง</label> <input id="u-pw2" name="password2" type="password" required autocomplete="new-password"></p>
-    <p><label for="u-pw-reason">เหตุผล</label> <input id="u-pw-reason" name="reason" maxlength="500" required></p>
-    <button type="submit">ตั้งรหัสผ่าน</button></fieldset>
-</form>
-<form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">
-  <fieldset><legend>แจ้งเตือนแอดมินทาง LINE</legend>{% csrf_token %}
-    <p>บัญชีผู้รับต้องเป็นแอดมินและเชื่อม LINE แล้ว ระบบตรวจสิทธิ์อีกครั้งก่อนส่ง</p>
-    <label><input type="checkbox" name="enabled" value="1"{% if target.staff_profile.notify_registrations %} checked{% endif %}> รับแจ้งคำขอลงทะเบียนและผลการอนุมัติ</label>
-    <label><input type="checkbox" name="admin_waiting" value="1"{% if target.staff_profile.notify_admin_waiting %} checked{% endif %}> รับแจ้งเรื่องใหม่ที่รอแอดมิน (ปัญหาการใช้งานหรืออื่นๆ)</label>
-    <button type="submit">บันทึกผู้รับแจ้ง</button>
-  </fieldset>
-</form>
+<div class="form-grid mt-24">
 <form method="post" action="{% url 'admin-user-action' target.pk 'grant' %}">
   <fieldset><legend>กำหนดบทบาท</legend>{% csrf_token %}
     <p class="helptext">หนึ่งคนมีบทบาทเดียว บทบาทใหม่แทนบทบาทเดิม เจ้าหน้าที่ไม่มีงานในกอง สมาชิกกองทำได้ทุกขั้นตอนของกอง แอดมินกองมอบงานในกองนั้นได้เพิ่ม แอดมินฝ่ายดูแลและสั่งงานทุกกอง แอดมินระบบทำได้ทุกอย่าง ถ้าไม่เลือกกอง บทบาทระดับกองใช้กองในสังกัด</p>
     {{ grant_form.as_p }}<button type="submit">กำหนดบทบาท</button></fieldset>
 </form>
-<form method="post" action="{% url 'admin-user-action' target.pk 'employee-id' %}">
-  <fieldset><legend>รหัสพนักงาน (ใช้เชื่อม LINE ด้วยการยืนยันกับทะเบียนพนักงาน)</legend>{% csrf_token %}
-    <p><label for="u-emp">รหัสพนักงาน</label> <input id="u-emp" name="employee_id" maxlength="32" value="{{ target.staff_profile.employee_id }}"></p>
-    <p><label for="u-emp-reason">เหตุผล (ไม่บังคับ)</label> <input id="u-emp-reason" name="reason" maxlength="500"></p>
-    <button type="submit">บันทึก</button></fieldset>
+<form method="post" action="{% url 'admin-user-action' target.pk 'move' %}">
+  <fieldset><legend>ย้ายกอง (ย้ายทุกบทบาทในกองต้นทาง)</legend>{% csrf_token %}{{ move_form.as_p }}<button type="submit">ย้าย</button></fieldset>
 </form>
-<p>LINE: {% if line %}เชื่อมแล้ว {{ line.staff_linked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่ได้เชื่อม{% endif %}</p>
-{% if line %}<form method="post" action="{% url 'admin-user-action' target.pk 'line-unlink' %}">{% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">เลิกเชื่อม LINE ของบัญชีนี้</button></form>{% endif %}
 {% if work_split %}<form method="post" action="{% url 'admin-user-action' target.pk 'full-division' %}">
   <fieldset><legend>ทำได้ทุกงานในกอง (ทุกบทบาทและอำนาจของกองในครั้งเดียว)</legend>{% csrf_token %}
     <p class="helptext">ให้ทีละรายการ จึงถอนบางบทบาทหรืออำนาจภายหลังได้เมื่อจะแยกหน้าที่ ถ้าต้องการให้คนเดียวทำต่อกันได้ทุกขั้น ให้ปิดการแยกหน้าที่ในตัวเลือกระบบด้วย</p>
@@ -71,25 +73,50 @@
     <p><label for="u-full-ref">เลขอ้างอิงการมอบอำนาจ</label> <input id="u-full-ref" name="approval_reference" maxlength="200" required></p>
     <button type="submit">ให้ทำได้ทุกงานในกองนี้</button></fieldset>
 </form>{% endif %}
-<section class="org-here" aria-labelledby="u-unit">
-  <h2 id="u-unit">สังกัด</h2>
-  <p>{{ target|unit_path }}</p>
-  <p class="muted">ย้ายหน่วย ตั้งเป็นผู้รับผิดชอบประจำงาน หรือผู้รับแจ้งเรื่องสำคัญ ได้ที่<a href="{% url 'admin-org' %}">ผังบุคลากร</a> การย้ายหน่วยไม่เปลี่ยนสิทธิ์</p>
+</div>
 </section>
-<form method="post" action="{% url 'admin-user-action' target.pk 'move' %}">
-  <fieldset><legend>ย้ายกอง (ย้ายทุกบทบาทในกองต้นทาง)</legend>{% csrf_token %}{{ move_form.as_p }}<button type="submit">ย้าย</button></fieldset>
+
+<section class="section user-part" aria-labelledby="u-line">
+<h2 id="u-line">LINE และการแจ้งเตือน</h2>
+<div class="form-grid">
+<fieldset><legend>LINE</legend>
+  <p>{% if line %}เชื่อมแล้ว {{ line.staff_linked_at|date:"Y-m-d H:i" }}{% else %}ยังไม่ได้เชื่อม{% endif %}</p>
+{% if line %}<form method="post" action="{% url 'admin-user-action' target.pk 'line-unlink' %}" class="mt-8">{% csrf_token %}<label>เหตุผล <input name="reason"></label><button type="submit">เลิกเชื่อม LINE ของบัญชีนี้</button></form>{% endif %}
+</fieldset>
+<form method="post" action="{% url 'admin-user-action' target.pk 'registration-notifications' %}">
+  <fieldset><legend>แจ้งเตือนแอดมินทาง LINE</legend>{% csrf_token %}
+    <p>บัญชีผู้รับต้องเป็นแอดมินและเชื่อม LINE แล้ว ระบบตรวจสิทธิ์อีกครั้งก่อนส่ง</p>
+    <label><input type="checkbox" name="enabled" value="1"{% if target.staff_profile.notify_registrations %} checked{% endif %}> รับแจ้งคำขอลงทะเบียนและผลการอนุมัติ</label>
+    <label><input type="checkbox" name="admin_waiting" value="1"{% if target.staff_profile.notify_admin_waiting %} checked{% endif %}> รับแจ้งเรื่องใหม่ที่รอแอดมิน (ปัญหาการใช้งานหรืออื่นๆ)</label>
+    <button type="submit">บันทึกผู้รับแจ้ง</button>
+  </fieldset>
 </form>
-<form method="post" action="{% url 'admin-user-action' target.pk target.is_active|yesno:'suspend,activate' %}">
-  <fieldset><legend>{{ target.is_active|yesno:"ระงับบัญชี,เปิดใช้บัญชี" }}</legend>{% csrf_token %}
+</div>
+</section>
+
+<section class="section user-part" aria-labelledby="u-security">
+<h2 id="u-security">ความปลอดภัย</h2>
+<div class="form-grid">
+<form method="post" action="{% url 'admin-user-action' target.pk 'set-password' %}">
+  <fieldset><legend>ตั้งรหัสผ่านใหม่</legend>{% csrf_token %}
+    <p class="helptext">ผู้ใช้ต้องเปลี่ยนรหัสเองเมื่อเข้าระบบครั้งถัดไป และทุกเครื่องที่เข้าอยู่จะออกจากระบบ</p>
+    <p><label for="u-pw">รหัสผ่านใหม่</label> <input id="u-pw" name="password" type="password" required autocomplete="new-password"></p>
+    <p><label for="u-pw2">พิมพ์อีกครั้ง</label> <input id="u-pw2" name="password2" type="password" required autocomplete="new-password"></p>
+    <p><label for="u-pw-reason">เหตุผล</label> <input id="u-pw-reason" name="reason" maxlength="500" required></p>
+    <button type="submit">ตั้งรหัสผ่าน</button></fieldset>
+</form>
+<form method="post" action="{% url 'admin-user-action' target.pk 'reset-password' %}">
+  <fieldset><legend>ตั้งรหัสผ่านชั่วคราว</legend>{% csrf_token %}
     <label>เหตุผล <input name="reason"></label> <button type="submit">ยืนยัน</button></fieldset>
 </form>
 <form method="post" action="{% url 'admin-user-action' target.pk 'revoke-sessions' %}">
   <fieldset><legend>บังคับออกจากระบบทุกเครื่อง</legend>{% csrf_token %}
     <label>เหตุผล <input name="reason"></label> <button type="submit">ยืนยัน</button></fieldset>
 </form>
-<form method="post" action="{% url 'admin-user-action' target.pk 'reset-password' %}">
-  <fieldset><legend>ตั้งรหัสผ่านชั่วคราว</legend>{% csrf_token %}
+<form method="post" action="{% url 'admin-user-action' target.pk target.is_active|yesno:'suspend,activate' %}">
+  <fieldset><legend>{{ target.is_active|yesno:"ระงับบัญชี,เปิดใช้บัญชี" }}</legend>{% csrf_token %}
     <label>เหตุผล <input name="reason"></label> <button type="submit">ยืนยัน</button></fieldset>
 </form>
 </div>
+</section>
 {% endblock %}
