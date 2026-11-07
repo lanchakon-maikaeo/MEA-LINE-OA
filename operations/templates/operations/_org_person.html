@@ -1,11 +1,12 @@
-{# ADR 0044: a person's card on the chart. The four unit pickers fill from #org-units (app.js); without it they keep the current unit. #}
-<div class="org-pop" id="op-{{ p.employee.pk }}" popover>
+{% load ui %}{# ADR 0044, 0051 Q5, Q6: a person's card on the chart. The four unit pickers fill from #org-units (app.js); without it they keep the current unit. #}
+<div class="org-pop org-pop--person" id="op-{{ p.employee.pk }}" popover>
   <button type="button" class="org-pop__close" popovertarget="op-{{ p.employee.pk }}" popovertargetaction="hide" aria-label="ปิด"><span aria-hidden="true">×</span></button>
+  <form class="org-pop__form" method="post">{% csrf_token %}<input type="hidden" name="action" value="set_person"><input type="hidden" name="employee" value="{{ p.employee.pk }}">
   <header class="org-pop__head">
     <h3>{{ p.name }}</h3>
-    <p class="muted">รหัส {{ p.employee.employee_id }} · {{ p.employee.position|default:"ไม่ระบุตำแหน่ง" }}{% if p.role != "employee" %} · {{ p.role_label }}{% endif %}</p>
+    <p class="muted">รหัส {{ p.employee.employee_id }} · {{ p.employee.position|default:"ไม่ระบุตำแหน่ง" }}</p>
+    <p class="org-pop__tags"><span class="tag tag--closed">ลงทะเบียน LINE แล้ว</span>{% if p.role != "employee" %}<span class="tag">{{ p.role_label }}</span>{% endif %}{% if p.user_id %}<a class="org-pop__link" href="{% url 'admin-user-detail' p.user_id %}">เปิดหน้าบัญชี ›</a>{% else %}<span class="tag tag--muted">ยังไม่มีบัญชีเว็บ</span>{% endif %}</p>
   </header>
-  <form class="org-pop__form" method="post">{% csrf_token %}<input type="hidden" name="action" value="set_person"><input type="hidden" name="employee" value="{{ p.employee.pk }}">
     <fieldset class="org-pop__group"><legend>หน่วย</legend>
       <div class="org-cascade" data-cascade>{% for level in p.levels %}
         <div class="field"><label for="pu-{{ p.employee.pk }}-{{ forloop.counter0 }}">{% cycle "ฝ่าย" "กอง" "แผนก" "กลุ่มงาน" %}</label>
@@ -25,11 +26,13 @@
     {% if p.koj %}<fieldset class="org-pop__group"><legend>รับแจ้งงานติดตาม กอจ.</legend>
       {% for k in p.koj %}<input type="hidden" name="koj" value="{{ k.group }}"><label class="choice choice--sm"><input type="checkbox" name="koj-{{ k.group }}" value="1"{% if k.on %} checked{% endif %}><span>{{ k.label }}</span></label>{% endfor %}
     </fieldset>{% endif %}
-    <div class="field"><label for="pa-{{ p.employee.pk }}">บัญชีเว็บ</label>
-      {% if p.account %}<p id="pa-{{ p.employee.pk }}">ผูกกับ <strong>{{ p.account }}</strong> แล้ว</p>
-      {% else %}<select id="pa-{{ p.employee.pk }}" name="account"><option value="">ไม่รวม</option>{% for uid, label in accounts %}<option value="{{ uid }}">{{ label }}</option>{% endfor %}</select>
-      <p class="helptext">รวม LINE ของคนนี้เข้ากับบัญชีเว็บที่เลือก บทบาท งานประจำ และเรื่องที่ถืออยู่จะย้ายไปด้วย บัญชีที่ระบบสร้างจาก LINE จะปิด ประวัติยังอยู่</p>{% endif %}</div>
     <div class="field"><label for="px-{{ p.employee.pk }}">เหตุผล (ไม่บังคับ)</label><input id="px-{{ p.employee.pk }}" name="reason" maxlength="500"></div>
-    <div class="org-pop__actions"><button class="btn btn--sm" type="submit">บันทึก</button><button type="button" class="btn btn--sm btn--ghost" popovertarget="op-{{ p.employee.pk }}" popovertargetaction="hide">ยกเลิก</button></div>
+    {% if p.account %}<p class="muted">บัญชีเว็บ: ผูกกับ <strong>{{ p.account }}</strong> แล้ว</p>
+    {% else %}<details class="org-pop__merge"><summary>รวมบัญชี</summary>
+      <div class="field"><label for="pa-{{ p.employee.pk }}">บัญชีเว็บที่จะรวม LINE ของคนนี้เข้าไป</label>
+        <select id="pa-{{ p.employee.pk }}" name="account"><option value="">ไม่รวม</option>{% for uid, label in accounts %}<option value="{{ uid }}">{{ label }}</option>{% endfor %}</select>
+        <p class="helptext">บทบาท งานประจำ และเรื่องที่ถืออยู่จะย้ายไปด้วย บัญชีที่ระบบสร้างจาก LINE จะปิด ประวัติยังอยู่ ย้อนกลับไม่ได้</p></div>
+    </details>{% endif %}
+    <div class="org-pop__actions org-pop__actions--sticky"><button class="btn btn--sm" type="submit">บันทึก</button><button type="button" class="btn btn--sm btn--ghost" popovertarget="op-{{ p.employee.pk }}" popovertargetaction="hide">ยกเลิก</button></div>
   </form>
 </div>

@@ -290,6 +290,7 @@ class Turn:
         if action in {
             "staff_ow",
             "staff_step_pick",
+            "staff_step_page",
             "staff_step_go",
             "staff_step_cancel",
             "staff_order_confirm",
@@ -716,6 +717,7 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
     if action in {
         "staff_ow",
         "staff_step_pick",
+        "staff_step_page",
         "staff_step_go",
         "staff_step_cancel",
         "staff_step_back",
@@ -806,6 +808,9 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
             staff_work.step_answer(turn, user, picked)
         else:
             staff_work.step_answer(turn, user, value.get("v", ""))
+        return True
+    if action == "staff_step_page" and prompt == "staff_step":
+        staff_work.step_page(turn, user, int(value.get("p", 0) or 0))
         return True
     if action == "staff_step_go" and prompt == "staff_step":
         staff_work.step_go(turn, user)

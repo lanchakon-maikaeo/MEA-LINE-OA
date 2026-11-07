@@ -249,7 +249,7 @@ OPTIONS = {
             (
                 "act",
                 "ทำงานได้ใน LINE ทุกขั้นที่ไม่ต้องใช้ฟอร์มยาว",
-                "ถามทีละข้อแล้วให้กดยืนยัน ขั้นที่มีรายการของ หมายเลขเครื่อง หรือจำนวน เปิดฟอร์มในเว็บ "
+                "ถามทีละข้อแล้วให้กดยืนยัน ขั้นที่มีรายการของ หมายเลขเครื่อง หรือจำนวน ทำในเว็บ "
                 "ทุกการกระทำผ่านกติกาและสิทธิ์เดียวกับเว็บ และบันทึกใน audit",
             ),
             ("view", "ดูงานใน LINE แล้วเปิดเว็บเพื่อทำงาน", ""),
@@ -862,19 +862,39 @@ PUSH_KINDS = (
     ),
     ("koj_completed", "koj", "ติดตามจบแล้ว", "ผู้ติดตามและผู้รับแจ้งงานติดตาม", "กอจ. · ติดตามจบแล้ว", True),
 )
+# ADR 0050 Q6: every kind to staff and every order kind goes to the แอดมินฝ่าย on duty; the
+# people each kind went to before are a switch of their own that starts off, except the assigned
+# ผู้รับผิดชอบ (Q19). Registration requests stay with the people chosen to approve them.
+ROUTED = frozenset(
+    kind
+    for kind, group, *_ in PUSH_KINDS
+    if group in ("staff", "order") and kind != "staff_registration"
+)
+DUTY = "duty"
+# The switch key of each kind's former recipients; kinds that had one keep its key and value.
+ORIGINAL = {"staff_assigned": "assignee", "staff_new_case": "division_admin"}
+ORIGINAL_LABEL = {
+    "staff_new_case": "แอดมินกองของกองเจ้าภาพ",
+    "staff_assigned": "ผู้รับผิดชอบที่ถูกมอบหมาย",
+}
+ORIGINAL_ON = {"staff_assigned"}
+
+
+def original(kind):
+    return ORIGINAL.get(kind, "people")
+
+
 # Kinds whose people are picked here as well: (group, label, on by default).
 PUSH_RECIPIENTS = {
-    "staff_assigned": (
-        ("assignee", "ผู้รับผิดชอบที่ถูกมอบหมาย", True),
-        ("duty", "สำเนาถึงแอดมินฝ่ายที่อยู่เวร", True),
-    ),
-    "staff_new_case": (
-        ("duty", "แอดมินฝ่ายที่อยู่เวร", True),
-        ("division_admin", "แอดมินกองของกองเจ้าภาพ", False),
-    ),
-    "staff_hazard": (("duty", "สำเนาถึงแอดมินฝ่ายที่อยู่เวร", True),),
-    "staff_routing": (("duty", "สำเนาถึงแอดมินฝ่ายที่อยู่เวร", True),),
+    kind: (
+        (DUTY, "แอดมินฝ่ายที่อยู่เวร", True),
+        (original(kind), ORIGINAL_LABEL.get(kind, who), kind in ORIGINAL_ON),
+    )
+    for kind, _group, _label, who, _sample, _on in PUSH_KINDS
+    if kind in ROUTED
 }
+# ADR 0050 Q13, Q15: someone who did the step hears nothing of it, unless switched on.
+PUSH_SELF = PUSH_PREFIX + "self"
 # The ตัวเลือกระบบ about pushes, shown on the Push Message page instead.
 PUSH_MOVED = (STAFF_LINE_BUDGET, STAFF_NOTIFY, ORDER_REMIND, CATCH_UP, CATCH_UP_APOLOGY)
 
@@ -889,6 +909,7 @@ def _switch(label, on):
 EMAIL_GROUPS = ("staff", "order")
 EMAIL_OFF = {"staff_new_case", "staff_admin_waiting", "staff_registration"}
 
+OPTIONS[PUSH_SELF] = _switch("Push Message: แจ้งเรื่องที่ตัวเองทำ", False)
 for _kind, _group, _label, _who, _sample, _on in PUSH_KINDS:
     OPTIONS[PUSH_PREFIX + _kind] = _switch(f"Push Message: {_label}", _on)
     if _group in EMAIL_GROUPS:
@@ -908,38 +929,49 @@ def push_on(kind, to=""):
 
 
 def push_rows(sent):
-    """The Push Message page: [(group label, [kind dict])]; `sent` counts this month's by kind."""
+    """The Push Message page (ADR 0048, 0050 Q10): [(group, label, [kind dict], counts)];
+    `sent` counts this month's LINE pushes by kind. Each kind carries its LINE switch, its email
+    switch (staff and order kinds) and the switches of its people."""
     groups = []
     for group, group_label in PUSH_GROUPS:
-        kinds = [
-            {
-                "kind": kind,
-                "label": label,
-                "who": who,
-                "sample": sample,
-                "key": PUSH_PREFIX + kind,
-                "on": push_on(kind),
-                "sent": sent.get(kind, 0),
-                "recipients": [
-                    {"key": f"{PUSH_PREFIX}{kind}:{to}", "label": to_label, "on": push_on(kind, to)}
-                    for to, to_label, _ in PUSH_RECIPIENTS.get(kind, ())
-                ]
-                + (
-                    [
-                        {
-                            "key": f"{PUSH_PREFIX}{kind}:email",
-                            "label": "อีเมล",
-                            "on": push_on(kind, "email"),
-                        }
-                    ]
-                    if g in EMAIL_GROUPS
-                    else []
-                ),
-            }
-            for kind, g, label, who, sample, _ in PUSH_KINDS
-            if g == group
-        ]
-        groups.append((group_label, kinds))
+        kinds = []
+        for kind, g, label, who, sample, _ in PUSH_KINDS:
+            if g != group:
+                continue
+            people = [
+                {"key": f"{PUSH_PREFIX}{kind}:{to}", "label": to_label, "on": push_on(kind, to)}
+                for to, to_label, _ in PUSH_RECIPIENTS.get(kind, ())
+            ]
+            reached = [r["label"] for r in people if r["on"]]
+            if not people:
+                reach = who
+            elif not reached:
+                reach = "ยังไม่มีผู้รับ"
+            else:
+                reach = reached[0] + (f" +{len(reached) - 1}" if len(reached) > 1 else "")
+            email = f"{PUSH_PREFIX}{kind}:email"
+            kinds.append(
+                {
+                    "kind": kind,
+                    "label": label,
+                    "who": who,
+                    "reach": reach,
+                    "sample": sample,
+                    "sent": sent.get(kind, 0),
+                    "line": {"key": PUSH_PREFIX + kind, "on": push_on(kind)},
+                    "email": {"key": email, "on": push_on(kind, "email")}
+                    if group in EMAIL_GROUPS
+                    else None,
+                    "recipients": people,
+                }
+            )
+        counts = {
+            "line": sum(k["line"]["on"] for k in kinds),
+            "email": sum(bool(k["email"] and k["email"]["on"]) for k in kinds),
+            "has_email": group in EMAIL_GROUPS,
+            "sent": sum(k["sent"] for k in kinds),
+        }
+        groups.append((group, group_label, kinds, counts))
     return groups
 
 

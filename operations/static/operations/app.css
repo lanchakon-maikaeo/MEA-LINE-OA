@@ -414,6 +414,10 @@ td button, td .btn, form.inline button { min-height: 40px; padding: 0 var(--s-18
 }
 .chip[aria-current="page"] .chip__count { background: var(--on-primary); color: var(--ink); }
 .chip__count--alert { background: var(--danger); color: var(--on-primary); }
+/* ADR 0050 Q12: a แอดมินฝ่าย on duty sees until when; a label, not a button */
+.chip--duty { cursor: default; border-color: var(--success); color: var(--success); font-size: 14px; padding: 0 var(--s-12); }
+.chip--duty:hover { border-color: var(--success); color: var(--success); }
+@media (max-width: 599px) { .chip--duty > span { display: none; } }
 summary.chip { list-style: none; }
 summary.chip::-webkit-details-marker { display: none; }
 
@@ -726,6 +730,8 @@ a.stat--dark:hover { background: var(--charcoal); color: var(--on-primary); }
 
 .action-list { display: flex; flex-wrap: wrap; gap: var(--s-8); }
 .action-list .btn--block { margin-bottom: var(--s-4); }
+/* ADR 0051 Q2: the pages of the division's own warehouse work, under the buttons. */
+.action-links { display: flex; flex-wrap: wrap; gap: var(--s-4); margin-top: var(--s-18); padding-top: var(--s-12); border-top: 1px solid var(--hairline-soft); }
 .more > summary { cursor: pointer; font-size: 14px; list-style: none; }
 .more > summary::-webkit-details-marker { display: none; }
 .more > summary::before { content: "+ "; }
@@ -1498,50 +1504,66 @@ body:has(.ov-page) .footer { border-top: 0; }
 /* ADR 0039: a viewer's read-only form keeps the form's layout. */
 fieldset.stack { border: 0; padding: 0; margin: 0; min-width: 0; }
 
-/* ADR 0041, 0044: the tree of people registered in LINE, top-down. Each level's units sit side
-   by side and wrap to the page; a node folds, and a click on a unit or person opens its card. */
-.ot { --ot-line: var(--hairline); --ot-accent: #ef6c1a; --ot-accent-soft: #fdeadb; --ot-root: #8a1c25; padding-bottom: var(--s-12); }
+/* ADR 0050 Q3–Q5: the chart of people registered in LINE, top-down like the MEA chart. Children
+   sit side by side under their parent, joined by lines; the deepest unit lists its people in a
+   column. The chart scrolls sideways in its own frame and takes the page's whole width; app.js
+   keeps one branch open per level and the tapped card where it was. */
+.admin-shell:has(> .page--chart) { max-width: none; }
+.ot {
+  --ot-line: var(--stone); --ot-gap: 22px; --ot-accent: #ef6c1a; --ot-accent-soft: #fdeadb; --ot-root: #8a1c25;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin;
+  margin: 0 calc(-1 * var(--gutter)); padding: var(--s-12) 0 var(--s-24);
+  border-block: 1px solid var(--hairline-soft); background: var(--cloud);
+}
+.ot:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.ot__canvas { display: flex; flex-direction: column; align-items: center; width: max-content; min-width: 100%; padding-inline: var(--ot-pad, var(--gutter)); }
 .ot__root { display: flex; justify-content: center; }
+.ot__card { position: relative; display: flex; justify-content: center; }
 .ot__box {
-  position: relative; display: inline-flex; align-items: center; gap: var(--s-8); max-width: 260px;
-  min-height: 36px; padding: var(--s-4) var(--s-12); border: 1px solid var(--hairline); border-radius: 10px;
+  position: relative; display: inline-flex; align-items: center; gap: var(--s-8); max-width: 230px;
+  min-height: 38px; padding: 6px var(--s-12); border: 1px solid var(--hairline); border-radius: 10px;
   background: var(--canvas); color: var(--ink); font: inherit; font-size: 14px; line-height: 1.35; text-align: left; white-space: normal;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05);
 }
 button.ot__box { cursor: pointer; }
 button.ot__box:hover { border-color: var(--ink); }
-.ot__box--root { background: var(--ot-root); border-color: var(--ot-root); color: var(--on-primary); font-weight: 700; }
-.ot__box--line { background: var(--ot-accent); border-color: var(--ot-accent); color: var(--on-primary); font-weight: 600; }
-.ot__box--sys { background: var(--ot-accent-soft); border-color: var(--ot-accent-soft); font-weight: 600; }
-.ot__box--sys:hover { border-color: var(--ot-accent); }
+button.ot__box[aria-expanded="true"] { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.ot__box--root { background: var(--ot-root); border-color: var(--ot-root); color: #fff; font-weight: 700; }
+.ot__box--line { background: var(--ot-accent); border-color: var(--ot-accent); color: #fff; font-weight: 600; }
+.ot__box--sys { background: var(--ot-accent-soft); border-color: var(--ot-accent-soft); color: #1f1f1f; font-weight: 600; }
 .ot__label { min-width: 0; overflow-wrap: anywhere; }
-.ot__short { flex: none; padding: 0 6px; border-radius: var(--r-full); background: var(--cloud); font-size: 12px; font-weight: 600; }
-.ot__n { flex: none; min-width: 22px; padding: 0 6px; border-radius: var(--r-full); background: rgba(0,0,0,.06); font-size: 12px; font-weight: 600; text-align: center; }
-.ot__box--root .ot__n, .ot__box--line .ot__n { background: rgba(255,255,255,.22); }
-/* Children sit in a tray under their parent and wrap to the page width; a line joins the two. */
-.ot__kids {
-  position: relative; list-style: none; display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start;
-  gap: var(--s-12); margin: var(--s-12) 0 0; padding: var(--s-12);
-  border: 1px solid var(--hairline-soft); border-radius: 16px; background: rgba(0,0,0,.018);
-}
-.ot__kids::before { content: ""; position: absolute; bottom: 100%; left: 50%; height: var(--s-12); border-left: 1px solid var(--ot-line); }
-.ot__kids:has(> .ot__item:only-child) { padding: 0; border: 0; background: none; }
-.ot > .ot__kids { margin-top: var(--s-18); }
-.ot > .ot__kids::before { height: var(--s-18); }
-.ot__item { display: flex; flex-direction: column; align-items: center; min-width: 0; }
-/* A unit with a level below is its fold: a click opens the next level (ADR 0044, 4 Nov 2569). */
-.ot__fold { display: flex; flex-direction: column; align-items: center; }
-.ot__fold > summary.ot__box { list-style: none; cursor: pointer; }
-.ot__fold > summary.ot__box::-webkit-details-marker { display: none; }
-.ot__fold > summary.ot__box::after { content: "▸"; flex: none; font-size: 12px; opacity: .7; }
-.ot__fold[open] > summary.ot__box::after { content: "▾"; }
-.ot__fold > summary.ot__box:hover { border-color: var(--ink); }
-.ot__fold > summary.ot__box--line:hover, .ot__fold > summary.ot__box--sys:hover { border-color: var(--ink); }
-.ot__fold > .ot__cardlink { display: block; margin: 4px auto 0; font-size: 12px; }
-.ot__people { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-4); max-width: 700px; margin: var(--s-12) 0 0; padding: 0; }
-.ot__fold > .ot__people { position: relative; padding-top: var(--s-12); margin-top: 0; }
-.ot__fold > .ot__people::before { content: ""; position: absolute; top: 0; left: 50%; height: var(--s-12); border-left: 1px solid var(--ot-line); }
+.ot__short { flex: none; padding: 0 6px; border-radius: var(--r-full); background: rgba(0,0,0,.07); font-size: 12px; font-weight: 600; }
+.ot__n { flex: none; min-width: 22px; padding: 0 6px; border-radius: var(--r-full); background: rgba(0,0,0,.07); font-size: 12px; font-weight: 600; text-align: center; }
+.ot__box--root .ot__n, .ot__box--line .ot__n { background: rgba(255,255,255,.24); }
+.ot__caret { flex: none; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: .55; transition: none; }
+button.ot__box[aria-expanded="true"] .ot__caret { transform: rotate(180deg); }
+/* ADR 0051 Q4: a unit's settings open from the first row of its branch, on the trunk below the card. */
+.ot__set { position: relative; display: flex; justify-content: center; padding-top: var(--ot-gap); }
+.ot__set::before { content: ""; position: absolute; top: 0; left: 50%; height: var(--ot-gap); border-left: 1.5px solid var(--ot-line); }
+.ot__set .btn { min-height: 32px; padding: 0 var(--s-12); font-size: 13px; }
+.ot__set .icon { width: 13px; height: 13px; }
+.ot__below { display: flex; flex-direction: column; align-items: center; }
+.ot__below[hidden] { display: none; }
+/* The lines: a stem down from the parent, a rail across the children, a drop into each. */
+.ot__kids { position: relative; display: flex; justify-content: center; align-items: flex-start; list-style: none; margin: 0; padding: var(--ot-gap) 0 0; }
+.ot__kids::before { content: ""; position: absolute; top: 0; left: 50%; height: var(--ot-gap); border-left: 1.5px solid var(--ot-line); }
+.ot__node { position: relative; display: flex; flex-direction: column; align-items: center; margin: 0; padding: var(--ot-gap) 14px 0; }
+.ot__node::before, .ot__node::after { content: ""; position: absolute; top: 0; width: 50%; height: var(--ot-gap); border-top: 1.5px solid var(--ot-line); }
+.ot__node::before { right: 50%; }
+.ot__node::after { left: 50%; border-left: 1.5px solid var(--ot-line); }
+.ot__node:first-child::before { border-top: 0; }
+.ot__node:first-child::after { border-top-left-radius: 8px; }
+.ot__node:last-child::after { border: 0; }
+.ot__node:last-child::before { border-right: 1.5px solid var(--ot-line); border-top-right-radius: 8px; }
+.ot__node:only-child { padding-top: 0; }
+.ot__node:only-child::before, .ot__node:only-child::after { display: none; }
+.ot__people { position: relative; display: flex; flex-direction: column; gap: 6px; list-style: none; margin: 0; padding: var(--ot-gap) 0 0; }
+.ot__people::before { content: ""; position: absolute; top: 0; left: 50%; height: var(--ot-gap); border-left: 1.5px solid var(--ot-line); }
+.ot__node--people > .ot__people { padding-top: 0; }
+.ot__node--people > .ot__people::before { display: none; }
+.ot__people li { margin: 0; }
 .ot__person {
-  display: flex; align-items: center; gap: var(--s-8); width: 220px; padding: 6px var(--s-8);
+  display: flex; align-items: center; gap: var(--s-8); width: 210px; padding: 6px var(--s-8);
   border: 1px solid var(--hairline-soft); border-radius: 10px; background: var(--canvas); color: var(--ink);
   font: inherit; text-align: left; cursor: pointer;
 }
@@ -1582,11 +1604,26 @@ button.ot__box:hover { border-color: var(--ink); }
 .org-pop__people { list-style: none; margin: 0 0 var(--s-8); padding: 0; display: grid; gap: var(--s-4); font-size: 14px; }
 .org-pop__people li { margin: 0; }
 .org-pop .org-card { padding: 0; border: 0; background: none; }
+/* ADR 0051 Q6: the person's card reads top down; the unit names are not cut, merging sits folded at the end, and the buttons stay in view. */
+.org-pop__head .org-pop__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: var(--s-8); }
+.org-pop__link { margin-left: auto; font-size: 14px; font-weight: 600; }
+.org-pop--person .org-cascade { grid-template-columns: minmax(0, 1fr); }
+.org-pop__merge { margin: 0 0 var(--s-12); padding: var(--s-8) var(--s-12); border: 1px solid var(--hairline-soft); border-radius: 14px; }
+.org-pop__merge > summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+.org-pop__merge[open] > summary { margin-bottom: var(--s-8); }
+.org-pop__actions--sticky {
+  position: sticky; bottom: calc(-1 * var(--s-24)); z-index: 1;
+  margin: 0 calc(-1 * var(--s-24)) calc(-1 * var(--s-24)); padding: var(--s-12) var(--s-24) var(--s-24);
+  border-top: 1px solid var(--hairline-soft); background: var(--canvas);
+}
 .link-btn { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: var(--hairline); cursor: pointer; }
 .org-warn { margin-bottom: var(--s-18); }
+/* ADR 0051 Q7: the account page in four groups; the chips at the top jump to each. */
+.user-part { padding-top: var(--s-8); border-top: 1px solid var(--hairline-soft); }
+.user-part h2 { scroll-margin-top: 96px; }
+.user-part fieldset > label:has(> input[type="checkbox"]) { display: flex; align-items: flex-start; gap: var(--s-8); margin: var(--s-8) 0; }
 @media (max-width: 640px) {
   .org-cascade { grid-template-columns: minmax(0, 1fr); }
-  .ot__person { width: 100%; }
 }
 
 /* ADR 0041 (Q9): a person in one short row — name, position, the four roster levels. */
@@ -1699,16 +1736,53 @@ button.ot__box:hover { border-color: var(--ink); }
 /* --- Push Message (ADR 0048) ------------------------------------------------------------------- */
 
 .push-off { background: var(--danger-tint); color: var(--danger-deep); }
-.push-list, .push-to { list-style: none; margin: 0; padding: 0; }
-.push-row { display: grid; grid-template-columns: 1fr auto; gap: var(--s-8) var(--s-18); align-items: start; padding: var(--s-18) 0; border-bottom: 1px solid var(--hairline-soft); }
-.push-row__text { display: grid; gap: var(--s-4); min-width: 0; }
-.push-row__label { font-size: 16px; }
-.push-row__who { font-size: 13px; color: var(--mute); }
-.push-row__sample { justify-self: start; max-width: 100%; margin-top: var(--s-4); padding: var(--s-8) var(--s-12); border-radius: 4px 16px 16px 16px; background: var(--cloud); font-size: 13px; color: var(--ash); overflow-wrap: anywhere; }
-.push-row.is-off .push-row__label, .push-row.is-off .push-row__sample { color: var(--stone); }
-.push-to { grid-column: 1 / -1; display: grid; gap: var(--s-8); padding-left: var(--s-18); border-left: 2px solid var(--hairline-soft); }
-.push-to__row { display: flex; justify-content: space-between; align-items: center; gap: var(--s-12); font-size: 14px; }
+/* ADR 0050 Q10: Push Message in folds. A group and a kind open and close; each kind's row has
+   its LINE and email switches, and the open row shows a sample and the switches of its people. */
+.push-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-12) var(--s-24); margin: 0 0 var(--s-8); }
+.push-self { display: flex; align-items: center; gap: var(--s-18); flex: 1 1 420px; max-width: 720px; padding: var(--s-8) var(--s-18); border: 1px solid var(--hairline-soft); border-radius: 14px; background: var(--canvas); }
+.push-self__text { display: grid; gap: 2px; flex: 1; min-width: 0; font-size: 14px; }
+.push-bar__tools { display: flex; gap: var(--s-8); }
+.push-note { margin: 0 0 var(--s-24); font-size: 14px; }
+.push-form { display: none; }
+.push-group { margin: 0 0 var(--s-18); border: 1px solid var(--hairline-soft); border-radius: 18px; background: var(--canvas); overflow: hidden; }
+.push-group__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-4) var(--s-12); padding: var(--s-12) var(--s-18); background: var(--cloud); cursor: pointer; list-style: none; }
+.push-group__head::-webkit-details-marker, .push-kind__head::-webkit-details-marker { display: none; }
+.push-group__title { margin: 0; font-size: 18px; }
+.push-group__meta { margin-left: auto; font-size: 13px; color: var(--mute); }
+.push-chev { flex: none; width: 8px; height: 8px; margin: 0 4px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; opacity: .55; transform: rotate(-45deg); }
+details[open] > summary > .push-chev { transform: rotate(45deg); }
+.push-cols { display: flex; padding: var(--s-8) var(--s-18) var(--s-4) 46px; font-size: 12px; color: var(--mute); }
+.push-cols > span:first-child { flex: 1; }
+.push-cols > span + span { width: 112px; text-align: center; }
+.push-group:not([open]) > .push-cols { display: none; }
+.push-kinds { list-style: none; margin: 0; padding: 0; }
+.push-kind { border-top: 1px solid var(--hairline-soft); }
+.push-kind__head { display: flex; align-items: center; gap: var(--s-12); padding: 2px var(--s-18); cursor: pointer; list-style: none; }
+.push-kind__head:hover { background: rgba(0,0,0,.02); }
+.push-kind__text { display: grid; gap: 2px; flex: 1; min-width: 0; padding: var(--s-8) 0; }
+.push-kind__label { font-size: 15px; }
+.push-kind__who { font-size: 13px; color: var(--mute); }
+.push-kind__sw { display: flex; justify-content: center; flex: none; width: 112px; }
+.push-kind.is-off .push-kind__label { color: var(--stone); }
+.push-kind__body { display: grid; gap: var(--s-8); padding: 0 var(--s-18) var(--s-18) 46px; }
+.push-kind__sample { justify-self: start; max-width: 560px; margin: 0; padding: var(--s-8) var(--s-12); border-radius: 4px 16px 16px 16px; background: var(--cloud); font-size: 13px; color: var(--ash); overflow-wrap: anywhere; }
+.push-kind__sample > .muted { display: block; margin-bottom: 2px; font-size: 11px; }
+.push-kind__h { margin: var(--s-4) 0 0; font-size: 13px; font-weight: 600; color: var(--mute); }
+.push-kind__hint { margin: 0; font-size: 12px; }
+.push-to { list-style: none; display: grid; max-width: 560px; margin: 0; padding: 0; border: 1px solid var(--hairline-soft); border-radius: 12px; }
+.push-to__row { display: flex; justify-content: space-between; align-items: center; gap: var(--s-12); padding: 0 var(--s-12); border-top: 1px solid var(--hairline-soft); font-size: 14px; }
+.push-to__row:first-child { border-top: 0; }
 .push-to__row.is-off > span { color: var(--stone); }
+@media (max-width: 640px) {
+  .push-cols { display: none; }
+  .push-kind__head { flex-wrap: wrap; row-gap: 0; }
+  .push-kind__text { flex-basis: calc(100% - 32px); }
+  .push-kind__sw { width: auto; padding-left: 26px; }
+  .push-kind__sw:empty { display: none; }
+  .push-kind__sw[data-channel]::before { content: attr(data-channel); align-self: center; margin-right: 2px; font-size: 12px; color: var(--mute); }
+  .push-kind__body { padding-left: var(--s-18); }
+  .push-group__meta { flex-basis: 100%; margin-left: 28px; }
+}
 .push-switch { margin: 0; }
 .switch { display: inline-flex; align-items: center; gap: var(--s-8); min-height: 44px; padding: 0 var(--s-4); border: 0; background: none; color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
 .switch__track { position: relative; width: 46px; height: 28px; border-radius: var(--r-full); background: var(--hairline); transition: background .15s ease; }
@@ -1731,7 +1805,7 @@ button.ot__box:hover { border-color: var(--ink); }
 .duty-chip--none { background: var(--cloud); border-left-color: var(--stone); color: var(--mute); }
 .duty-day { margin-top: var(--s-24); }
 /* A save returns to its row or day; keep it clear of the sticky top bar. */
-.push-row, .duty-day, #week, #s-numbers { scroll-margin-top: calc(var(--nav-h) + var(--s-18)); }
+.push-kind, .duty-day, #week, #s-numbers { scroll-margin-top: calc(var(--nav-h) + var(--s-18)); }
 .duty-rows { list-style: none; margin: 0 0 var(--s-12); padding: 0; display: grid; gap: var(--s-4); }
 .duty-rows__item { display: flex; align-items: center; gap: var(--s-8); }
 .duty-rows__time { font-variant-numeric: tabular-nums; color: var(--ash); min-width: 7.5em; }

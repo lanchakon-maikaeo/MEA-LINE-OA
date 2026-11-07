@@ -48,6 +48,7 @@ from operations.templatetags import ui
 from operations.tests.test_m02_cases import make_staff, withdrawal
 from operations.tests.test_m07_fulfilment import fuse
 from operations.tests.test_m09_problems import Problems, ProblemTestCase, faulty
+from operations.tests.test_m13_work_orders import keep_original_recipients
 
 S = Case.Status
 A = AuthorityGrant.Activity
@@ -350,7 +351,11 @@ class ActionTests(WebTestCase):
         self.act(self.approver, case, "approve", {"lines": [{"line_no": 1, "quantity": "3"}]})
         self.assertEqual(self.offers(self.issuer, case)[0], ("issue", True))
         # ADR 0041: แอดมินระบบ does what a แอดมินฝ่าย does: assign and send on.
-        self.assertEqual(self.offers(self.admin, case), [("assign", False), ("admin_send", False)])
+        # ADR 0050 Q20: and take it themselves.
+        self.assertEqual(
+            self.offers(self.admin, case),
+            [("claim", False), ("assign", False), ("admin_send", False)],
+        )
 
     def test_approve_and_issue_through_the_forms(self):
         case = self.at_meter()
@@ -690,6 +695,10 @@ def with_email(user, address):
     STAFF_WEB_BASE_URL="https://faoj.example.test",
 )
 class StaffEmailTests(WebTestCase):
+    def setUp(self):
+        super().setUp()
+        keep_original_recipients()  # these follow each kind's own people (ADR 0050 Q6)
+
     def trf_staff_division(self):
         from operations.models import Division
 

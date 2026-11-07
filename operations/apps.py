@@ -24,6 +24,7 @@ class OperationsConfig(AppConfig):
         post_migrate.connect(
             _publish_problem_flow, sender=self, dispatch_uid="operations.problem_flow"
         )
+        post_migrate.connect(_link_roster, sender=self, dispatch_uid="operations.link_roster")
 
 
 def _publish_problem_flow(sender, verbosity=1, **kwargs):
@@ -32,3 +33,12 @@ def _publish_problem_flow(sender, verbosity=1, **kwargs):
     from operations import problem_pick
 
     problem_pick.autopublish(print if verbosity else None)
+
+
+def _link_roster(sender, **kwargs):
+    """ADR 0050 Q1: web accounts not yet tied to ทะเบียนพนักงาน are matched after each migrate,
+    so the accounts made before this release get their สังกัด on deploy. It changes nothing for
+    an account already tied or one that matches nobody."""
+    from operations import roster_match
+
+    roster_match.link_all()

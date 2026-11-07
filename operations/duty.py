@@ -4,7 +4,8 @@ Alerts meant for แอดมินฝ่าย go to whoever is on duty now; wi
 แอดมินฝ่าย, as before the roster. Duty decides alerts only: everyone still sees and takes cases.
 A week has rows for Monday to Sunday and one for วันหยุด (the days in the holiday calendar); a
 day may have exceptions on the month calendar, which replace that day's rows. A shift whose end
-is not after its start runs past midnight. แอดมินระบบ and แอดมินฝ่าย edit; each change is audited.
+is not after its start runs past midnight. Only แอดมินระบบ open and edit it (ADR 0050 Q8); each
+change is audited, and a แอดมินฝ่าย on duty sees until when in the header (Q12).
 Only a แอดมินฝ่าย whose web account is linked to a followed LINE account counts: the alerts
 are LINE pushes, so someone on duty without LINE would leave an alert with nobody.
 """
@@ -24,8 +25,7 @@ WEEKDAYS = ("จันทร์", "อังคาร", "พุธ", "พฤห�
 
 
 def may_edit(user):
-    scope = identity.staff_scope(user)
-    return scope.is_admin or scope.is_department_supervisor
+    return identity.staff_scope(user).is_admin
 
 
 def _require(user):
@@ -80,9 +80,25 @@ def on_duty(now=None):
     return list(people.values())
 
 
-def receivers(now=None):
-    """Who gets an alert meant for แอดมินฝ่าย: those on duty, else all of them (Q7)."""
-    return on_duty(now) or admins()
+def until(user, now=None):
+    """When this แอดมินฝ่าย's shift covering now ends (local, naive), or None off duty."""
+    moment = timezone.localtime(now or timezone.now()).replace(tzinfo=None)
+    if user.pk not in {u.pk for u in admins()}:
+        return None
+    ends = []
+    for day in (moment.date(), moment.date() - timedelta(days=1)):
+        rows, _ = day_rows(day)
+        for shift in rows:
+            if shift.user_id == user.pk and _covers(shift, moment, day):
+                over = shift.end <= shift.start
+                ends.append(datetime.combine(day + timedelta(days=over), shift.end))
+    return max(ends, default=None)
+
+
+def receivers(now=None, email=False):
+    """Who gets an alert meant for แอดมินฝ่าย: those on duty, else all of them (Q7). With
+    nobody on duty an email goes to every แอดมินฝ่าย, LINE or not (ADR 0050 Q8)."""
+    return on_duty(now) or admins() + (admins(linked=False) if email else [])
 
 
 def _times(start, end):

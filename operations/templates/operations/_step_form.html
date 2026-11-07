@@ -1,0 +1,31 @@
+{% load ui %}{# ADR 0051 Q1, Q9: a warehouse stage or an appointment, opened from สิ่งที่ทำได้ into the action slot like the other steps. #}
+<section class="action-form{% if demo %} action-form--demo{% endif %}" aria-labelledby="af-title" data-tour="action-form"{% if demo %} data-demo{% endif %}>
+  {% if demo %}<p class="demo-ribbon">{% icon "spark" "sm" %} แบบฟอร์มตัวอย่างสำหรับการสาธิต · ทดลองกรอกได้ โดยระบบจะไม่บันทึกข้อมูล</p>{% endif %}
+  <div class="action-form__head">
+    <div>
+      <span class="eyebrow">{{ case.number }} · {{ case.get_status_display }}</span>
+      <h2 id="af-title">{{ title }}</h2>
+    </div>
+    <a class="icon-btn" href="{% url 'case-detail' case.number %}" data-close-action aria-label="ปิดฟอร์ม">✕</a>
+  </div>
+  {% if a %}
+  <p class="lede mb-24">{{ a.calendar.name }}: {% if a.slot %}{{ a.slot.starts_at|thai_datetime }}{% else %}ยังไม่มีช่วงเวลา{% endif %}{% if a.method %} · {{ a.get_method_display }}{% endif %}{% if a.note %} · {{ a.note }}{% endif %}</p>
+  <form method="post" action="{% url 'case-appointment' case.number %}">
+    {% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}">
+    <div class="field"><label for="cm{{ a.pk }}">วิธีรับของ</label>
+      <select id="cm{{ a.pk }}" name="method"><option value="">วิธีรับเดิม</option>{% for v, l in panel.methods %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="cs{{ a.pk }}">ช่วงเวลาใหม่</label>
+      <select id="cs{{ a.pk }}" name="slot"><option value="">ไม่เปลี่ยน</option>{% for k, slots in panel.free.items %}{% if k == a.pk %}{% for s in slots %}<option value="{{ s.pk }}">{{ s.starts_at|thai_datetime }}</option>{% endfor %}{% endif %}{% endfor %}</select>
+      <p class="helptext">ใช้กับปุ่มเปลี่ยนเป็นช่วงที่เลือก</p></div>
+    <div class="field"><label for="cn{{ a.pk }}">หมายเหตุถึงผู้แจ้ง</label>
+      <input type="text" id="cn{{ a.pk }}" name="note" maxlength="300"><p class="helptext">ถ้าไม่รับนัดต้องใส่</p></div>
+    <div class="form-actions">
+      <button type="submit" name="action" value="confirm">ยืนยันนัด</button>
+      <button class="btn--secondary" type="submit" name="action" value="move">เปลี่ยนเป็นช่วงที่เลือก</button>
+      <button class="btn--ghost" type="submit" name="action" value="reject">ไม่รับนัด</button>
+    </div>
+  </form>
+  {% else %}
+  {% include "operations/_stage_form.html" with pre="st" %}
+  {% endif %}
+</section>

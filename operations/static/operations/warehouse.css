@@ -33,6 +33,7 @@
 .chat__form { display: grid; gap: var(--s-8); margin-top: var(--s-12); }
 @media (max-width: 720px) { .cal-week { grid-template-columns: repeat(7, 160px); } }
 .wh-next { border: 1px solid var(--hairline-soft); border-radius: 14px; padding: var(--s-12); margin: var(--s-12) 0; }
+.action-form .wh-next { border: 0; padding: 0; margin: 0; }
 .wh-numbers { border: 0; padding: 0; margin: 0 0 var(--s-12); display: flex; flex-wrap: wrap; gap: var(--s-8); }
 .wh-numbers legend { font-size: 13px; color: var(--mute); margin-bottom: var(--s-4); }
 .wh-next__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 var(--s-12); }

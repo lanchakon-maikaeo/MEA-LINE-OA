@@ -7,6 +7,7 @@ emergency (Q33), set on the LINE account page since 28 ต.ค. 2569."""
 from datetime import date, timedelta
 
 from django.test import Client
+from django.urls import reverse
 from django.utils import timezone
 
 from operations import calendars, warehouse
@@ -40,8 +41,10 @@ class CaseCardTests(WorkTestCase):
         today = timezone.localdate().isoformat()
         client.post(f"/cases/{case.number}/stage/", {"stage": "received", "on": today})
         page = client.get(f"/cases/{case.number}/").content.decode()
-        self.assertIn("บันทึกคีย์จ่ายแล้ว", page)
-        self.assertIn("ระบบเสนอตามตาราง", page)
+        self.assertIn("บันทึกคีย์จ่ายแล้ว", page)  # ADR 0051 Q1: a button in สิ่งที่ทำได้
+        self.assertNotIn("ระบบเสนอตามตาราง", page)
+        form = client.get(f"/cases/{case.number}/stage/", HTTP_HX_REQUEST="true")
+        self.assertIn("ระบบเสนอตามตาราง", form.content.decode())  # its form opens in the slot
         client.post(
             f"/cases/{case.number}/stage/",
             {"stage": "keyed", "on": today, "planned_on": today},
@@ -67,7 +70,11 @@ class CaseCardTests(WorkTestCase):
         client = Client()
         client.force_login(self.kcw)
         page = client.get(f"/cases/{appointment.case.number}/").content.decode()
-        self.assertIn("ยืนยันนัด", page)
+        url = reverse("case-appointment", args=[appointment.case.number])
+        url = f"{url}?appointment={appointment.pk}"
+        self.assertIn(url, page)  # ADR 0051 Q9: one button per appointment in สิ่งที่ทำได้
+        form = client.get(url, HTTP_HX_REQUEST="true").content.decode()
+        self.assertIn("ยืนยันนัด", form)
         client.post(
             f"/cases/{appointment.case.number}/appointment/",
             {"appointment": appointment.pk, "action": "confirm"},

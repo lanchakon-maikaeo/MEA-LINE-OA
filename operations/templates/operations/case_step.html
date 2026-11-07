@@ -1,0 +1,12 @@
+{% extends "operations/base.html" %}
+{% load static %}
+{% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}">{% endblock %}
+{% block title %}{{ title }} · {{ case.number }} · DED Center{% endblock %}
+{% block page_class %}page--reading{% endblock %}
+{% block content %}
+<ol class="crumbs">
+  <li><a href="{% url 'case-detail' case.number %}">{{ case.number }}</a></li>
+  <li aria-current="page">{{ title }}</li>
+</ol>
+<div id="action-slot">{% include "operations/_step_form.html" %}</div>
+{% endblock %}

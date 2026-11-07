@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
@@ -82,6 +82,7 @@ class DutyTests(TestCase):
         cls.bob = on_line(make_staff("bob", (Role.DEPARTMENT_SUPERVISOR, None)))
         cls.cat = make_staff("cat", (Role.DEPARTMENT_SUPERVISOR, None))  # not on LINE
         cls.member = make_staff("member")
+        cls.admin = make_staff("duty-admin", (Role.ADMIN, None))
 
     monday = date(2026, 11, 9)
 
@@ -90,8 +91,8 @@ class DutyTests(TestCase):
         self.assertEqual(set(duty.receivers(at(self.monday, 9))), {self.ann, self.bob})
 
     def test_weekday_rows_and_an_overnight_shift(self):
-        duty.add(self.ann, "07:30", "15:30", [self.ann.pk], weekday=0)
-        duty.add(self.ann, "15:30", "07:30", [self.bob.pk], weekday=0)
+        duty.add(self.admin, "07:30", "15:30", [self.ann.pk], weekday=0)
+        duty.add(self.admin, "15:30", "07:30", [self.bob.pk], weekday=0)
         self.assertEqual(duty.on_duty(at(self.monday, 9)), [self.ann])
         self.assertEqual(duty.on_duty(at(self.monday, 20)), [self.bob])
         tuesday = date(2026, 11, 10)
@@ -99,44 +100,49 @@ class DutyTests(TestCase):
         self.assertEqual(duty.on_duty(at(tuesday, 9)), [])
 
     def test_a_holiday_uses_its_own_row(self):
-        duty.add(self.ann, "07:30", "15:30", [self.ann.pk], weekday=0)
-        duty.add(self.ann, "08:00", "12:00", [self.bob.pk], weekday=DutyShift.HOLIDAY)
+        duty.add(self.admin, "07:30", "15:30", [self.ann.pk], weekday=0)
+        duty.add(self.admin, "08:00", "12:00", [self.bob.pk], weekday=DutyShift.HOLIDAY)
         Holiday.objects.create(day=self.monday, name="วันหยุดชดเชย")
         self.assertEqual(duty.on_duty(at(self.monday, 9)), [self.bob])
 
     def test_an_exception_replaces_the_day_and_nobody_means_everyone(self):
-        duty.add(self.ann, "07:30", "15:30", [self.ann.pk], weekday=0)
-        duty.add(self.bob, "07:30", "15:30", [self.bob.pk], on=self.monday)
+        duty.add(self.admin, "07:30", "15:30", [self.ann.pk], weekday=0)
+        duty.add(self.admin, "07:30", "15:30", [self.bob.pk], on=self.monday)
         self.assertEqual(set(duty.on_duty(at(self.monday, 9))), {self.ann, self.bob})
         ann = DutyShift.objects.get(on=self.monday, user=self.ann)
-        duty.remove(self.bob, ann.pk)  # Ann on leave
+        duty.remove(self.admin, ann.pk)  # Ann on leave
         self.assertEqual(duty.on_duty(at(self.monday, 9)), [self.bob])
-        duty.nobody(self.ann, self.monday)
+        duty.nobody(self.admin, self.monday)
         self.assertEqual(duty.on_duty(at(self.monday, 9)), [])
-        duty.reset(self.ann, self.monday)
+        duty.reset(self.admin, self.monday)
         self.assertEqual(duty.on_duty(at(self.monday, 9)), [self.ann])
 
     def test_only_a_department_admin_registered_on_line_is_on_duty(self):
         with self.assertRaisesMessage(ValidationError, "ลงทะเบียน LINE"):
-            duty.add(self.ann, "07:30", "15:30", [self.cat.pk], weekday=0)
+            duty.add(self.admin, "07:30", "15:30", [self.cat.pk], weekday=0)
         DutyShift.objects.create(weekday=0, start=time(7, 30), end=time(15, 30), user=self.cat)
         self.assertEqual(duty.on_duty(at(self.monday, 9)), [])  # left LINE: nobody, so everyone
         self.assertNotIn(self.cat, duty.receivers(at(self.monday, 9)))
         client = Client()
-        client.force_login(self.ann)
+        client.force_login(self.admin)
         page = client.get(reverse("admin-duty"))
         self.assertContains(page, "ยังไม่ลงทะเบียน LINE จึงยังจัดเวรไม่ได้: Cat")
         self.assertContains(page, "ไม่มี LINE ไม่นับเป็นเวร")
 
-    def test_only_admins_and_department_admins_edit(self):
+    def test_only_admins_edit(self):
+        """ADR 0050 Q8: แอดมินฝ่าย no longer open the page; Q12: the one on duty sees until when."""
         with self.assertRaises(ValidationError):
-            duty.add(self.ann, "07:30", "07:30", [self.ann.pk], weekday=0)
+            duty.add(self.admin, "07:30", "07:30", [self.ann.pk], weekday=0)
         with self.assertRaises(ValidationError):
-            duty.add(self.ann, "07:30", "15:30", [self.member.pk], weekday=0)
+            duty.add(self.admin, "07:30", "15:30", [self.member.pk], weekday=0)
+        with self.assertRaises(PermissionDenied):
+            duty.add(self.ann, "07:30", "15:30", [self.ann.pk], weekday=0)
         client = Client()
-        client.force_login(self.member)
-        self.assertEqual(client.get(reverse("admin-duty")).status_code, 403)
-        client.force_login(self.ann)
+        for user in (self.member, self.ann):
+            client.force_login(user)
+            self.assertEqual(client.get(reverse("admin-duty")).status_code, 403)
+        self.assertNotContains(client.get(reverse("console")), "ตารางเวร")
+        client.force_login(self.admin)
         page = client.get(reverse("admin-duty"), {"day": "2026-11-09"})
         self.assertContains(page, "เวรประจำสัปดาห์")
         self.assertContains(page, 'value="07:30"')
@@ -168,7 +174,8 @@ class NewCaseAlertTests(PickTestCase):
         )
         with patch("operations.staff_line.plan") as plan:
             staff_email.plan_for_event(event)
-        return [c.args for c in plan.call_args_list if c.args[0] == "staff_new_case"]
+        # ADR 0050: one call for the kind's own people (empty while off), one for the duty
+        return [c.args for c in plan.call_args_list if c.args[0] == "staff_new_case" and c.args[3]]
 
     def test_a_case_waiting_at_receive_tells_the_department_admin_on_duty(self):
         case, _ = self.file("กองเครื่องวัดหน่วยไฟฟ้า")

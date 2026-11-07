@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Production on faoj-prod-gcp (ADR 0043; how-to in Docs/deploy-gcp.md). Run from the repository
-# on the Mac, logged in with `gcloud auth login`. Each step can be re-run.
+# on the Mac after `deploy/gcp-move.sh login`. Each step can be re-run.
 #
+#   deploy/gcp-move.sh login          the owner signs in to Google in the browser; this Mac keeps
+#                                     faoj-deployer's access token for an hour, no refresh token
+#   deploy/gcp-move.sh logout         forget that token now
+#   deploy/gcp-move.sh deployer-setup  once, by the owner: the faoj-deployer service account
 #   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's OCIR digest, detached;
 #                                     GCP_APPROVAL="who/when approved" goes into the release record
 #   deploy/gcp-move.sh status         faoj status and /health/ready/
@@ -42,6 +46,9 @@ PUBLIC_HOST=${GCP_PUBLIC_HOST:-34-15-129-131.sslip.io}
 REGISTRY=ap-singapore-1.ocir.io
 NAMESPACE=axif86tn0tbj
 APPROVAL=${GCP_APPROVAL:-"owner in chat 2 Nov 2026: production on faoj-prod-gcp (ADR 0043)"}
+ACCOUNT=${GCP_ACCOUNT:-mea.amr2026@gmail.com}
+DEPLOYER=faoj-deployer@$PROJECT.iam.gserviceaccount.com
+TOKEN=${GCP_TOKEN_FILE:-$HOME/.config/faoj/gcp-token}
 
 say() { echo "[$(date +%H:%M:%S)] $*" >&2; }
 die() { echo "gcp-move: $*" >&2; exit 1; }
@@ -49,6 +56,48 @@ on_gcp() {
   gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap \
     --ssh-key-file "$KEY" --quiet --command "$*" -- -o LogLevel=ERROR 2>&1 \
     | grep -v -e 'consider installing NumPy' -e 'increasing_the_tcp_upload_bandwidth' -e '^$' || true
+}
+# The owner's account is the project's Owner, so it keeps no credential on the Mac: login mints an
+# hour of faoj-deployer (IAP ssh, Cloud Run; no IAM) and revokes the owner's. When Google's hour is
+# up, nothing here (a script, an agent, malware) reaches production until the owner signs in again.
+login() {
+  # Whatever happens after the browser, the owner's grant does not outlive this command.
+  trap 'gcloud auth revoke --all --quiet >/dev/null 2>&1 || echo "gcp-move: the owner'"'"'s refresh token is still on this Mac: gcloud auth revoke --all" >&2; rm -f "$TOKEN.new"' EXIT
+  gcloud auth login "$ACCOUNT" --force --brief
+  mkdir -p "${TOKEN%/*}"
+  gcloud auth print-access-token --impersonate-service-account "$DEPLOYER" \
+    2> >(grep -v 'using service account impersonation' >&2) | tr -d '\n' > "$TOKEN.new" || true
+  [ -s "$TOKEN.new" ] || die "no token for $DEPLOYER (just ran deployer-setup? wait 2 minutes and log in again)"
+  mv "$TOKEN.new" "$TOKEN"
+  say "signed in as faoj-deployer until about $(date -v+55M +%H:%M); deploy/gcp-move.sh logout when done"
+}
+logout() {
+  rm -f "$TOKEN"
+  say "signed out (Google ends the token itself within the hour)"
+}
+deployer_setup() {  # once; IAM changes, so the owner runs it
+  local sa=$DEPLOYER compute
+  trap 'gcloud auth revoke --all --quiet >/dev/null 2>&1' EXIT
+  gcloud auth login "$ACCOUNT" --force --brief
+  compute=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com
+  gcloud iam service-accounts describe "$sa" --project "$PROJECT" >/dev/null 2>&1 \
+    || gcloud iam service-accounts create faoj-deployer --project "$PROJECT" \
+         --display-name "faoj deploys from the Mac (gcp-move.sh login)"
+  # compute.viewer and the IAP tunnel are all `gcloud compute ssh` needs while the key is already in
+  # the instance's metadata; run.admin and acting as the runtime account are for staff-proxy.
+  for role in roles/compute.viewer roles/iap.tunnelResourceAccessor roles/run.admin; do
+    gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$sa" --role "$role" \
+      --condition None --quiet >/dev/null
+  done
+  gcloud iam service-accounts add-iam-policy-binding "$compute" --project "$PROJECT" \
+    --member "serviceAccount:$sa" --role roles/iam.serviceAccountUser --quiet >/dev/null
+  gcloud iam service-accounts add-iam-policy-binding "$sa" --project "$PROJECT" \
+    --member "user:$ACCOUNT" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null
+  say "faoj-deployer ready; IAM takes a minute or two, then: deploy/gcp-move.sh login"
+}
+signed_in() {
+  [ -n "$(find "$TOKEN" -mmin -55 2>/dev/null)" ] || die "not signed in, or the hour is up: deploy/gcp-move.sh login"
+  export CLOUDSDK_AUTH_ACCESS_TOKEN_FILE=$TOKEN
 }
 image_arg() {
   case "${1:-}" in "$REGISTRY"/*@sha256:*) ;; *) die "give the Release workflow's app image ($REGISTRY/…@sha256:…)";; esac
@@ -273,7 +322,7 @@ confirm_yes() {
 
 tunnels() {
   "$REPO/deploy/e5-move.sh" tunnel
-  gcp_cmd true || die "no IAP ssh to $VM (gcloud auth login?)"
+  gcp_cmd true || die "no IAP ssh to $VM"
 }
 
 # The checks (move_manifest --deep, decrypt_check) are GCP's release. E5 runs them in one-off
@@ -647,7 +696,11 @@ EOF
 }
 
 cmd=${1:-}; shift || true
+case "$cmd" in login|logout|deployer-setup|"") ;; *) signed_in;; esac
 case "$cmd" in
+  login) login;;
+  logout) logout;;
+  deployer-setup) deployer_setup;;
   prepare) prepare;;
   pull-token) pull_token "$@";;
   ocir-login) ocir_login;;

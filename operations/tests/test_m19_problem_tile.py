@@ -26,6 +26,7 @@ from operations.models import (
 )
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import ALICE, buttons, texts
+from operations.tests.test_m13_work_orders import keep_original_recipients
 from operations.tests.test_m14_kcw_menu import KcwTestCase
 
 TILE = "ปัญหา/ข้อเสนอแนะ"
@@ -134,6 +135,7 @@ class ChatTests(PickTestCase):
     def test_the_admins_hear_on_line_unless_they_turned_it_off(self):
         from operations import orchestration, staff_email
 
+        keep_original_recipients(["staff_admin_waiting"])  # ADR 0050 Q6: off by default
         quiet = make_staff("quiet-admin", (Role.ADMIN, None))
         quiet.staff_profile.notify_admin_waiting = False
         quiet.staff_profile.save()

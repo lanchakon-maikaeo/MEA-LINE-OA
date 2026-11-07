@@ -65,7 +65,8 @@ class CaseNumberTests(WorkTestCase):
         )
         monday = timezone.localdate() - timedelta(days=timezone.localdate().weekday() + 7)
         warehouse.record(self.kcw, [case], S.RECEIVED, monday)
-        page = self.web.get(reverse("case-detail", args=[case.number]))
+        # ADR 0051 Q1: the numbers to key are ticked in the form the button opens
+        page = self.web.get(reverse("case-stage", args=[case.number]), HTTP_HX_REQUEST="true")
         self.assertContains(page, 'name="number" value="4500070002" checked')
         thursday = monday + timedelta(days=3)
         warehouse.record(self.kcw, [case], S.KEYED, monday, thursday, numbers=["4500070002"])

@@ -5,6 +5,7 @@ division's cases; admins see every division read-only and their visits to other 
 cases are audited (round 2 Q3). Actions on a case go through services.perform_action.
 """
 
+import dataclasses
 import uuid
 from datetime import date
 from urllib.parse import urlencode
@@ -126,12 +127,23 @@ def navigation(request):
             "registry": registry.may_open(user),
             # ADR 0033: a ผู้ดูแลชีท who is not an admin reaches the sheets from the top menu.
             "sheets": not scope.is_admin and sheet_access.may_open(user),
-            # ADR 0048: แอดมินฝ่าย keep their ตารางเวร themselves.
-            "duty": not scope.is_admin and scope.is_department_supervisor,
+            # ADR 0050 Q8, Q12: only แอดมินระบบ keep the ตารางเวร; a แอดมินฝ่าย sees their shift.
+            "duty_until": _duty_until(user) if scope.is_department_supervisor else "",
             "admin": admin_menu,
             "admin_waiting": _admin_waiting() if scope.sees_department else 0,
         }
     }
+
+
+def _duty_until(user):
+    """อยู่เวรถึง: the end of this แอดมินฝ่าย's shift now, "" off duty."""
+    from operations import duty
+
+    end = duty.until(user)
+    if end is None:
+        return ""
+    tomorrow = end.date() > timezone.localdate()
+    return f"{'พรุ่งนี้ ' if tomorrow else ''}{end:%H:%M} น."
 
 
 def _admin_waiting():
@@ -496,6 +508,13 @@ def case_detail(request, number):
     codes = {d.code for d in queues.own_divisions(scope)}
     st = web_actions.situation(request.user, case)
     offers = web_actions.available(request.user, case, st)
+    panel = warehouse_web.case_panel(request.user, case)
+    steps = warehouse_web.case_steps(case, panel)
+    primary = next((o for o in offers if o.primary), None)
+    if steps and not (primary and primary.name == "accept_assignment"):
+        # ADR 0051 Q8: an appointment, else the next warehouse stage, is what to do first.
+        offers = [dataclasses.replace(o, primary=False) for o in offers]
+        primary = None
     return render(
         request,
         "operations/case_detail.html",
@@ -504,11 +523,12 @@ def case_detail(request, number):
             "page": data,
             "back_division": back if back in codes else "",
             "offers": offers,
-            "primary": next((o for o in offers if o.primary), None),
+            "primary": primary,
+            "steps": steps,
             "irreversible": ", ".join(o.label for o in offers if o.irreversible),
             "hints": web_actions.hints(st, offers),
             "can_upload": uploads.may_upload(st),
-            "panel": warehouse_web.case_panel(request.user, case),
+            "panel": panel,
             "tracking_numbers": case_numbers.panel(request.user, case),
             # Zero trust (31 ต.ค. 2569 Q2): a typed name is not checked against the roster.
             "unverified": not (case.requester.is_anonymous or case.requester.is_internal)

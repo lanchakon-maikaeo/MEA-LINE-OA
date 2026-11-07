@@ -226,7 +226,7 @@ def create(
         urgent=order.is_urgent,
         channel=order.channel,
     )
-    _notify("staff_order_new", order, doers(order), f"new:{order.pk}")
+    _notify("staff_order_new", order, doers(order), f"new:{order.pk}", actor)
     return order
 
 
@@ -304,7 +304,7 @@ def act(
         kind, users = notice
         users = doers(order) if users is None else users
         # Each notice is planned once per step taken, even when the same step repeats.
-        _notify(kind, order, users, f"{step}:{order.pk}:{now.isoformat()}")
+        _notify(kind, order, users, f"{step}:{order.pk}:{now.isoformat()}", actor)
     return order
 
 
@@ -398,19 +398,26 @@ def _deliver(channel, kind, order, user, key, now, **fields):
     return delivery
 
 
-def _notify(kind, order, users, key):
-    """A LINE message to people who linked LINE, and an e-mail when staff e-mail is on."""
-    from operations import staff_email
+def _notify(kind, order, users, key, actor=None):
+    """A LINE message to people who linked LINE, and an e-mail when staff e-mail is on. ADR 0050:
+    `users` get it only while the kind's switch for them is on; the แอดมินฝ่าย on duty get it
+    too, and the person who took the step is left out."""
+    from operations import alert_routing, staff_email
     from operations.conversation import text_message
 
     now = timezone.now()
     body = text(kind, order)
     planned = []
     line_on = options.get(options.STAFF_LINE_BUDGET) != "0"
-    for user in {u.pk: u for u in users if u is not None and u.is_active}.values():
+    actor_id = actor.pk if actor is not None else None
+    users = alert_routing.originals(kind, users, actor_id)
+    by_line = users + alert_routing.on_duty(kind, actor_id)
+    by_mail = users + alert_routing.on_duty(kind, actor_id, email=True)
+    line_ids, mail_ids = {u.pk for u in by_line}, {u.pk for u in by_mail}
+    for user in {u.pk: u for u in by_line + by_mail if u.is_active}.values():
         line = (
             ChannelIdentity.objects.filter(staff_user=user, is_following=True).first()
-            if line_on
+            if line_on and user.pk in line_ids
             else None
         )
         if line is not None:
@@ -433,7 +440,7 @@ def _notify(kind, order, users, key):
         if (
             staff_email.enabled()
             and user.email
-            and options.push_on(kind)
+            and user.pk in mail_ids
             and options.push_on(kind, "email")
         ):
             # LINE gets a button instead (ADR 0041); the e-mail keeps the web link.

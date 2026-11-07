@@ -10,6 +10,10 @@ register = template.Library()
 # Stroke icons (24px grid). Inline SVG is markup, not script or style, so the CSP allows it.
 ICONS = {
     "menu": '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    "sliders": (
+        '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/>'
+        '<circle cx="9" cy="17" r="2"/>'
+    ),
     "search": '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>',
     "check": '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     "alert": '<path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.5v.01"/>',

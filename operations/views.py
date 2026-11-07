@@ -34,6 +34,7 @@ from operations import (
     questions,
     queues,
     roster,
+    roster_match,
     sealing,
     staff_email,
     units,
@@ -260,6 +261,7 @@ def admin_user_detail(request, pk):
             "grant_form": forms.GrantRoleForm(),
             "move_form": forms.ChangeDivisionForm(),
             "work_split": identity.work_is_split(),
+            "roster": roster_match.status(target),
         },
     )
 
@@ -1193,13 +1195,15 @@ def admin_push(request):
         key = request.POST.get("key", "")
         if not (key.startswith(options.PUSH_PREFIX) or key in options.PUSH_MOVED):
             key = ""  # this page changes only its own options
-        _run(
-            request,
-            lambda: options.change(
-                request.user, key, request.POST.get("value", ""), request.POST.get("reason", "")
-            ),
-            "บันทึกแล้ว",
-        )
+        value, reason = request.POST.get("value", ""), request.POST.get("reason", "")
+        if request.headers.get("X-Requested-With") == "fetch":
+            # ADR 0050 Q10: a switch saves at once and the page stays as it is.
+            try:
+                options.change(request.user, key, value, reason)
+            except ValidationError as exc:
+                return JsonResponse({"error": " ".join(exc.messages)}, status=400)
+            return JsonResponse({"key": key, "value": options.get(key)})
+        _run(request, lambda: options.change(request.user, key, value, reason), "บันทึกแล้ว")
         return redirect(f"{reverse('admin-push')}#{request.POST.get('anchor', '')}")
     month = notifications._month_start(timezone.now())
     sent = dict(
@@ -1224,6 +1228,8 @@ def admin_push(request):
         "operations/admin_push.html",
         {
             "groups": options.push_rows(sent),
+            "self_on": options.get(options.PUSH_SELF) == "on",
+            "self_key": options.PUSH_SELF,
             "moved": [moved[k] for k in options.PUSH_MOVED],
             "line_on": notifications.push_enabled(),
             "email_on": staff_email.enabled(),

@@ -397,6 +397,9 @@ def import_upload(actor, upload, columns, choices, deactivate_missing, reason):
     if not seen:
         raise ValidationError("ไฟล์ไม่มีแถวที่มีรหัสพนักงาน")
     follow(actor, seen, names, reason)
+    from operations import roster_match  # local: roster_match builds on roster
+
+    roster_match.link_all(actor)  # ADR 0050 Q1: web accounts the file now names by email
     closed = 0
     if deactivate_missing:
         closed = (

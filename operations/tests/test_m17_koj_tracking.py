@@ -24,6 +24,7 @@ from operations.models import (
     Conversation,
     ConversationDraft,
     District,
+    Division,
     KojHistory,
     KojRecipient,
     KojRecord,
@@ -38,6 +39,7 @@ from operations.models import (
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import ALICE, BOB, CAROL, buttons, texts
 from operations.tests.test_m14_kcw_menu import KcwTestCase
+from operations.tests.test_m21_org_units import on_chart
 
 # ADR 0034 made the กอจ. button file cases; the tracking boxes of ADR 0026 stay in the program,
 # so these tests publish their own copy of that flow.
@@ -646,7 +648,9 @@ class SourceTests(KojTestCase):
         client.force_login(self.admin_koj)
         self.assertContains(client.get("/console/sheets/"), self.source.name)
         self.assertContains(client.get(f"/koj/sources/{self.source.pk}/"), NUMBER)
-        # ADR 0031 Q12, Q25: the recipient sets sit on the กอจ. cards of ผังหน่วยงาน.
+        # ADR 0031 Q12, Q25: the recipient sets sit on the กอจ. cards of ผังหน่วยงาน, which
+        # shows once someone of กอจ. registered on LINE (ADR 0050 Q3).
+        on_chart(Division.objects.get(code="กอจ."), "", self.admin_koj)
         page = client.get("/console/admin/org/").content.decode()
         self.assertIn("ผู้รับแจ้งงานติดตาม กอจ.", page)
         response = client.post(

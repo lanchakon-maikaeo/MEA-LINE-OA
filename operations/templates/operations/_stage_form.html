@@ -1,5 +1,5 @@
-<form method="post" action="{% url 'case-stage' case.number %}" class="wh-next">
-  {% csrf_token %}<input type="hidden" name="stage" value="{{ stage }}">
+{% if demo %}<form class="wh-next" data-demo-form>{% else %}<form method="post" action="{% url 'case-stage' case.number %}" class="wh-next">
+  {% csrf_token %}{% endif %}<input type="hidden" name="stage" value="{{ stage }}">
   {% if stage == "keyed" and panel.unkeyed %}
   <fieldset class="wh-numbers"><legend>เลขที่คีย์จ่ายครั้งนี้</legend><input type="hidden" name="pick_numbers" value="1">
     {% for n in panel.unkeyed %}<label class="chip-check"><input type="checkbox" name="number" value="{{ n }}" checked> {{ n }}</label>{% endfor %}
@@ -10,5 +10,6 @@
     {% if stage == "keyed" and not panel.returning %}<div class="field"><label for="{{ pre }}-plan">วันจ่าย</label><input type="date" id="{{ pre }}-plan" name="planned_on"{% if panel.suggested %} value="{{ panel.suggested|date:'Y-m-d' }}"{% endif %}><span class="helptext">{% if panel.suggested %}ระบบเสนอตามตาราง แก้ได้{% else %}ใส่วันจ่าย ตารางยังไม่มีกำหนดของชนิดนี้{% endif %} ผู้แจ้งได้ข้อความวันจ่ายและปุ่มเลือกวิธีรับ</span></div>{% endif %}
     <div class="field"><label for="{{ pre }}-note">บันทึกภายใน</label><input type="text" id="{{ pre }}-note" name="note" maxlength="300"></div>
   </div>
-  <button class="btn btn--sm" type="submit">บันทึก{{ label }}</button>
+  <div class="form-actions">{% if demo %}<button type="button" disabled>สาธิต: บันทึก{{ label }} (ไม่บันทึก)</button>{% else %}<button type="submit">บันทึก{{ label }}</button>
+    <a class="btn btn--secondary" href="{% url 'case-detail' case.number %}" data-close-action>ยกเลิก</a>{% endif %}</div>
 </form>

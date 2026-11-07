@@ -17,11 +17,17 @@
 | เครื่องสำรอง | Mac (`~/faoj-standby`) ดึง WAL ของ `production-gcp` มาทุก 5 นาที |
 | เครดิต | Free Trial ของ GCP หมดราวปลาย ม.ค. 2570 ห้ามกด Upgrade และห้ามผูก billing account อื่น ต้องย้ายออกให้ได้ภายในกลาง ม.ค. |
 
-E5 (`168-107-70-170.sslip.io`) หยุดรับงานแล้ว ฐานข้อมูลเป็น read-only และทุกหน้าแสดงข้อความว่าย้ายไปที่อยู่ใหม่ เก็บไว้ถึงวันที่ 10 พ.ย. ห้าม deploy หรือแก้อะไรบน E5 ถ้าเจ้าของไม่ได้สั่ง
+เจ้าของลบ VM `faoj-prod-e5` (E5) แล้วเมื่อ 5 พ.ย. 2569 จึงย้ายกลับ E5 (`gcp-move.sh reverse-move`) ไม่ได้อีก และ `168-107-70-170.sslip.io` เปิดไม่ได้แล้ว ที่ OCI ยังเก็บ data volume `faoj-prod-e5-data` (ฐานข้อมูล E5 ตอน freeze), boot volume, reserved IP 168.107.70.170, bucket `faoj-backup` และ `faoj-files` (GCP ยัง backup ลงที่นี่) และ OCIR (GCP ดึง image จากที่นี่) ห้ามลบของเหล่านี้
 
 ## ก่อนเริ่ม
 
-1. เจ้าของ login ด้วย `gcloud auth login` บน Mac
+1. เจ้าของรัน `deploy/gcp-move.sh login` บน Mac เบราว์เซอร์จะเปิดหน้า login ของ Google ให้เลือกบัญชี `mea.amr2026@gmail.com` แล้วกด Allow จากนั้นคำสั่งของ `gcp-move.sh` จะทำงานในนามของ service account `faoj-deployer` ได้ราว 55 นาที เกินนั้นต้อง `login` ใหม่ ถ้าเสร็จงานก่อนให้รัน `deploy/gcp-move.sh logout`
+
+   บัญชีของเจ้าของเป็น Owner ของโปรเจกต์ `login` จึงไม่เก็บ token ของบัญชีนี้ไว้ แต่ขอ token อายุ 1 ชั่วโมงของ `faoj-deployer` แล้วยกเลิก token ของเจ้าของทันที `faoj-deployer` ssh ผ่าน IAP และ deploy Cloud Run ได้ แต่แก้ IAM ไม่ได้ เมื่อครบชั่วโมง Google ปิด token เอง สคริปต์ agent หรือมัลแวร์บน Mac จะเข้า production ไม่ได้อีกจนกว่าเจ้าของจะ login ใหม่ ส่วน `logout` ลบแค่ไฟล์ token บน Mac ตัว token ที่ Google ยังใช้ได้จนครบชั่วโมง
+
+   อย่ารัน `gcloud auth login` ตรงๆ เพราะจะเก็บ refresh token ของ Owner ไว้บน Mac ถาวร ถ้าจำเป็นต้องใช้ ให้รัน `gcloud auth revoke --all` ทันทีที่เสร็จ
+
+   `faoj-deployer` สร้างไว้แล้วเมื่อ 5 พ.ย. 2569 ด้วย `deploy/gcp-move.sh deployer-setup` ถ้าต้องสร้างใหม่หรือเพิ่มสิทธิ์ เจ้าของรันคำสั่งนี้เอง คำสั่งจะ login ผ่านเบราว์เซอร์ ตั้งสิทธิ์ แล้วยกเลิก token ของเจ้าของเมื่อจบ สิทธิ์ใหม่ใช้เวลา 1 ถึง 2 นาทีกว่าจะมีผล ถ้า login เร็วกว่านั้นจะได้ `no token for faoj-deployer`
 2. ทุกคำสั่งรันจาก repository บน Mac ผ่าน `deploy/gcp-move.sh` ซึ่งเข้าเครื่องผ่าน IAP ด้วย key `~/.ssh/faoj_gcp_ed25519` เครื่องไม่เปิดพอร์ต SSH สู่อินเทอร์เน็ต และไม่ต้องแก้ allow list เมื่อ IP ของ Mac เปลี่ยน (ต่างจาก Bastion ของ E5)
 3. ถ้าต้องการ shell บนเครื่อง ใช้ `deploy/gcp-move.sh ssh` ถ้าต้องการรันคำสั่งเดียว ใช้ `deploy/gcp-move.sh ssh '<คำสั่ง>'` คำสั่ง `faoj` ต้องใช้ `sudo`
 
@@ -130,7 +136,11 @@ ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:ec9a92d9f70e… release_ok: 
 
 ใช้ได้เฉพาะ image ที่ Release workflow สร้างและสแกนแล้ว ห้ามใช้ image ที่ build บนเครื่องหรือบน Mac
 
-1. Deploy โดยใส่ว่าใครอนุมัติเมื่อไร ข้อความนี้จะอยู่ใน release record
+1. Login (ถ้ายังไม่ได้ login หรือเกินเวลาแล้ว) จากนั้น deploy โดยใส่ว่าใครอนุมัติเมื่อไร ข้อความนี้จะอยู่ใน release record
+
+   ```bash
+   deploy/gcp-move.sh login
+   ```
 
    ```bash
    GCP_APPROVAL="owner in chat <วันที่>: <PR หรือเหตุผล>" deploy/gcp-move.sh deploy ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:<digest>
@@ -168,6 +178,12 @@ ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:ec9a92d9f70e… release_ok: 
    ```
 
    **ถ้าถูกต้อง** `current:` เป็น 12 ตัวแรกของ digest ใหม่ maintenance เป็น `off` ทุก service ขึ้น `Up` และ `curl` ได้ `{"status": "ok"}` worker ที่เพิ่งเริ่มจะเผยแพร่ Rich Menu ของรุ่นใหม่ทันที
+
+4. Logout เมื่อเสร็จ
+
+   ```bash
+   deploy/gcp-move.sh logout
+   ```
 
 `faoj auto-promote` และ `faoj auto-deploy` ปิดอยู่บน GCP ระบบจึงไม่รับรุ่นใหม่เอง ทุกรุ่นต้อง deploy ด้วยมือตามขั้นข้างบน
 
@@ -297,7 +313,9 @@ files: last copy 2026-11-02 23:13
 
 | เห็นอะไร | แปลว่า | แก้อย่างไร |
 |---|---|---|
-| gcloud ขึ้นข้อความเรื่อง auth tokens หรือให้ login ใหม่ | session ของ gcloud หมดอายุ | เจ้าของรัน `gcloud auth login` แล้วลองใหม่ |
+| `not signed in, or the hour is up` | ยังไม่ได้ login หรือเกินเวลาแล้ว | เจ้าของรัน `deploy/gcp-move.sh login` แล้วลองใหม่ |
+| `no token for faoj-deployer` | ยังไม่ได้สร้าง `faoj-deployer` หรือสิทธิ์ยังไม่มีผล | เจ้าของรัน `deploy/gcp-move.sh deployer-setup` รอ 2 นาที แล้วรัน `login` ใหม่ |
+| gcloud ขึ้น `Permission denied` หรือ `does not have … permission` ทั้งที่เพิ่ง login | `faoj-deployer` ขาดสิทธิ์สำหรับคำสั่งนั้น | ดูชื่อ permission ในข้อความ เพิ่ม role ใน `deployer_setup` ของ `gcp-move.sh` แล้วให้เจ้าของรัน `deployer-setup` ใหม่ |
 | ssh ผ่าน IAP ค้างหรือต่อไม่ติด | IAP หรือเครื่องยังไม่พร้อม หรือเครื่องหยุด | ลองใหม่อีกครั้ง ถ้ายังไม่ได้ ดูสถานะเครื่องด้วย `gcloud compute instances list --project mea-ded-center-line-oa` |
 | เครื่องหยุด (`TERMINATED` หรือ `SUSPENDED`) และทุกอย่างล่ม | เครดิต Free Trial อาจหมด | เปิดหน้า Billing ของ GCP ดูเครดิต ห้ามกด Upgrade และแจ้งเจ้าของทันที ข้อมูลยังอยู่ใน backup ที่ OCI และ standby บน Mac |
 
