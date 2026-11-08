@@ -338,7 +338,8 @@ def record(actor, cases, stage, on, planned_on=None, note="", numbers=()):
     done, skipped = [], []
     typed = {str(n).strip().upper() for n in numbers}
     for case in cases:
-        if not identity.holds(scope, case.owner_division_id) and not scope.is_admin:
+        mine = identity.holds(identity.for_case(scope, case), case.owner_division_id)  # ADR 0052
+        if not mine and not scope.is_admin:
             skipped.append((case, "ไม่ใช่งานของกองคุณ"))
             continue
         if case.status == Case.Status.AWAITING_APPROVAL:  # ADR 0025, 28 ต.ค. 2569 Q4

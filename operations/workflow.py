@@ -231,6 +231,13 @@ ACTIONS = {
             "M06",
             _per_kind(lambda k, st: _same([s for s in st if s not in TERMINAL])),
         ),
+        # ADR 0052 Q4: the กลุ่มงาน inside that แผนก.
+        ActionSpec(
+            "set_work_group",
+            "ระบุกลุ่มงาน",
+            "M06",
+            _per_kind(lambda k, st: _same([s for s in st if s not in TERMINAL])),
+        ),
         # 23 Oct 2569: staff correct the SAP slip number a requester typed (history keeps both).
         ActionSpec(
             "set_sap_number",

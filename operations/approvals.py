@@ -119,13 +119,15 @@ def system_only(ctx, case, payload, reason, target):
     fail(ErrorCode.FORBIDDEN, "ระบบทำขั้นนี้เอง")
 
 
-def may_start(user, division_id):
+def may_start(user, division_id, case=None):
     """ดำเนินการ in a กอง (ADR 0044): its แอดมินกอง, a แอดมินฝ่าย, or someone an admin granted the
-    authority on กติกาและอำนาจ. Being a member no longer brings it."""
+    authority on กติกาและอำนาจ. Being a member no longer brings it. ADR 0052 Q2: a แอดมินแผนก
+    or แอดมินกลุ่มงาน starts the cases of their unit."""
     scope = identity.staff_scope(user)
     return (
         scope.is_support
         or division_id in scope.overseen
+        or (case is not None and identity.in_unit(scope, case))
         or policy.active_grants(user, A.WITHDRAWAL_APPROVAL)
         .filter(Q(division__isnull=True) | Q(division_id=division_id), member_of__isnull=True)
         .exists()
@@ -136,7 +138,7 @@ def may_approve(user, case):
     """Item rows (the hidden stock work) still go by the authority grant of each line."""
     if not whole(case):
         return policy.has_authority(user, A.WITHDRAWAL_APPROVAL, case.owner_division_id)
-    return may_start(user, case.owner_division_id)
+    return may_start(user, case.owner_division_id, case)
 
 
 def whole(case):

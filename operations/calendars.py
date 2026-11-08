@@ -216,7 +216,7 @@ def month(actor, calendar, first):
     list: the page shows every calendar of the division in one month (28 ต.ค. 2569 Q6)."""
     shown = list(calendar) if isinstance(calendar, (list, tuple)) else [calendar]
     for one in shown:
-        require_member(actor, one)
+        require_member(actor, one, unit=True)
     first = first.replace(day=1)
     start = first - timedelta(days=(first.weekday() + 1) % 7)
     end = start + timedelta(days=42)
@@ -314,10 +314,26 @@ def release_expired(now=None):
 # --- Staff --------------------------------------------------------------------------------------
 
 
-def require_member(actor, calendar):
+def require_member(actor, calendar, unit=False):
+    """Staff of the calendar's กอง; `unit`: ADR 0052 Q19, its แอดมินแผนก/กลุ่มงาน read it too."""
     scope = identity.staff_scope(actor)
-    if not identity.can_access_division(scope, calendar.division_id):
+    if identity.can_access_division(scope, calendar.division_id):
+        return
+    if not (unit and calendar.division_id in scope.unit_divisions):
         raise PermissionDenied
+
+
+def may_decide(actor, appointment):
+    """Staff of the กอง, or (ADR 0052 Q19) a unit admin for an appointment of their case."""
+    scope = identity.staff_scope(actor)
+    if identity.can_access_division(scope, appointment.calendar.division_id):
+        return True
+    case = appointment.case
+    return bool(
+        case
+        and case.owner_division_id == appointment.calendar.division_id
+        and identity.holds(identity.for_case(scope, case), case.owner_division_id)
+    )
 
 
 def visible(actor):
@@ -404,7 +420,8 @@ def _tell(actor, appointment, text):
 def decide(actor, appointment, action, *, slot=None, method="", note=""):
     """confirm, move (to another slot), reject or done; each tells the requester."""
     appointment = Appointment.objects.select_for_update().get(pk=appointment.pk)
-    require_member(actor, appointment.calendar)
+    if not may_decide(actor, appointment):
+        raise PermissionDenied
     if appointment.status in (A.REJECTED, A.CANCELLED, A.DONE):
         raise ValidationError("นัดนี้จบไปแล้ว")
     note = (note or "").strip()[:500]

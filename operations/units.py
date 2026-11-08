@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from operations import identity, workflow
@@ -186,10 +186,20 @@ def away_until(user, today=None):
 
 
 def can_act(user, division_id):
-    return bool(
-        user is not None
-        and user.is_active
-        and division_id in identity.staff_scope(user).division_roles
+    """Holds a working role in the กอง; ADR 0052: a แอดมินแผนก/กลุ่มงาน of it counts too."""
+    if user is None or not user.is_active:
+        return False
+    scope = identity.staff_scope(user)
+    return division_id in scope.division_roles or division_id in scope.unit_divisions
+
+
+def in_reach(scope, person):
+    """ADR 0052 Q6: a แอดมินแผนก/กลุ่มงาน hands work only to people of their unit."""
+    if not scope.unit_only:
+        return True
+    profile = getattr(person, "staff_profile", None)
+    return bool(profile) and (
+        profile.section_id in scope.sections or profile.work_group_id in scope.work_groups
     )
 
 
@@ -220,13 +230,61 @@ def match_case(case, division_id=None):
     return match(division_id or case.owner_division_id, case.kind, case_groups(case))
 
 
-def section_for(case, division_id=None):
-    """Q14: the แผนก of a case is the one of the unit that takes its work, if any."""
+def unit_for(case, division_id=None):
+    """Q14, ADR 0052 Q4: the แผนก and กลุ่มงาน of the unit that takes the case's work, if any."""
     work = match_case(case, division_id)
-    if work is None:
+    section = work and (work.work_group.section if work.work_group else work.section)
+    if not (section and section.is_active):
+        return None, None
+    group = work.work_group
+    return section, group if group and group.is_active else None
+
+
+def section_for(case, division_id=None):
+    return unit_for(case, division_id)[0]
+
+
+def place(case, division_id=None):
+    """Set the case's แผนก and กลุ่มงาน from the unit cards (the caller saves)."""
+    case.section, case.work_group = unit_for(case, division_id)
+
+
+def group_in(case, section):
+    """ADR 0052 Q20: the กลุ่มงาน of the first unit card inside `section` the case matches;
+    None when that card is the แผนก's own or nothing there matches."""
+    if section is None:
         return None
-    section = work.work_group.section if work.work_group else work.section
-    return section if section and section.is_active else None
+    groups = case_groups(case)
+    works = UnitWork.objects.filter(
+        Q(section=section) | Q(work_group__section=section),
+        division_id=case.owner_division_id,
+        kind=case.kind,
+        is_active=True,
+    ).select_related("work_group")
+    for work in works.order_by("order", "pk"):
+        if work.group in groups:
+            group = work.work_group
+            return group if group and group.is_active else None
+    return None
+
+
+def follow_person(case, person):
+    """ADR 0052 Q18: a case with no แผนก takes the สังกัด of its new ผู้รับผิดชอบ, when that
+    person sits in a แผนก of the case's กอง (the caller saves). Returns whether it moved."""
+    if case.section_id is not None or person is None:
+        return False
+    profile = (
+        StaffProfile.objects.filter(user=person, division_id=case.owner_division_id)
+        .select_related("section", "work_group__section")
+        .first()
+    )
+    group = profile.work_group if profile and profile.work_group else None
+    group = group if group and group.is_active else None
+    section = group.section if group else profile and profile.section
+    if not (section and section.is_active and section.division_id == case.owner_division_id):
+        return False
+    case.section, case.work_group = section, group
+    return True
 
 
 @dataclass
@@ -318,10 +376,13 @@ def _set(case, person, why):
     case.assignee = person
     case.auto_assigned = person is not None
     case.accepted_by = case.accepted_at = None  # ADR 0049: the new person presses รับงาน
+    follow_person(case, person)  # ADR 0052 Q18: a กอง-level card leaves no แผนก
     case.revision += 1
     case.updated_at = timezone.now()
     case.save(
         update_fields=[
+            "section",
+            "work_group",
             "assignee",
             "auto_assigned",
             "accepted_by",

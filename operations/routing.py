@@ -8,7 +8,7 @@ by themselves: each change here is a person's decision with the authority the ba
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from operations import ai_routing, coordination, identity, policy, routing_words, workflow
+from operations import ai_routing, coordination, identity, policy, routing_words, units, workflow
 from operations.contracts import ErrorCode, fail
 from operations.models import (
     AckClock,
@@ -20,6 +20,7 @@ from operations.models import (
     Handoff,
     RoutingReview,
     Section,
+    WorkGroup,
 )
 
 A = AuthorityGrant.Activity
@@ -139,10 +140,13 @@ def request_handoff(ctx, case, payload, reason, target):
             reason=reason,
         )
         return {"outcome": "routing_review", "review_id": review.pk, "to_division": to.code}
+    to_section, to_work_group = units.unit_for(case, to.pk)  # ADR 0052 Q17
     handoff = Handoff.objects.create(
         case=case,
         from_division=case.owner_division,
         to_division=to,
+        to_section=to_section,
+        to_work_group=to_work_group,
         reason_category=category,
         reason=reason,
         recommendation=recommendation,
@@ -435,10 +439,40 @@ def set_section(ctx, case, payload, reason, target):
     previous = case.section
     if previous == section:
         fail(ErrorCode.VALIDATION_ERROR, "The case is already with this section.")
+    # ADR 0052 Q13: a แอดมินแผนก sends a case of their แผนก on; nobody of a unit pulls one in.
+    if ctx.scope.unit_only and case.section_id not in ctx.scope.sections:
+        fail(ErrorCode.FORBIDDEN, "เปลี่ยนแผนกได้เฉพาะเรื่องของแผนกคุณ")
     case.section = section
+    case.work_group = units.group_in(case, section)  # ADR 0052 Q20
     case.status = target
     return {
         "section": section.name if section else "",
+        "previous": previous.name if previous else "",
+    }
+
+
+def set_work_group(ctx, case, payload, reason, target):
+    """ADR 0052 Q4, Q13: the กลุ่มงาน inside the case's แผนก that looks after it (or none)."""
+    if ctx.requester is not None or not _member(ctx, case.owner_division_id):
+        fail(ErrorCode.FORBIDDEN, "เฉพาะคนในกองเจ้าภาพระบุกลุ่มงานได้")
+    if ctx.scope.unit_only and not identity.in_unit(ctx.scope, case):
+        fail(ErrorCode.FORBIDDEN, "เปลี่ยนกลุ่มงานได้เฉพาะเรื่องในหน่วยของคุณ")
+    value = payload.get("work_group")
+    group = None
+    if value not in (None, ""):
+        try:
+            group = WorkGroup.objects.get(pk=int(value), section_id=case.section_id, is_active=True)
+        except (TypeError, ValueError, WorkGroup.DoesNotExist):
+            fail(ErrorCode.VALIDATION_ERROR, "เลือกกลุ่มงานในแผนกของเรื่อง")
+    if case.section_id is None:
+        fail(ErrorCode.VALIDATION_ERROR, "ระบุแผนกก่อน แล้วจึงระบุกลุ่มงาน")
+    previous = case.work_group
+    if previous == group:
+        fail(ErrorCode.VALIDATION_ERROR, "เรื่องอยู่กับกลุ่มงานนี้อยู่แล้ว")
+    case.work_group = group
+    case.status = target
+    return {
+        "work_group": group.name if group else "",
         "previous": previous.name if previous else "",
     }
 
@@ -494,6 +528,7 @@ def admin_send(ctx, case, payload, reason, target):
 HANDLERS = {
     "admin_send": admin_send,
     "set_section": set_section,
+    "set_work_group": set_work_group,
     "set_sap_number": set_sap_number,
     "complete_triage": complete_triage,
     "request_handoff": request_handoff,
