@@ -188,6 +188,28 @@ class ChartMatchTests(RosterTestCase):
         identity.update_account(self.admin, user, "A009", "ชนันพร ผ่องศรี", "", "แก้ชื่อเต็ม")
         self.assertEqual(StaffProfile.objects.get(user=user).division, self.kcw)
 
+    def test_the_web_shows_the_same_path_as_the_line_list(self):
+        """Owner, 8 พ.ย. 2569: web and LINE follow ผังบุคลากร; a หน่วยงาน alone is a full answer."""
+        in_kong = Employee.objects.create(
+            employee_id="520010",
+            name="สมศรี",
+            department="ฝอจ.",
+            division_name="กคว.",
+            division=self.kcw,
+            section_name="แผนกคลังเครื่องวัด",
+        )
+        only_unit = Employee.objects.create(employee_id="520011", name="วัฒนรัฐ", department="ฝอจ.")
+        self.in_line(in_kong, "สมศรี มีสุข")
+        self.in_line(only_unit, "วัฒนรัฐ ชมทรัพย์")
+        for username, name in (("A010", "สมศรี มีสุข"), ("A011", "วัฒนรัฐ ชมทรัพย์")):
+            roster_match.link(self.web(username, name))
+        client = Client()
+        client.force_login(self.admin)
+        page = client.get("/console/admin/users/")
+        for row in (in_kong, only_unit):
+            self.assertContains(page, f'aria-label="สังกัด {" › ".join(roster.employee_path(row))}"')
+        self.assertEqual(roster.employee_path(only_unit), ["ฝอจ.", "N/A", "N/A", "N/A"])
+
     def test_a_person_checked_in_line_later_fills_the_web_account(self):
         user = self.web("A004", "ชนันพร ผ่องศรี")
         self.assertIsNone(roster_match.link(user).employee)

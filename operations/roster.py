@@ -512,6 +512,19 @@ def path_of(employee):
     return " › ".join(getattr(employee, f) for f in LEVELS if getattr(employee, f))
 
 
+def department_of(division):
+    """The หน่วยงาน (ฝ่าย) the roster puts a กอง of the system under, or "" when nobody says."""
+    if division is None:
+        return ""
+    return (
+        Employee.objects.filter(division=division, is_active=True)
+        .exclude(department="")
+        .values_list("department", flat=True)
+        .first()
+        or ""
+    )
+
+
 def unit_paths():
     """Every path the active roster has, each with the fields an employee placed there takes."""
     rows = Employee.objects.filter(is_active=True, is_synthetic=False).values(*PLACE).distinct()

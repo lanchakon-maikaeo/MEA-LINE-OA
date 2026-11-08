@@ -191,7 +191,7 @@ def admin_home(request):
 def admin_users(request):
     grants = RoleGrant.objects.filter(revoked_at__isnull=True).select_related("division")
     users = list(
-        User.objects.select_related("staff_profile")
+        User.objects.select_related("staff_profile__roster_row__division")
         .prefetch_related(Prefetch("role_grants", queryset=grants, to_attr="active_grants"))
         .order_by("username")
     )

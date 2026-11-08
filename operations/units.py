@@ -577,7 +577,8 @@ def move_person(actor, user, unit, reason=""):
     profile.division = unit.division if unit else None
     profile.section = unit.section if unit else None
     profile.work_group = unit.group if unit else None
-    profile.save(update_fields=["division", "section", "work_group"])
+    profile.roster_row = None  # off the chart until the next import, so the label shows the move
+    profile.save(update_fields=["division", "section", "work_group", "roster_row"])
     identity.audit(
         actor,
         "staff.unit_changed",
@@ -603,9 +604,10 @@ def bind_from_roster(user, employee):
         group = _find(
             WorkGroup.objects.filter(section=section, is_active=True), employee.work_group
         )
-    if (profile.division, profile.section, profile.work_group) != (division, section, group):
-        profile.division, profile.section, profile.work_group = division, section, group
-        profile.save(update_fields=["division", "section", "work_group"])
+    now = (division, section, group, employee)
+    if (profile.division, profile.section, profile.work_group, profile.roster_row) != now:
+        profile.division, profile.section, profile.work_group, profile.roster_row = now
+        profile.save(update_fields=["division", "section", "work_group", "roster_row"])
 
 
 def _find(rows, text):

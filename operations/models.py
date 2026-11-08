@@ -198,6 +198,11 @@ class StaffProfile(models.Model):
     work_group = models.ForeignKey(
         WorkGroup, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # Owner, 8 พ.ย. 2569: the ผังบุคลากร row the สังกัด above came from, so the web shows the
+    # same path as the LINE list; set even while the ID waits for รวมบัญชี (ADR 0050 Q9).
+    roster_row = models.ForeignKey(
+        "Employee", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
     # ไม่อยู่ ถึงวันที่ (ADR 0031 Q21): set by the person; the system skips them until then.
     away_until = models.DateField(null=True, blank=True)
     must_change_password = models.BooleanField(default=False)
