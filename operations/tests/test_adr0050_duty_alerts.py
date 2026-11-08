@@ -32,9 +32,13 @@ from operations import (
 )
 from operations.models import (
     AuditEvent,
+    District,
+    Division,
     DutyShift,
+    Employee,
     NotificationDelivery,
     OutboxEvent,
+    Requester,
     Role,
     StaffProfile,
     SystemOption,
@@ -91,6 +95,62 @@ class MatchTests(RosterTestCase):
         client.force_login(self.admin)
         page = client.get(reverse("admin-user-detail", args=[self.web.pk]))
         self.assertContains(page, "รวมบัญชี")
+
+
+class ChartMatchTests(RosterTestCase):
+    """Owner, 8 พ.ย. 2569: a web account an admin made takes its สังกัด from ผังหน่วยงาน, the
+    people who passed the employee check in LINE, by ชื่อ-นามสกุล; or from a username that is a
+    รหัสพนักงาน."""
+
+    def setUp(self):
+        super().setUp()
+        self.kcw = Division.objects.get(code="กคว.")
+
+    def employee(self, employee_id, first_name):
+        return Employee.objects.create(employee_id=employee_id, name=first_name, division=self.kcw)
+
+    def in_line(self, employee, name):
+        return Requester.objects.create(
+            display_name=name,
+            district=District.objects.order_by("code").first(),
+            approved_by=self.admin,
+            employee=employee,
+            employee_link=Requester.EmployeeLink.VERIFIED,
+        )
+
+    def web(self, username, name):
+        user = make_staff(username)
+        StaffProfile.objects.filter(user=user).update(display_name=name)
+        return user
+
+    def test_the_full_name_of_a_person_in_line_gives_the_unit(self):
+        self.in_line(self.employee("520001", "สมหญิง"), "สมหญิง ใจดี")
+        user = self.web("A001", "สมหญิง  ใจดี")
+        self.assertEqual(roster_match.link(user).how, "name")
+        profile = StaffProfile.objects.get(user=user)
+        self.assertEqual((profile.employee_id, profile.division), ("520001", self.kcw))
+
+    def test_a_first_name_alone_or_a_shared_name_matches_nobody(self):
+        self.in_line(self.employee("520001", "สมหญิง"), "สมหญิง")
+        self.assertIsNone(roster_match.link(self.web("A002", "สมหญิง")).employee)
+        self.in_line(self.employee("520002", "สมชาย"), "สมชาย ใจดี")
+        self.in_line(self.employee("520003", "สมชาย"), "สมชาย ใจดี")
+        match = roster_match.link(self.web("A003", "สมชาย ใจดี"))
+        self.assertIsNone(match.employee)
+        self.assertIn("มากกว่าหนึ่งคน", match.reason)
+
+    def test_a_username_that_is_an_employee_id(self):
+        self.employee("2635435", "ทดสอบ")
+        user = self.web("2635435", "Test")
+        self.assertEqual(roster_match.link(user).how, "username")
+        self.assertEqual(StaffProfile.objects.get(user=user).division, self.kcw)
+
+    def test_a_person_checked_in_line_later_fills_the_web_account(self):
+        user = self.web("A004", "ชนันพร ผ่องศรี")
+        self.assertIsNone(roster_match.link(user).employee)
+        requester = self.in_line(self.employee("520004", "ชนันพร"), "ชนันพร ผ่องศรี")
+        roster_match.link_requester(requester, self.admin)
+        self.assertEqual(StaffProfile.objects.get(user=user).division, self.kcw)
 
 
 class AlertTestCase(PickTestCase):
