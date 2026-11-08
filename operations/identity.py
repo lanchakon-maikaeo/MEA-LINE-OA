@@ -1046,10 +1046,9 @@ def update_account(actor, user, username, display_name, email, reason=""):
         **changed,
         **{f"previous_{k}": before[k] for k in changed},
     )
-    if "email" in changed:
-        from operations import roster_match  # local: roster_match builds on identity
+    from operations import roster_match  # local: roster_match builds on identity
 
-        roster_match.link(user, actor)  # ADR 0050 Q1
+    roster_match.link(user, actor)  # ADR 0050 Q1: the username, email and name all match the roster
 
 
 def password_changed(user):

@@ -25,6 +25,7 @@ from operations import (
     identity,
     options,
     orchestration,
+    roster,
     roster_match,
     staff_email,
     staff_line,
@@ -143,6 +144,48 @@ class ChartMatchTests(RosterTestCase):
         self.employee("2635435", "ทดสอบ")
         user = self.web("2635435", "Test")
         self.assertEqual(roster_match.link(user).how, "username")
+        self.assertEqual(StaffProfile.objects.get(user=user).division, self.kcw)
+
+    def register(self, employee, name):
+        identity.submit_registration(
+            "line",
+            f"chart-{employee.employee_id}",
+            name,
+            "D01",
+            employee=employee,
+            verified_by="otp",
+        )
+        self.assertEqual(identity.approve_verified_registrations(), 1)
+
+    def test_a_new_registration_fills_its_own_account_and_the_web_account(self):
+        user = self.web("A005", "บุรินทร คงสุข")
+        self.register(self.employee("520005", "บุรินทร"), "บุรินทร คงสุข")
+        self.assertEqual(StaffProfile.objects.get(employee_id="520005").division, self.kcw)
+        self.assertEqual(StaffProfile.objects.get(user=user).division, self.kcw)
+
+    def test_a_move_on_the_chart_moves_the_web_account_too(self):
+        other = Division.objects.get(code="กคอ.")
+        Employee.objects.create(
+            employee_id="520007", name="อื่น", department="ฝอจ.", division_name="กคอ.", division=other
+        )
+        employee = Employee.objects.create(
+            employee_id="520006",
+            name="กิตติยา",
+            department="ฝอจ.",
+            division_name="กคว.",
+            division=self.kcw,
+        )
+        user = self.web("A002", "กิตติยา คงทับ")
+        self.register(employee, "กิตติยา คงทับ")
+        self.assertEqual(StaffProfile.objects.get(user=user).employee_id, "")  # waits for รวมบัญชี
+        roster.move_employee(self.admin, employee, "ฝอจ. › กคอ.", "ย้ายตามผัง")
+        self.assertEqual(StaffProfile.objects.get(user=user).division, other)
+
+    def test_renaming_a_web_account_matches_it_again(self):
+        self.in_line(self.employee("520008", "ชนันพร"), "ชนันพร ผ่องศรี")
+        user = self.web("A009", "ชนันพร")
+        self.assertIsNone(roster_match.link(user).employee)
+        identity.update_account(self.admin, user, "A009", "ชนันพร ผ่องศรี", "", "แก้ชื่อเต็ม")
         self.assertEqual(StaffProfile.objects.get(user=user).division, self.kcw)
 
     def test_a_person_checked_in_line_later_fills_the_web_account(self):

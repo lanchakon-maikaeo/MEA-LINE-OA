@@ -557,6 +557,9 @@ def move_employee(actor, employee, path, reason=""):
     employee.save(update_fields=[*PLACE[:5], "district", "division"])
     identity.audit(actor, "employee.unit_changed", employee, reason, unit=path, previous=before)
     follow(actor, [employee.employee_id], {}, reason)
+    from operations import roster_match  # local: roster_match builds on roster
+
+    roster_match.link_all(actor)  # a web account matched by name, not yet merged, moves too
 
 
 def employee_path(employee, names=None):
