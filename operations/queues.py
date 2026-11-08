@@ -643,4 +643,8 @@ def own_divisions(scope):
     divisions = Division.objects.filter(is_active=True).order_by("code")
     if scope.is_admin or scope.is_support:
         return list(divisions)
-    return list(divisions.filter(pk__in=[*scope.division_roles, *scope.overseen, *scope.viewed]))
+    return list(
+        divisions.filter(
+            pk__in=[*scope.division_roles, *scope.overseen, *scope.viewed, *scope.unit_divisions]
+        )
+    )

@@ -160,7 +160,7 @@ def _scope(request):
 def _division_or_404(scope, code):
     division = Division.objects.filter(code=code, is_active=True).first()
     # Unknown and out-of-scope divisions look the same, so URLs reveal nothing.
-    if division is None or not identity.may_read_division(scope, division.pk):
+    if division is None or not identity.may_open_division(scope, division.pk):
         raise Http404
     return division
 
@@ -334,7 +334,11 @@ def _queue(request, division, admin_all=False):
         "sorts": queues.SORTS.items(),
         "may_approve": bool(division)
         and approvals.no_screening()
-        and approvals.may_start(request.user, division.pk),
+        and (
+            approvals.may_start(request.user, division.pk)
+            # ADR 0052: the queue already holds only their unit's cases; each is checked again.
+            or division.pk in identity.staff_scope(request.user).unit_divisions
+        ),
         "statuses": [
             *Case.Status.choices,
             *(
@@ -373,7 +377,8 @@ def _members(division):
         if split:
             label = ", ".join(sorted(Role(r).label for r in roles))
         else:
-            label = Role(Role.SUPERVISOR if Role.SUPERVISOR in roles else Role.STAFF).label
+            heads = (Role.SUPERVISOR, Role.SECTION_ADMIN, Role.WORK_GROUP_ADMIN)  # ADR 0052
+            label = Role(next((r for r in heads if r in roles), Role.STAFF)).label
         profile = getattr(user, "staff_profile", None)
         rows.append({"name": profile.display_name if profile else user.username, "label": label})
     return rows

@@ -7,7 +7,7 @@ next request of sessions that are already open. Callers never pass roles or dist
 import secrets
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -22,6 +22,7 @@ from operations.models import (
     DUTY_ROLES,
     GLOBAL_ROLES,
     MEMBER_ROLES,
+    UNIT_ROLES,
     VIEWER_ROLES,
     AuditEvent,
     AuthorityGrant,
@@ -58,11 +59,28 @@ class StaffScope:
     # for ผู้ดูข้อมูลระดับฝ่าย). They never count as access for acting.
     viewed: frozenset[int] = frozenset()
     is_department_viewer: bool = False
+    # ADR 0052: the แผนก and กลุ่มงาน this person is admin of, and their กอง. They give no
+    # membership of the กอง: for_case adds it one case at a time.
+    sections: frozenset[int] = frozenset()
+    work_groups: frozenset[int] = frozenset()
+    unit_divisions: frozenset[int] = frozenset()
 
     @property
     def has_any_access(self):
         """May act somewhere; every command and LINE staff path asks this."""
-        return self.is_admin or self.is_support or bool(self.division_roles or self.overseen)
+        return (
+            self.is_admin
+            or self.is_support
+            or bool(self.division_roles or self.overseen or self.unit_divisions)
+        )
+
+    @property
+    def unit_only(self):
+        """ADR 0052: sees only the cases of a แผนก or กลุ่มงาน, nothing of a whole กอง."""
+        # Not division_roles: for_case fills them for one case, and the answer must stay.
+        return bool(self.unit_divisions) and not (
+            self.is_admin or self.is_support or self.overseen or self.viewed
+        )
 
     @property
     def may_read(self):
@@ -112,15 +130,26 @@ def staff_scope(user):
     grants = RoleGrant.objects.filter(
         user_id=user.pk, user__is_active=True, revoked_at__isnull=True
     ).filter(
-        # A grant on a deactivated division no longer gives access to it.
-        Q(division__isnull=True) | Q(division__is_active=True)
+        # A grant on a deactivated division (or แผนก, กลุ่มงาน) no longer gives access to it.
+        Q(division__isnull=True) | Q(division__is_active=True),
+        Q(section__isnull=True) | Q(section__is_active=True),
+        Q(work_group__isnull=True) | Q(work_group__is_active=True),
     )
     roles = {}
     global_roles = set()
     viewed = set()
-    for role, division_id in grants.values_list("role", "division_id"):
+    sections, groups, unit_divisions = set(), set(), set()
+    for role, division_id, section_id, group_id in grants.values_list(
+        "role", "division_id", "section_id", "work_group_id"
+    ):
         if role == Role.DIVISION_VIEWER:
             viewed.add(division_id)
+        elif role in UNIT_ROLES:
+            if section_id:
+                sections.add(section_id)
+            else:
+                groups.add(group_id)
+            unit_divisions.add(division_id)
         elif division_id is None:
             global_roles.add(role)
         else:
@@ -144,7 +173,48 @@ def staff_scope(user):
         is_department_supervisor=department,
         viewed=frozenset(viewed - overseen - set(roles)),
         is_department_viewer=viewer,
+        sections=frozenset(sections),
+        work_groups=frozenset(groups),
+        unit_divisions=frozenset(unit_divisions),
     )
+
+
+def in_unit(scope, case):
+    """ADR 0052 Q5: the case's แผนกที่ดูแล is a แผนก of this admin, or its กลุ่มงานที่ดูแล is
+    one of their กลุ่มงาน."""
+    return case.section_id in scope.sections or case.work_group_id in scope.work_groups
+
+
+def for_case(scope, case):
+    """ADR 0052: a แอดมินแผนก/กลุ่มงาน acts in a case of their unit as its กอง's แอดมินกอง (Q2),
+    in a case they are responsible for as a member (Q16), and on a handoff or งานย่อย waiting
+    for their unit as a member of the receiving กอง (Q17). Every other scope comes back as is."""
+    if not scope.unit_divisions:
+        return scope
+    from operations.models import ChildWork, Handoff  # local: models import nothing of ours
+
+    roles = dict(scope.division_roles)
+
+    def add(division_id, held):
+        roles[division_id] = frozenset(roles.get(division_id, frozenset()) | held)
+
+    if in_unit(scope, case):
+        add(case.owner_division_id, MEMBER_ROLES | {Role.SUPERVISOR})
+    elif case.assignee_id is not None and case.assignee_id == scope.user_id:
+        add(case.owner_division_id, MEMBER_ROLES)
+    for division_id in ChildWork.objects.filter(
+        Q(section_id__in=scope.sections) | Q(work_group_id__in=scope.work_groups),
+        case_id=case.pk,
+        status__in=ChildWork.OPEN,
+    ).values_list("division_id", flat=True):
+        add(division_id, MEMBER_ROLES)
+    for division_id in Handoff.objects.filter(
+        Q(to_section_id__in=scope.sections) | Q(to_work_group_id__in=scope.work_groups),
+        case_id=case.pk,
+        status=Handoff.Status.PENDING,
+    ).values_list("to_division_id", flat=True):
+        add(division_id, MEMBER_ROLES)
+    return replace(scope, division_roles=roles)
 
 
 def intake_division():
@@ -190,6 +260,12 @@ def can_access_division(scope, division_id, roles=None):
 def may_read_division(scope, division_id):
     """ADR 0039: what may be opened to read; a viewer's divisions count here only."""
     return can_access_division(scope, division_id) or division_id in scope.viewed
+
+
+def may_open_division(scope, division_id):
+    """The กอง's pages (queue, งานคลัง, ปฏิทินนัด) open; ADR 0052: a แอดมินแผนก/กลุ่มงาน opens
+    their กอง's, and the pages show only their unit's cases."""
+    return may_read_division(scope, division_id) or division_id in scope.unit_divisions
 
 
 def filter_by_division(queryset, scope, field_name):
@@ -314,9 +390,22 @@ def create_staff_user(actor, username, display_name, email=""):
 
 
 @transaction.atomic
-def grant_role(actor, user, role, division=None, reason=""):
+def grant_role(actor, user, role, division=None, reason="", section=None, work_group=None):
     """ADR 0041: one role per person. The new role replaces every other one the account holds
-    (ผู้ช่วยเหลือระบบ stays: it is no role an admin hands out)."""
+    (ผู้ช่วยเหลือระบบ stays: it is no role an admin hands out). ADR 0052: a แอดมินแผนก names
+    its `section`, a แอดมินกลุ่มงาน its `work_group`; their กอง is the division."""
+    if role == Role.SECTION_ADMIN:
+        work_group = None
+        if section is None or not section.is_active:
+            raise ValidationError("แอดมินแผนกต้องมีแผนกที่ใช้งานอยู่")
+        division = section.division
+    elif role == Role.WORK_GROUP_ADMIN:
+        section = None
+        if work_group is None or not work_group.is_active:
+            raise ValidationError("แอดมินกลุ่มงานต้องมีกลุ่มงานที่ใช้งานอยู่")
+        division = work_group.section.division
+    else:
+        section = work_group = None
     scope = staff_scope(actor)
     if not scope.is_admin:
         raise PermissionDenied("Admin permission required.")
@@ -338,7 +427,12 @@ def grant_role(actor, user, role, division=None, reason=""):
     if not user.is_active:
         raise ValidationError("Cannot grant roles to a suspended account.")
     exists = RoleGrant.objects.filter(
-        user=user, role=role, division=division, revoked_at__isnull=True
+        user=user,
+        role=role,
+        division=division,
+        section=section,
+        work_group=work_group,
+        revoked_at__isnull=True,
     ).exists()
     if exists:
         raise ValidationError("Role is already granted.")
@@ -348,7 +442,13 @@ def grant_role(actor, user, role, division=None, reason=""):
         )
     )
     grant = RoleGrant.objects.create(
-        user=user, role=role, division=division, granted_by=actor, reason=reason.strip()
+        user=user,
+        role=role,
+        division=division,
+        section=section,
+        work_group=work_group,
+        granted_by=actor,
+        reason=reason.strip(),
     )
     audit(
         actor,
@@ -357,6 +457,7 @@ def grant_role(actor, user, role, division=None, reason=""):
         reason,
         role=role,
         division=division.code if division else None,
+        **({"unit": (section or work_group).name} if section or work_group else {}),
     )
     # After the new grant, so a move within one กอง hands no case on (ADR 0031 Q24).
     for other in others:
@@ -372,6 +473,8 @@ EMPLOYEE = "employee"  # เจ้าหน้าที่ (ADR 0041): a pick th
 PICKS = (
     EMPLOYEE,
     Role.STAFF,
+    Role.WORK_GROUP_ADMIN,
+    Role.SECTION_ADMIN,
     Role.SUPERVISOR,
     Role.DIVISION_VIEWER,
     Role.DEPARTMENT_SUPERVISOR,
@@ -385,9 +488,10 @@ def role_label(role):
 
 
 @transaction.atomic
-def set_role(actor, user, role, division=None, reason=""):
+def set_role(actor, user, role, division=None, reason="", section=None, work_group=None):
     """The one role of an account (ADR 0041). A กอง role without a กอง takes the account's
-    สังกัด; asking for the role it already holds changes nothing."""
+    สังกัด, and so does a แอดมินแผนก/กลุ่มงาน without its unit (ADR 0052 Q7); asking for the
+    role it already holds changes nothing."""
     require_admin(actor)
     if role not in PICKS:
         raise ValidationError("โปรดเลือกบทบาทจากรายการ")
@@ -398,16 +502,33 @@ def set_role(actor, user, role, division=None, reason=""):
         if held.exists():
             clear_roles(actor, user, reason)
         return None
+    profile = StaffProfile.objects.filter(user=user).select_related("work_group__section").first()
+    if role == Role.SECTION_ADMIN and section is None and work_group is not None:
+        section = work_group.section  # a กลุ่มงาน picked for a แอดมินแผนก names its แผนก
+    if role == Role.SECTION_ADMIN and section is None:
+        section = profile and (
+            profile.work_group.section if profile.work_group else profile.section
+        )
+        if section is None:
+            raise ValidationError("บุคคลนี้ไม่มีแผนกในสังกัด โปรดเลือกแผนก")
+    if role == Role.WORK_GROUP_ADMIN and work_group is None:
+        work_group = profile.work_group if profile else None
+        if work_group is None:
+            raise ValidationError("บุคคลนี้ไม่มีกลุ่มงานในสังกัด โปรดเลือกกลุ่มงาน")
+    if role in UNIT_ROLES:
+        division = (section or work_group.section).division
+        section, work_group = (section, None) if role == Role.SECTION_ADMIN else (None, work_group)
+    else:
+        section = work_group = None
     if role in DIVISION_ROLES and division is None:
-        profile = StaffProfile.objects.filter(user=user).select_related("division").first()
         division = profile.division if profile else None
         if division is None:
             raise ValidationError("บุคคลนี้ไม่มีกองในสังกัด โปรดเลือกกอง")
     if role in GLOBAL_ROLES:
         division = None
-    same = held.filter(role=role, division=division)
+    same = held.filter(role=role, division=division, section=section, work_group=work_group)
     if not same.exists():
-        return grant_role(actor, user, role, division, reason)
+        return grant_role(actor, user, role, division, reason, section, work_group)
     for other in held.exclude(pk__in=same):
         revoke_role(actor, other, reason or f"เปลี่ยนเป็น{Role(role).label}")
     return None
@@ -500,6 +621,8 @@ def change_division(actor, user, from_division, to_division, reason):
         raise ValidationError("User has no active role in the source division.")
     for grant in grants:
         revoke_role(actor, grant, reason)
+        if grant.role in UNIT_ROLES:
+            continue  # ADR 0052: its แผนก/กลุ่มงาน stays in the old กอง, so the role ends
         if not RoleGrant.objects.filter(
             user=user, role=grant.role, division=to_division, revoked_at__isnull=True
         ).exists():
@@ -659,7 +782,7 @@ def grant_full_division(actor, user, division, reason, approval_reference):
         )
         return 1, sync_membership_authority(user, actor)
     roles = 0
-    for role in sorted(DIVISION_ROLES - VIEWER_ROLES):
+    for role in sorted(DIVISION_ROLES - VIEWER_ROLES - UNIT_ROLES):
         if RoleGrant.objects.filter(
             user=user, role=role, division=division, revoked_at__isnull=True
         ).exists():
@@ -777,7 +900,7 @@ def merge_accounts(actor, employee, user, reason=""):
         )
         has_role = RoleGrant.objects.filter(user=user, revoked_at__isnull=True).exists()
         if held is not None and not has_role:
-            set_role(actor, user, held.role, held.division, reason)
+            set_role(actor, user, held.role, held.division, reason, held.section, held.work_group)
         for model in (UnitWorkOwner, UnitRecipient, KojRecipient):
             for row in model.objects.filter(user=old):
                 keys = {f: getattr(row, f) for f in ("work_id", "group") if hasattr(row, f)}
@@ -923,10 +1046,9 @@ def update_account(actor, user, username, display_name, email, reason=""):
         **changed,
         **{f"previous_{k}": before[k] for k in changed},
     )
-    if "email" in changed:
-        from operations import roster_match  # local: roster_match builds on identity
+    from operations import roster_match  # local: roster_match builds on identity
 
-        roster_match.link(user, actor)  # ADR 0050 Q1
+    roster_match.link(user, actor)  # ADR 0050 Q1: the username, email and name all match the roster
 
 
 def password_changed(user):
@@ -1180,7 +1302,9 @@ def _reopen_without_old_roles(user, actor):
 
 
 @transaction.atomic
-def grant_requester_role(actor, requester, role, division=None, reason=""):
+def grant_requester_role(
+    actor, requester, role, division=None, reason="", section=None, work_group=None
+):
     """Manage a verified LINE employee without a second web registration."""
     require_admin(actor)
     reason = _require_reason(reason)
@@ -1204,7 +1328,7 @@ def grant_requester_role(actor, requester, role, division=None, reason=""):
     user = provision_employee_staff(lines[0], requester.employee, actor)
     if role in DIVISION_ROLES and division is None:
         division = requester.employee.division
-    set_role(actor, user, role, division, reason)
+    set_role(actor, user, role, division, reason, section, work_group)
     requester.is_external = False
     requester.save(update_fields=["is_external"])
     audit(actor, "requester.staff_access", requester, reason, user=user.pk, role=role)

@@ -1629,7 +1629,7 @@ button.ot__box[aria-expanded="true"] .ot__caret { transform: rotate(180deg); }
 /* ADR 0041 (Q9): a person in one short row — name, position, the four roster levels. */
 .person-sub { display: block; margin-top: 2px; font-size: 13px; font-weight: 400; color: var(--mute); }
 .unit-path { display: inline-flex; flex-wrap: wrap; gap: 0 4px; font-size: 14px; }
-.unit-path > span + span::before { content: "›"; margin-right: 4px; color: var(--stone); }
+.unit-path > span + span:not(.unit-path__part, .unit-path__sep)::before { content: "›"; margin-right: 4px; color: var(--stone); } /* unit_path writes its own › */
 .unit-path__na { color: var(--stone); }
 .people-bulk { padding: var(--s-12); border-radius: 14px; background: var(--cloud); }
 .people-bulk input[name=reason] { flex: 1 1 180px; min-width: 0; }

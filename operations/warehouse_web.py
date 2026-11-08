@@ -17,7 +17,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_safe
 
-from operations import calendars, case_chat, identity, queues, warehouse, workflow
+from operations import calendars, case_chat, identity, queues, services, warehouse, workflow
+from operations.contracts import Actor
 from operations.models import (
     Appointment,
     Calendar,
@@ -65,12 +66,19 @@ NEXT_LABELS = {
 BULK_DEFAULT = {"none": S.RECEIVED, S.RECEIVED: S.KEYED, S.KEYED: S.ISSUED, S.ISSUED: S.DELIVERED}
 
 
-def _division(request, code):
+def _division(request, code, unit_posts=False):
     division = Division.objects.filter(code=code, is_active=True).first()
     scope = identity.staff_scope(request.user)
-    # ADR 0039: a viewer opens the pages; only staff of the division post to them.
-    check = identity.may_read_division if request.method == "GET" else identity.can_access_division
-    if division is None or not check(scope, division.pk):
+    # ADR 0039: a viewer opens the pages; only staff of the division post to them. ADR 0052: a
+    # แอดมินแผนก/กลุ่มงาน opens them too, and posts งานคลัง of their unit's cases.
+    if request.method == "GET":
+        allowed = identity.may_open_division(scope, division.pk) if division else False
+    else:
+        allowed = division is not None and (
+            identity.can_access_division(scope, division.pk)
+            or (unit_posts and division.pk in scope.unit_divisions)
+        )
+    if not allowed:
         raise Http404
     return division
 
@@ -84,7 +92,7 @@ def _day(text, default=None):
 
 @login_required
 def warehouse_page(request, code):
-    division = _division(request, code)
+    division = _division(request, code, unit_posts=True)
     if request.method == "POST":
         back = reverse("warehouse", args=[code]) + (
             f"?tab={request.POST['tab']}" if request.POST.get("tab", "").isalpha() else ""
@@ -98,6 +106,14 @@ def warehouse_page(request, code):
             messages.error(request, "วันที่ไม่ถูกต้อง")
             return redirect(back)
         cases, missing = warehouse.find_cases(request.user, division, numbers)
+        if identity.staff_scope(request.user).unit_only:  # ADR 0052: other units' slips hide
+            mine = set(
+                services.visible_cases(Actor.staff(request.user))
+                .filter(pk__in=[c.pk for c in cases])
+                .values_list("pk", flat=True)
+            )
+            missing += [c.number for c in cases if c.pk not in mine]
+            cases = [c for c in cases if c.pk in mine]
         try:
             done, skipped = warehouse.record(
                 request.user, cases, stage, on, planned, request.POST.get("note", ""), numbers
@@ -113,16 +129,19 @@ def warehouse_page(request, code):
             messages.error(request, "ไม่พบในงานที่ยังไม่จบ: " + ", ".join(missing[:30]))
         return redirect(back)
     kinds = [Case.Kind.WITHDRAWAL, Case.Kind.RETURN]
+    scope = identity.staff_scope(request.user)
+    # ADR 0052 Q14: a แอดมินแผนก/กลุ่มงาน sees the slips of their unit's cases only.
+    shown = services.visible_cases(Actor.staff(request.user)) if scope.unit_only else Case.objects
     cases = (
-        Case.objects.filter(owner_division=division, kind__in=kinds)
+        shown.filter(owner_division=division, kind__in=kinds)
         .exclude(status__in=workflow.TERMINAL)
         .select_related("district")
         .prefetch_related("milestones", "lines", "appointments", "extra_numbers")
         .order_by("submitted_at")
     )
     today = timezone.localdate()
-    # ADR 0039: a viewer sees the stages and gets no form.
-    may_act = identity.can_access_division(identity.staff_scope(request.user), division.pk)
+    # ADR 0039: a viewer sees the stages and gets no form; ADR 0052: a unit admin acts.
+    may_act = identity.can_access_division(scope, division.pk) or scope.unit_only
     by_tab = {key: [] for key, _ in TABS}
     for case in cases[:500]:
         done = {m.stage: m for m in case.milestones.all()}
@@ -278,7 +297,7 @@ def schedule_page(request, code):
 
 @login_required
 def calendar_page(request, code):
-    division = _division(request, code)
+    division = _division(request, code, unit_posts=True)
     choices = list(Calendar.objects.filter(division=division, is_active=True).order_by("pk"))
     if not choices:
         messages.info(request, "กองนี้ยังไม่มีปฏิทินนัด")
@@ -297,10 +316,19 @@ def calendar_page(request, code):
     if request.method == "POST":
         return _calendar_post(request, code, choices, picked_cal, start)
     weeks = calendars.month(request.user, shown, start)
+    # ADR 0052 Q19: a แอดมินแผนก/กลุ่มงาน sees who booked only for their unit's cases.
+    unit = identity.staff_scope(request.user).unit_only
+    mine = (
+        set(services.visible_cases(Actor.staff(request.user)).values_list("pk", flat=True))
+        if unit
+        else None
+    )
     for week in weeks:
         for d in week:
             for slot in d["slots"]:
                 slot.tone = tones[slot.calendar_id]
+                for a in slot.appointments.all():
+                    a.mine = mine is None or a.case_id in mine
     picked = _day(request.GET.get("day"))
     picked_day = next((d for week in weeks for d in week if picked and d["date"] == picked), None)
     waiting = list(
@@ -308,6 +336,7 @@ def calendar_page(request, code):
         .select_related("slot", "case__district", "calendar")
         .order_by("requested_at")
     )
+    waiting = [a for a in waiting if mine is None or a.case_id in mine]
     free = {c.key: calendars.free_slots(c.key) for c in shown}
     for a in waiting:
         a.tone = tones[a.calendar_id]
@@ -332,6 +361,7 @@ def calendar_page(request, code):
             "methods": [m for m in Appointment.Method.choices if m[0]],
             "today": today,
             "now": timezone.now(),
+            "unit": unit,  # ADR 0052 Q19: no slot opening or closing
         },
     )
 

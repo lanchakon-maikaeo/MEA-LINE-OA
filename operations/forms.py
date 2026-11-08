@@ -11,6 +11,8 @@ from operations.models import (
     District,
     Division,
     EquipmentType,
+    Section,
+    WorkGroup,
 )
 
 REASON = forms.CharField(label="เหตุผล", max_length=500, widget=forms.TextInput, required=False)
@@ -23,13 +25,17 @@ class StaffCreateForm(forms.Form):
 
 
 class GrantRoleForm(forms.Form):
-    """The one role of a person (ADR 0041); a กอง role without a กอง takes their สังกัด."""
+    """The one role of a person (ADR 0041); a กอง role without a กอง takes their สังกัด, and a
+    แอดมินแผนก/กลุ่มงาน without a unit takes the สังกัด's (ADR 0052 Q7)."""
 
     role = forms.ChoiceField(label="บทบาท")
     division = forms.ModelChoiceField(
         label="กอง (เว้นว่าง = กองในสังกัด)",
         queryset=Division.objects.filter(is_active=True),
         required=False,
+    )
+    unit = forms.ChoiceField(
+        label="แผนกหรือกลุ่มงาน (แอดมินแผนก/กลุ่มงาน เว้นว่าง = หน่วยในสังกัด)", required=False
     )
     reason = forms.CharField(label="เหตุผล", max_length=500, required=False)
 
@@ -40,6 +46,27 @@ class GrantRoleForm(forms.Form):
         self.fields["role"].choices = [("", "เลือกบทบาท")] + [
             (r, identity.role_label(r)) for r in identity.PICKS
         ]
+        units = [("", "หน่วยในสังกัด")]
+        for section in Section.objects.filter(is_active=True, division__is_active=True).order_by(
+            "division__code", "order", "name"
+        ):
+            units.append((f"s{section.pk}", f"{section.division.code} › {section.name}"))
+            for group in section.work_groups.filter(is_active=True).order_by("order", "name"):
+                units.append(
+                    (f"g{group.pk}", f"{section.division.code} › {section.name} › {group.name}")
+                )
+        self.fields["unit"].choices = units
+
+    def clean(self):
+        """The unit key (s<pk>, g<pk>) becomes the section or work_group the role takes."""
+        data = super().clean()
+        key = data.pop("unit", "") or ""
+        data["section"] = data["work_group"] = None
+        if key.startswith("s"):
+            data["section"] = Section.objects.filter(pk=key[1:], is_active=True).first()
+        elif key.startswith("g"):
+            data["work_group"] = WorkGroup.objects.filter(pk=key[1:], is_active=True).first()
+        return data
 
 
 class ReasonForm(forms.Form):

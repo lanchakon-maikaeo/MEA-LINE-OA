@@ -512,6 +512,19 @@ def path_of(employee):
     return " › ".join(getattr(employee, f) for f in LEVELS if getattr(employee, f))
 
 
+def department_of(division):
+    """The หน่วยงาน (ฝ่าย) the roster puts a กอง of the system under, or "" when nobody says."""
+    if division is None:
+        return ""
+    return (
+        Employee.objects.filter(division=division, is_active=True)
+        .exclude(department="")
+        .values_list("department", flat=True)
+        .first()
+        or ""
+    )
+
+
 def unit_paths():
     """Every path the active roster has, each with the fields an employee placed there takes."""
     rows = Employee.objects.filter(is_active=True, is_synthetic=False).values(*PLACE).distinct()
@@ -557,6 +570,9 @@ def move_employee(actor, employee, path, reason=""):
     employee.save(update_fields=[*PLACE[:5], "district", "division"])
     identity.audit(actor, "employee.unit_changed", employee, reason, unit=path, previous=before)
     follow(actor, [employee.employee_id], {}, reason)
+    from operations import roster_match  # local: roster_match builds on roster
+
+    roster_match.link_all(actor)  # a web account matched by name, not yet merged, moves too
 
 
 def employee_path(employee, names=None):

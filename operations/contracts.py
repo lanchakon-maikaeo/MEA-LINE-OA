@@ -169,6 +169,7 @@ ACTION_EXTRA_FIELDS = {
     "decide_routing": {"division", "keywords"},
     "set_priority": {"priority"},
     "set_section": {"section"},
+    "set_work_group": {"work_group"},
     "set_sap_number": {"sap_number"},
     "record_facts": {"facts", "clear"},
     # M07: lines are [{"line_no": n, ...}] of the case; deliveries are numbered per case.

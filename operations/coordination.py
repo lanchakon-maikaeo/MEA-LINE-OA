@@ -159,10 +159,15 @@ def request_child_work(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "กองนี้มีงานย่อยที่ยังเปิดอยู่ในเรื่องนี้แล้ว")
     # Asking a division that already refused this case is a dispute for the coordinator (Q6).
     refused = ChildWork.objects.filter(case=case, division=division, status=C.DECLINED).exists()
+    from operations import units  # local: units reads the chart, not the coordination
+
+    section, work_group = units.unit_for(case, division.pk)  # ADR 0052 Q17
     child = ChildWork.objects.create(
         case=case,
         seq=ChildWork.objects.filter(case=case).count() + 1,
         division=division,
+        section=section,
+        work_group=work_group,
         rule=rule,
         task=task,
         deliverable=clean_text(payload, "deliverable", False),

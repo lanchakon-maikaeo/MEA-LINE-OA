@@ -175,6 +175,32 @@ def _staff_condition(ctx):
     return condition
 
 
+def _unit_condition(ctx):
+    """ADR 0052: a แอดมินแผนก/กลุ่มงาน reads the cases of their unit (Q2), the cases they are
+    responsible for (Q16), and a handoff or งานย่อย waiting for their unit (Q17); nothing else
+    of the กอง, not even what the กอง's authority waits on (Q12)."""
+    scope = ctx.scope
+    mine = Q(section__in=scope.sections) | Q(work_group__in=scope.work_groups)
+    return (
+        mine
+        | Q(assignee=ctx.user)
+        | Q(
+            Exists(
+                Handoff.objects.filter(
+                    Q(to_section__in=scope.sections) | Q(to_work_group__in=scope.work_groups),
+                    case=OuterRef("pk"),
+                    status=Handoff.Status.PENDING,
+                )
+            )
+        )
+        | Q(Exists(ChildWork.objects.filter(mine, case=OuterRef("pk"), status__in=ChildWork.OPEN)))
+    )
+
+
+def _condition(ctx):
+    return _unit_condition(ctx) if ctx.scope.unit_only else _staff_condition(ctx)
+
+
 def _can_view(ctx, case):
     if ctx.requester is not None:
         return case.requester_id == ctx.requester.pk
@@ -182,7 +208,7 @@ def _can_view(ctx, case):
         return ctx.scope.sees_department  # ADR 0030: the admins hold it; ADR 0039: ฝ่าย sees it
     if identity.may_read_division(ctx.scope, case.owner_division_id):
         return True
-    return Case.objects.filter(_staff_condition(ctx), pk=case.pk).exists()
+    return Case.objects.filter(_condition(ctx), pk=case.pk).exists()
 
 
 def _is_member(ctx, division_id, roles=None):
@@ -201,7 +227,7 @@ def visible_cases(actor):
         return cases
     if ctx.scope.sees_department:  # ADR 0039: the admins' problem cases too
         return cases.filter(_staff_condition(ctx) | Q(held_by_admin=True))
-    return cases.filter(_staff_condition(ctx)).exclude(held_by_admin=True)
+    return cases.filter(_condition(ctx)).exclude(held_by_admin=True)
 
 
 def _parse_case_id(case_id):
@@ -571,10 +597,10 @@ def submit_case(actor, *, idempotency_key, payload):
             if intake is None:
                 # ADR 0008: straight to the division the rules name; unclear → coordinator.
                 case.owner_division = owner or _proposed_owner(case, coordinator, now)
-                case.section = units.section_for(case)  # ADR 0031 Q14
+                units.place(case)  # ADR 0031 Q14, ADR 0052 Q4
                 case.status = approvals.first_status(case)  # ADR 0025
             case.number = numbering.issue(case.owner_division, now)
-            case.save(update_fields=["owner_division", "section", "status", "number"])
+            case.save(update_fields=["owner_division", "section", "work_group", "status", "number"])
             cases.append(case)
         numbers = [c.number for c in cases]
         results = []
@@ -625,7 +651,16 @@ def _take(ctx, case, payload, reason, target, overseer=False):
     case.auto_assigned = False  # ADR 0031 Q24: a person chose; the system leaves it alone
     case.accepted_by, case.accepted_at = ctx.user, timezone.now()  # ADR 0049 Q10
     case.status = target
-    return {"assignee_id": ctx.user.pk}
+    moved = units.follow_person(case, ctx.user)  # ADR 0052 Q18
+    return {"assignee_id": ctx.user.pk, **_placed(case, moved)}
+
+
+def _placed(case, moved):
+    """The แผนก and กลุ่มงาน a case took from its new ผู้รับผิดชอบ, for the timeline."""
+    if not moved:
+        return {}
+    group = {"work_group": case.work_group.name} if case.work_group_id else {}
+    return {"section": case.section.name, **group}
 
 
 def _claim(ctx, case, payload, reason, target):
@@ -660,7 +695,7 @@ def route_by_ai(case_id, run):
             "quote": run.quote,
             "routing_run": run.pk,
         }
-        case.section = units.section_for(case)
+        units.place(case)
         case.revision += 1
         case.updated_at = timezone.now()
         case.save()
@@ -683,11 +718,11 @@ def _assign(ctx, case, payload, reason, target):
     if isinstance(assignee_id, bool) or not isinstance(assignee_id, int):
         fail(ErrorCode.VALIDATION_ERROR, "assignee_id is required.")
     assignee = User.objects.filter(pk=assignee_id, is_active=True).first()
-    if (
-        assignee is None
-        or case.owner_division_id not in identity.staff_scope(assignee).division_roles
-    ):
+    # ADR 0052 Q16: a แอดมินแผนก/กลุ่มงาน of the กอง may be handed a case outside their unit.
+    if assignee is None or not units.can_act(assignee, case.owner_division_id):
         fail(ErrorCode.VALIDATION_ERROR, "Assignee must be active staff of the owner division.")
+    if not units.in_reach(ctx.scope, assignee):
+        fail(ErrorCode.VALIDATION_ERROR, "มอบหมายได้เฉพาะคนในหน่วยของคุณ")  # ADR 0052 Q6
     if case.assignee_id == assignee.pk:
         fail(ErrorCode.VALIDATION_ERROR, "This person is already responsible.")
     previous = case.assignee_id
@@ -696,7 +731,8 @@ def _assign(ctx, case, payload, reason, target):
     # ADR 0049: the new ผู้รับผิดชอบ presses รับงาน; choosing yourself is taking it.
     mine = assignee.pk == ctx.user.pk
     case.accepted_by, case.accepted_at = (assignee, timezone.now()) if mine else (None, None)
-    return {"assignee_id": assignee.pk, "previous_assignee_id": previous}
+    moved = units.follow_person(case, assignee)  # ADR 0052 Q18
+    return {"assignee_id": assignee.pk, "previous_assignee_id": previous, **_placed(case, moved)}
 
 
 def _accept_assignment(ctx, case, payload, reason, target):
@@ -871,6 +907,8 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         # Unknown and out-of-scope cases are indistinguishable.
         if case is None or not _can_view(ctx, case):
             fail(ErrorCode.NOT_FOUND)
+        if ctx.scope is not None:  # ADR 0052: a unit admin's rights in this one case
+            ctx = dataclasses.replace(ctx, scope=identity.for_case(ctx.scope, case))
         replayed = _replay(ctx, action, key, request_hash)
         if replayed is not None:
             return replayed
@@ -896,7 +934,7 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         from_status, from_owner = case.status, case.owner_division_id
         data = _handler(action, case)(ctx, case, payload, reason, target)
         if case.owner_division_id != from_owner:
-            case.section = units.section_for(case)  # Q12: the new owner's own แผนก, if any
+            units.place(case)  # Q12: the new owner's own แผนก, if any (and กลุ่มงาน, ADR 0052)
         if acting_for is not None:
             data = {**(data or {}), "support": acting_for}
         data = _with_notes(ctx, case, action, from_status, payload, reason, data)

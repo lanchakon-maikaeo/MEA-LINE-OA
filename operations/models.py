@@ -155,6 +155,9 @@ class Role(models.TextChoices):
     # ADR 0039: sees what a Supervisor of the scope sees and does nothing.
     DIVISION_VIEWER = "division_viewer", "ผู้ดูข้อมูลของกอง"
     DEPARTMENT_VIEWER = "department_viewer", "ผู้ดูข้อมูลระดับฝ่าย"
+    # ADR 0052: a แอดมินกอง of one แผนก or กลุ่มงาน only, seeing nothing outside it.
+    SECTION_ADMIN = "section_admin", "แอดมินแผนก"
+    WORK_GROUP_ADMIN = "work_group_admin", "แอดมินกลุ่มงาน"
 
 
 GLOBAL_ROLES = frozenset(
@@ -168,8 +171,10 @@ GLOBAL_ROLES = frozenset(
 )
 DIVISION_ROLES = frozenset(set(Role) - GLOBAL_ROLES)
 VIEWER_ROLES = frozenset({Role.DIVISION_VIEWER, Role.DEPARTMENT_VIEWER})
+# ADR 0052: roles bound to one แผนก or กลุ่มงาน of the กอง; they make nobody a member of it.
+UNIT_ROLES = frozenset({Role.SECTION_ADMIN, Role.WORK_GROUP_ADMIN})
 # What a member does when the division's work is not split (16 Oct 2569 Q3).
-MEMBER_ROLES = frozenset(DIVISION_ROLES - {Role.SUPERVISOR, Role.DIVISION_VIEWER})
+MEMBER_ROLES = frozenset(DIVISION_ROLES - {Role.SUPERVISOR, Role.DIVISION_VIEWER} - UNIT_ROLES)
 # The duties a split division hands out one by one; merged into สมาชิกกอง on 16 Oct 2569.
 DUTY_ROLES = frozenset(MEMBER_ROLES - {Role.STAFF})
 
@@ -193,6 +198,11 @@ class StaffProfile(models.Model):
     work_group = models.ForeignKey(
         WorkGroup, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
+    # Owner, 8 พ.ย. 2569: the ผังบุคลากร row the สังกัด above came from, so the web shows the
+    # same path as the LINE list; set even while the ID waits for รวมบัญชี (ADR 0050 Q9).
+    roster_row = models.ForeignKey(
+        "Employee", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
     # ไม่อยู่ ถึงวันที่ (ADR 0031 Q21): set by the person; the system skips them until then.
     away_until = models.DateField(null=True, blank=True)
     must_change_password = models.BooleanField(default=False)
@@ -214,6 +224,13 @@ class RoleGrant(models.Model):
     )
     role = models.CharField(max_length=32, choices=Role.choices)
     division = models.ForeignKey(Division, null=True, blank=True, on_delete=models.PROTECT)
+    # ADR 0052: the one unit of a แอดมินแผนก or แอดมินกลุ่มงาน; `division` is its กอง.
+    section = models.ForeignKey(
+        Section, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    work_group = models.ForeignKey(
+        WorkGroup, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
     granted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -231,6 +248,17 @@ class RoleGrant(models.Model):
                 condition=(
                     Q(role__in=sorted(GLOBAL_ROLES), division__isnull=True)
                     | (~Q(role__in=sorted(GLOBAL_ROLES)) & Q(division__isnull=False))
+                ),
+            ),
+            models.CheckConstraint(
+                name="rolegrant_unit_matches_role",
+                condition=(
+                    Q(role="section_admin", section__isnull=False, work_group__isnull=True)
+                    | Q(role="work_group_admin", section__isnull=True, work_group__isnull=False)
+                    | (
+                        ~Q(role__in=["section_admin", "work_group_admin"])
+                        & Q(section__isnull=True, work_group__isnull=True)
+                    )
                 ),
             ),
             models.UniqueConstraint(
@@ -550,6 +578,10 @@ class Case(models.Model):
     # แผนกที่ดูแล (Q12): proposed by the policy, changed by the owner division; never an owner.
     section = models.ForeignKey(
         Section, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    # กลุ่มงานที่ดูแล (ADR 0052 Q4): inside `section`, from the unit card the case matched.
+    work_group = models.ForeignKey(
+        WorkGroup, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     assignee = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
@@ -1689,6 +1721,14 @@ class Handoff(models.Model):
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="handoffs")
     from_division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
     to_division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    # ADR 0052 Q17: the แผนก and กลุ่มงาน of to_division whose unit card takes the case, so
+    # their admins see the handoff and may accept it.
+    to_section = models.ForeignKey(
+        Section, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    to_work_group = models.ForeignKey(
+        WorkGroup, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     reason_category = models.CharField(max_length=32, blank=True)
     reason = models.TextField(blank=True)
@@ -2282,6 +2322,13 @@ class ChildWork(models.Model):
     case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="child_works")
     seq = models.PositiveSmallIntegerField()
     division = models.ForeignKey(Division, on_delete=models.PROTECT, related_name="+")
+    # ADR 0052 Q17: the unit of `division` whose card takes the case, as on a handoff.
+    section = models.ForeignKey(
+        Section, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    work_group = models.ForeignKey(
+        WorkGroup, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
     rule = models.CharField(max_length=8, blank=True)
     task = models.TextField()
     deliverable = models.TextField(blank=True)

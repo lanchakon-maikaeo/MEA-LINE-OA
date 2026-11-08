@@ -28,6 +28,7 @@ from operations import (
     returns,
     routing_words,
     typed_lines,
+    units,
     workflow,
 )
 from operations.fulfilment import CANCEL_RESOLUTIONS
@@ -45,6 +46,7 @@ from operations.models import (
     Role,
     RoleGrant,
     Section,
+    WorkGroup,
 )
 
 S = Case.Status
@@ -73,6 +75,7 @@ BUTTON_LABELS = {
     "decide_routing": "ตัดสินว่ากองใดรับ",
     "set_priority": "ตั้งระดับความเร่งด่วน",
     "set_section": "ระบุแผนก",
+    "set_work_group": "ระบุกลุ่มงาน",
     "set_sap_number": "แก้เลข SAP ของคำขอ",
     "record_facts": "แก้ข้อเท็จจริง",
     "approve": "ดำเนินการ",
@@ -195,6 +198,8 @@ class Situation:
     line: bool = False  # the requester has LINE, so answers there by themselves
     resolver_id: int | None = None  # who recorded the latest ผลการแก้ปัญหา
     sections: list = field(default_factory=list)  # the owner division's active แผนก
+    groups: list = field(default_factory=list)  # ADR 0052: the case's แผนก's active กลุ่มงาน
+    scope: object = None  # the viewer's own scope, before for_case (ADR 0052)
     overseen: frozenset = frozenset()  # divisions this viewer supervises (16 Oct 2569 Q5)
     admin: bool = False  # ADR 0030: admins send cases to divisions and answer what they hold
     department: bool = False  # ADR 0039: a แอดมินฝ่าย sends the admins' cases too
@@ -247,12 +252,14 @@ class Situation:
 def situation(user, case):
     from operations.models import Handoff, RoutingReview
 
-    scope = identity.staff_scope(user)
+    base = identity.staff_scope(user)
+    scope = identity.for_case(base, case)  # ADR 0052: a unit admin's rights in this case
     lines = list(case.lines.select_related("item", "case").order_by("line_no"))
     intake = Division.objects.filter(is_intake=True, is_active=True).first()
     return Situation(
         user=user,
         case=case,
+        scope=base,
         roles=dict(scope.division_roles),
         lines=lines,
         line_division={line.line_no: coordination.division_of(line) for line in lines},
@@ -308,6 +315,9 @@ def _readiness(case, lines):
         "sections": list(
             Section.objects.filter(division_id=case.owner_division_id, is_active=True)
         ),
+        "groups": list(WorkGroup.objects.filter(section_id=case.section_id, is_active=True))
+        if case.section_id
+        else [],
         "line": ChannelIdentity.objects.filter(
             requester_id=case.requester_id,
             channel=ChannelIdentity.Channel.LINE,
@@ -399,7 +409,17 @@ RULES = {
         )
     ),
     "dispute_resolution": lambda st: st.case.kind == K.PROBLEM and st.answers_for_district(),
-    "set_section": lambda st: bool(st.sections) and st.member(st.owner),
+    # ADR 0052 Q13: a แอดมินแผนก sends their own cases on; a แอดมินกลุ่มงาน keeps the แผนก.
+    "set_section": lambda st: (
+        bool(st.sections)
+        and st.member(st.owner)
+        and (not st.scope.unit_only or st.case.section_id in st.scope.sections)
+    ),
+    "set_work_group": lambda st: (
+        bool(st.groups)
+        and st.member(st.owner)
+        and (not st.scope.unit_only or identity.in_unit(st.scope, st.case))
+    ),
     "set_sap_number": lambda st: (
         st.member(st.owner) and bool(typed_lines.sap_label(st.case.kind, st.case.topic))
     ),
@@ -652,10 +672,13 @@ def _reason(required=False, label="เหตุผล", help_text=""):
     return Field("reason", label + " (ไม่บังคับ)", "textarea", False, help=help_text)
 
 
-def _members(division_id):
+def _members(st):
+    """Who may take the case: everyone with a working role in its กอง, the แอดมินแผนก/กลุ่มงาน
+    included (ADR 0052 Q16); a unit admin picks among the people of their own unit (Q6)."""
+    case = st.case
     grants = (
         RoleGrant.objects.filter(
-            division_id=division_id, revoked_at__isnull=True, user__is_active=True
+            division_id=case.owner_division_id, revoked_at__isnull=True, user__is_active=True
         )
         .exclude(role__in=VIEWER_ROLES)  # ADR 0039: nobody assigns work to a viewer
         .select_related("user__staff_profile")
@@ -663,6 +686,8 @@ def _members(division_id):
     )
     seen, choices = set(), []
     for g in grants:
+        if st.scope is not None and not units.in_reach(st.scope, g.user):
+            continue
         if g.user_id not in seen:
             seen.add(g.user_id)
             profile = getattr(g.user, "staff_profile", None)
@@ -702,7 +727,7 @@ def build_form(action, st, params, demo=False):
     add = form.fields.append
 
     if action == "assign":
-        add(Field("assignee_id", "ผู้รับผิดชอบ", "select", True, _members(case.owner_division_id)))
+        add(Field("assignee_id", "ผู้รับผิดชอบ", "select", True, _members(st)))
         add(_reason())
     elif action == "request_info":
         add(
@@ -789,6 +814,19 @@ def build_form(action, st, params, demo=False):
             )
         )
         add(_reason())
+    elif action == "set_work_group":
+        add(
+            Field(
+                "work_group",
+                "กลุ่มงานที่ดูแล",
+                "select",
+                False,
+                [("", "ไม่ระบุกลุ่มงาน"), *[(str(x.pk), x.name) for x in st.groups]],
+                str(case.work_group_id or ""),
+                help="กลุ่มงานในแผนกของเรื่อง แอดมินกลุ่มงานเห็นเฉพาะเรื่องของกลุ่มตน",
+            )
+        )
+        add(_reason())
     elif action == "set_section":
         add(
             Field(
@@ -798,7 +836,7 @@ def build_form(action, st, params, demo=False):
                 False,
                 [("", "ไม่ระบุแผนก"), *[(str(x.pk), x.name) for x in st.sections]],
                 str(case.section_id or ""),
-                help="ใช้แยกคิวและรายงานในกอง สิทธิ์และกรอบเวลายังเป็นของกอง",
+                help="ใช้แยกคิว รายงาน และงานของแอดมินแผนก เจ้าภาพและกรอบเวลายังเป็นของกอง",
             )
         )
         add(_reason())
