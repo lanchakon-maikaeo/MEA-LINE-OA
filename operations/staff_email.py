@@ -124,7 +124,7 @@ def _text(kind, case, detail=""):
         rows.append(detail)
     path = reverse("case-detail", args=[case.number])
     rows.append(f"เปิดดู: {settings.STAFF_WEB_BASE_URL.rstrip('/')}{path}")
-    rows.append("อีเมลนี้ส่งอัตโนมัติจาก DED Center (ข้อมูลกองและกติกาเป็นข้อมูลจำลอง)")
+    rows.append("อีเมลนี้ส่งอัตโนมัติจาก DED Center")
     return "\n".join(rows)
 
 

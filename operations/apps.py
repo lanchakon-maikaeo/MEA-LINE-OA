@@ -38,7 +38,9 @@ def _publish_problem_flow(sender, verbosity=1, **kwargs):
 def _link_roster(sender, **kwargs):
     """ADR 0050 Q1: web accounts not yet tied to ทะเบียนพนักงาน are matched after each migrate,
     so the accounts made before this release get their สังกัด on deploy. It changes nothing for
-    an account already tied or one that matches nobody."""
-    from operations import roster_match
+    an account already tied or one that matches nobody. ADR 0053 Q6: then every LINE that passed
+    the employee check joins the staff account holding the same รหัสพนักงาน, if it has none."""
+    from operations import roster_match, staff_line
 
     roster_match.link_all()
+    staff_line.tie_all()

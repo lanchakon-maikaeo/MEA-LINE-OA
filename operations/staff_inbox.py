@@ -100,10 +100,11 @@ def title(case):
 
 
 def row(turn, source, item):
-    """One line: number, title, status; the whole line opens the item."""
+    """One line: number, title, status; the whole line opens the item. The status is the item's
+    own, as on the web list; รอรับงาน sits beside the ผู้รับผิดชอบ on the card (ADR 0053 Q1)."""
     is_case = source == "case"
     text = title(item) if is_case else item.title
-    status = "รอรับงาน" if is_case and item.awaits_acceptance else item.get_status_display()
+    status = item.get_status_display()
     _, data = turn.button(
         item.number, "staff_case" if is_case else "staff_order", {source: str(item.pk)}
     )

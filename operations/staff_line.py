@@ -257,6 +257,95 @@ def unlink(identity_row, actor=None, reason=""):
     return True
 
 
+# ADR 0053 Q6: a LINE that passed the employee check (or an admin tied to ทะเบียนพนักงาน) is
+# that employee's, so it belongs to the staff account holding the same รหัสพนักงาน.
+PROVEN = (Requester.EmployeeLink.VERIFIED, Requester.EmployeeLink.ADMIN)
+
+
+def _untied(**filters):
+    return ChannelIdentity.objects.filter(
+        staff_user__isnull=True,
+        status=ChannelIdentity.Status.ACTIVE,
+        requester__status=Requester.Status.ACTIVE,
+        requester__employee_link__in=PROVEN,
+        requester__employee__isnull=False,
+        **filters,
+    )
+
+
+@transaction.atomic
+def tie_verified(identity_row, actor=None):
+    """Tie this LINE to the one active staff account with its employee's รหัสพนักงาน, when that
+    account has no LINE yet. Nothing changes when there is no such account, two of them, or the
+    account already has a LINE. Returns the account, or None."""
+    line = (
+        _untied(pk=identity_row.pk)
+        .select_for_update(of=("self",))
+        .select_related("requester__employee")
+        .first()
+    )
+    if line is None:
+        return None
+    holders = list(
+        StaffProfile.objects.filter(
+            employee_id=line.requester.employee.employee_id, user__is_active=True
+        ).select_related("user")[:2]
+    )
+    if len(holders) != 1:
+        return None
+    user = holders[0].user
+    if ChannelIdentity.objects.filter(staff_user=user).exists():
+        return None
+    line.staff_user, line.staff_linked_at = user, timezone.now()
+    line.save(update_fields=["staff_user", "staff_linked_at"])
+    identity.audit(
+        actor,
+        "staff.line_linked",
+        line,
+        actor_label="" if actor else "system",
+        method="employee_record",
+        user=user.pk,
+    )
+    _relink(line)
+    catch_up_assigned(user)
+    return user
+
+
+def tie_account(user, actor=None):
+    """The account just got its รหัสพนักงาน: tie the one verified LINE of that employee."""
+    employee_id = (
+        StaffProfile.objects.filter(user=user).values_list("employee_id", flat=True).first()
+    )
+    if not employee_id or ChannelIdentity.objects.filter(staff_user=user).exists():
+        return None
+    lines = list(_untied(requester__employee__employee_id=employee_id)[:2])
+    return tie_verified(lines[0], actor) if len(lines) == 1 else None
+
+
+def tie_all(actor=None):
+    """Every untied verified LINE whose employee has a staff account (once on each deploy)."""
+    return sum(tie_verified(line, actor) is not None for line in _untied())
+
+
+def catch_up_assigned(user):
+    """ADR 0053 Q7: a LINE just tied hears once of each open case that still waits for this
+    person's รับงาน, with the รับงาน button, as the assignment would have told them."""
+    from operations import alert_routing, workflow
+
+    if not alert_routing.originals("staff_assigned", [user]):
+        return []
+    waiting = Case.objects.filter(
+        assignee=user,
+        accepted_by__isnull=True,
+        status__in=workflow.OPEN,
+        is_example=False,
+    ).select_related("owner_division")
+    planned = []
+    for case in waiting.order_by("submitted_at"):
+        planned += plan("staff_assigned", f"tied:{case.pk}", case, [user], chosen=True)
+    return planned
+
+
 # --- Internal reporters (Q8) ----------------------------------------------------------------------
 
 
