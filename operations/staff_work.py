@@ -673,8 +673,8 @@ def case_rows(case):
 
 def case_detail(turn, user, case):
     """The case card (ADR 0055): the case, who reported it, and every step of the web's
-    สิ่งที่ทำได้ in the web's order, grouped as ทำต่อ, อื่น ๆ, ทำในเว็บ and ย้อนกลับไม่ได้; the
-    pages after it hold the rest of the case page."""
+    สิ่งที่ทำได้ in the web's order, grouped as ทำต่อ, อื่น ๆ, ทำในเว็บ and ย้อนกลับไม่ได้; one card,
+    nothing to swipe to."""
     from operations import case_menu, staff_inbox
 
     groups = {"next": [], "more": [], "web": [], "irreversible": []}
@@ -692,7 +692,7 @@ def case_detail(turn, user, case):
             )
             groups[group].append((item.label, card_button(turn, case, item)[1]))
     back = turn.button("‹ กลับไปที่รายการ", "staff_inbox")
-    turn.replies.append(staff_inbox.case_card(case_rows(case), groups, back, case_pages(case)))
+    turn.replies.append(staff_inbox.case_card(case_rows(case), groups, back))
 
 
 def card_button(turn, case, item):
@@ -703,13 +703,6 @@ def card_button(turn, case, item):
         value = {"case": str(case.pk), "appointment": item.name}
         return turn.button(item.label, "staff_appt", value)
     return turn.button(item.label, "staff_step", {"case": str(case.pk), "action": item.name})
-
-
-def case_pages(case):
-    """The rest of the case page, a page per part (filled in by staff_pages)."""
-    from operations import staff_pages
-
-    return staff_pages.pages(case)
 
 
 def step_start(turn, user, case, action):

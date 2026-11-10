@@ -315,10 +315,10 @@ def _grid(tiles):
     return rows
 
 
-def case_card(rows, groups, back, pages=()):
+def case_card(rows, groups, back):
     """The case card: its rows, then the steps in four groups (ทำต่อ green and wide, อื่น ๆ two
-    to a row, ทำในเว็บ grey, ย้อนกลับไม่ได้ red), ‹ กลับไปที่รายการ below; `pages` are more
-    bubbles after it (the rest of the case page)."""
+    to a row, ทำในเว็บ grey, ย้อนกลับไม่ได้ red), ‹ กลับไปที่รายการ below. One bubble, nothing
+    to swipe to (the owner, 11 Nov 2569)."""
     contents = [
         {
             "type": "text",
@@ -365,7 +365,7 @@ def case_card(rows, groups, back, pages=()):
     return {
         "type": "flex",
         "altText": rows[0][:400],
-        "contents": {"type": "carousel", "contents": [bubble, *pages][:12]},
+        "contents": {"type": "carousel", "contents": [bubble]},
     }
 
 
