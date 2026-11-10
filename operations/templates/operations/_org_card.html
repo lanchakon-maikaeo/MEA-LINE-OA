@@ -12,7 +12,6 @@
       {% for p in c.people %}<li class="org-person">
         <span class="org-dot{% if p.line %} org-dot--on{% endif %}" role="img" aria-label="{% if p.line %}ผูก LINE แล้ว{% else %}ยังไม่ผูก LINE{% endif %}" title="{% if p.line %}ผูก LINE แล้ว{% else %}ยังไม่ผูก LINE{% endif %}"></span>
         <span class="org-person__name">{{ p.name }}</span>
-        {% if p.away %}<span class="tag tag--muted">ไม่อยู่ถึง {{ p.away|thai_day }}</span>{% endif %}
       </li>{% endfor %}
     </ul>{% else %}<p class="muted">ยังไม่มีคนสังกัดหน่วยนี้{% if not c.unit.section %}โดยตรง{% endif %}</p>{% endif %}
   </div>

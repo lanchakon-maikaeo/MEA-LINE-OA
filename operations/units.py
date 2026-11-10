@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from operations import identity, workflow
 from operations.models import (
+    UNIT_ROLES,
     VIEWER_ROLES,
     Case,
     ChannelIdentity,
@@ -176,15 +177,6 @@ def has_line(user):
     return ChannelIdentity.objects.filter(staff_user=user, is_following=True).exists()
 
 
-def away_until(user, today=None):
-    """The last day this person is away, while it has not passed."""
-    profile = getattr(user, "staff_profile", None)
-    today = today or timezone.localdate()
-    if profile and profile.away_until and profile.away_until >= today:
-        return profile.away_until
-    return None
-
-
 def can_act(user, division_id):
     """Holds a working role in the กอง; ADR 0052: a แอดมินแผนก/กลุ่มงาน of it counts too."""
     if user is None or not user.is_active:
@@ -201,6 +193,50 @@ def in_reach(scope, person):
     return bool(profile) and (
         profile.section_id in scope.sections or profile.work_group_id in scope.work_groups
     )
+
+
+def heads_only(scope, case):
+    """ADR 0054 Q4: a แอดมินฝ่าย (and แอดมินระบบ) hands a case to the owner กอง's แอดมินกอง,
+    while the กอง has one."""
+    return scope.is_department_supervisor and (
+        RoleGrant.objects.filter(
+            division_id=case.owner_division_id,
+            role=Role.SUPERVISOR,
+            revoked_at__isnull=True,
+            user__is_active=True,
+        ).exists()
+    )
+
+
+def assignable(scope, case):
+    """ADR 0054 Q4, Q5: who this person may make the case's ผู้รับผิดชอบ, in the order the web
+    and LINE both show. A แอดมินฝ่าย sees the owner กอง's แอดมินกอง (everyone in the กอง when it
+    has none); everyone else sees the กอง's people, the แอดมินแผนก and แอดมินกลุ่มงาน first and
+    those of the case's แผนก ahead of the rest; a unit admin sees only their unit (ADR 0052 Q6).
+    Nobody assigns work to a viewer (ADR 0039)."""
+    grants = (
+        RoleGrant.objects.filter(
+            division_id=case.owner_division_id, revoked_at__isnull=True, user__is_active=True
+        )
+        .exclude(role__in=VIEWER_ROLES)
+        .select_related("user__staff_profile", "work_group")
+    )
+    grants = [g for g in grants if in_reach(scope, g.user)]
+    if heads_only(scope, case):
+        grants = [g for g in grants if g.role == Role.SUPERVISOR]
+    best = {}
+    for g in grants:
+        profile = getattr(g.user, "staff_profile", None)
+        sections = {
+            profile.section_id if profile else None,
+            g.section_id,
+            g.work_group.section_id if g.work_group else None,
+        }
+        ours = case.section_id is not None and case.section_id in sections
+        key = (g.role not in UNIT_ROLES, not ours, display(g.user), g.user_id)
+        if g.user_id not in best or key < best[g.user_id][0]:
+            best[g.user_id] = (key, g.user)
+    return [user for _, user in sorted(best.values(), key=lambda pair: pair[0])]
 
 
 def case_groups(case):
@@ -296,8 +332,9 @@ class Pick:
     notes: list = field(default_factory=list)
 
 
-def responsible(work, skip=(), today=None):
-    """Q21: the first ผู้รับผิดชอบประจำงาน who can act and is not away; the others are noted."""
+def responsible(work, skip=()):
+    """Q21: the first ผู้รับผิดชอบประจำงาน who can act; the others are noted. ADR 0054 Q13: nobody
+    is skipped for being away any more."""
     pick = Pick(work=work)
     if work is None:
         return pick
@@ -311,10 +348,6 @@ def responsible(work, skip=(), today=None):
             continue
         if not can_act(user, work.division_id):
             pick.notes.append(f"{name} ไม่มีสิทธิ์ในกองนี้แล้ว จึงข้ามไป")
-            continue
-        until = away_until(user, today)
-        if until:
-            pick.notes.append(f"{name} ไม่อยู่ถึง {thai_date(until)} จึงข้ามไป")
             continue
         pick.person = user
         return pick
@@ -743,21 +776,6 @@ def set_recipients(actor, unit, user_ids, reason=""):
         unit=unit.path,
         people=[display(u) for u in wanted],
     )
-
-
-@transaction.atomic
-def set_away(user, until, today=None):
-    """Q21: a staff member's own "ไม่อยู่ ถึงวันที่"; their system-assigned cases move on (Q24)."""
-    today = today or timezone.localdate()
-    if until is not None and until < today:
-        raise ValidationError("เลือกวันนี้หรือวันหลังจากนี้")
-    profile = StaffProfile.objects.select_for_update().get(user=user)
-    profile.away_until = until
-    profile.save(update_fields=["away_until"])
-    identity.audit(user, "staff.away_set", user, until=until.isoformat() if until else "")
-    if until is None:
-        return 0
-    return release(user, f"{display(user)} ไม่อยู่ถึง {thai_date(until)}")
 
 
 # --- Display ----------------------------------------------------------------------------------

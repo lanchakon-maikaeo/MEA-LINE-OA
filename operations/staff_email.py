@@ -136,17 +136,27 @@ def plan(
     `case` is None only for situations about no single case (M11 registry summary). Staff
     with a linked LINE get the important ones there too (ADR 0010), whether email is on or not.
     ADR 0050: `users` are the kind's own people, who get it only while their switch is on; the
-    แอดมินฝ่าย on duty get it too, and `actor_id` (who did the step) is left out."""
+    แอดมินฝ่าย on duty get it too, and `actor_id` (who did the step) is left out. ADR 0054: each
+    group has its own LINE and email switch, and the case's แอดมินกอง and แอดมินแผนก may be told
+    as well. One message per person and channel: the first group that reaches them decides its
+    buttons, so the ผู้รับผิดชอบ keeps รับงาน and the แอดมินฝ่าย on duty keeps the steps."""
     from operations import alert_routing, staff_line  # local: both read subjects from here
 
     if case is not None and case.is_example:
         return []  # ตัวอย่าง (15 ต.ค. 2569 Q33): no email or LINE about it
-    users = alert_routing.originals(kind, users, actor_id)
-    staff_line.plan(kind, key, case, users, chosen, division_id)  # first: the รับงาน button
-    duty = alert_routing.on_duty(kind, actor_id)
+    route = alert_routing
+    if route.originals_on(kind):  # off means nobody: no fallback to the unit's people either
+        own = route.originals(kind, users, actor_id)
+        staff_line.plan(kind, key, case, own, chosen, division_id)
+    duty = route.on_duty(kind, actor_id)
     staff_line.plan(kind, key, case, duty, True, division_id, duty=True)
-    duty = alert_routing.on_duty(kind, actor_id, email=True)
-    return mail(kind, key, case, users + duty, detail, text)
+    staff_line.plan(kind, key, case, route.case_admins(kind, case, actor_id), True, division_id)
+    mailed = (
+        route.originals(kind, users, actor_id, email=True)
+        + route.on_duty(kind, actor_id, email=True)
+        + route.case_admins(kind, case, actor_id, email=True)
+    )
+    return mail(kind, key, case, mailed, detail, text)
 
 
 def mail(kind, key, case, users, detail="", text=None):

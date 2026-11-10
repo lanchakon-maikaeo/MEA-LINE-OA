@@ -877,18 +877,31 @@ ORIGINAL_LABEL = {
     "staff_new_case": "แอดมินกองของกองเจ้าภาพ",
     "staff_assigned": "ผู้รับผิดชอบที่ถูกมอบหมาย",
 }
-ORIGINAL_ON = {"staff_assigned"}
+# ADR 0054 Q2: the owner กอง's แอดมินกอง hears of each new case, by LINE and by email.
+ORIGINAL_ON = {"staff_assigned", "staff_new_case"}
+# ADR 0054 Q10: the kinds about a case also reach the owner กอง's แอดมินกอง and the case's
+# แอดมินแผนก/กลุ่มงาน, when switched on; not where the former recipients are that แอดมินกอง.
+HOST, UNIT = "host_admin", "unit_admin"
+UNIT_KINDS = frozenset(
+    kind
+    for kind, group, *_ in PUSH_KINDS
+    if kind in ROUTED and group == "staff" and kind != "staff_admin_waiting"
+)
+HOSTED = UNIT_KINDS - {"staff_new_case", "staff_assignment_returned"}
 
 
 def original(kind):
     return ORIGINAL.get(kind, "people")
 
 
-# Kinds whose people are picked here as well: (group, label, on by default).
+# Kinds whose people are picked here as well: (group, label, on by default). Each group has a
+# LINE switch and an email switch (ADR 0054 Q9), both starting the same.
 PUSH_RECIPIENTS = {
     kind: (
         (DUTY, "แอดมินฝ่ายที่อยู่เวร", True),
         (original(kind), ORIGINAL_LABEL.get(kind, who), kind in ORIGINAL_ON),
+        *(((HOST, "แอดมินกองเจ้าภาพ", False),) if kind in HOSTED else ()),
+        *(((UNIT, "แอดมินแผนกหรือกลุ่มงานของเรื่อง", False),) if kind in UNIT_KINDS else ()),
     )
     for kind, _group, _label, who, _sample, _on in PUSH_KINDS
     if kind in ROUTED
@@ -907,7 +920,7 @@ def _switch(label, on):
 # ADR 0049 Q6: staff and order kinds may go by email too (when the server sends staff email);
 # the ones that went by LINE only before start off.
 EMAIL_GROUPS = ("staff", "order")
-EMAIL_OFF = {"staff_new_case", "staff_admin_waiting", "staff_registration"}
+EMAIL_OFF = {"staff_admin_waiting", "staff_registration"}  # ADR 0054 Q2: new cases mail too
 
 OPTIONS[PUSH_SELF] = _switch("Push Message: แจ้งเรื่องที่ตัวเองทำ", False)
 for _kind, _group, _label, _who, _sample, _on in PUSH_KINDS:
@@ -919,6 +932,9 @@ for _kind, _group, _label, _who, _sample, _on in PUSH_KINDS:
     for _to, _to_label, _to_on in PUSH_RECIPIENTS.get(_kind, ()):
         OPTIONS[f"{PUSH_PREFIX}{_kind}:{_to}"] = _switch(
             f"Push Message: {_label} → {_to_label}", _to_on
+        )
+        OPTIONS[f"{PUSH_PREFIX}{_kind}:{_to}:email"] = _switch(
+            f"Push Message: {_label} → {_to_label} → อีเมล", _to_on
         )
 
 
@@ -938,10 +954,20 @@ def push_rows(sent):
         for kind, g, label, who, sample, _ in PUSH_KINDS:
             if g != group:
                 continue
+            # ADR 0054 Q9: each group's LINE and email switch, side by side.
             people = [
-                {"key": f"{PUSH_PREFIX}{kind}:{to}", "label": to_label, "on": push_on(kind, to)}
+                {
+                    "label": to_label,
+                    "line": {"key": f"{PUSH_PREFIX}{kind}:{to}", "on": push_on(kind, to)},
+                    "email": {
+                        "key": f"{PUSH_PREFIX}{kind}:{to}:email",
+                        "on": push_on(kind, f"{to}:email"),
+                    },
+                }
                 for to, to_label, _ in PUSH_RECIPIENTS.get(kind, ())
             ]
+            for r in people:
+                r["on"] = r["line"]["on"] or r["email"]["on"]
             reached = [r["label"] for r in people if r["on"]]
             if not people:
                 reach = who

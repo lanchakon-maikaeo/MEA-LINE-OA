@@ -798,13 +798,24 @@ class ScopeAndPermissionTests(CaseTestCase):
                     payload={"assignee_id": bad},
                 )
         self.act(self.as_staff(self.supervisor), case, "assign", payload=assign)
-        self.act(self.as_staff(self.admin), case, "assign", payload={"assignee_id": self.meter.pk})
+        # ADR 0054 Q4: an admin hands the case to the owner กอง's แอดมินกอง, not past them.
+        self.assertFails(
+            ErrorCode.VALIDATION_ERROR,
+            self.act,
+            self.as_staff(self.admin),
+            case,
+            "assign",
+            payload={"assignee_id": self.meter.pk},
+        )
+        self.act(
+            self.as_staff(self.admin), case, "assign", payload={"assignee_id": self.supervisor.pk}
+        )
         decisions = Decision.objects.filter(case=case, action="assign").order_by("id")
         self.assertEqual(
             [d.data for d in decisions],
             [
                 {"assignee_id": self.meter2.pk, "previous_assignee_id": None},
-                {"assignee_id": self.meter.pk, "previous_assignee_id": self.meter2.pk},
+                {"assignee_id": self.supervisor.pk, "previous_assignee_id": self.meter2.pk},
             ],
         )
 

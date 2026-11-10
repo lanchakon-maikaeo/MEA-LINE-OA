@@ -46,6 +46,8 @@ OPEN = frozenset(set(S) - TERMINAL)
 
 # ADR 0049 Q9: all a ผู้รับผิดชอบ may do before pressing รับงาน.
 ACCEPTANCE_STEPS = frozenset({"accept_assignment", "return_assignment"})
+# ADR 0054 Q6: an assignee who may assign passes the case on without รับงาน first.
+BEFORE_ACCEPTANCE = ACCEPTANCE_STEPS | {"assign"}
 
 # Placeholder target: return to the status recorded when the case was paused.
 RESUME = "resume"

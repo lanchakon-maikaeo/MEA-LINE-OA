@@ -208,6 +208,13 @@ def choose_division(turn, user, status="active", page=1):
 
 def detail(turn, rows, buttons):
     """Keep actions in the same card as the details the supervisor is confirming."""
+    turn.replies.append(card(rows, buttons))
+
+
+def card(rows, buttons, alt=None):
+    """The case card as one LINE message: the first row as its title, the rest, then the buttons
+    as (label, postback data or link). `alt` is what a phone shows before the chat is opened
+    (ADR 0054 Q11: the alert's short text, never the reporter); the title by default."""
     contents = [
         {
             "type": "text",
@@ -231,29 +238,27 @@ def detail(turn, rows, buttons):
             {
                 "type": "button",
                 "height": "sm",
-                "style": "primary" if label == "ดำเนินการ" else "link",
+                "style": "primary" if label in ("ดำเนินการ", "รับงาน") else "link",
                 "color": "#16804A",
                 "action": action,
             }
         )
-    turn.replies.append(
-        {
-            "type": "flex",
-            "altText": rows[0][:400],
-            "contents": {
-                "type": "carousel",
-                "contents": [
-                    {
-                        "type": "bubble",
-                        "size": "mega",
-                        "body": {
-                            "type": "box",
-                            "layout": "vertical",
-                            "spacing": "md",
-                            "contents": contents,
-                        },
-                    }
-                ],
-            },
-        }
-    )
+    return {
+        "type": "flex",
+        "altText": (alt or rows[0])[:400],
+        "contents": {
+            "type": "carousel",
+            "contents": [
+                {
+                    "type": "bubble",
+                    "size": "mega",
+                    "body": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "spacing": "md",
+                        "contents": contents,
+                    },
+                }
+            ],
+        },
+    }

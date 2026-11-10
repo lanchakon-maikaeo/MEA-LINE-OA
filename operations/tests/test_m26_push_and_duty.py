@@ -46,7 +46,7 @@ class PushSwitchTests(TestCase):
         self.assertFalse(options.push_on("case_cancelled"))
         self.assertTrue(options.push_on("case_closed"))
         self.assertTrue(options.push_on("staff_new_case", "duty"))
-        self.assertFalse(options.push_on("staff_new_case", "division_admin"))
+        self.assertTrue(options.push_on("staff_new_case", "division_admin"))  # ADR 0054 Q2
         self.assertTrue(options.push_on("catch_up"))  # not listed: its own ตัวเลือกระบบ decides
 
     @override_settings(**PUSH_ON)
@@ -181,10 +181,8 @@ class NewCaseAlertTests(PickTestCase):
         case, _ = self.file("กองเครื่องวัดหน่วยไฟฟ้า")
         self.assertEqual(case.status, case.Status.AWAITING_APPROVAL)
         calls = self.planned(case)
-        self.assertEqual(len(calls), 1)
-        self.assertIn(self.ann, calls[0][3])
-        self.assertNotIn(self.head, calls[0][3])
-        options.change(None, "push:staff_new_case:division_admin", "on", "")
-        options.change(None, "push:staff_new_case:duty", "off", "")
+        # ADR 0054 Q2: the owner กอง's แอดมินกอง first, then the แอดมินฝ่าย on duty.
+        self.assertEqual([c[3] for c in calls], [[self.head], [self.ann]])
+        options.change(None, "push:staff_new_case:division_admin", "off", "")
         calls = self.planned(case)
-        self.assertEqual([c[3] for c in calls], [[self.head]])
+        self.assertEqual([c[3] for c in calls], [[self.ann]])

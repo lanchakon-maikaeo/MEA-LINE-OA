@@ -20,20 +20,6 @@
   </dl>
 </section>
 {% if scope.has_any_access %}
-<section class="section" aria-labelledby="acc-away">
-  <div class="section-head"><h2 id="acc-away">ไม่อยู่</h2></div>
-  {% if away %}
-    <p>ตอนนี้ตั้งไว้ว่าไม่อยู่ถึง <strong>{{ away|thai_day }}</strong> ระบบจะไม่มอบเรื่องใหม่ให้จนถึงวันนั้น</p>
-    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="back"><button class="btn btn--secondary btn--sm" type="submit">กลับมาแล้ว</button></form>
-  {% else %}
-    <p class="muted">ถ้าลาหรือไปราชการ ตั้งวันสุดท้ายที่ไม่อยู่ไว้ ระบบจะย้ายเรื่องที่ระบบมอบให้คุณไปให้คนสำรองทันที และไม่มอบเรื่องใหม่ให้จนถึงวันนั้น เรื่องที่มีคนมอบหมายให้คุณเองจะไม่ย้าย</p>
-    <form class="org-move__form" method="post">{% csrf_token %}<input type="hidden" name="action" value="away">
-      <div class="field"><label for="acc-until">ไม่อยู่ถึงวันที่</label><input id="acc-until" type="date" name="until" min="{{ today|date:'Y-m-d' }}" required></div>
-      <button class="btn btn--sm" type="submit">บันทึก</button></form>
-  {% endif %}
-</section>
-{% endif %}
-{% if scope.has_any_access %}
 <section class="section" aria-labelledby="acc-line">
   <div class="section-head"><h2 id="acc-line">LINE ของเจ้าหน้าที่</h2></div>
   {% if line %}

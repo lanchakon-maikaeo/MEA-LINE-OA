@@ -203,7 +203,8 @@ class StaffProfile(models.Model):
     roster_row = models.ForeignKey(
         "Employee", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
-    # ไม่อยู่ ถึงวันที่ (ADR 0031 Q21): set by the person; the system skips them until then.
+    # ADR 0054 Q13: retired; nothing reads or writes it and 0105 cleared it. The column stays
+    # so the release before keeps working (ADR 0015 Q6); a later release drops it.
     away_until = models.DateField(null=True, blank=True)
     must_change_password = models.BooleanField(default=False)
     notify_registrations = models.BooleanField(default=False)

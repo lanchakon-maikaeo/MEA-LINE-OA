@@ -448,6 +448,32 @@ def _duty_steps(line, user, case, now):
     return buttons
 
 
+# ADR 0054 Q6, Q11: the steps on the ผู้รับผิดชอบ's card, in this order; มอบหมายต่อ only for one
+# who may hand the case on.
+ASSIGNEE_STEPS = (
+    ("accept_assignment", "รับงาน"),
+    ("assign", "มอบหมายต่อ"),
+    ("return_assignment", "ขอคืนงาน"),
+)
+
+
+def _assignee_steps(line, user, case, now):
+    from operations import web_actions
+
+    offered = {o.name for o in web_actions.available(user, case)}
+    return [
+        (label, _token(line, "staff_step", {"case": str(case.pk), "action": action}, now))
+        for action, label in ASSIGNEE_STEPS
+        if action in offered
+    ]
+
+
+def _card(case, buttons, text):
+    from operations import staff_inbox, staff_work
+
+    return staff_inbox.card(staff_work.case_rows(case), buttons, alt=text)
+
+
 def plan(kind, key, case, users, chosen=False, division_id=None, duty=False):
     """LINE deliveries for staff with a linked LINE; nothing when the budget option is 0.
     `chosen`: the people were picked by an admin (Q33), so each of them is told. `division_id`:
@@ -472,9 +498,9 @@ def plan(kind, key, case, users, chosen=False, division_id=None, duty=False):
         token = _token(line, "staff_case", {"case": str(case.pk)}, now)
         text = _text(kind, case, user)
         buttons = [(f"ดูเรื่อง {case.number}", token)]
-        if take and user.pk == case.assignee_id:
-            step = {"case": str(case.pk), "action": "accept_assignment"}
-            buttons.insert(0, ("รับงาน", _token(line, "staff_step", step, now)))
+        card = kind == "staff_assigned" and user.pk == case.assignee_id
+        if take and card:
+            buttons[:0] = _assignee_steps(line, user, case, now)
         elif duty and acts:
             buttons += _duty_steps(line, user, case, now)
         level = IMPORTANT[kind]
@@ -489,7 +515,9 @@ def plan(kind, key, case, users, chosen=False, division_id=None, duty=False):
                     recipient_user=user,
                     case=case,
                     text=text,
-                    message=text_message(text, buttons),
+                    # ADR 0054 Q11: the ผู้รับผิดชอบ gets the case card; the lock screen shows
+                    # the short text only.
+                    message=_card(case, buttons, text) if card else text_message(text, buttons),
                     source_event=uuid.uuid5(NAMESPACE, f"{key}:{user.pk}"),
                     send_after=now + delay,
                 )

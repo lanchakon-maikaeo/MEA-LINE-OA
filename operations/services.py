@@ -723,6 +723,8 @@ def _assign(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "Assignee must be active staff of the owner division.")
     if not units.in_reach(ctx.scope, assignee):
         fail(ErrorCode.VALIDATION_ERROR, "มอบหมายได้เฉพาะคนในหน่วยของคุณ")  # ADR 0052 Q6
+    if ctx.scope and assignee not in units.assignable(ctx.scope, case):
+        fail(ErrorCode.VALIDATION_ERROR, "แอดมินฝ่ายมอบหมายได้เฉพาะแอดมินกองของกองเจ้าภาพ")  # 0054
     if case.assignee_id == assignee.pk:
         fail(ErrorCode.VALIDATION_ERROR, "This person is already responsible.")
     previous = case.assignee_id
@@ -923,10 +925,15 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         targets = spec.targets(case.kind, case.status)
         if not targets:
             fail(ErrorCode.INVALID_TRANSITION, f"{action} is not allowed while {case.status}.")
-        # ADR 0049 Q9: the ผู้รับผิดชอบ takes the case or gives it back before any other step;
-        # checked here, not only in the offered buttons, so no channel skips it.
+        # ADR 0049 Q9: the ผู้รับผิดชอบ takes the case or gives it back before any other step,
+        # or passes it on (ADR 0054 Q6); checked here, not only in the offered buttons, so no
+        # channel skips it.
         awaiting = case.awaits_acceptance and ctx.user is not None
-        if awaiting and case.assignee_id == ctx.user.pk and action not in workflow.ACCEPTANCE_STEPS:
+        if (
+            awaiting
+            and case.assignee_id == ctx.user.pk
+            and action not in workflow.BEFORE_ACCEPTANCE
+        ):
             fail(ErrorCode.FORBIDDEN, "กดรับงานเรื่องนี้ก่อน แล้วจึงทำขั้นอื่นได้")
         # One target, or (M07) several the handler chooses from by the line counters; RESUME is
         # resolved by the handler.

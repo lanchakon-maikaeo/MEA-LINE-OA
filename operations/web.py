@@ -7,7 +7,6 @@ cases are audited (round 2 Q3). Actions on a case go through services.perform_ac
 
 import dataclasses
 import uuid
-from datetime import date
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -538,6 +537,11 @@ def case_detail(request, number):
             # Zero trust (31 ต.ค. 2569 Q2): a typed name is not checked against the roster.
             "unverified": not (case.requester.is_anonymous or case.requester.is_internal)
             and employees.identity_state(case.requester) != "verified",
+            # ADR 0054 Q15: the รหัสพนักงาน the reporter proved, as the LINE card shows it.
+            "reporter_id": case.requester.employee.employee_id
+            if not case.requester.is_anonymous
+            and employees.identity_state(case.requester) == "verified"
+            else "",
         },
     )
 
@@ -765,9 +769,6 @@ def account(request):
             if line is not None and staff_line.unlink(line, request.user, "เลิกเชื่อมจากหน้าเว็บ"):
                 messages.success(request, "เลิกเชื่อม LINE แล้ว")
             return redirect("account")
-        elif request.POST.get("action") in ("away", "back"):
-            _set_away(request)
-            return redirect("account")
     grants = (
         RoleGrant.objects.filter(user=request.user, revoked_at__isnull=True)
         .select_related("division")
@@ -782,31 +783,8 @@ def account(request):
             "line": ChannelIdentity.objects.filter(staff_user=request.user).first(),
             "code": code,
             "code_minutes": staff_line.CODE_MINUTES,
-            "away": units.away_until(request.user),
-            "today": timezone.localdate(),
         },
     )
-
-
-def _set_away(request):
-    """ADR 0031 Q21: "ไม่อยู่ ถึงวันที่" set by the person; their system-given cases move on."""
-    until = None
-    if request.POST.get("action") == "away":
-        try:
-            until = date.fromisoformat(request.POST.get("until", ""))
-        except ValueError:
-            messages.error(request, "เลือกวันสุดท้ายที่ไม่อยู่")
-            return
-    try:
-        moved = units.set_away(request.user, until)
-    except ValidationError as exc:
-        messages.error(request, "; ".join(exc.messages))
-        return
-    if until is None:
-        messages.success(request, "บันทึกว่ากลับมาแล้ว เรื่องที่ย้ายไปแล้วยังอยู่กับคนใหม่")
-        return
-    extra = f" ย้ายเรื่องที่ยังไม่จบให้คนสำรอง {moved} เรื่อง" if moved else ""
-    messages.success(request, f"บันทึกว่าไม่อยู่ถึง {units.thai_date(until)} แล้ว{extra}")
 
 
 @login_required

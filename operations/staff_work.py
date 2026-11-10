@@ -573,74 +573,69 @@ def _form(user, case, action):
         form.fields = [f for f in form.fields if f.required]
     if action == "assign":
         # ADR 0050 Q17: pick a name, then confirm; the note stays on the web form.
-        heads = identity.staff_scope(user).is_department_supervisor
+        from operations import units
+
         form.fields = [f for f in form.fields if f.name == "assignee_id"]
         for field in form.fields:
-            field.choices = assignees(case, heads)
+            field.choices = assignees(case, st.scope)
             field.help = "ตัวเลขในวงเล็บคืองานที่ค้างอยู่"
-            if heads:
+            if units.heads_only(st.scope, case):
                 field.label = "มอบหมายให้แอดมินกอง"
     return form, offers[action], st
 
 
-def assignees(case, heads=False):
+def assignees(case, scope):
     """Who a case may go to from LINE, each with how many open cases they hold (ADR 0050 Q17):
-    the owner กอง's people, those of the case's แผนก first; for a แอดมินฝ่าย, only its แอดมินกอง,
-    who hand it on (Q18). Nobody marked away."""
+    the web's list in the web's order (ADR 0054 Q4, Q5)."""
     from django.db.models import Count
 
     from operations import units
-    from operations.models import Role, RoleGrant
-    from operations.web_actions import VIEWER_ROLES
 
-    grants = RoleGrant.objects.filter(
-        division_id=case.owner_division_id, revoked_at__isnull=True, user__is_active=True
-    ).exclude(role__in=VIEWER_ROLES)
-    if heads:
-        grants = grants.filter(role=Role.SUPERVISOR)
-    grants = grants.select_related("user__staff_profile")
-    people = {g.user_id: g.user for g in grants if not units.away_until(g.user)}
+    people = units.assignable(scope, case)
     held = dict(
         Case.objects.filter(assignee__in=people, status__in=workflow.OPEN)
         .values("assignee")
         .annotate(n=Count("pk"))
         .values_list("assignee", "n")
     )
-
-    def order(user):
-        profile = getattr(user, "staff_profile", None)
-        other = not (case.section_id and profile and profile.section_id == case.section_id)
-        return (other, work_orders.name_of(user))
-
-    named = sorted(people.values(), key=order)
-    return [(str(u.pk), f"{work_orders.name_of(u)} ({held.get(u.pk, 0)})") for u in named]
+    return [(str(u.pk), f"{work_orders.name_of(u)} ({held.get(u.pk, 0)})") for u in people]
 
 
 def reporter(case):
     """ADR 0042 Q5: who reported, from which unit and when; an anonymous reporter by the alias
-    only (ADR 0010)."""
-    from operations import roster, units
+    only (ADR 0010). ADR 0054 Q15: the รหัสพนักงาน once the reporter proved it (or an admin
+    linked it) and the ตำแหน่ง, as on the web's case page, which marks the unproven ones too."""
+    from operations import employees, roster, units
 
     person = case.requester
+    rows = []
     if person.is_anonymous:
         name = f"ผู้แจ้งไม่ระบุตัวตน{f' · {person.alias}' if person.alias else ''}"
         unit = case.district.name
+        rows.append(f"ผู้แจ้ง: {name}")
     else:
-        name = person.display_name
-        path = [p for p in roster.employee_path(person.employee) if p != units.NA]
+        proven = employees.identity_state(person) == "verified"
+        mark = "" if proven or person.is_internal else " · ยังไม่ยืนยันตัวตน"
+        rows.append(f"ผู้แจ้ง: {person.display_name}{mark}")
+        employee = person.employee
+        if proven:
+            rows.append(f"รหัสพนักงาน: {employee.employee_id}")
+        if employee and employee.position:
+            rows.append(f"ตำแหน่ง: {employee.position}")
+        path = [p for p in roster.employee_path(employee) if p != units.NA]
         unit = " › ".join(path[:2]) if path else case.district.name
     when = timezone.localtime(case.reported_at or case.submitted_at)
     return [
-        f"ผู้แจ้ง: {name}",
+        *rows,
         f"หน่วยงาน: {unit}",
         f"เวลาแจ้ง: {units.thai_date(when.date())} {when:%H:%M} น.",
     ]
 
 
-def case_detail(turn, user, case):
-    """The case, who reported it, and every step this person may take in chat (ADR 0042 Q5:
-    no web links; a step that needs a long form stays on the web)."""
-    from operations import case_numbers, staff_inbox, typed_lines, units, web_actions
+def case_rows(case):
+    """The case card's rows (ADR 0042 Q5), for the LINE menu and the assignment alert (ADR 0054
+    Q11)."""
+    from operations import case_numbers, staff_inbox, typed_lines, units
 
     level = case.triage.effective_priority if hasattr(case, "triage") else ""
     who = ""
@@ -664,6 +659,15 @@ def case_detail(turn, user, case):
             unit = line.item.unit if typed_lines.is_shared(line.item) else ""
             rows.append(f"· {typed_lines.label_of(row['group'])} {typed_lines.describe(row, unit)}")
     rows.append(f"รายละเอียด: {staff_inbox.details(case)[:300] or 'ไม่ระบุ'}")
+    return rows
+
+
+def case_detail(turn, user, case):
+    """The case, who reported it, and every step this person may take in chat (ADR 0042 Q5:
+    no web links; a step that needs a long form stays on the web)."""
+    from operations import staff_inbox, web_actions
+
+    rows = case_rows(case)
     buttons = []
     if options.get(options.STAFF_LINE_ACTIONS) == "act":
         # ADR 0044: the web's สิ่งที่ทำได้, ดำเนินการ first (เริ่มคัดกรอง only while the

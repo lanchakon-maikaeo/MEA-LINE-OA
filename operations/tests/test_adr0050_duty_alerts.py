@@ -253,7 +253,7 @@ class RoutingTests(AlertTestCase):
         people = set(
             N.objects.filter(kind="staff_new_case").values_list("recipient_user", flat=True)
         )
-        self.assertEqual(people, {self.ann.pk})  # Q6: the แอดมินกอง's switch starts off
+        self.assertEqual(people, {self.ann.pk, self.head.pk})  # ADR 0054 Q2: and the แอดมินกอง
 
     @override_settings(STAFF_EMAIL_ENABLED=True)
     def test_email_has_its_own_switch_and_reaches_admins_without_line(self):
@@ -311,13 +311,11 @@ class LineStepTests(AlertTestCase):
         self.assertTrue(labels[0].startswith("ดูเรื่อง"))
 
     def test_the_admin_assigns_one_of_the_owner_heads_and_confirms(self):
-        away = make_staff("kcw-away", (Role.SUPERVISOR, "กคว."))
-        StaffProfile.objects.filter(user=away).update(away_until=timezone.localdate())
         make_staff("kcw-staff", (Role.STAFF, "กคว."))
         case = self.new_case()
         reply = self.step(case, "มอบหมายให้แอดมินกอง")
         names = [label for label in buttons(reply) if label != "ยกเลิก"]
-        self.assertEqual(names, ["Kcw-Head (0)"])  # Q18: แอดมินกอง only, nobody away
+        self.assertEqual(names, ["Kcw-Head (0)"])  # Q18: แอดมินกอง only
         reply = self.press(ANN_LINE, "Kcw-Head (0)")
         self.assertIn(f"มอบหมายเรื่อง {case.number} ให้ Kcw-Head ใช่ไหม", texts(reply))
         self.press(ANN_LINE, "ยืนยัน")
@@ -362,9 +360,10 @@ class LineStepTests(AlertTestCase):
     def test_a_division_admin_picks_from_everyone_in_the_division(self):
         case = self.new_case()
         member = make_staff("kcw-member", (Role.STAFF, "กคว."))
-        choices = dict(staff_work.assignees(case))
+        choices = dict(staff_work.assignees(case, identity.staff_scope(self.head)))
         self.assertIn(str(member.pk), choices)
-        self.assertNotIn(str(member.pk), dict(staff_work.assignees(case, heads=True)))
+        ann = dict(staff_work.assignees(case, identity.staff_scope(self.ann)))
+        self.assertNotIn(str(member.pk), ann)
 
 
 class DutyBadgeTests(AlertTestCase):

@@ -33,7 +33,6 @@ from operations import (
 )
 from operations.fulfilment import CANCEL_RESOLUTIONS
 from operations.models import (
-    VIEWER_ROLES,
     AuthorityGrant,
     Case,
     CaseTriage,
@@ -44,7 +43,6 @@ from operations.models import (
     ProblemResolution,
     ReturnUnit,
     Role,
-    RoleGrant,
     Section,
     WorkGroup,
 )
@@ -509,13 +507,14 @@ def _awaits_me(st):
 
 def available(user, case, st=None):
     """Actions this viewer may start now, the primary one first (empty for read-only viewers).
-    ADR 0049 Q9: a ผู้รับผิดชอบ who has not pressed รับงาน may only take it or give it back."""
+    ADR 0049 Q9: a ผู้รับผิดชอบ who has not pressed รับงาน may only take it or give it back, or
+    pass it on when they may assign (ADR 0054 Q6)."""
     st = st or situation(user, case)
     names = []
     hidden = set() if options.old_stock() else STOCK
     waiting = _awaits_me(st)
     for name, rule in RULES.items():
-        if name in hidden or (waiting and name not in workflow.ACCEPTANCE_STEPS):
+        if name in hidden or (waiting and name not in workflow.BEFORE_ACCEPTANCE):
             continue
         spec = workflow.ACTIONS.get(name)
         if (
@@ -673,26 +672,8 @@ def _reason(required=False, label="เหตุผล", help_text=""):
 
 
 def _members(st):
-    """Who may take the case: everyone with a working role in its กอง, the แอดมินแผนก/กลุ่มงาน
-    included (ADR 0052 Q16); a unit admin picks among the people of their own unit (Q6)."""
-    case = st.case
-    grants = (
-        RoleGrant.objects.filter(
-            division_id=case.owner_division_id, revoked_at__isnull=True, user__is_active=True
-        )
-        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: nobody assigns work to a viewer
-        .select_related("user__staff_profile")
-        .order_by("user__username")
-    )
-    seen, choices = set(), []
-    for g in grants:
-        if st.scope is not None and not units.in_reach(st.scope, g.user):
-            continue
-        if g.user_id not in seen:
-            seen.add(g.user_id)
-            profile = getattr(g.user, "staff_profile", None)
-            choices.append((str(g.user_id), profile.display_name if profile else g.user.username))
-    return choices
+    """Who may take the case, in the order LINE lists them too (ADR 0054 Q4, Q5)."""
+    return [(str(u.pk), units.display(u)) for u in units.assignable(st.scope, st.case)]
 
 
 def _divisions(exclude=None, real=False):
