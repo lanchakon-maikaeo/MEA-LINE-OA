@@ -245,7 +245,9 @@ class MatrixTests(FulfilmentTestCase):
             spec = workflow.ACTIONS[name]
             self.assertTrue(spec.enabled, name)
             self.assertEqual(spec.enabled_kinds, [K.WITHDRAWAL], name)
-        self.assertEqual(workflow.ACTIONS["confirm"].enabled_kinds, [K.WITHDRAWAL, K.PROBLEM])
+        self.assertEqual(
+            workflow.ACTIONS["confirm"].enabled_kinds, [K.WITHDRAWAL, K.RETURN, K.PROBLEM]
+        )  # ADR 0055: a return followed by its number is confirmed too
         self.assertEqual(
             workflow.ACTIONS["close"].enabled_kinds, [K.WITHDRAWAL, K.RETURN, K.PROBLEM]
         )

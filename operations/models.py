@@ -3448,6 +3448,12 @@ class Calendar(models.Model):
     def __str__(self):
         return self.name
 
+    @property
+    def is_pickup(self):
+        """นัดรับของ ("pickup", "pickup-…"): ADR 0055's appointment steps are its own; the
+        โน้ตบุ๊กและหัวอ่าน calendar keeps its flow as it was."""
+        return self.key.startswith("pickup")
+
 
 class CalendarSlot(models.Model):
     """ช่วงเวลาที่เจ้าหน้าที่เปิดให้ขอนัด (Q13, Q34): staff choose the times, freely."""
@@ -3457,6 +3463,8 @@ class CalendarSlot(models.Model):
     ends_at = models.DateTimeField()
     capacity = models.PositiveSmallIntegerField(default=1)
     is_open = models.BooleanField(default=True)
+    # ADR 0055: a time staff picked freely for one appointment; never offered to anyone else.
+    private = models.BooleanField(default=False)
     note = models.CharField(max_length=200, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
@@ -3513,6 +3521,14 @@ class Appointment(models.Model):
     class Meta:
         ordering = ["-requested_at"]
 
+    @property
+    def takes_method(self):
+        """How the goods come belongs to a withdrawal's นัดรับของ only (ADR 0055), never to the
+        notebook or meter-reader calendars."""
+        if not self.calendar.is_pickup:
+            return False
+        return self.case_id is None or self.case.kind == "withdrawal"
+
 
 class CaseNumber(models.Model):
     """เลขติดตามที่เจ้าหน้าที่เพิ่มเข้าเรื่อง (ADR 0047): the first number stays Case.sap_number."""
@@ -3553,6 +3569,7 @@ class CaseMilestone(models.Model):
     recorded_at = models.DateTimeField(auto_now_add=True)
     # ADR 0047: คีย์จ่ายแล้ว comes once per number of a withdrawal; "" is the case's first number.
     number = models.CharField(max_length=60, blank=True, default="")
+    via = models.CharField(max_length=8, blank=True, default="")  # ADR 0055: "line" from LINE
 
     class Meta:
         ordering = ["case", "on", "pk"]

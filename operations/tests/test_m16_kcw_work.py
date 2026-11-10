@@ -152,10 +152,16 @@ class WarehouseTests(WorkTestCase):
         warehouse.record(self.kcw, [second], S.ISSUED, monday + timedelta(days=3))
         warehouse.record(self.kcw, [second], S.DELIVERED, monday + timedelta(days=4))
         second.refresh_from_db()
-        self.assertEqual(second.status, "closed")  # Q37: the district has it, the case ends
+        # ADR 0055: the district has it, the work is done; the requester confirms to close.
+        self.assertEqual(second.status, "awaiting_confirmation")
         reply = self.type(ALICE, "ขอบคุณ")
         self.assertIn("จ่ายแล้ว", texts(reply))
         self.assertIn("วิธีรับ: รถ กคว. ไปส่ง", texts(reply))
+        done = [m for m in reply if "กด “ยืนยันผล” เรื่องจะปิด" in m.get("text", "")]
+        self.assertIn(second.number, texts(done))
+        self.assertIn("ปิดแล้ว", texts(self.press(ALICE, "ยืนยันผล", done)))
+        second.refresh_from_db()
+        self.assertEqual(second.status, "closed")
         reply = self.type(ALICE, first.number)
         self.assertIn("ขั้นงานคลัง: จ่ายแล้ว", texts(reply))
 

@@ -35,6 +35,7 @@ from operations import (
     routing_words,
     support,
     units,
+    warehouse,
     workflow,
 )
 from operations.contracts import (
@@ -815,11 +816,16 @@ HANDLERS = {
     # ADR 0025: recorded by the system only
     "start_work": approvals.system_only,
     "skip_screening": approvals.system_only,
+    "finish_on_delivery": approvals.system_only,  # ADR 0055: warehouse.record does it
 }
 
 # Shared lifecycle actions: each kind has its own rules (M07 Q6, M08 Q11/Q13, M09 Q1-Q4).
 BY_KIND = {
-    "confirm": {Case.Kind.WITHDRAWAL: fulfilment.confirm, Case.Kind.PROBLEM: problems.confirm},
+    "confirm": {
+        Case.Kind.WITHDRAWAL: fulfilment.confirm,
+        Case.Kind.RETURN: warehouse.confirm_done,
+        Case.Kind.PROBLEM: problems.confirm,
+    },
     "close": {
         Case.Kind.WITHDRAWAL: fulfilment.close,
         Case.Kind.RETURN: returns.close,
@@ -830,6 +836,14 @@ BY_KIND = {
 
 
 def _handler(action, case):
+    if (
+        action in ("confirm", "close")
+        and case.status == Case.Status.AWAITING_CONFIRMATION
+        and case.kind != Case.Kind.PROBLEM
+        and warehouse.tracking(case)
+    ):
+        # ADR 0055: the last warehouse stage waits for the requester like a resolution does.
+        return warehouse.confirm_done if action == "confirm" else warehouse.close_done
     if action in BY_KIND:
         return BY_KIND[action][case.kind]
     return HANDLERS[action]

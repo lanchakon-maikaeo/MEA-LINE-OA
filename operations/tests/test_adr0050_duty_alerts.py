@@ -342,15 +342,23 @@ class LineStepTests(AlertTestCase):
         case.refresh_from_db()
         self.assertEqual((case.assignee, case.accepted_by), (self.ann, self.ann))  # Q20
 
-    def test_a_long_form_step_answers_without_a_link(self):
+    def test_a_step_that_cannot_be_undone_asks_twice_without_a_link(self):
         self.link(self.head, HEAD_LINE)
         case = self.new_case()
         line = self.head_line()
-        step = {"case": str(case.pk), "action": "cancel"}  # cannot be undone: the web
+        step = {"case": str(case.pk), "action": "cancel"}  # ADR 0055: in LINE, two confirms
         data = staff_line._token(line, "staff_step", step, timezone.now())
         reply = self.say(self.postback(HEAD_LINE, data))
-        self.assertIn("ขั้นนี้ทำในเว็บ", texts(reply))
+        self.assertIn("เหตุผล (ไม่บังคับ)", texts(reply))
         self.assertFalse([v for v in buttons(reply).values() if str(v).startswith("http")])
+        reply = self.press(HEAD_LINE, "ข้าม", reply)  # no reason required
+        reply = self.press(HEAD_LINE, "ข้าม", reply)  # nor an internal note
+        self.assertIn("ขั้นตอนนี้ไม่สามารถย้อนกลับได้", texts(reply))
+        reply = self.press(HEAD_LINE, "ทำต่อ", reply)
+        self.assertIn("ย้อนกลับไม่ได้", texts(reply))
+        self.press(HEAD_LINE, "ยืนยันยกเลิกเรื่อง", reply)
+        case.refresh_from_db()
+        self.assertEqual(case.status, "cancelled")
 
     def head_line(self):
         from operations.models import ChannelIdentity

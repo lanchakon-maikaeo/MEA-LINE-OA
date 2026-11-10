@@ -5,7 +5,6 @@ division's cases; admins see every division read-only and their visits to other 
 cases are audited (round 2 Q3). Actions on a case go through services.perform_action.
 """
 
-import dataclasses
 import uuid
 from urllib.parse import urlencode
 
@@ -24,6 +23,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from operations import (
     admin_nav,
     approvals,
+    case_menu,
     case_numbers,
     casepage,
     charts,
@@ -511,14 +511,8 @@ def case_detail(request, number):
     back = request.session.get("division", "")
     codes = {d.code for d in queues.own_divisions(scope)}
     st = web_actions.situation(request.user, case)
-    offers = web_actions.available(request.user, case, st)
     panel = warehouse_web.case_panel(request.user, case)
-    steps = warehouse_web.case_steps(case, panel)
-    primary = next((o for o in offers if o.primary), None)
-    if steps and not (primary and primary.name == "accept_assignment"):
-        # ADR 0051 Q8: an appointment, else the next warehouse stage, is what to do first.
-        offers = [dataclasses.replace(o, primary=False) for o in offers]
-        primary = None
+    menu = case_menu.build(request.user, case, st, panel)  # ADR 0055: the LINE card's list
     return render(
         request,
         "operations/case_detail.html",
@@ -526,11 +520,8 @@ def case_detail(request, number):
             "case": case,
             "page": data,
             "back_division": back if back in codes else "",
-            "offers": offers,
-            "primary": primary,
-            "steps": steps,
-            "irreversible": ", ".join(o.label for o in offers if o.irreversible),
-            "hints": web_actions.hints(st, offers),
+            "menu": menu,
+            "hints": web_actions.hints(st, menu.offers),
             "can_upload": uploads.may_upload(st),
             "panel": panel,
             "tracking_numbers": case_numbers.panel(request.user, case),

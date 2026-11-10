@@ -31,7 +31,15 @@ KIND_STATUSES = {
         S.AWAITING_CONFIRMATION,
     ),
     # ADR 0025: returns and problem reports wait for the owner division's approval too.
-    K.RETURN: (S.SUBMITTED, S.TRIAGE, S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.IN_PROGRESS),
+    # ADR 0055: a return followed by its number waits for the requester after its last stage.
+    K.RETURN: (
+        S.SUBMITTED,
+        S.TRIAGE,
+        S.AWAITING_APPROVAL,
+        S.AWAITING_EXECUTION,
+        S.IN_PROGRESS,
+        S.AWAITING_CONFIRMATION,
+    ),
     K.PROBLEM: (
         S.SUBMITTED,
         S.TRIAGE,
@@ -468,7 +476,7 @@ ACTIONS = {
                     S.AWAITING_CONFIRMATION: frozenset({S.AWAITING_CONFIRMATION, S.CLOSED}),
                     S.CANCELLED: frozenset({S.CANCELLED}),
                 },
-                K.RETURN: {},
+                K.RETURN: {S.AWAITING_CONFIRMATION: frozenset({S.CLOSED})},  # ADR 0055
                 K.PROBLEM: {S.AWAITING_CONFIRMATION: frozenset({S.CLOSED})},
             },
         ),
@@ -478,9 +486,26 @@ ACTIONS = {
             "M07-M09",
             _per_kind(
                 lambda k, st: (
-                    {S.IN_PROGRESS: {S.CLOSED}}
+                    {S.IN_PROGRESS: {S.CLOSED}, S.AWAITING_CONFIRMATION: {S.CLOSED}}
                     if k == K.RETURN
                     else {S.AWAITING_CONFIRMATION: {S.CLOSED}}
+                )
+            ),
+        ),
+        # ADR 0055: the last warehouse stage of a case followed by its number ends the work; the
+        # requester then confirms the result. Recorded by the system with the stage only.
+        ActionSpec(
+            "finish_on_delivery",
+            "งานคลังขั้นสุดท้าย รอหน่วยงาน (เขต/ฝ่าย)ยืนยันผล",
+            "M07-M08",
+            _per_kind(
+                lambda k, _: (
+                    {}
+                    if k == K.PROBLEM
+                    else {
+                        S.AWAITING_EXECUTION: {S.AWAITING_CONFIRMATION},
+                        S.IN_PROGRESS: {S.AWAITING_CONFIRMATION},
+                    }
                 )
             ),
         ),

@@ -6,7 +6,7 @@ truck days, saved with a reason. ปฏิทิน: a week of slots with their 
 and confirm, move or reject requests. The case card posts staff messages to the case chat.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -716,12 +716,21 @@ def case_appointment(request, number):
         return HttpResponse(status=405)
     appointment = get_object_or_404(Appointment, pk=request.POST.get("appointment"), case=case)
     action = request.POST.get("action", "")
-    slot = None
-    if action == "move":
+    slot = at = None
+    warnings = []
+    if action == "move" and request.POST.get("at"):
+        # ADR 0055: a time picked freely, kept for this appointment alone.
+        at = _moment(request.POST["at"])
+        if at is None:
+            messages.error(request, "วันเวลาไม่ถูกต้อง")
+            return redirect(f"{reverse('case-detail', args=[case.number])}#s-warehouse")
+    elif action == "move":
         slot = CalendarSlot.objects.filter(
-            pk=request.POST.get("slot") or 0, calendar=appointment.calendar
+            pk=request.POST.get("slot") or 0, calendar=appointment.calendar, private=False
         ).first()
     try:
+        if at is not None:
+            _, _, warnings = calendars.free_time(appointment.calendar, at, appointment)
         calendars.decide(
             request.user,
             appointment,
@@ -729,12 +738,24 @@ def case_appointment(request, number):
             slot=slot,
             method=request.POST.get("method", ""),
             note=request.POST.get("note", ""),
+            at=at,
         )
     except (ValidationError, PermissionDenied) as exc:
         messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์ทำรายการนี้"])))
     else:
         messages.success(request, "บันทึกนัดแล้ว ผู้แจ้งจะเห็นข้อความตอนส่งข้อความมาครั้งถัดไป")
+        for warning in warnings:
+            messages.warning(request, f"โปรดทราบ: นัดนี้อยู่ใน{warning}")
     return redirect(f"{reverse('case-detail', args=[case.number])}#s-warehouse")
+
+
+def _moment(text):
+    """A datetime-local value ("2026-11-12T09:30") in local time, or None."""
+    try:
+        moment = datetime.fromisoformat(str(text or "").strip())
+    except ValueError:
+        return None
+    return timezone.make_aware(moment) if timezone.is_naive(moment) else moment
 
 
 def case_panel(user, case):

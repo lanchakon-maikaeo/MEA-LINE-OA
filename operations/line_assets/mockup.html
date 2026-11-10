@@ -399,16 +399,38 @@ kbd {
       box.style.display = "flex";
       box.style.flexDirection = node.layout === "horizontal" ? "row" : "column";
       box.style.gap = { sm: "6px", md: "10px", lg: "14px" }[node.spacing] || "0";
+      // ADR 0055: the card's tiles are styled boxes, as LINE draws them.
+      if (node.backgroundColor) box.style.background = node.backgroundColor;
+      if (node.borderColor) box.style.border = (node.borderWidth || "1px") + " solid " + node.borderColor;
+      if (node.cornerRadius) box.style.borderRadius = { sm: "4px", md: "8px", lg: "12px" }[node.cornerRadius] || node.cornerRadius;
+      if (node.paddingAll) box.style.padding = node.paddingAll;
+      if (node.justifyContent) box.style.justifyContent = node.justifyContent;
+      if (node.height) box.style.minHeight = node.height;
+      if (node.flex !== undefined) box.style.flex = String(node.flex);
+      if (node.margin) box.style.marginTop = { sm: "6px", md: "10px", lg: "14px" }[node.margin] || node.margin;
       (node.contents || []).forEach(function (c) { box.appendChild(flexNode(c)); });
       return box;
+    }
+    if (node.type === "separator") {
+      var line = el("div");
+      line.style.borderTop = "1px solid #e6e6e6";
+      return line;
+    }
+    if (node.type === "filler") {
+      var gap = el("div");
+      gap.style.flex = "1";
+      return gap;
     }
     if (node.type === "text") {
       var t = el("div", "ftext " + (node.size || "md") + (node.weight === "bold" ? " bold" : ""), node.text);
       if (node.color) t.style.color = node.color;
+      if (node.align) t.style.textAlign = node.align;
       return t;
     }
     if (node.type === "button") {
       var b = el("button", "fbtn" + (node.style === "primary" ? " primary" : ""), node.action.label);
+      if (node.color && node.style === "primary") b.style.background = node.color;
+      if (node.color && node.style === "link") b.style.color = node.color;
       b.type = "button";
       b.dataset.label = node.action.label;
       if (node.action.displayText) b.dataset.display = node.action.displayText;
@@ -418,6 +440,11 @@ kbd {
   }
   function bubble(contents) {
     var card = el("div", "flex");
+    if (contents.header) {
+      var head = el("div", "fbody");
+      head.appendChild(flexNode(contents.header));
+      card.appendChild(head);
+    }
     if (contents.body) {
       var body = el("div", "fbody");
       body.appendChild(flexNode(contents.body));

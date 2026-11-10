@@ -2,10 +2,10 @@
 {% if panel.warehouse or panel.milestones or panel.appointments %}{# ADR 0051 Q10: the record only; its buttons are in สิ่งที่ทำได้. #}
 <section data-tour="stages" class="section" aria-labelledby="s-warehouse">
   <div class="section-head"><h2 id="s-warehouse">งานคลังและนัด</h2></div>
-  {% if panel.milestones %}<ol class="wh-steps">{% for m in panel.milestones %}<li><strong>{{ m.label }}</strong>{% if panel.per_number and m.stage == "keyed" %} {{ m.number|default:case.sap_number }}{% endif %} {{ m.on|thai_date }}{% if m.planned_on %} · วันจ่าย {{ m.planned_on|thai_date }}{% endif %}{% if m.note %} · {{ m.note }}{% endif %} <span class="muted">{{ m.recorded_by.staff_profile.display_name|default:m.recorded_by.username }}</span></li>{% endfor %}</ol>{% elif panel.warehouse %}<p class="muted">ยังไม่ได้บันทึกขั้นงานคลัง</p>{% endif %}
+  {% if panel.milestones %}<ol class="wh-steps">{% for m in panel.milestones %}<li><strong>{{ m.label }}</strong>{% if panel.per_number and m.stage == "keyed" %} {{ m.number|default:case.sap_number }}{% endif %} {{ m.on|thai_date }}{% if m.planned_on %} · วันจ่าย {{ m.planned_on|thai_date }}{% endif %}{% if m.note %} · {{ m.note }}{% endif %} <span class="muted">{{ m.recorded_by.staff_profile.display_name|default:m.recorded_by.username }}{% if m.via == "line" %} · ทาง LINE{% endif %}</span></li>{% endfor %}</ol>{% elif panel.warehouse %}<p class="muted">ยังไม่ได้บันทึกขั้นงานคลัง</p>{% endif %}
   {% for a in panel.appointments %}
   <div class="wh-appt">
-    <p>{{ a.calendar.name }}: {% if a.slot %}{{ a.slot.starts_at|thai_datetime }}{% else %}ยังไม่มีช่วงเวลา{% endif %}{% if a.method %} · {{ a.get_method_display }}{% endif %} · <span class="tag">{{ a.get_status_display }}</span>{% if a.note %} <span class="muted">{{ a.note }}</span>{% endif %}</p>
+    <p>{{ a.calendar.name }}: {% if a.slot %}{{ a.slot.starts_at|thai_datetime }}{% else %}ยังไม่มีช่วงเวลา{% endif %}{% if a.method and a.takes_method %} · {{ a.get_method_display }}{% endif %} · <span class="tag">{{ a.get_status_display }}</span>{% if a.note %} <span class="muted">{{ a.note }}</span>{% endif %}</p>
   </div>
   {% endfor %}
 </section>

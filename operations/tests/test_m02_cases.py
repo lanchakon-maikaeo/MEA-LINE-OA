@@ -196,7 +196,14 @@ WORKING = {
         "awaiting_confirmation",
     },
     # ADR 0025: returns and problem reports wait for the owner division's approval too.
-    K.RETURN: {"triage", "awaiting_approval", "awaiting_execution", "in_progress"},
+    # ADR 0055: a return followed by its number waits for the requester after its last stage.
+    K.RETURN: {
+        "triage",
+        "awaiting_approval",
+        "awaiting_execution",
+        "in_progress",
+        "awaiting_confirmation",
+    },
     K.PROBLEM: {"triage", "awaiting_approval", "in_progress", "awaiting_confirmation"},
 }
 PAUSED = {"awaiting_info", "on_hold"}
@@ -343,10 +350,13 @@ class TransitionMatrixTests(CaseTestCase):
             expected = set(workflow.KIND_STATUSES[kind]) | workflow.PAUSED | workflow.TERMINAL
             self.assertEqual(seen, expected, kind)
 
-    def test_return_cases_close_without_district_confirmation(self):
+    def test_return_cases_wait_for_confirmation_only_after_the_last_stage(self):
         for spec in workflow.ACTIONS.values():
-            for targets in spec.transitions[K.RETURN].values():
-                self.assertNotIn(S.AWAITING_CONFIRMATION, targets)
+            if spec.name == "finish_on_delivery":  # ADR 0055: a return followed by its number
+                continue
+            for source, targets in spec.transitions[K.RETURN].items():
+                if source != S.AWAITING_CONFIRMATION:  # staying there is no way in
+                    self.assertNotIn(S.AWAITING_CONFIRMATION, targets, spec.name)
         self.assertEqual(workflow.ACTIONS["close"].targets(K.RETURN, S.IN_PROGRESS), {S.CLOSED})
 
     def test_contract_document_exports_matrix_actions_and_errors(self):

@@ -27,12 +27,12 @@
       <span class="tag cal-tag cal-tag--{{ a.tone }}">{{ a.calendar.name }}</span>
       <strong>{% if a.slot %}{{ a.slot.starts_at|date:"D j M H:i" }}{% else %}ยังไม่เลือกช่วง{% endif %}</strong>
       {% if a.case %}<a href="{% url 'case-detail' a.case.number %}">{{ a.case.number }}</a> · {{ a.case.district.name }}{% endif %}
-      {% if a.method %} · {{ a.get_method_display }}{% endif %}
+      {% if a.method and a.takes_method %} · {{ a.get_method_display }}{% endif %}
     </div>
     <form method="post" class="cal-req__form">
       {% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}">
-      <label class="visually-hidden" for="m{{ a.pk }}">วิธีรับของ</label>
-      <select id="m{{ a.pk }}" name="method"><option value="">วิธีรับเดิม</option>{% for v, l in methods %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select>
+      {% if a.takes_method %}<label class="visually-hidden" for="m{{ a.pk }}">วิธีรับของ</label>
+      <select id="m{{ a.pk }}" name="method"><option value="">วิธีรับเดิม</option>{% for v, l in methods %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select>{% endif %}
       <label class="visually-hidden" for="s{{ a.pk }}">ช่วงใหม่</label>
       <select id="s{{ a.pk }}" name="slot"><option value="">ช่วงใหม่ (เปลี่ยนนัด)</option>{% for s in a.free %}<option value="{{ s.pk }}">{{ s.starts_at|date:"D j M H:i" }}</option>{% endfor %}</select>
       <label class="visually-hidden" for="n{{ a.pk }}">หมายเหตุถึงผู้แจ้ง</label>
@@ -87,7 +87,7 @@
       <div class="cal-slot__time">{{ s.starts_at|time:"H:i" }} ถึง {{ s.ends_at|time:"H:i" }} <span class="muted">นัดแล้ว {{ s.taken }} จาก {{ s.capacity }}</span>{% if s.note %} <span class="muted">{{ s.note }}</span>{% endif %}</div>
       {% for a in s.appointments.all %}{% if a.status == "requested" or a.status == "confirmed" %}
         {% if not a.mine %}<div class="cal-slot__who">ไม่ว่าง</div>{% else %}
-        <div class="cal-slot__who">{% if a.case %}<a href="{% url 'case-detail' a.case.number %}">{{ a.case.number }}</a>{% else %}ร่างที่ยังไม่ส่ง{% endif %} · {{ a.get_status_display }}{% if a.method %} · {{ a.get_method_display }}{% endif %}
+        <div class="cal-slot__who">{% if a.case %}<a href="{% url 'case-detail' a.case.number %}">{{ a.case.number }}</a>{% else %}ร่างที่ยังไม่ส่ง{% endif %} · {{ a.get_status_display }}{% if a.method and a.takes_method %} · {{ a.get_method_display }}{% endif %}
           {% if a.status == "confirmed" %}<form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="appointment" value="{{ a.pk }}"><input type="hidden" name="day" value="{{ picked.date|date:'Y-m-d' }}"><button class="btn btn--ghost btn--sm" name="action" value="done" type="submit">ทำเสร็จ</button></form>{% endif %}
         </div>
         {% endif %}

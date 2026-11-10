@@ -586,7 +586,7 @@ class WebTests(RegistryTestCase):
         reader = self.client_for(self.reg)
         page = reader.get(f"/cases/{case.number}/")
         self.assertContains(page, "เลขเอกสาร SAP")
-        self.assertEqual(page.context["offers"], [])  # read only: no actions offered
+        self.assertEqual(page.context["menu"].items, [])  # read only: no actions offered
         self.assertEqual(reader.get(f"/cases/{unrelated.number}/").status_code, 404)
         # Only the registry unit gets this reading right, not every division.
         self.assertEqual(self.client_for(self.meter).get(f"/cases/{case.number}/").status_code, 404)

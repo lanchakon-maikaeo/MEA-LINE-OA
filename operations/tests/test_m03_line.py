@@ -88,15 +88,18 @@ def buttons(messages):
                 body = bubble["body"]
                 if body.get("action"):  # a bubble that is its own button (ADR 0030)
                     found[body["action"]["displayText"]] = body["action"]["data"]
-                # ADR 0041: a card's buttons sit in its footer.
-                for button in body["contents"] + bubble.get("footer", {}).get("contents", []):
-                    if "action" in button:
-                        found[button["action"]["label"]] = button["action"].get("data") or button[
-                            "action"
-                        ].get("uri")
-                    for inner in button.get("contents", []):  # ADR 0036: a card's row of times
-                        if "action" in inner:
-                            found[inner["action"]["displayText"]] = inner["action"]["data"]
+                # ADR 0041: a card's buttons sit in its footer; ADR 0055: tiles in boxes.
+                top = body["contents"] + bubble.get("footer", {}).get("contents", [])
+                nodes = [(node, True) for node in top]
+                while nodes:
+                    node, outer = nodes.pop(0)
+                    action = node.get("action")
+                    if action and outer and node.get("type") == "button":
+                        found[action["label"]] = action.get("data") or action.get("uri")
+                    elif action:  # ADR 0036: a card's row of times; a tile shows its name
+                        found[action.get("displayText") or action["label"]] = action.get("data")
+                    inner = node.get("contents")
+                    nodes += [(child, False) for child in inner] if isinstance(inner, list) else []
     return found
 
 

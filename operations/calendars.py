@@ -54,7 +54,8 @@ CARD_TIMES = 8  # Q16: at most eight times on a day's card
 
 
 def _open(calendar=None):
-    slots = CalendarSlot.objects.filter(is_open=True, calendar__is_active=True)
+    """Open slots anyone may book: a time staff picked for one appointment never is (ADR 0055)."""
+    slots = CalendarSlot.objects.filter(is_open=True, calendar__is_active=True, private=False)
     if calendar is not None:
         slots = slots.filter(calendar=calendar)
     return slots.annotate(
@@ -236,6 +237,8 @@ def month(actor, calendar, first):
     off = holidays(start, end)
     days = {}
     for slot in slots:
+        if slot.private and not slot.taken:  # ADR 0055: shown only as its appointment
+            continue
         days.setdefault(timezone.localtime(slot.starts_at).date(), []).append(slot)
     weeks = []
     for w in range(6):
@@ -416,15 +419,78 @@ def _tell(actor, appointment, text):
         case_chat.send_system(actor, appointment.case, text)  # no LINE: staff call instead
 
 
+def free_time(calendar, starts_at, keep=None):
+    """ADR 0055: a time staff pick freely for one appointment, as (slot, ends_at, warnings).
+    The slot is an open one starting at that very time with room, else None and a private slot
+    is made on saving. It must be in the future and clear of every unfinished appointment of
+    this calendar that fills an overlapping slot; a weekend, a วันหยุด or a closed time only
+    warns."""
+    if starts_at <= timezone.now():
+        raise ValidationError("เลือกเวลาที่ยังไม่ผ่านไป")
+    ends_at = starts_at + timedelta(minutes=calendar.default_minutes or 30)
+    holding = Q(appointments__status__in=Appointment.HOLDING)
+    if keep is not None:
+        holding &= ~Q(appointments__pk=keep.pk)
+    overlapping = list(
+        CalendarSlot.objects.filter(calendar=calendar, starts_at__lt=ends_at, ends_at__gt=starts_at)
+        .annotate(taken=Count("appointments", filter=holding))
+        .order_by("starts_at")
+    )
+    for slot in overlapping:
+        if slot.taken and slot.taken >= slot.capacity:
+            raise ValidationError(f"ชนกับนัดอื่น {label(slot)}")
+    exact = next(
+        (
+            s
+            for s in overlapping
+            if s.starts_at == starts_at and s.is_open and not s.private and s.taken < s.capacity
+        ),
+        None,
+    )
+    day = timezone.localtime(starts_at).date()
+    warnings = []
+    if day.weekday() >= 5:
+        warnings.append(f"วัน{DAY_NAMES[day.weekday()]}")
+    if day in (off := holidays(day, day)):
+        warnings.append(f"วันหยุด {off[day]}")
+    if any(not s.is_open for s in overlapping):
+        warnings.append("ช่วงที่ปิดรับนัดไว้")
+    return exact, ends_at, warnings
+
+
+def _private_slot(actor, calendar, starts_at, keep):
+    exact, ends_at, _ = free_time(calendar, starts_at, keep)
+    if exact is not None:
+        return exact
+    return CalendarSlot.objects.create(
+        calendar=calendar,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        capacity=1,
+        private=True,
+        note="เวลาที่เจ้าหน้าที่เลือกให้นัดนี้",
+        created_by=actor,
+    )
+
+
 @transaction.atomic
-def decide(actor, appointment, action, *, slot=None, method="", note=""):
+def decide(actor, appointment, action, *, slot=None, method="", note="", via="", at=None):
     """confirm, move (to another slot), reject or done; each tells the requester."""
     appointment = Appointment.objects.select_for_update().get(pk=appointment.pk)
     if not may_decide(actor, appointment):
         raise PermissionDenied
+    case = appointment.case
+    pickup = appointment.calendar.is_pickup  # ADR 0055: โน้ตบุ๊กและหัวอ่าน keeps its flow
+    if pickup and case is not None and case.awaits_acceptance and case.assignee_id == actor.pk:
+        raise ValidationError("กดรับงานเรื่องนี้ก่อน แล้วจึงตอบนัดได้")  # ADR 0049 Q9, ADR 0055
     if appointment.status in (A.REJECTED, A.CANCELLED, A.DONE):
         raise ValidationError("นัดนี้จบไปแล้ว")
     note = (note or "").strip()[:500]
+    if at is not None and not pickup:
+        raise ValidationError("เลือกวันเวลาเองได้เฉพาะนัดรับของ")
+    if action == "move" and at is not None:  # ADR 0055: a time picked freely
+        list(Calendar.objects.select_for_update().filter(pk=appointment.calendar_id))
+        slot = _private_slot(actor, appointment.calendar, at, appointment)
     if action == "move":
         if slot is None or slot.calendar_id != appointment.calendar_id:
             raise ValidationError("เลือกช่วงใหม่ในปฏิทินเดียวกัน")
@@ -451,6 +517,8 @@ def decide(actor, appointment, action, *, slot=None, method="", note=""):
     if method:
         if method not in Appointment.Method.values:
             raise ValidationError("วิธีรับของไม่ถูกต้อง")
+        if not appointment.takes_method:  # ADR 0055: a withdrawal's นัดรับของ only
+            raise ValidationError("วิธีรับของใช้กับนัดรับของของเรื่องเบิกเท่านั้น")
         appointment.method = method
         text += f"\nวิธีรับของ: {Appointment.Method(method).label}" if text else ""
     if note:
@@ -458,7 +526,13 @@ def decide(actor, appointment, action, *, slot=None, method="", note=""):
         text += f"\n{note}" if text else ""
     appointment.decided_at, appointment.decided_by = timezone.now(), actor
     appointment.save()
-    identity.audit(actor, f"appointment.{action}", appointment, status=appointment.status)
+    identity.audit(
+        actor,
+        f"appointment.{action}",
+        appointment,
+        status=appointment.status,
+        **({"via": via} if via else {}),
+    )
     if text:
         _tell(actor, appointment, text)
     return appointment
