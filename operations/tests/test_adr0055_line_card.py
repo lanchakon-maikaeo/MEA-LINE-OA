@@ -3,7 +3,7 @@ warehouse stages, steps that cannot be undone and appointments work in LINE; a t
 freely belongs to its appointment; ปิดเรื่อง waits for the requester's ยืนยันผล.
 
 Acceptance → tests: the card shows the web's list in the web's order and groups, a web-only
-step grey, and pages for the rest of the case (MenuTests). A stage is recorded in LINE with
+step grey, one card with nothing to swipe to (MenuTests). A stage is recorded in LINE with
 วันนี้ first, back-dating but not a future day, the pay day suggested, the consequence said,
 and marked ทาง LINE on the web; an assignee who has not pressed รับงาน cannot; an older card's
 button gives the fresh card (StageTests). An appointment is confirmed, moved to a tapped time or
@@ -88,7 +88,7 @@ class MenuTests(LineCardTestCase):
         places = [page.index(f">{i.label}<") for i in menu.items]
         self.assertEqual(places, sorted(places))  # the web in the same order
         self.assertIn("ทำต่อ", texts(reply))
-        self.assertIn(f"รายละเอียดเรื่อง · {case.number}", str(reply))  # the pages after it
+        self.assertEqual(len(reply[-1]["contents"]["contents"]), 1)  # one card, nothing to swipe
 
     def test_every_step_is_on_the_card_with_none_cut(self):
         case = self.withdraw("4500055002")
