@@ -198,10 +198,12 @@ class TruckTests(KkoTestCase):
             done, skipped = warehouse.record(self.kko, [case], stage, today)
             self.assertEqual((len(done), skipped), (1, []))
         case.refresh_from_db()
-        self.assertEqual(case.status, "closed")
+        self.assertEqual(case.status, "awaiting_confirmation")  # ADR 0055: then ยืนยันผล
         self.assertFalse(Appointment.objects.filter(case=case).exists())  # no delivery offer
         texts_held = list(CaseMessage.objects.filter(case=case).values_list("text", flat=True))
-        self.assertEqual(texts_held, [f"{case.number} รับเข้าคลังแล้ว ปิดเรื่องแล้ว"])
+        self.assertEqual(len(texts_held), 1)
+        self.assertTrue(texts_held[0].startswith(f"{case.number} รับเข้าคลังแล้ว\n"))
+        self.assertIn("ยืนยันผล", texts_held[0])
         self.assertEqual(warehouse.current(case).label, "รับเข้าคลังแล้ว")
 
     def test_the_schedule_page_keeps_unmapped_rows_and_saves_stage_names(self):

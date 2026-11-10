@@ -23,6 +23,7 @@ from operations import (
 )
 from operations.models import (
     AckClock,
+    ActionReceipt,
     AuditEvent,
     Case,
     CaseTriage,
@@ -187,6 +188,14 @@ def timeline(case):
     """Decisions and the policy's own events (overdue, escalation), oldest first."""
     status_labels = dict(Case.Status.choices)
     entries = []
+    # ADR 0055: a step staff took on the LINE card says so.
+    from_line = {
+        r.get("action_id")
+        for r in ActionReceipt.objects.filter(
+            case=case, idempotency_key__startswith="line-staff-"
+        ).values_list("result", flat=True)
+        if isinstance(r, dict)
+    }
     for decision in case.decisions.select_related("actor__staff_profile"):
         label = action_label(decision.action)
         data = decision.data if isinstance(decision.data, dict) else {}
@@ -219,6 +228,7 @@ def timeline(case):
                 # ADR 0028: what the requester read, and the note only staff read.
                 "notice": data.get("notice", "") if data.get("notice") != decision.reason else "",
                 "note": data.get("internal_note", ""),
+                "via": "ทาง LINE" if str(decision.action_id) in from_line else "",
                 "system": False,
             }
         )
@@ -456,10 +466,20 @@ def _handoff(case):
     return info
 
 
+TRACKING = [
+    RECEIVE,
+    ("งานคลัง", {S.AWAITING_EXECUTION, S.IN_PROGRESS}),
+    ("รอหน่วยงาน (เขต/ฝ่าย)ยืนยันผล", {S.AWAITING_CONFIRMATION}),
+    ("ปิดเรื่อง", {S.CLOSED}),
+]
+
+
 def journey(case):
     """Steps done, the current one and those to come. A paused case, or one that ended early,
     stays at the step it left, with the reason beside it."""
     steps = JOURNEY.get(case.kind, [])
+    if case.sap_kind and case.kind != K.PROBLEM and not case.lines.exists():
+        steps = TRACKING  # ADR 0055: its warehouse stages, then the requester confirms
     status = case.status
     if status in ASIDE:
         left = case.decisions.filter(to_status=status).order_by("-id").first()

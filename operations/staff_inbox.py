@@ -100,10 +100,11 @@ def title(case):
 
 
 def row(turn, source, item):
-    """One line: number, title, status; the whole line opens the item."""
+    """One line: number, title, status; the whole line opens the item. The status is the item's
+    own, as on the web list; รอรับงาน sits beside the ผู้รับผิดชอบ on the card (ADR 0053 Q1)."""
     is_case = source == "case"
     text = title(item) if is_case else item.title
-    status = "รอรับงาน" if is_case and item.awaits_acceptance else item.get_status_display()
+    status = item.get_status_display()
     _, data = turn.button(
         item.number, "staff_case" if is_case else "staff_order", {source: str(item.pk)}
     )
@@ -207,6 +208,13 @@ def choose_division(turn, user, status="active", page=1):
 
 def detail(turn, rows, buttons):
     """Keep actions in the same card as the details the supervisor is confirming."""
+    turn.replies.append(card(rows, buttons))
+
+
+def card(rows, buttons, alt=None):
+    """The case card as one LINE message: the first row as its title, the rest, then the buttons
+    as (label, postback data or link). `alt` is what a phone shows before the chat is opened
+    (ADR 0054 Q11: the alert's short text, never the reporter); the title by default."""
     contents = [
         {
             "type": "text",
@@ -230,29 +238,163 @@ def detail(turn, rows, buttons):
             {
                 "type": "button",
                 "height": "sm",
-                "style": "primary" if label == "ดำเนินการ" else "link",
+                "style": "primary" if label in ("ดำเนินการ", "รับงาน") else "link",
                 "color": "#16804A",
                 "action": action,
             }
         )
-    turn.replies.append(
+    return {
+        "type": "flex",
+        "altText": (alt or rows[0])[:400],
+        "contents": {
+            "type": "carousel",
+            "contents": [
+                {
+                    "type": "bubble",
+                    "size": "mega",
+                    "body": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "spacing": "md",
+                        "contents": contents,
+                    },
+                }
+            ],
+        },
+    }
+
+
+# --- The case card, design ก (ADR 0055) ----------------------------------------------------------
+
+RED = "#C62828"
+GREY = "#8A8A8A"
+SECTIONS = [
+    ("next", "ทำต่อ", GREEN),
+    ("more", "อื่น ๆ", GREEN),
+    ("web", "ทำในเว็บ", GREY),
+    ("irreversible", "ย้อนกลับไม่ได้", RED),
+]
+
+
+def _tile(label, data, color, filled=False, tag=""):
+    text = [
         {
-            "type": "flex",
-            "altText": rows[0][:400],
-            "contents": {
-                "type": "carousel",
+            "type": "text",
+            "text": label,
+            "size": "md" if filled else "sm",
+            "weight": "bold" if filled else "regular",
+            "color": "#FFFFFF" if filled else color,
+            "align": "center",
+            "wrap": True,
+        }
+    ]
+    if tag:
+        text.append({"type": "text", "text": tag, "size": "xxs", "color": GREY, "align": "center"})
+    return {
+        "type": "box",
+        "layout": "vertical",
+        "flex": 1,
+        "paddingAll": "10px",
+        "cornerRadius": "md",
+        "justifyContent": "center",
+        "borderWidth": "1px",
+        "borderColor": color,
+        "backgroundColor": color if filled else "#FFFFFF",
+        "action": {"type": "postback", "label": label[:40], "data": data, "displayText": label},
+        "contents": text,
+    }
+
+
+def _grid(tiles):
+    rows = []
+    for start in range(0, len(tiles), 2):
+        pair = tiles[start : start + 2]
+        if len(pair) == 1:
+            pair.append({"type": "filler"})
+        rows.append({"type": "box", "layout": "horizontal", "spacing": "sm", "contents": pair})
+    return rows
+
+
+def case_card(rows, groups, back, pages=()):
+    """The case card: its rows, then the steps in four groups (ทำต่อ green and wide, อื่น ๆ two
+    to a row, ทำในเว็บ grey, ย้อนกลับไม่ได้ red), ‹ กลับไปที่รายการ below; `pages` are more
+    bubbles after it (the rest of the case page)."""
+    contents = [
+        {
+            "type": "text",
+            "text": rows[0],
+            "size": "lg",
+            "weight": "bold",
+            "color": GREEN,
+            "wrap": True,
+        },
+        {"type": "separator"},
+        *[{"type": "text", "text": row, "size": "sm", "wrap": True} for row in rows[1:] if row],
+    ]
+    for key, title, color in SECTIONS:
+        items = groups.get(key) or []
+        if not items:
+            continue
+        contents.append({"type": "separator", "margin": "md"})
+        contents.append(
+            {"type": "text", "text": title, "size": "xs", "color": color, "weight": "bold"}
+        )
+        if key == "next":
+            contents += [_tile(label, data, GREEN, filled=True) for label, data in items]
+        else:
+            tag = "เว็บ" if key == "web" else ""
+            contents += _grid([_tile(label, data, color, tag=tag) for label, data in items])
+    bubble = {
+        "type": "bubble",
+        "size": "mega",
+        "body": {"type": "box", "layout": "vertical", "spacing": "md", "contents": contents},
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "height": "sm",
+                    "style": "link",
+                    "color": GREY,
+                    "action": _tap(back[0], back[1]),
+                }
+            ],
+        },
+    }
+    return {
+        "type": "flex",
+        "altText": rows[0][:400],
+        "contents": {"type": "carousel", "contents": [bubble, *pages][:12]},
+    }
+
+
+def danger(rows, sure, cancel):
+    """The second confirm of a step that cannot be undone (ADR 0055): a red card."""
+    return {
+        "type": "flex",
+        "altText": rows[0][:400],
+        "contents": {
+            "type": "bubble",
+            "size": "kilo",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "12px",
+                "backgroundColor": RED,
                 "contents": [
-                    {
-                        "type": "bubble",
-                        "size": "mega",
-                        "body": {
-                            "type": "box",
-                            "layout": "vertical",
-                            "spacing": "md",
-                            "contents": contents,
-                        },
-                    }
+                    {"type": "text", "text": "ย้อนกลับไม่ได้", "color": "#FFFFFF", "weight": "bold"}
                 ],
             },
-        }
-    )
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "contents": [
+                    *({"type": "text", "text": r, "size": "sm", "wrap": True} for r in rows),
+                    _tile(sure[0], sure[1], RED, filled=True),
+                    _tile(cancel[0], cancel[1], GREY),
+                ],
+            },
+        },
+    }

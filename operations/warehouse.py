@@ -324,7 +324,7 @@ def find_cases(actor, division, numbers):
 
 
 @transaction.atomic
-def record(actor, cases, stage, on, planned_on=None, note="", numbers=()):
+def record(actor, cases, stage, on, planned_on=None, note="", numbers=(), via=""):
     """Record one stage for many cases; returns (done, skipped [(case, why)]). คีย์จ่ายแล้ว
     goes to the case's numbers among `numbers`, else to each number not keyed yet (ADR 0047)."""
     if stage not in S.values:
@@ -344,6 +344,9 @@ def record(actor, cases, stage, on, planned_on=None, note="", numbers=()):
             continue
         if case.status == Case.Status.AWAITING_APPROVAL:  # ADR 0025, 28 ต.ค. 2569 Q4
             skipped.append((case, "ยังรอรับเรื่อง บันทึกขั้นงานคลังได้หลังรับเรื่องแล้ว"))
+            continue
+        if case.awaits_acceptance and case.assignee_id == actor.pk:  # ADR 0049 Q9, ADR 0055
+            skipped.append((case, "กดรับงานเรื่องนี้ก่อน แล้วจึงบันทึกขั้นงานคลังได้"))
             continue
         have = stages(case)
         targets = [("", "")]
@@ -375,6 +378,7 @@ def record(actor, cases, stage, on, planned_on=None, note="", numbers=()):
                 planned_on=plan if stage == S.KEYED else None,
                 note=note[:300],
                 recorded_by=actor,
+                via=via,
             )
         recorded = [n for _, n in targets if n]
         identity.audit(
@@ -384,49 +388,134 @@ def record(actor, cases, stage, on, planned_on=None, note="", numbers=()):
             number=case.number,
             on=on.isoformat(),
             **({"numbers": recorded} if recorded else {}),
+            **({"via": via} if via else {}),
         )
         done.append(case)
-        if returning:
-            if stage == S.DELIVERED and _close(actor, case):
-                _tell(actor, case, f"{case.number} {stage_label(case, stage)} ปิดเรื่องแล้ว")
-        elif stage == S.KEYED:
+        if stage == S.DELIVERED:
+            _finish(actor, case)
+        elif stage == S.KEYED and not returning:
             _offer(actor, case, plan, recorded if len(payable(case)) > 1 else ())
-        elif stage == S.ISSUED:
+        elif stage == S.ISSUED and not returning:
             _tell(actor, case, f"จ่ายแล้ว {thai_date(on)}" + _method_text(case))
-        elif stage == S.DELIVERED and _close(actor, case):
-            _tell(actor, case, f"{case.number} เขตได้รับของแล้ว ปิดเรื่องแล้ว")
     return done, skipped
 
 
-def _close(actor, case):
-    """Q37: a tracking withdrawal or return (no item rows) ends when the district has it."""
-    from operations import services, workflow  # local: services builds on its peers
+def tracking(case):
+    """A withdrawal or return followed by its SAP number, with no item rows: the warehouse
+    stages are its work (Q37). A problem (โน้ตบุ๊กและหัวอ่าน among them) keeps its own ตอบผล."""
+    if case.kind not in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN):
+        return False
+    return bool(case.sap_kind) and not case.lines.exists()
+
+
+FINISH = "finish_on_delivery"
+CONFIRM_LABEL = "ยืนยันผล"
+
+
+def _finish(actor, case):
+    """ADR 0055 (ปิดเรื่อง): the last stage ends the work, then the requester confirms the
+    result and that closes the case, as a problem or a delivery does. Q37 closed it here."""
+    from operations import policy, services, workflow  # local: services builds on its peers
 
     case = Case.objects.select_for_update().get(pk=case.pk)
-    if case.status in workflow.TERMINAL or case.lines.exists() or not case.sap_kind:
+    waiting = Case.Status.AWAITING_CONFIRMATION
+    if case.status in workflow.TERMINAL or case.status == waiting or not tracking(case):
         return False
     from_status = case.status
-    case.status = Case.Status.CLOSED
+    case.status = waiting
     case.revision += 1
-    case.updated_at = case.ended_at = timezone.now()
-    case.save(update_fields=["status", "revision", "updated_at", "ended_at"])
+    case.updated_at = timezone.now()
+    case.save(update_fields=["status", "revision", "updated_at"])
     scope = identity.staff_scope(actor)
-    context = services._Context(label="ปิดเมื่อเขตได้รับของ", user=actor, scope=scope)
+    context = services._Context(label="งานคลังขั้นสุดท้าย", user=actor, scope=scope)
     services._record(
         context,
         case,
-        "close_on_delivery",
+        FINISH,
         from_status,
-        "เขตได้รับแล้ว (grill กคว. รอบใหม่ Q37)",
+        stage_label(case, S.DELIVERED),
         {},
         services.EVENT_DECISION_RECORDED,
         None,
         None,
     )
-    from operations import policy  # local: policy reads the database
+    policy.after_decision(case, FINISH, actor_is_staff=True)
+    found = _identity(case)
+    if found is not None:
+        from operations import case_chat
 
-    policy.after_decision(case, "close_on_delivery", actor_is_staff=True)
+        text = (
+            f"{case.number} {stage_label(case, S.DELIVERED)}\n"
+            f"ถ้าเรียบร้อยแล้ว กด “{CONFIRM_LABEL}” เรื่องจะปิด"
+            "\nถ้ายังไม่เรียบร้อย พิมพ์บอกเจ้าหน้าที่ในแชตนี้"
+        )
+        button = [
+            CONFIRM_LABEL,
+            _token(found, "done_confirm", {"case": str(case.pk)}),
+            CONFIRM_LABEL,
+        ]
+        case_chat.send_system(actor, case, text, [button])
     return True
+
+
+def finished_at(case):
+    """When the last stage asked the requester to confirm, for ปิดเรื่อง after the wait."""
+    decision = case.decisions.filter(action=FINISH).order_by("-id").first()
+    return decision.created_at if decision else None
+
+
+def confirm_done(ctx, case, payload, reason, target):
+    """The requester confirms the result (or staff record their answer); the case closes."""
+    from operations import problems  # local: problems builds on services
+
+    data = problems._requester_or_intake(ctx, case, payload)
+    case.status = Case.Status.CLOSED
+    return data
+
+
+def close_done(ctx, case, payload, reason, target):
+    """No answer for RECEIPT_NO_RESPONSE_DAYS after the last stage: the owner division closes."""
+    from django.conf import settings
+
+    from operations.contracts import ErrorCode, fail
+
+    if ctx.requester is not None or not identity.holds(
+        identity.for_case(ctx.scope, case), case.owner_division_id
+    ):
+        fail(ErrorCode.FORBIDDEN, "สมาชิกกองเจ้าภาพเป็นผู้ปิดเรื่อง")
+    asked = finished_at(case)
+    days = settings.RECEIPT_NO_RESPONSE_DAYS
+    if asked is None or asked > timezone.now() - timedelta(days=days):
+        fail(ErrorCode.VALIDATION_ERROR, f"รอผู้แจ้งยืนยันผลครบ {days} วันก่อนปิดโดยไม่มีคำตอบ")
+    case.status = Case.Status.CLOSED
+    return {"unanswered_since": asked.isoformat()}
+
+
+def on_confirm(turn, token):
+    """The requester's tap on ยืนยันผล after the last stage."""
+    from operations import conversation, services
+    from operations.contracts import Actor, CommandFailed
+
+    case = (
+        services.visible_cases(conversation._actor(turn)).filter(pk=token.value.get("case")).first()
+        if turn.requester
+        else None
+    )
+    if case is None:
+        return conversation._menu(turn, "เรื่องนี้ไม่ใช่ของคุณ")
+    if case.status != Case.Status.AWAITING_CONFIRMATION or not tracking(case):
+        return conversation._menu(turn, f"{case.number} ไม่ได้รอการยืนยันผลแล้ว")
+    try:
+        services.perform_action(
+            Actor.for_requester(turn.requester),
+            case.pk,
+            "confirm",
+            expected_revision=case.revision,
+            idempotency_key=f"line-done-{turn.inbox.pk}",
+        )
+    except CommandFailed as exc:
+        return conversation._menu(turn, f"บันทึกไม่ได้: {exc.message or exc.code}")
+    return conversation._menu(turn, f"บันทึกแล้ว เรื่อง {case.number} ปิดแล้ว")
 
 
 def thai_date(day):

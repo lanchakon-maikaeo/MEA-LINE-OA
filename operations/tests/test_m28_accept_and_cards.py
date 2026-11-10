@@ -225,7 +225,7 @@ class AssignAlertTests(AcceptTestCase):
         case = self.assign(case, self.other)
         case = self.assign(case, self.kcw)
         self.assertEqual(self.alerts(case, "staff_assigned").filter(channel="email").count(), 1)
-        self.assertFalse(options.push_on("staff_new_case", "email"))  # LINE only before
+        self.assertTrue(options.push_on("staff_new_case", "email"))  # ADR 0054 Q2
 
     def test_the_push_page_has_an_email_switch_and_says_when_email_is_off(self):
         admin = make_staff("push-admin-28", (Role.ADMIN, None))

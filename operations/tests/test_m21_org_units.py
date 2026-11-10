@@ -11,13 +11,11 @@ the cards (MigrationTests).
 """
 
 import uuid
-from datetime import timedelta
 from importlib import import_module
 
 from django.apps import apps
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client
-from django.utils import timezone
 
 from operations import identity, options, staff_line, units
 from operations.models import (
@@ -134,31 +132,12 @@ class AssignTests(UnitTestCase):
         self.assertIsNone(case.assignee)
         self.assertIsNone(case.section)
 
-    def test_away_people_are_skipped_and_their_cases_move_to_the_backup(self):
+    def test_the_first_owner_takes_it_and_the_next_only_when_the_first_cannot_act(self):
+        # ADR 0054 Q13: no "ไม่อยู่" any more; the order matters only once the first loses the กอง.
         self.work(self.repair, self.kae, self.kae2)
-        tomorrow = timezone.localdate() + timedelta(days=1)
-        units.set_away(self.kae, tomorrow)
         first = self.problem()
         first.refresh_from_db()
-        self.assertEqual(first.assignee, self.kae2)
-        units.set_away(self.kae, None)
-        second = self.problem("หม้อแปลงน้ำมันรั่ว")
-        second.refresh_from_db()
-        self.assertEqual(second.assignee, self.kae)
-        # Q24: away now, so the open case moves on and does not come back.
-        self.assertEqual(units.set_away(self.kae, tomorrow), 1)
-        second.refresh_from_db()
-        self.assertEqual(second.assignee, self.kae2)
-        units.set_away(self.kae, None)
-        second.refresh_from_db()
-        self.assertEqual(second.assignee, self.kae2)
-        # Nobody else can take it while the backup is away too: the backup keeps it.
-        units.set_away(self.kae, tomorrow)
-        units.set_away(self.kae2, tomorrow)
-        second.refresh_from_db()
-        self.assertEqual(second.assignee, self.kae2)
-        with self.assertRaises(ValidationError):
-            units.set_away(self.kae, timezone.localdate() - timedelta(days=1))
+        self.assertEqual(first.assignee, self.kae)
 
     def test_a_revoked_role_moves_the_case_or_frees_it(self):
         self.work(self.repair, self.kae, self.kae2)
@@ -178,9 +157,11 @@ class AssignTests(UnitTestCase):
         self.act(self.head, case, "assign", {"assignee_id": self.kae2.pk, "reason": "ถนัด"})
         case.refresh_from_db()
         self.assertFalse(case.auto_assigned)
-        units.set_away(self.kae2, timezone.localdate() + timedelta(days=3))
+        identity.revoke_role(
+            self.admin, RoleGrant.objects.get(user=self.kae, division=self.division), "ย้ายงาน"
+        )
         case.refresh_from_db()
-        self.assertEqual(case.assignee, self.kae2)
+        self.assertEqual(case.assignee, self.kae2)  # a person's pick never follows the system
 
     def test_a_new_section_or_a_new_owner_list_moves_system_picks(self):
         self.work(self.repair, self.kae)

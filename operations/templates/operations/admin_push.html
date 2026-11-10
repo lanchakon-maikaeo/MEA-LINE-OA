@@ -42,15 +42,19 @@
         <div class="push-kind__body">
           <p class="push-kind__sample"><span class="muted">ตัวอย่างข้อความ</span>{{ k.sample|linebreaksbr }}</p>
           {% if k.recipients %}<h3 class="push-kind__h">ผู้รับ</h3>
-          <ul class="push-to" aria-label="ผู้รับของ {{ k.label }}">
-            {% for r in k.recipients %}<li class="push-to__row{% if not r.on %} is-off{% endif %}"><span>{{ r.label }}</span>{% include "operations/_push_switch.html" with key=r.key on=r.on label=r.label %}</li>{% endfor %}
-          </ul>
-          <p class="muted push-kind__hint">ผู้รับชุดนี้ใช้ทั้ง LINE และอีเมล</p>{% else %}<p class="muted push-kind__hint">ส่งถึง {{ k.who }}</p>{% endif %}
+          {# ADR 0054 Q9: each group picks LINE and email on its own. #}
+          <table class="push-to" aria-label="ผู้รับของ {{ k.label }}">
+            <thead><tr><th scope="col">ผู้รับ</th><th scope="col">LINE</th>{% if k.email %}<th scope="col">อีเมล</th>{% endif %}</tr></thead>
+            <tbody>
+            {% for r in k.recipients %}<tr class="push-to__row{% if not r.on %} is-off{% endif %}"><th scope="row">{{ r.label }}</th><td>{% include "operations/_push_switch.html" with key=r.line.key on=r.line.on label=r.label|add:" ทาง LINE" %}</td>{% if k.email %}<td>{% include "operations/_push_switch.html" with key=r.email.key on=r.email.on label=r.label|add:" ทางอีเมล" %}</td>{% endif %}</tr>{% endfor %}
+            </tbody>
+          </table>
+          <p class="muted push-kind__hint">สวิตช์ LINE และอีเมลบนหัวแถวเป็นสวิตช์หลักของชนิดนี้ ปิดแล้วไม่ส่งถึงใครทางนั้น</p>{% else %}<p class="muted push-kind__hint">ส่งถึง {{ k.who }}</p>{% endif %}
         </div>
       </details>
       {% include "operations/_push_form.html" with key=k.line.key on=k.line.on anchor="push-"|add:k.kind %}
       {% if k.email %}{% include "operations/_push_form.html" with key=k.email.key on=k.email.on anchor="push-"|add:k.kind %}{% endif %}
-      {% for r in k.recipients %}{% include "operations/_push_form.html" with key=r.key on=r.on anchor="push-"|add:k.kind %}{% endfor %}
+      {% for r in k.recipients %}{% include "operations/_push_form.html" with key=r.line.key on=r.line.on anchor="push-"|add:k.kind %}{% if k.email %}{% include "operations/_push_form.html" with key=r.email.key on=r.email.on anchor="push-"|add:k.kind %}{% endif %}{% endfor %}
     </li>
   {% endfor %}
   </ul>

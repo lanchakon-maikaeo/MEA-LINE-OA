@@ -29,11 +29,11 @@ from operations import (
     routing_words,
     typed_lines,
     units,
+    warehouse,
     workflow,
 )
 from operations.fulfilment import CANCEL_RESOLUTIONS
 from operations.models import (
-    VIEWER_ROLES,
     AuthorityGrant,
     Case,
     CaseTriage,
@@ -44,7 +44,6 @@ from operations.models import (
     ProblemResolution,
     ReturnUnit,
     Role,
-    RoleGrant,
     Section,
     WorkGroup,
 )
@@ -298,6 +297,9 @@ def _readiness(case, lines):
     close_from = None
     if case.status == Case.Status.AWAITING_CONFIRMATION and case.kind == K.PROBLEM:
         close_from = resolved.created_at + wait if resolved else None
+    elif case.status == Case.Status.AWAITING_CONFIRMATION and case.sap_kind and not lines:
+        asked = warehouse.finished_at(case)  # ADR 0055: after the last warehouse stage
+        close_from = asked + wait if asked else None
     elif case.kind == K.WITHDRAWAL and not any(line.outstanding > 0 for line in lines):
         deliveries = list(Delivery.objects.filter(case=case))
         waiting = [d.issued_at for d in deliveries if d.status == Delivery.Status.AWAITING]
@@ -332,6 +334,17 @@ def _delivery_divisions(delivery):
 
 def _unit_division(st, unit):
     return st.line_division.get(unit.line.line_no, st.owner) if unit.line_id else st.owner
+
+
+def _done_waiting(st):
+    """ADR 0055: a case followed by its SAP number waits for the requester after its last
+    warehouse stage."""
+    return (
+        st.case.status == S.AWAITING_CONFIRMATION
+        and bool(st.case.sap_kind)
+        and not st.lines
+        and st.case.kind != K.PROBLEM
+    )
 
 
 RULES = {
@@ -402,6 +415,7 @@ RULES = {
         st.answers_for_district()
         and (
             st.case.kind == K.PROBLEM
+            or _done_waiting(st)
             or any(
                 d.status == Delivery.Status.AWAITING and st.other(d.issued_by_id)
                 for d in st.deliveries
@@ -424,7 +438,7 @@ RULES = {
         st.member(st.owner) and bool(typed_lines.sap_label(st.case.kind, st.case.topic))
     ),
     "close": lambda st: (
-        st.case.kind in (K.WITHDRAWAL, K.PROBLEM)
+        (st.case.kind in (K.WITHDRAWAL, K.PROBLEM) or _done_waiting(st))
         and st.member(st.owner)
         and st.close_from is not None
         and st.close_from <= st.now
@@ -509,13 +523,14 @@ def _awaits_me(st):
 
 def available(user, case, st=None):
     """Actions this viewer may start now, the primary one first (empty for read-only viewers).
-    ADR 0049 Q9: a ผู้รับผิดชอบ who has not pressed รับงาน may only take it or give it back."""
+    ADR 0049 Q9: a ผู้รับผิดชอบ who has not pressed รับงาน may only take it or give it back, or
+    pass it on when they may assign (ADR 0054 Q6)."""
     st = st or situation(user, case)
     names = []
     hidden = set() if options.old_stock() else STOCK
     waiting = _awaits_me(st)
     for name, rule in RULES.items():
-        if name in hidden or (waiting and name not in workflow.ACCEPTANCE_STEPS):
+        if name in hidden or (waiting and name not in workflow.BEFORE_ACCEPTANCE):
             continue
         spec = workflow.ACTIONS.get(name)
         if (
@@ -551,19 +566,25 @@ def hints(st, offers):
     out = []
     if case.status == S.TRIAGE and st.with_intake and st.member(st.owner):
         out.append(Hint("เรื่องยังอยู่ที่กองรับเรื่อง ส่งต่อให้กองที่รับผิดชอบก่อน แล้วกองนั้นจะกด “คัดกรองเสร็จ”"))
-    waiting = (case.kind == K.PROBLEM and case.status == S.AWAITING_CONFIRMATION) or (
-        case.kind == K.WITHDRAWAL
-        and any(d.status == Delivery.Status.AWAITING for d in st.deliveries)
+    done = _done_waiting(st)
+    waiting = (
+        done
+        or (case.kind == K.PROBLEM and case.status == S.AWAITING_CONFIRMATION)
+        or (
+            case.kind == K.WITHDRAWAL
+            and any(d.status == Delivery.Status.AWAITING for d in st.deliveries)
+        )
     )
     if waiting and (st.member(st.owner) or "confirm" in names):
         # Who answers: the requester in LINE, or staff on their behalf when there is no LINE.
         who = _who(st, names)
-        answer = "ตอบผล" if case.kind == K.PROBLEM else "ยืนยันรับของ"
+        answer = "ตอบผล" if case.kind == K.PROBLEM else "ยืนยันผล" if done else "ยืนยันรับของ"
         if st.line:
             out.append(
                 Hint(
                     f"ผู้แจ้ง{answer}ใน LINE ได้เอง"
                     + (" กด “ยืนยัน” แล้วเรื่องจะปิดเอง" if case.kind == K.PROBLEM else "")
+                    + (" กด “ยืนยันผล” แล้วเรื่องจะปิดเอง" if done else "")
                 )
             )
         else:
@@ -581,7 +602,7 @@ def hints(st, offers):
         and st.member(st.owner)
         and st.close_from is not None
     ):
-        if case.kind == K.PROBLEM:
+        if case.kind == K.PROBLEM or done:
             out.append(Hint("ถ้าหน่วยงาน (เขต/ฝ่าย)ยังไม่ตอบผล ปิดเรื่องเองได้ตั้งแต่", st.close_from))
             if st.line:
                 who = _who(st, names)
@@ -673,26 +694,8 @@ def _reason(required=False, label="เหตุผล", help_text=""):
 
 
 def _members(st):
-    """Who may take the case: everyone with a working role in its กอง, the แอดมินแผนก/กลุ่มงาน
-    included (ADR 0052 Q16); a unit admin picks among the people of their own unit (Q6)."""
-    case = st.case
-    grants = (
-        RoleGrant.objects.filter(
-            division_id=case.owner_division_id, revoked_at__isnull=True, user__is_active=True
-        )
-        .exclude(role__in=VIEWER_ROLES)  # ADR 0039: nobody assigns work to a viewer
-        .select_related("user__staff_profile")
-        .order_by("user__username")
-    )
-    seen, choices = set(), []
-    for g in grants:
-        if st.scope is not None and not units.in_reach(st.scope, g.user):
-            continue
-        if g.user_id not in seen:
-            seen.add(g.user_id)
-            profile = getattr(g.user, "staff_profile", None)
-            choices.append((str(g.user_id), profile.display_name if profile else g.user.username))
-    return choices
+    """Who may take the case, in the order LINE lists them too (ADR 0054 Q4, Q5)."""
+    return [(str(u.pk), units.display(u)) for u in units.assignable(st.scope, st.case)]
 
 
 def _divisions(exclude=None, real=False):
@@ -993,7 +996,9 @@ def build_form(action, st, params, demo=False):
             )
         add(_reason(True))
     elif action == "confirm":
-        if case.kind == K.WITHDRAWAL:
+        if _done_waiting(st):
+            form.intro = "หน่วยงาน (เขต/ฝ่าย)แจ้งทางอื่นว่าเรียบร้อยแล้ว บันทึกแทนหน่วยงาน (เขต/ฝ่าย) เรื่องจะปิด"
+        elif case.kind == K.WITHDRAWAL:
             waiting = [d for d in st.deliveries if d.status == Delivery.Status.AWAITING]
             delivery = _pick(waiting, params.get("delivery"), "seq")
             form.picker = [(d.seq, f"ส่งมอบครั้งที่ {d.seq}", f"delivery={d.seq}") for d in waiting]
@@ -1041,7 +1046,7 @@ def build_form(action, st, params, demo=False):
         add(Field("intake_note", "บันทึกการรับแจ้ง", "textarea", True))
         add(_reason(True, "หน่วยงาน (เขต/ฝ่าย)แจ้งว่ายังไม่เรียบร้อยอย่างไร"))
     elif action == "close":
-        if case.kind == K.WITHDRAWAL:
+        if case.kind == K.WITHDRAWAL and not _done_waiting(st):
             form.intro = (
                 f"ปิดได้เมื่อหน่วยงาน (เขต/ฝ่าย)ไม่ยืนยันรับเกิน {settings.RECEIPT_NO_RESPONSE_DAYS} วัน"
             )

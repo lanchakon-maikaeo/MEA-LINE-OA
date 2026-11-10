@@ -256,11 +256,13 @@ def plan_for_event(event):
             return _create(
                 event, "request_info", N.Level.CRITICAL, _case_identity(case), text, case
             )
+        # ADR 0055: no reason is required, and a blank one leaves out its line.
+        why = f"\nเหตุผล: {decision.reason}" if (decision.reason or "").strip() else ""
         if decision.action == "decline":
-            text = f"เรื่อง {case.number} ไม่ได้รับเรื่อง\nเหตุผล: {decision.reason}"
+            text = f"เรื่อง {case.number} ไม่ได้รับเรื่อง{why}"
             return _create(event, "case_declined", N.Level.NORMAL, _case_identity(case), text, case)
         if decision.action == "cancel" and decision.actor_id is not None:
-            text = f"เรื่อง {case.number} ถูกยกเลิกโดยเจ้าหน้าที่\nเหตุผล: {decision.reason}"
+            text = f"เรื่อง {case.number} ถูกยกเลิกโดยเจ้าหน้าที่{why}"
             return _create(
                 event, "case_cancelled", N.Level.NORMAL, _case_identity(case), text, case
             )

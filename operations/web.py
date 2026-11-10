@@ -5,9 +5,7 @@ division's cases; admins see every division read-only and their visits to other 
 cases are audited (round 2 Q3). Actions on a case go through services.perform_action.
 """
 
-import dataclasses
 import uuid
-from datetime import date
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -25,6 +23,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from operations import (
     admin_nav,
     approvals,
+    case_menu,
     case_numbers,
     casepage,
     charts,
@@ -512,14 +511,8 @@ def case_detail(request, number):
     back = request.session.get("division", "")
     codes = {d.code for d in queues.own_divisions(scope)}
     st = web_actions.situation(request.user, case)
-    offers = web_actions.available(request.user, case, st)
     panel = warehouse_web.case_panel(request.user, case)
-    steps = warehouse_web.case_steps(case, panel)
-    primary = next((o for o in offers if o.primary), None)
-    if steps and not (primary and primary.name == "accept_assignment"):
-        # ADR 0051 Q8: an appointment, else the next warehouse stage, is what to do first.
-        offers = [dataclasses.replace(o, primary=False) for o in offers]
-        primary = None
+    menu = case_menu.build(request.user, case, st, panel)  # ADR 0055: the LINE card's list
     return render(
         request,
         "operations/case_detail.html",
@@ -527,17 +520,19 @@ def case_detail(request, number):
             "case": case,
             "page": data,
             "back_division": back if back in codes else "",
-            "offers": offers,
-            "primary": primary,
-            "steps": steps,
-            "irreversible": ", ".join(o.label for o in offers if o.irreversible),
-            "hints": web_actions.hints(st, offers),
+            "menu": menu,
+            "hints": web_actions.hints(st, menu.offers),
             "can_upload": uploads.may_upload(st),
             "panel": panel,
             "tracking_numbers": case_numbers.panel(request.user, case),
             # Zero trust (31 ต.ค. 2569 Q2): a typed name is not checked against the roster.
             "unverified": not (case.requester.is_anonymous or case.requester.is_internal)
             and employees.identity_state(case.requester) != "verified",
+            # ADR 0054 Q15: the รหัสพนักงาน the reporter proved, as the LINE card shows it.
+            "reporter_id": case.requester.employee.employee_id
+            if not case.requester.is_anonymous
+            and employees.identity_state(case.requester) == "verified"
+            else "",
         },
     )
 
@@ -765,9 +760,6 @@ def account(request):
             if line is not None and staff_line.unlink(line, request.user, "เลิกเชื่อมจากหน้าเว็บ"):
                 messages.success(request, "เลิกเชื่อม LINE แล้ว")
             return redirect("account")
-        elif request.POST.get("action") in ("away", "back"):
-            _set_away(request)
-            return redirect("account")
     grants = (
         RoleGrant.objects.filter(user=request.user, revoked_at__isnull=True)
         .select_related("division")
@@ -782,31 +774,8 @@ def account(request):
             "line": ChannelIdentity.objects.filter(staff_user=request.user).first(),
             "code": code,
             "code_minutes": staff_line.CODE_MINUTES,
-            "away": units.away_until(request.user),
-            "today": timezone.localdate(),
         },
     )
-
-
-def _set_away(request):
-    """ADR 0031 Q21: "ไม่อยู่ ถึงวันที่" set by the person; their system-given cases move on."""
-    until = None
-    if request.POST.get("action") == "away":
-        try:
-            until = date.fromisoformat(request.POST.get("until", ""))
-        except ValueError:
-            messages.error(request, "เลือกวันสุดท้ายที่ไม่อยู่")
-            return
-    try:
-        moved = units.set_away(request.user, until)
-    except ValidationError as exc:
-        messages.error(request, "; ".join(exc.messages))
-        return
-    if until is None:
-        messages.success(request, "บันทึกว่ากลับมาแล้ว เรื่องที่ย้ายไปแล้วยังอยู่กับคนใหม่")
-        return
-    extra = f" ย้ายเรื่องที่ยังไม่จบให้คนสำรอง {moved} เรื่อง" if moved else ""
-    messages.success(request, f"บันทึกว่าไม่อยู่ถึง {units.thai_date(until)} แล้ว{extra}")
 
 
 @login_required

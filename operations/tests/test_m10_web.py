@@ -77,7 +77,8 @@ class WebTestCase(ProblemTestCase):
 
     def offers(self, user, case):
         page = self.client_for(user).get(f"/cases/{case.number}/")
-        return [(o.name, o.primary) for o in page.context["offers"]]
+        menu = page.context["menu"]  # ADR 0055: the list the LINE card shows too
+        return [(i.name, i is menu.first) for i in menu.items if i.kind == "action"]
 
 
 # --- Scope (round 2 Q1–Q4) -------------------------------------------------------------------

@@ -494,7 +494,8 @@ def order_start(turn, user, division=None):
     staff_orders_chat.start(turn, user)
 
 
-def _typed_date(text):
+def _typed_date(text, past=False):
+    """วัน/เดือน/ปี typed in chat; a day gone by only when `past` (a stage's day, ADR 0055)."""
     match = TYPED_DATE.match(text.strip())
     if not match:
         return None
@@ -508,11 +509,11 @@ def _typed_date(text):
         year = today.year
     try:
         chosen = date(year, month, day)
-        if not given and chosen < today:
+        if not given and chosen < today and not past:
             chosen = date(year + 1, month, day)  # 5/1 typed in December means next year
     except ValueError:
         return None
-    return chosen if chosen >= today else None
+    return chosen if past or chosen >= today else None
 
 
 # --- Case steps in chat ---------------------------------------------------------------------------
@@ -551,6 +552,8 @@ def _askable(form):
             continue
         if f.kind == "checks" and f.name == "confirm_irreversible":
             continue
+        if f.kind == "file" and not f.required:  # ADR 0055: a file stays for the web
+            continue
         if f.kind not in CHAT_KINDS:
             return None
         if f.kind in ("select", "radio") and len(f.choices) > MAX_CHOICES:
@@ -561,10 +564,16 @@ def _askable(form):
     return fields
 
 
-def _form(user, case, action):
+def chat_fields(user, case, action, st=None):
+    """The fields chat asks for this step, or None when it needs its web form (ADR 0055)."""
+    form, _, _ = _form(user, case, action, st)
+    return None if form is None else _askable(form)
+
+
+def _form(user, case, action, st=None):
     from operations import web_actions
 
-    st = web_actions.situation(user, case)
+    st = st or web_actions.situation(user, case)
     offers = {o.name: o for o in web_actions.available(user, case, st)}
     if action not in offers:
         return None, None, None
@@ -573,74 +582,69 @@ def _form(user, case, action):
         form.fields = [f for f in form.fields if f.required]
     if action == "assign":
         # ADR 0050 Q17: pick a name, then confirm; the note stays on the web form.
-        heads = identity.staff_scope(user).is_department_supervisor
+        from operations import units
+
         form.fields = [f for f in form.fields if f.name == "assignee_id"]
         for field in form.fields:
-            field.choices = assignees(case, heads)
+            field.choices = assignees(case, st.scope)
             field.help = "ตัวเลขในวงเล็บคืองานที่ค้างอยู่"
-            if heads:
+            if units.heads_only(st.scope, case):
                 field.label = "มอบหมายให้แอดมินกอง"
     return form, offers[action], st
 
 
-def assignees(case, heads=False):
+def assignees(case, scope):
     """Who a case may go to from LINE, each with how many open cases they hold (ADR 0050 Q17):
-    the owner กอง's people, those of the case's แผนก first; for a แอดมินฝ่าย, only its แอดมินกอง,
-    who hand it on (Q18). Nobody marked away."""
+    the web's list in the web's order (ADR 0054 Q4, Q5)."""
     from django.db.models import Count
 
     from operations import units
-    from operations.models import Role, RoleGrant
-    from operations.web_actions import VIEWER_ROLES
 
-    grants = RoleGrant.objects.filter(
-        division_id=case.owner_division_id, revoked_at__isnull=True, user__is_active=True
-    ).exclude(role__in=VIEWER_ROLES)
-    if heads:
-        grants = grants.filter(role=Role.SUPERVISOR)
-    grants = grants.select_related("user__staff_profile")
-    people = {g.user_id: g.user for g in grants if not units.away_until(g.user)}
+    people = units.assignable(scope, case)
     held = dict(
         Case.objects.filter(assignee__in=people, status__in=workflow.OPEN)
         .values("assignee")
         .annotate(n=Count("pk"))
         .values_list("assignee", "n")
     )
-
-    def order(user):
-        profile = getattr(user, "staff_profile", None)
-        other = not (case.section_id and profile and profile.section_id == case.section_id)
-        return (other, work_orders.name_of(user))
-
-    named = sorted(people.values(), key=order)
-    return [(str(u.pk), f"{work_orders.name_of(u)} ({held.get(u.pk, 0)})") for u in named]
+    return [(str(u.pk), f"{work_orders.name_of(u)} ({held.get(u.pk, 0)})") for u in people]
 
 
 def reporter(case):
     """ADR 0042 Q5: who reported, from which unit and when; an anonymous reporter by the alias
-    only (ADR 0010)."""
-    from operations import roster, units
+    only (ADR 0010). ADR 0054 Q15: the รหัสพนักงาน once the reporter proved it (or an admin
+    linked it) and the ตำแหน่ง, as on the web's case page, which marks the unproven ones too."""
+    from operations import employees, roster, units
 
     person = case.requester
+    rows = []
     if person.is_anonymous:
         name = f"ผู้แจ้งไม่ระบุตัวตน{f' · {person.alias}' if person.alias else ''}"
         unit = case.district.name
+        rows.append(f"ผู้แจ้ง: {name}")
     else:
-        name = person.display_name
-        path = [p for p in roster.employee_path(person.employee) if p != units.NA]
+        proven = employees.identity_state(person) == "verified"
+        mark = "" if proven or person.is_internal else " · ยังไม่ยืนยันตัวตน"
+        rows.append(f"ผู้แจ้ง: {person.display_name}{mark}")
+        employee = person.employee
+        if proven:
+            rows.append(f"รหัสพนักงาน: {employee.employee_id}")
+        if employee and employee.position:
+            rows.append(f"ตำแหน่ง: {employee.position}")
+        path = [p for p in roster.employee_path(employee) if p != units.NA]
         unit = " › ".join(path[:2]) if path else case.district.name
     when = timezone.localtime(case.reported_at or case.submitted_at)
     return [
-        f"ผู้แจ้ง: {name}",
+        *rows,
         f"หน่วยงาน: {unit}",
         f"เวลาแจ้ง: {units.thai_date(when.date())} {when:%H:%M} น.",
     ]
 
 
-def case_detail(turn, user, case):
-    """The case, who reported it, and every step this person may take in chat (ADR 0042 Q5:
-    no web links; a step that needs a long form stays on the web)."""
-    from operations import case_numbers, staff_inbox, typed_lines, units, web_actions
+def case_rows(case):
+    """The case card's rows (ADR 0042 Q5), for the LINE menu and the assignment alert (ADR 0054
+    Q11)."""
+    from operations import case_numbers, staff_inbox, typed_lines, units
 
     level = case.triage.effective_priority if hasattr(case, "triage") else ""
     who = ""
@@ -664,37 +668,66 @@ def case_detail(turn, user, case):
             unit = line.item.unit if typed_lines.is_shared(line.item) else ""
             rows.append(f"· {typed_lines.label_of(row['group'])} {typed_lines.describe(row, unit)}")
     rows.append(f"รายละเอียด: {staff_inbox.details(case)[:300] or 'ไม่ระบุ'}")
-    buttons = []
+    return rows
+
+
+def case_detail(turn, user, case):
+    """The case card (ADR 0055): the case, who reported it, and every step of the web's
+    สิ่งที่ทำได้ in the web's order, grouped as ทำต่อ, อื่น ๆ, ทำในเว็บ and ย้อนกลับไม่ได้; the
+    pages after it hold the rest of the case page."""
+    from operations import case_menu, staff_inbox
+
+    groups = {"next": [], "more": [], "web": [], "irreversible": []}
     if options.get(options.STAFF_LINE_ACTIONS) == "act":
-        # ADR 0044: the web's สิ่งที่ทำได้, ดำเนินการ first (เริ่มคัดกรอง only while the
-        # screening option is on); a step needing its web form, or one that cannot be undone,
-        # opens the form in the browser when tapped.
-        offers = web_actions.available(user, case)
-        priority = {"accept_assignment": -1, "approve": 0, "admin_send": 1, "assign": 2}
-        offers.sort(key=lambda offer: (offer.irreversible, priority.get(offer.name, 3)))
-        for offer in offers[:10]:
-            label = card_label(offer.name)
-            buttons.append(
-                turn.button(label, "staff_step", {"case": str(case.pk), "action": offer.name})
+        menu = case_menu.build(user, case, line=True)
+        for item in menu.items:
+            group = (
+                "irreversible"
+                if item.irreversible
+                else "web"
+                if not item.line
+                else "next"
+                if item is menu.first
+                else "more"
             )
-    staff_inbox.detail(turn, rows, [*buttons[:11], turn.button("กลับไปที่รายการ", "staff_inbox")])
+            groups[group].append((item.label, card_button(turn, case, item)[1]))
+    back = turn.button("‹ กลับไปที่รายการ", "staff_inbox")
+    turn.replies.append(staff_inbox.case_card(case_rows(case), groups, back, case_pages(case)))
+
+
+def card_button(turn, case, item):
+    """The postback of one item of the menu: a web step, a warehouse stage or an appointment."""
+    if item.kind == "stage":
+        return turn.button(item.label, "staff_stage", {"case": str(case.pk), "stage": item.name})
+    if item.kind == "appointment":
+        value = {"case": str(case.pk), "appointment": item.name}
+        return turn.button(item.label, "staff_appt", value)
+    return turn.button(item.label, "staff_step", {"case": str(case.pk), "action": item.name})
+
+
+def case_pages(case):
+    """The rest of the case page, a page per part (filled in by staff_pages)."""
+    from operations import staff_pages
+
+    return staff_pages.pages(case)
 
 
 def step_start(turn, user, case, action):
+    from operations import staff_stage
+
     if options.get(options.STAFF_LINE_ACTIONS) != "act":
         turn.say("ขั้นตอนนี้ดำเนินการได้ทางเว็บเท่านั้น")
         return
     form, offer, _ = _form(user, case, action)
     if form is None:
-        turn.say("ท่านไม่สามารถดำเนินการขั้นตอนนี้ในเรื่องนี้ได้")
-        return
-    if _askable(form) is None or offer.irreversible:
+        return staff_stage.stale(turn, user, case)  # ADR 0055: an older card's button
+    if _askable(form) is None:
         turn.say(f"{offer.label}: ขั้นนี้ทำในเว็บ")  # ADR 0050 Q21: no web link in LINE
         return
     turn.set_prompt(
         "staff_step", case=str(case.pk), action=action, revision=case.revision, values={}
     )
-    if not any(f.required for f in _askable(form)):
+    if not any(f.required for f in _askable(form)) and not offer.irreversible:
         step_go(turn, user)  # nothing it needs: one tap does it, notes stay for the web
         return
     _ask_next(turn, user)
@@ -765,15 +798,46 @@ def _ask_next(turn, user):
             shown = dict((str(v), lbl) for v, lbl in f.choices).get(value, value)
             rows.append(f"{f.label}: {shown}")
     if offer.irreversible:
+        # ADR 0055: two steps, the second a red card; no reason is required.
         rows.append("ขั้นตอนนี้ไม่สามารถย้อนกลับได้")
+        go = turn.button("ทำต่อ", "staff_step_sure")
+    else:
+        go = turn.button("บันทึก", "staff_step_go")
     turn.say(
         "\n".join(rows),
         [
-            turn.button("บันทึก", "staff_step_go"),
+            go,
             turn.button("แก้ไขคำตอบ", "staff_step_back"),
             turn.button("ยกเลิก", "staff_step_cancel"),
         ],
     )
+
+
+def step_sure(turn, user):
+    """The second confirm of a step that cannot be undone: a red card."""
+    case, form, offer, data = _state(turn, user)
+    if form is None or not offer.irreversible:
+        return _ask_next(turn, user)
+    from operations import staff_inbox
+
+    rows = [
+        f"{offer.label} เรื่อง {case.number}",
+        "ย้อนกลับไม่ได้ เมื่อบันทึกแล้วแก้คืนไม่ได้",
+        *_consequences(case, offer.name),
+    ]
+    turn.set_prompt("staff_step", **{**data, "sure": True})
+    sure = turn.button(f"ยืนยัน{offer.label}", "staff_step_go")
+    cancel = turn.button("ยกเลิก", "staff_step_cancel")
+    turn.replies.append(staff_inbox.danger(rows, sure, cancel))
+
+
+def _consequences(case, action):
+    """ADR 0055: what the step does to the case, said before the last tap."""
+    if action == "close":
+        return ["เรื่องจะปิด ผู้แจ้งยังไม่ได้ยืนยันผล"]
+    if action in ("cancel", "decline", "deny_approval"):
+        return ["เรื่องจะจบ ผู้แจ้งจะเห็นข้อความเมื่อส่งข้อความมาครั้งถัดไป"]
+    return []
 
 
 def _page(turn, picks, skip, page):
@@ -801,6 +865,10 @@ def step_page(turn, user, page):
 
 
 def step_back(turn, user):
+    if turn.conversation.prompt_data.get("kind"):
+        from operations import staff_stage
+
+        return staff_stage.back(turn, user)
     case, form, _, data = _state(turn, user)
     if form is None:
         turn.set_prompt()
@@ -814,8 +882,13 @@ def step_back(turn, user):
     _ask_next(turn, user)
 
 
-def step_answer(turn, user, value):
+def step_answer(turn, user, value, picked=""):
     """An answer to the field being asked (typed text or a choice)."""
+    if turn.conversation.prompt_data.get("kind"):
+        from operations import staff_stage
+
+        return staff_stage.answer(turn, user, value, picked)
+    value = picked or value
     case, form, _, data = _state(turn, user)
     if form is None:
         turn.set_prompt()
@@ -850,11 +923,22 @@ def step_go(turn, user):
     from operations import services, wording
     from operations.contracts import Actor, CommandFailed
 
+    if turn.conversation.prompt_data.get("kind"):
+        from operations import staff_stage
+
+        return staff_stage.go(turn, user)
     case, form, offer, data = _state(turn, user)
     turn.set_prompt()
     if form is None:
+        if case is not None:
+            from operations import staff_stage
+
+            return staff_stage.stale(turn, user, case)
         turn.say("ไม่สามารถดำเนินการขั้นตอนนี้ได้แล้ว สถานะของเรื่องอาจเปลี่ยนไป")
         return
+    if offer.irreversible and not data.get("sure"):
+        turn.set_prompt("staff_step", **data)
+        return step_sure(turn, user)
     post = _Post({k: v for k, v in data.get("values", {}).items() if v})
     if offer.irreversible:
         post["confirm_irreversible"] = "1"

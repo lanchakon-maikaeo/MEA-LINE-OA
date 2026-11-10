@@ -293,7 +293,7 @@ class StaffLineTests(PeopleTestCase):
         self.press(ALICE, "เริ่มคัดกรอง", detail)  # nothing it needs: one tap
         self.assertEqual(Case.objects.get(pk=case.pk).status, "triage")
         detail = self.press(ALICE, case.number, reply)
-        self.press(ALICE, "ขอข้อมูลเพิ่ม", detail)
+        self.press(ALICE, "ขอข้อมูลเพิ่มจากหน่วยงาน (เขต/ฝ่าย)", detail)  # ADR 0055: web names
         asked = self.type(ALICE, "ขอรูปหม้อแปลง")
         while "ข้าม" in buttons(asked):  # an optional field (ADR 0044)
             asked = self.press(ALICE, "ข้าม", asked)

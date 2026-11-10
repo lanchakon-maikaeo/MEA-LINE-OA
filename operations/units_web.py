@@ -147,7 +147,6 @@ def _chart(divisions):
             "user": user,
             "name": units.display(user),
             "line": user.pk in line_ids,
-            "away": units.away_until(user),
             "path": units.path_labels(profile),
         }
 

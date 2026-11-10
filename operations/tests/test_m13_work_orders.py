@@ -30,9 +30,11 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 
 def keep_original_recipients(kinds=None):
     """ADR 0050 Q6: a kind's own people start off and the แอดมินฝ่าย on duty get it; tests about
-    who those people are switch them back on."""
+    who those people are switch them back on, by LINE and by email (ADR 0054 Q9)."""
     for kind in kinds or options.ROUTED:
-        options.change(None, f"{options.PUSH_PREFIX}{kind}:{options.original(kind)}", "on", "")
+        for channel in ("", ":email"):
+            key = f"{options.PUSH_PREFIX}{kind}:{options.original(kind)}{channel}"
+            options.change(None, key, "on", "")
 
 
 @override_settings(STAFF_EMAIL_ENABLED=True)

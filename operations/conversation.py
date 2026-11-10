@@ -299,6 +299,7 @@ class Turn:
             "staff_order_value",
             "staff_order_people",
             "staff_step_back",
+            "staff_step_sure",
             "admin_confirm",
         }:
             value["prompt_revision"] = self.conversation.prompt_data.get("prompt_revision")
@@ -721,6 +722,7 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
         "staff_step_go",
         "staff_step_cancel",
         "staff_step_back",
+        "staff_step_sure",
         "staff_order_confirm",
     }:
         revision = value.get("prompt_revision")
@@ -800,14 +802,32 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
         else:
             staff_work.step_start(turn, user, case, value.get("action", ""))
         return True
+    if action in (
+        "staff_stage",
+        "staff_appt",
+    ):  # ADR 0055: the card's warehouse and appointment steps
+        from operations import staff_stage
+
+        case = staff_line._case_for(user, case_id=value.get("case"))
+        if case is None:
+            turn.say("ไม่พบเรื่องนี้ในงานของคุณแล้ว")
+        elif action == "staff_stage":
+            staff_stage.stage_start(turn, user, case, value.get("stage", ""))
+        else:
+            staff_stage.appointment_start(turn, user, case, value.get("appointment", ""))
+        return True
     if action == "staff_step_pick" and prompt == "staff_step":
-        if value.get("date"):  # LINE's date picker puts the day it chose in the event
-            picked = ((turn.event or {}).get("postback") or {}).get("params", {}).get("date", "")
+        if value.get("date"):  # LINE's picker puts the day (and time) it chose in the event
+            params = ((turn.event or {}).get("postback") or {}).get("params", {})
+            picked = params.get("date") or params.get("datetime") or ""
             if not picked:
                 return True
-            staff_work.step_answer(turn, user, picked)
+            staff_work.step_answer(turn, user, "", picked)
         else:
             staff_work.step_answer(turn, user, value.get("v", ""))
+        return True
+    if action == "staff_step_sure" and prompt == "staff_step":
+        staff_work.step_sure(turn, user)
         return True
     if action == "staff_step_page" and prompt == "staff_step":
         staff_work.step_page(turn, user, int(value.get("p", 0) or 0))
@@ -2472,6 +2492,12 @@ def _case_detail(turn, number):
             buttons += [tuple(b) for b in offer]
     if case_chat.M.objects.filter(case=case).exists():
         text += "\nมีการคุยกับเจ้าหน้าที่ในเรื่องนี้ พิมพ์ในแชตนี้หลังข้อความของเจ้าหน้าที่เพื่อตอบ"
+    if case.status == Case.Status.AWAITING_CONFIRMATION and warehouse.tracking(case):
+        text += f"\nงานเสร็จแล้ว ถ้าเรียบร้อย กด “{warehouse.CONFIRM_LABEL}” เรื่องจะปิด"
+        buttons = [
+            turn.button(warehouse.CONFIRM_LABEL, "done_confirm", {"case": str(case.pk)}),
+            *buttons,
+        ]
     if case.kind == K.WITHDRAWAL:
         from operations import receipts  # local: receipts builds on this module (M07)
 
@@ -2631,9 +2657,11 @@ def _token_action(turn, token, draft):
         return (_case_reply if action == "case_reply" else _case_notices)(turn, case)
     if action == "case_search":
         return _search_cases(turn)
-    if action == "delivery":
+    if action in ("delivery", "done_confirm"):
         from operations import warehouse  # local: warehouse builds on this module
 
+        if action == "done_confirm":
+            return warehouse.on_confirm(turn, token)  # ADR 0055: ยืนยันผล after the last stage
         return warehouse.on_choice(turn, token)
     if action == "flow_again":
         from operations import flow_runner  # local: flow_runner builds on this module

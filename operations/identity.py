@@ -859,9 +859,10 @@ def set_employee_id(actor, user, employee_id, reason=""):
     audit(actor, "staff.employee_id_set", user, reason, previous=previous, value=employee_id)
     employee = Employee.objects.filter(employee_id=employee_id).first() if employee_id else None
     if employee is not None:
-        from operations import units  # local: units builds on identity
+        from operations import staff_line, units  # local: both build on identity
 
         units.bind_from_roster(user, employee)  # ADR 0050 Q1
+        staff_line.tie_account(user, actor)  # ADR 0053 Q6
 
 
 @transaction.atomic
@@ -916,6 +917,9 @@ def merge_accounts(actor, employee, user, reason=""):
     target.employee_id = employee.employee_id
     target.save(update_fields=["employee_id"])
     units.bind_from_roster(user, employee)
+    from operations import staff_line  # local: staff_line builds on identity
+
+    staff_line.tie_account(user, actor)  # ADR 0053 Q6: when no old account brought a LINE
     audit(
         actor,
         "staff.accounts_merged",

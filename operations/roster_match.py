@@ -154,6 +154,9 @@ def link(user, actor=None):
         value=employee.employee_id,
         method=match.how,
     )
+    from operations import staff_line  # local: staff_line calls this module
+
+    staff_line.tie_account(user, actor)  # ADR 0053 Q6: the employee's verified LINE
     return match
 
 
@@ -172,8 +175,13 @@ def link_all(actor=None):
 
 
 def link_requester(requester, actor=None):
-    """A requester was just tied to the roster: the web account on their LINE follows, and so
-    does a web account of the same ชื่อ-นามสกุล."""
+    """A requester was just tied to the roster: their LINE joins the staff account holding the
+    same รหัสพนักงาน (ADR 0053 Q6), the web account on their LINE follows, and so does a web
+    account of the same ชื่อ-นามสกุล."""
+    from operations import staff_line  # local: staff_line calls this module
+
+    for line in ChannelIdentity.objects.filter(requester=requester, staff_user__isnull=True):
+        staff_line.tie_verified(line, actor)
     for line in ChannelIdentity.objects.filter(requester=requester, staff_user__isnull=False):
         link(line.staff_user, actor)
     name = _name(requester.display_name)

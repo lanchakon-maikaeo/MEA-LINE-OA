@@ -196,7 +196,14 @@ WORKING = {
         "awaiting_confirmation",
     },
     # ADR 0025: returns and problem reports wait for the owner division's approval too.
-    K.RETURN: {"triage", "awaiting_approval", "awaiting_execution", "in_progress"},
+    # ADR 0055: a return followed by its number waits for the requester after its last stage.
+    K.RETURN: {
+        "triage",
+        "awaiting_approval",
+        "awaiting_execution",
+        "in_progress",
+        "awaiting_confirmation",
+    },
     K.PROBLEM: {"triage", "awaiting_approval", "in_progress", "awaiting_confirmation"},
 }
 PAUSED = {"awaiting_info", "on_hold"}
@@ -343,10 +350,13 @@ class TransitionMatrixTests(CaseTestCase):
             expected = set(workflow.KIND_STATUSES[kind]) | workflow.PAUSED | workflow.TERMINAL
             self.assertEqual(seen, expected, kind)
 
-    def test_return_cases_close_without_district_confirmation(self):
+    def test_return_cases_wait_for_confirmation_only_after_the_last_stage(self):
         for spec in workflow.ACTIONS.values():
-            for targets in spec.transitions[K.RETURN].values():
-                self.assertNotIn(S.AWAITING_CONFIRMATION, targets)
+            if spec.name == "finish_on_delivery":  # ADR 0055: a return followed by its number
+                continue
+            for source, targets in spec.transitions[K.RETURN].items():
+                if source != S.AWAITING_CONFIRMATION:  # staying there is no way in
+                    self.assertNotIn(S.AWAITING_CONFIRMATION, targets, spec.name)
         self.assertEqual(workflow.ACTIONS["close"].targets(K.RETURN, S.IN_PROGRESS), {S.CLOSED})
 
     def test_contract_document_exports_matrix_actions_and_errors(self):
@@ -798,13 +808,24 @@ class ScopeAndPermissionTests(CaseTestCase):
                     payload={"assignee_id": bad},
                 )
         self.act(self.as_staff(self.supervisor), case, "assign", payload=assign)
-        self.act(self.as_staff(self.admin), case, "assign", payload={"assignee_id": self.meter.pk})
+        # ADR 0054 Q4: an admin hands the case to the owner กอง's แอดมินกอง, not past them.
+        self.assertFails(
+            ErrorCode.VALIDATION_ERROR,
+            self.act,
+            self.as_staff(self.admin),
+            case,
+            "assign",
+            payload={"assignee_id": self.meter.pk},
+        )
+        self.act(
+            self.as_staff(self.admin), case, "assign", payload={"assignee_id": self.supervisor.pk}
+        )
         decisions = Decision.objects.filter(case=case, action="assign").order_by("id")
         self.assertEqual(
             [d.data for d in decisions],
             [
                 {"assignee_id": self.meter2.pk, "previous_assignee_id": None},
-                {"assignee_id": self.meter.pk, "previous_assignee_id": self.meter2.pk},
+                {"assignee_id": self.supervisor.pk, "previous_assignee_id": self.meter2.pk},
             ],
         )
 

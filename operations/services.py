@@ -35,6 +35,7 @@ from operations import (
     routing_words,
     support,
     units,
+    warehouse,
     workflow,
 )
 from operations.contracts import (
@@ -723,6 +724,8 @@ def _assign(ctx, case, payload, reason, target):
         fail(ErrorCode.VALIDATION_ERROR, "Assignee must be active staff of the owner division.")
     if not units.in_reach(ctx.scope, assignee):
         fail(ErrorCode.VALIDATION_ERROR, "มอบหมายได้เฉพาะคนในหน่วยของคุณ")  # ADR 0052 Q6
+    if ctx.scope and assignee not in units.assignable(ctx.scope, case):
+        fail(ErrorCode.VALIDATION_ERROR, "แอดมินฝ่ายมอบหมายได้เฉพาะแอดมินกองของกองเจ้าภาพ")  # 0054
     if case.assignee_id == assignee.pk:
         fail(ErrorCode.VALIDATION_ERROR, "This person is already responsible.")
     previous = case.assignee_id
@@ -813,11 +816,16 @@ HANDLERS = {
     # ADR 0025: recorded by the system only
     "start_work": approvals.system_only,
     "skip_screening": approvals.system_only,
+    "finish_on_delivery": approvals.system_only,  # ADR 0055: warehouse.record does it
 }
 
 # Shared lifecycle actions: each kind has its own rules (M07 Q6, M08 Q11/Q13, M09 Q1-Q4).
 BY_KIND = {
-    "confirm": {Case.Kind.WITHDRAWAL: fulfilment.confirm, Case.Kind.PROBLEM: problems.confirm},
+    "confirm": {
+        Case.Kind.WITHDRAWAL: fulfilment.confirm,
+        Case.Kind.RETURN: warehouse.confirm_done,
+        Case.Kind.PROBLEM: problems.confirm,
+    },
     "close": {
         Case.Kind.WITHDRAWAL: fulfilment.close,
         Case.Kind.RETURN: returns.close,
@@ -828,6 +836,14 @@ BY_KIND = {
 
 
 def _handler(action, case):
+    if (
+        action in ("confirm", "close")
+        and case.status == Case.Status.AWAITING_CONFIRMATION
+        and case.kind != Case.Kind.PROBLEM
+        and warehouse.tracking(case)
+    ):
+        # ADR 0055: the last warehouse stage waits for the requester like a resolution does.
+        return warehouse.confirm_done if action == "confirm" else warehouse.close_done
     if action in BY_KIND:
         return BY_KIND[action][case.kind]
     return HANDLERS[action]
@@ -923,10 +939,15 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         targets = spec.targets(case.kind, case.status)
         if not targets:
             fail(ErrorCode.INVALID_TRANSITION, f"{action} is not allowed while {case.status}.")
-        # ADR 0049 Q9: the ผู้รับผิดชอบ takes the case or gives it back before any other step;
-        # checked here, not only in the offered buttons, so no channel skips it.
+        # ADR 0049 Q9: the ผู้รับผิดชอบ takes the case or gives it back before any other step,
+        # or passes it on (ADR 0054 Q6); checked here, not only in the offered buttons, so no
+        # channel skips it.
         awaiting = case.awaits_acceptance and ctx.user is not None
-        if awaiting and case.assignee_id == ctx.user.pk and action not in workflow.ACCEPTANCE_STEPS:
+        if (
+            awaiting
+            and case.assignee_id == ctx.user.pk
+            and action not in workflow.BEFORE_ACCEPTANCE
+        ):
             fail(ErrorCode.FORBIDDEN, "กดรับงานเรื่องนี้ก่อน แล้วจึงทำขั้นอื่นได้")
         # One target, or (M07) several the handler chooses from by the line counters; RESUME is
         # resolved by the handler.

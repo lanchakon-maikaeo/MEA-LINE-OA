@@ -54,7 +54,7 @@
     {% elif row.case.ended_at %}
       <span class="muted">ปิด {{ row.case.ended_at|thai_short }}</span>
     {% endif %}
-    <span class="muted">{% if row.case.owner_division %}ดูแลโดย {{ row.case.owner_division.code }}{% if row.case.section %} · {{ row.case.section.name }}{% endif %}{% endif %}{% if row.case.assignee %} · {{ row.case.assignee.staff_profile.display_name|default:row.case.assignee.username }}{% if row.case.auto_assigned %} <span class="tag tag--outline">ระบบมอบให้</span>{% endif %}{% endif %}</span>
+    <span class="muted">{% if row.case.owner_division %}ดูแลโดย {{ row.case.owner_division.code }}{% if row.case.section %} · {{ row.case.section.name }}{% endif %}{% endif %}{% if row.case.assignee %} · {{ row.case.assignee.staff_profile.display_name|default:row.case.assignee.username }}{% if row.case.auto_assigned %} <span class="tag tag--outline">ระบบมอบให้</span>{% endif %}{% if row.case.awaits_acceptance %} <span class="tag tag--alert">รอรับงาน</span>{% endif %}{% endif %}</span>
   </div>
 </li>
 {% endif %}
