@@ -120,9 +120,13 @@ def days_since(moment):
 
 
 @register.simple_tag
-def prio(level):
-    from operations.queues import LEVEL_NAMES, LEVEL_TITLES
+def prio(level, every=False):
+    """The level tag: ฉุกเฉิน and เร่งด่วน only (the owner, 11 Nov 2569); `every` also shows
+    ตามกำหนด, ปกติ and ยังไม่ตั้งระดับ, for a chart's legend or a proposal's value."""
+    from operations.queues import LEVEL_NAMES, LEVEL_TITLES, UNTRIAGED, URGENT
 
+    if not every and level not in URGENT:
+        return ""
     if level in LEVEL_NAMES:
         return format_html(
             '<span class="prio prio--{}" title="{}">{}</span>',
@@ -130,7 +134,7 @@ def prio(level):
             LEVEL_TITLES[level],
             LEVEL_NAMES[level],
         )
-    return format_html('<span class="prio prio--none" title="ยังไม่ได้กำหนดระดับ">รอคัดกรอง</span>')
+    return format_html('<span class="prio prio--none" title="ยังไม่ได้กำหนดระดับ">{}</span>', UNTRIAGED)
 
 
 @register.filter

@@ -212,7 +212,7 @@
       <div class="panel__head"><h3 id="r-level">ความด่วน</h3></div>
       <div class="viz-bars">
         {% for key, n, total, href, step in dash.levels %}
-          <a class="viz-bar viz-bar--{{ step }}" href="{{ href }}"><span>{% prio key %}</span><progress max="{{ total }}" value="{{ n }}" aria-label="{% if key == 'none' %}รอคัดกรอง{% else %}{{ key|level_name }}{% endif %} {{ n }} เรื่อง">{{ n }}</progress><span class="num">{{ n }}</span></a>
+          <a class="viz-bar viz-bar--{{ step }}" href="{{ href }}"><span>{% prio key True %}</span><progress max="{{ total }}" value="{{ n }}" aria-label="{% if key == 'none' %}ยังไม่ตั้งระดับ{% else %}{{ key|level_name }}{% endif %} {{ n }} เรื่อง">{{ n }}</progress><span class="num">{{ n }}</span></a>
         {% endfor %}
       </div>
     </section>

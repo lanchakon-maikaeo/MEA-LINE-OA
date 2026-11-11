@@ -346,3 +346,26 @@ class CloseTests(LineCardTestCase):
         ).latest("pk")
         delivery = notifications.plan_for_event(event)
         self.assertEqual(delivery.text, f"เรื่อง {case.number} ถูกยกเลิกโดยเจ้าหน้าที่")
+
+
+class LevelTests(LineCardTestCase):
+    """The owner (11 Nov 2569): only ฉุกเฉิน and เร่งด่วน show a level; ข้อมูลยังไม่ครบ is gone."""
+
+    def test_only_an_urgent_case_shows_its_level(self):
+        from operations import staff_work
+        from operations.models import CaseTriage
+
+        case = self.withdraw("4500055031")
+        page = self.web(self.head, case)
+        self.assertNotContains(page, 'class="prio prio--')
+        self.assertNotContains(page, "รอคัดกรอง")
+        self.assertFalse([r for r in staff_work.case_rows(case) if "ระดับ" in r])
+        queue = Client()
+        queue.force_login(self.head)
+        self.assertNotContains(
+            queue.get(reverse("division-detail", args=[self.division.code])), "ข้อมูลยังไม่ครบ"
+        )
+        CaseTriage.objects.filter(case=case).update(effective_priority="P1")
+        self.assertContains(self.web(self.head, case), 'class="prio prio--P1"')
+        case = Case.objects.get(pk=case.pk)
+        self.assertIn("สถานะ: กำลังดำเนินการ · ระดับเร่งด่วน", staff_work.case_rows(case))

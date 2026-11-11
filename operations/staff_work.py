@@ -658,7 +658,8 @@ def case_rows(case):
     rows = [
         f"เรื่อง {case.number} · {case.get_kind_display()}",
         *reporter(case),
-        f"สถานะ: {case.get_status_display()} · ระดับ{queues.level_name(level)}",
+        f"สถานะ: {case.get_status_display()}"
+        + (f" · ระดับ{queues.urgent_name(level)}" if queues.urgent_name(level) else ""),
         f"กอง {case.owner_division.code}{who}",
         # The kind of number the requester picked, and the ones staff added (ADR 0047).
         *(f"{label}: {', '.join(numbers)}" for label, numbers in case_numbers.by_kind(case)),

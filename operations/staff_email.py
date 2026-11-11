@@ -117,8 +117,8 @@ def _text(kind, case, detail=""):
     rows = [
         SUBJECTS[kind],
         f"เรื่อง {case.number} ({case.get_kind_display()}) · สถานะ {case.get_status_display()}",
-        f"ระดับ{queues.level_name(level)} · กองที่ดูแล {case.owner_division.code}"
-        f" · {case.district.name}",
+        (f"ระดับ{queues.urgent_name(level)} · " if queues.urgent_name(level) else "")
+        + f"กองที่ดูแล {case.owner_division.code} · {case.district.name}",
     ]
     if detail:
         rows.append(detail)
