@@ -1065,6 +1065,9 @@ class FoundationTests(TestCase):
         self.assertEqual(ui.initial("เมธี"), "ม")
         # The web names levels in words, never P-codes (user, 8 Oct 2569).
         self.assertIn(">ฉุกเฉิน<", str(ui.prio("P0")))
-        self.assertIn(">ปกติ<", str(ui.prio("P3")))
-        self.assertIn(">รอคัดกรอง<", str(ui.prio("")))
+        # Only ฉุกเฉิน and เร่งด่วน show a tag (owner, 11 Nov 2569); a legend shows every level.
+        self.assertEqual(str(ui.prio("P3")), "")
+        self.assertEqual(str(ui.prio("")), "")
+        self.assertIn(">ปกติ<", str(ui.prio("P3", True)))
+        self.assertIn(">ยังไม่ตั้งระดับ<", str(ui.prio("", True)))
         self.assertNotIn(">P", str(ui.prio("P1")))

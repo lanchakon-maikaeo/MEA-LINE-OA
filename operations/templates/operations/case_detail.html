@@ -356,7 +356,7 @@
       {% if p.policy_change_pending %}<p class="flag flag--info mb-24">กติการุ่นใหม่เสนอต่างจากที่ยืนยันไว้</p>{% endif %}
       <dl class="kv">
         <div><dt>กองที่เสนอ</dt><dd><span class="strong">{{ p.proposed_owner }}</span>{% if p.owner_changes %} <span class="muted">(ตอนนี้ {{ p.current_owner }})</span>{% endif %}</dd></div>
-        <div><dt>ระดับที่เสนอ</dt><dd>{% prio p.priority.suggested %}{% if p.priority.floor %} <span class="muted">ห้ามต่ำกว่า{{ p.priority.floor|level_name }}</span>{% endif %}</dd></div>
+        <div><dt>ระดับที่เสนอ</dt><dd>{% prio p.priority.suggested %}{% if p.priority.suggested != "P0" and p.priority.suggested != "P1" %}{{ p.priority.suggested|level_name }}{% endif %}{% if p.priority.floor %} <span class="muted">ห้ามต่ำกว่า{{ p.priority.floor|level_name }}</span>{% endif %}</dd></div>
         {% if p.rule_rows %}<div><dt>กติกา</dt><dd>{% for rule, title in p.rule_rows %}<span class="strong">{{ rule }}</span> {{ title }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</dd></div>{% endif %}
         {% if p.support_units %}<div><dt>หน่วยสนับสนุน</dt><dd>{{ p.support_units|join:", " }}</dd></div>{% endif %}
         {% if p.child_work_owners %}<div><dt>งานย่อยที่เสนอ</dt><dd>{{ p.child_work_owners|join:", " }}</dd></div>{% endif %}

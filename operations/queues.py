@@ -64,10 +64,17 @@ LEVEL_TITLES = {
     "P3": "งานปกติ",
 }
 UNTRIAGED = "ยังไม่ตั้งระดับ"  # ADR 0025: no screening step names it any more
+# The owner (11 Nov 2569): a case shows its level only when it is ฉุกเฉิน or เร่งด่วน.
+URGENT = ("P0", "P1")
 
 
 def level_name(level):
     return LEVEL_NAMES.get(level, UNTRIAGED)
+
+
+def urgent_name(level):
+    """ฉุกเฉิน or เร่งด่วน, else "" (ปกติ, ตามกำหนด and no level show nothing)."""
+    return LEVEL_NAMES[level] if level in URGENT else ""
 
 
 # A role held alone in the division presets the filters of the host tab (round 2 Q1).
@@ -548,8 +555,6 @@ def build_rows(cases, now):
         for work in children.get(case.pk, []):
             row.flags.append(("", f"งานย่อย {work.division.code}: {work.get_status_display()}"))
         if recommendation is not None:
-            if recommendation.missing:
-                row.flags.append(("info", "ข้อมูลยังไม่ครบ"))
             if recommendation.case_revision != case.revision:
                 row.flags.append(("info", "ข้อเสนอยังไม่อัปเดต"))
         if triage and triage.policy_change_pending:
