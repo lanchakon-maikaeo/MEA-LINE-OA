@@ -6,7 +6,9 @@
 #                                     faoj-deployer's access token for an hour, no refresh token
 #   deploy/gcp-move.sh logout         forget that token now
 #   deploy/gcp-move.sh deployer-setup  once, by the owner: the faoj-deployer service account
-#   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's OCIR digest, detached;
+#   deploy/gcp-move.sh registry-setup  once, by the owner: Artifact Registry faoj, GitHub's keyless
+#                                     push (faoj-ci) and the VM's pull, after OCIR went free tier
+#   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's image digest, detached;
 #                                     GCP_APPROVAL="who/when approved" goes into the release record
 #   deploy/gcp-move.sh status         faoj status and /health/ready/
 #   deploy/gcp-move.sh line-menu      publish the Rich Menu from the running release, nothing else
@@ -33,8 +35,8 @@
 #   deploy/gcp-move.sh back-to-e5     undo a move that stopped before GCP opened
 #   deploy/gcp-move.sh reverse-move   after GCP took work: the move back to E5, same checks
 #
-# Deploy only images the Release workflow built and scanned (ap-singapore-1.ocir.io/…@sha256),
-# never one built on a host.
+# Deploy only images the Release workflow built and scanned (asia-southeast3-docker.pkg.dev/…@sha256;
+# ap-singapore-1.ocir.io/… before 11 Nov 2026), never one built on a host.
 set -euo pipefail
 umask 077
 
@@ -43,8 +45,12 @@ ZONE=${GCP_ZONE:-asia-southeast3-a}
 VM=${GCP_VM:-faoj-prod-gcp}
 KEY=${GCP_KEY:-$HOME/.ssh/faoj_gcp_ed25519}
 PUBLIC_HOST=${GCP_PUBLIC_HOST:-34-15-129-131.sslip.io}
-REGISTRY=ap-singapore-1.ocir.io
+REGISTRY=asia-southeast3-docker.pkg.dev
+GAR_REPO=$REGISTRY/$PROJECT/faoj
+OCIR=ap-singapore-1.ocir.io
 NAMESPACE=axif86tn0tbj
+GITHUB_REPO=lanchakon-maikaeo/MEA-LINE-OA
+CI_SA=faoj-ci@$PROJECT.iam.gserviceaccount.com
 APPROVAL=${GCP_APPROVAL:-"owner in chat 2 Nov 2026: production on faoj-prod-gcp (ADR 0043)"}
 ACCOUNT=${GCP_ACCOUNT:-mea.amr2026@gmail.com}
 DEPLOYER=faoj-deployer@$PROJECT.iam.gserviceaccount.com
@@ -95,12 +101,62 @@ deployer_setup() {  # once; IAM changes, so the owner runs it
     --member "user:$ACCOUNT" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null
   say "faoj-deployer ready; IAM takes a minute or two, then: deploy/gcp-move.sh login"
 }
+# OCIR refused pushes from 11 Nov 2026 (OCI free tier). GitHub signs in through Workload Identity
+# Federation (main of this repository only) as faoj-ci, writer on this one repository; the VM pulls
+# as its own service account with a metadata token, so no key or token is stored anywhere.
+registry_setup() {  # once; IAM changes, so the owner runs it
+  local number vm_sa scopes pool=github provider
+  trap 'gcloud auth revoke --all --quiet >/dev/null 2>&1' EXIT
+  gcloud auth login "$ACCOUNT" --force --brief
+  number=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+  provider=projects/$number/locations/global/workloadIdentityPools/$pool/providers/github
+  vm_sa=$(gcloud compute instances describe "$VM" --project "$PROJECT" --zone "$ZONE" --format='value(serviceAccounts[0].email)')
+  scopes=$(gcloud compute instances describe "$VM" --project "$PROJECT" --zone "$ZONE" --format='value(serviceAccounts[0].scopes)')
+  [ -n "$vm_sa" ] || die "$VM has no service account to pull with"
+  case "$scopes" in *cloud-platform*|*devstorage.read*) ;; *) die "$VM's scopes ($scopes) cannot read Artifact Registry";; esac
+  say "APIs, repository faoj in asia-southeast3"
+  gcloud services enable artifactregistry.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \
+    --project "$PROJECT" --quiet
+  gcloud artifacts repositories describe faoj --project "$PROJECT" --location asia-southeast3 >/dev/null 2>&1 \
+    || gcloud artifacts repositories create faoj --project "$PROJECT" --location asia-southeast3 \
+         --repository-format docker --description "faoj release images: Release pushes, $VM pulls" --quiet
+  say "faoj-ci may push to faoj only; $vm_sa may pull from it"
+  gcloud iam service-accounts describe "$CI_SA" --project "$PROJECT" >/dev/null 2>&1 \
+    || gcloud iam service-accounts create faoj-ci --project "$PROJECT" \
+         --display-name "GitHub Release: push to Artifact Registry faoj only"
+  gcloud artifacts repositories add-iam-policy-binding faoj --project "$PROJECT" --location asia-southeast3 \
+    --member "serviceAccount:$CI_SA" --role roles/artifactregistry.writer --quiet >/dev/null
+  gcloud artifacts repositories add-iam-policy-binding faoj --project "$PROJECT" --location asia-southeast3 \
+    --member "serviceAccount:$vm_sa" --role roles/artifactregistry.reader --quiet >/dev/null
+  say "Workload Identity: $GITHUB_REPO on main only"
+  gcloud iam workload-identity-pools describe "$pool" --project "$PROJECT" --location global >/dev/null 2>&1 \
+    || gcloud iam workload-identity-pools create "$pool" --project "$PROJECT" --location global \
+         --display-name "GitHub Actions" --quiet
+  gcloud iam workload-identity-pools providers describe github --project "$PROJECT" --location global \
+      --workload-identity-pool "$pool" >/dev/null 2>&1 \
+    || gcloud iam workload-identity-pools providers create-oidc github --project "$PROJECT" --location global \
+         --workload-identity-pool "$pool" --issuer-uri https://token.actions.githubusercontent.com \
+         --attribute-mapping google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref \
+         --attribute-condition "assertion.repository=='$GITHUB_REPO' && assertion.ref=='refs/heads/main'" --quiet
+  gcloud iam service-accounts add-iam-policy-binding "$CI_SA" --project "$PROJECT" \
+    --role roles/iam.workloadIdentityUser \
+    --member "principalSet://iam.googleapis.com/projects/$number/locations/global/workloadIdentityPools/$pool/attribute.repository/$GITHUB_REPO" \
+    --quiet >/dev/null
+  say "GitHub variables (no secrets)"
+  gh variable set GAR_REGISTRY --repo "$GITHUB_REPO" --body "$REGISTRY"
+  gh variable set GAR_REPOSITORY --repo "$GITHUB_REPO" --body "$PROJECT/faoj"
+  gh variable set GCP_WIF_PROVIDER --repo "$GITHUB_REPO" --body "$provider"
+  gh variable set GCP_CI_SERVICE_ACCOUNT --repo "$GITHUB_REPO" --body "$CI_SA"
+  say "ready; IAM takes a minute or two, then re-run the Release workflow"
+}
+# Docker on the VM signs in to Artifact Registry with the VM's own hour-long metadata token.
+HOST_GAR_LOGIN="curl -sf -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"access_token\"])' | sudo docker login -u oauth2accesstoken --password-stdin https://$REGISTRY >/dev/null"
 signed_in() {
   [ -n "$(find "$TOKEN" -mmin -55 2>/dev/null)" ] || die "not signed in, or the hour is up: deploy/gcp-move.sh login"
   export CLOUDSDK_AUTH_ACCESS_TOKEN_FILE=$TOKEN
 }
 image_arg() {
-  case "${1:-}" in "$REGISTRY"/*@sha256:*) ;; *) die "give the Release workflow's app image ($REGISTRY/…@sha256:…)";; esac
+  case "${1:-}" in "$GAR_REPO"/*@sha256:*|"$OCIR"/*@sha256:*) ;; *) die "give the Release workflow's app image ($GAR_REPO/app@sha256:…)";; esac
 }
 
 prepare() {
@@ -127,7 +183,7 @@ ocir_login() {
   # The token goes over ssh stdin to docker on the host; never in argv, a file here or the screen.
   printf '%s' "$token" | gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" \
     --tunnel-through-iap --ssh-key-file "$KEY" --quiet \
-    --command "sudo docker login $REGISTRY -u '$user' --password-stdin >/dev/null && echo 'OCIR login saved'" \
+    --command "sudo docker login $OCIR -u '$user' --password-stdin >/dev/null && echo 'OCIR login saved'" \
     -- -o LogLevel=ERROR 2>&1 | grep -v -e NumPy -e tcp_upload -e '^$'
 }
 
@@ -136,7 +192,7 @@ ocir_login() {
 login_on_host() {  # user; token on stdin
   gcloud compute ssh "ubuntu@$VM" --project "$PROJECT" --zone "$ZONE" --tunnel-through-iap \
     --ssh-key-file "$KEY" --quiet -- -o LogLevel=ERROR \
-    "t=\$(cat); for i in \$(seq 1 15); do printf %s \"\$t\" | sudo docker login $REGISTRY -u '$1' --password-stdin >/dev/null 2>&1 && { echo 'OCIR login saved'; exit 0; }; sleep 20; done; echo 'OCIR login failed'; exit 1" \
+    "t=\$(cat); for i in \$(seq 1 15); do printf %s \"\$t\" | sudo docker login $OCIR -u '$1' --password-stdin >/dev/null 2>&1 && { echo 'OCIR login saved'; exit 0; }; sleep 20; done; echo 'OCIR login failed'; exit 1" \
     2>&1 | grep -v -e NumPy -e tcp_upload -e '^$'
 }
 
@@ -184,6 +240,7 @@ bootstrap() {
   image_arg "${1:-}"
   say "bootstrap-host.sh from $1 (secrets made on the host, never shown)"
   on_gcp "set -e
+    $HOST_GAR_LOGIN
     sudo docker pull -q '$1' >/dev/null
     tmp=\$(mktemp -d); cid=\$(sudo docker create '$1')
     sudo docker cp \"\$cid:/app/deploy/server/.\" \"\$tmp/\" >/dev/null; sudo docker rm \"\$cid\" >/dev/null
@@ -210,6 +267,7 @@ deploy() {
   say "faoj deploy $sha (detached; log /srv/faoj/run/deploy-$sha.log)"
   # systemd-run keeps the deploy alive when the IAP session drops (1 Nov 2026 on E5).
   on_gcp "set -e
+    $HOST_GAR_LOGIN
     # The new release's own faoj runs the deploy, so a fix in faoj applies to this deploy too.
     tmp=/srv/faoj/run/bundle-$sha; sudo mkdir -p /srv/faoj/run
     sudo rm -rf \$tmp; sudo mkdir -p \$tmp; cid=\$(sudo docker create '$1')
@@ -696,11 +754,12 @@ EOF
 }
 
 cmd=${1:-}; shift || true
-case "$cmd" in login|logout|deployer-setup|"") ;; *) signed_in;; esac
+case "$cmd" in login|logout|deployer-setup|registry-setup|"") ;; *) signed_in;; esac
 case "$cmd" in
   login) login;;
   logout) logout;;
   deployer-setup) deployer_setup;;
+  registry-setup) registry_setup;;
   prepare) prepare;;
   pull-token) pull_token "$@";;
   ocir-login) ocir_login;;

@@ -422,6 +422,19 @@ class PipelineTests(SimpleTestCase):
         self.assertIn('scan "$DB_IMAGE" "$p" 1', release)
         self.assertIn('--exit-code "$3"', release)
 
+    def test_images_go_to_artifact_registry_without_a_stored_key(self):
+        # OCIR refused pushes on 11 Nov 2026; GitHub signs in through Workload Identity instead.
+        for name in ("release.yml", "scheduled.yml"):
+            text = (ROOT / ".github/workflows" / name).read_text()
+            self.assertNotIn("secrets.", text, name)
+            self.assertIn("vars.GAR_REGISTRY", text, name)
+            self.assertIn("google-github-actions/auth@", text, name)
+            for job_name, job in yaml.safe_load(text)["jobs"].items():
+                if job.get("permissions"):
+                    self.assertEqual(
+                        job["permissions"], {"contents": "read", "id-token": "write"}, job_name
+                    )
+
     def test_main_tag_moves_only_after_a_passing_release_from_main(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn(

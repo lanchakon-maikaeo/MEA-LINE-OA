@@ -1,11 +1,13 @@
 # Release (M12, E.8): after CI passes on main, build the database and application images once for
-# arm64 (OCI A1, native runner) and amd64 (CI, an organisation VM later), push them to OCIR by
-# digest, scan, write SBOMs and the release manifest. Nothing here can reach a host or a
-# database: an operator deploys the printed digest with `faoj deploy` (Q3 a).
+# arm64 and amd64, push them to Artifact Registry by digest, scan, write SBOMs and the release
+# manifest. Nothing here can reach a host or a database: an operator deploys the printed digest
+# with `deploy/gcp-move.sh deploy` (Q3 a).
 #
-# Needs repository variables OCIR_REGISTRY (e.g. ap-singapore-1.ocir.io) and OCIR_NAMESPACE, and
-# secrets OCIR_USERNAME / OCIR_TOKEN of the faoj-ci user (push to faoj/* only). Until they are
-# set, the workflow skips itself.
+# OCIR refused pushes once the OCI account went free tier (11 Nov 2026), so images live in the
+# production project's Artifact Registry. No stored key: each job signs in as faoj-ci (writer on
+# that one repository) through Workload Identity Federation, which trusts this repository's main
+# branch only. `deploy/gcp-move.sh registry-setup` sets the repository variables GAR_REGISTRY,
+# GAR_REPOSITORY, GCP_WIF_PROVIDER and GCP_CI_SERVICE_ACCOUNT; until then the workflow skips itself.
 name: Release
 on:
   workflow_run:
@@ -19,8 +21,9 @@ concurrency:
   group: release
   cancel-in-progress: false
 env:
-  REGISTRY: ${{ vars.OCIR_REGISTRY }}
-  NAMESPACE: ${{ vars.OCIR_NAMESPACE }}
+  REGISTRY: ${{ vars.GAR_REGISTRY }}
+  REPOSITORY: ${{ vars.GAR_REPOSITORY }}
+  REGISTRY_USER: oauth2accesstoken
   COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
   TRIVY_IMAGE: aquasec/trivy@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
   SYFT_IMAGE: anchore/syft@sha256:3eb5379ba7b409c3f4069b686110527af0c47df993fa5c10d13e7cf34f49b1aa
@@ -36,8 +39,8 @@ jobs:
         env:
           CONCLUSION: ${{ github.event.workflow_run.conclusion || 'success' }}
         run: |
-          if [ -z "$REGISTRY" ] || [ -z "$NAMESPACE" ]; then
-            echo "::notice::OCIR_REGISTRY/OCIR_NAMESPACE not set yet; no release built."
+          if [ -z "$REGISTRY" ] || [ -z "$REPOSITORY" ]; then
+            echo "::notice::GAR_REGISTRY/GAR_REPOSITORY not set yet (deploy/gcp-move.sh registry-setup); no release built."
             echo "go=false" >> "$GITHUB_OUTPUT"
           elif [ "$CONCLUSION" != success ]; then
             echo "go=false" >> "$GITHUB_OUTPUT"
@@ -55,20 +58,29 @@ jobs:
           - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.COMMIT }}
           persist-credentials: false
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
       - name: Build and push by digest
         env:
-          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
-          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+          REGISTRY_TOKEN: ${{ steps.gcp.outputs.access_token }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          echo "$OCIR_TOKEN" | docker login "$REGISTRY" -u "$OCIR_USERNAME" --password-stdin
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
           docker buildx create --use --name faoj >/dev/null
-          repo="$REGISTRY/$NAMESPACE/faoj/db"
+          repo="$REGISTRY/$REPOSITORY/db"
           docker buildx build --platform "$PLATFORM" --provenance=false \
             --output "type=image,name=$repo,push-by-digest=true,name-canonical=true,push=true" \
             --metadata-file meta.json deploy/server/db
@@ -83,6 +95,9 @@ jobs:
     needs: db
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       image: ${{ steps.index.outputs.image }}
     steps:
@@ -90,13 +105,19 @@ jobs:
         with:
           pattern: digest-db-*
           merge-multiple: true
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
       - id: index
         env:
-          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
-          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+          REGISTRY_TOKEN: ${{ steps.gcp.outputs.access_token }}
         run: |
-          echo "$OCIR_TOKEN" | docker login "$REGISTRY" -u "$OCIR_USERNAME" --password-stdin
-          repo="$REGISTRY/$NAMESPACE/faoj/db"
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+          repo="$REGISTRY/$REPOSITORY/db"
           docker buildx imagetools create -t "$repo:$COMMIT" "$repo@$(cat digest-db-amd64)" "$repo@$(cat digest-db-arm64)"
           digest=$(docker buildx imagetools inspect "$repo:$COMMIT" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
           echo "image=$repo@$digest" >> "$GITHUB_OUTPUT"
@@ -110,21 +131,30 @@ jobs:
           - {platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.COMMIT }}
           persist-credentials: false
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
       - name: Build and push by digest
         env:
-          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
-          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+          REGISTRY_TOKEN: ${{ steps.gcp.outputs.access_token }}
           PLATFORM: ${{ matrix.platform }}
           DB_IMAGE: ${{ needs.db-index.outputs.image }}
         run: |
-          echo "$OCIR_TOKEN" | docker login "$REGISTRY" -u "$OCIR_USERNAME" --password-stdin
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
           docker buildx create --use --name faoj >/dev/null
-          repo="$REGISTRY/$NAMESPACE/faoj/app"
+          repo="$REGISTRY/$REPOSITORY/app"
           docker buildx build --platform "$PLATFORM" --provenance=false \
             --build-arg RELEASE_COMMIT="$COMMIT" --build-arg DB_IMAGE="$DB_IMAGE" \
             --output "type=image,name=$repo,push-by-digest=true,name-canonical=true,push=true" \
@@ -140,27 +170,36 @@ jobs:
     needs: [db-index, app]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: digest-app-*
           merge-multiple: true
+      - id: gcp
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
       - name: Index, scan (blocking for our images), SBOM and manifest
         env:
-          OCIR_USERNAME: ${{ secrets.OCIR_USERNAME }}
-          OCIR_TOKEN: ${{ secrets.OCIR_TOKEN }}
+          REGISTRY_TOKEN: ${{ steps.gcp.outputs.access_token }}
           DB_IMAGE: ${{ needs.db-index.outputs.image }}
           FROM_MAIN: ${{ github.event_name == 'workflow_run' || github.ref == 'refs/heads/main' }}
         run: |
           set -euo pipefail
-          echo "$OCIR_TOKEN" | docker login "$REGISTRY" -u "$OCIR_USERNAME" --password-stdin
-          repo="$REGISTRY/$NAMESPACE/faoj/app"
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+          repo="$REGISTRY/$REPOSITORY/app"
           docker buildx imagetools create -t "$repo:$COMMIT" "$repo@$(cat digest-app-amd64)" "$repo@$(cat digest-app-arm64)"
           digest=$(docker buildx imagetools inspect "$repo:$COMMIT" --format '{{json .Manifest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')
           app="$repo@$digest"
           mkdir -p release
           scan() {  # image, platform, blocking
-            docker run --rm -e TRIVY_USERNAME="$OCIR_USERNAME" -e TRIVY_PASSWORD="$OCIR_TOKEN" -v "$PWD/release:/out" \
+            docker run --rm -e TRIVY_USERNAME="$REGISTRY_USER" -e TRIVY_PASSWORD="$REGISTRY_TOKEN" -v "$PWD/release:/out" \
               "$TRIVY_IMAGE" image --quiet --platform "$2" --scanners vuln,secret --severity HIGH,CRITICAL \
               --ignore-unfixed --exit-code "$3" --format json --output "/out/scan-$4.json" "$1"
           }
@@ -170,11 +209,11 @@ jobs:
             scan "$app" "$p" 1 "app-$a" || status=1
             scan "$DB_IMAGE" "$p" 1 "db-$a" || status=1
           done
-          docker run --rm -e SYFT_REGISTRY_AUTH_AUTHORITY="$REGISTRY" -e SYFT_REGISTRY_AUTH_USERNAME="$OCIR_USERNAME" \
-            -e SYFT_REGISTRY_AUTH_PASSWORD="$OCIR_TOKEN" -v "$PWD/release:/out" "$SYFT_IMAGE" \
+          docker run --rm -e SYFT_REGISTRY_AUTH_AUTHORITY="$REGISTRY" -e SYFT_REGISTRY_AUTH_USERNAME="$REGISTRY_USER" \
+            -e SYFT_REGISTRY_AUTH_PASSWORD="$REGISTRY_TOKEN" -v "$PWD/release:/out" "$SYFT_IMAGE" \
             "registry:$app" --platform linux/arm64 -o "spdx-json=/out/sbom-app.spdx.json"
-          docker run --rm -e SYFT_REGISTRY_AUTH_AUTHORITY="$REGISTRY" -e SYFT_REGISTRY_AUTH_USERNAME="$OCIR_USERNAME" \
-            -e SYFT_REGISTRY_AUTH_PASSWORD="$OCIR_TOKEN" -v "$PWD/release:/out" "$SYFT_IMAGE" \
+          docker run --rm -e SYFT_REGISTRY_AUTH_AUTHORITY="$REGISTRY" -e SYFT_REGISTRY_AUTH_USERNAME="$REGISTRY_USER" \
+            -e SYFT_REGISTRY_AUTH_PASSWORD="$REGISTRY_TOKEN" -v "$PWD/release:/out" "$SYFT_IMAGE" \
             "registry:$DB_IMAGE" --platform linux/arm64 -o "spdx-json=/out/sbom-db.spdx.json"
           # Third-party images are pinned in the bundle; their findings are reported, not blocking.
           docker create --platform linux/amd64 --name bundle "$app" >/dev/null
@@ -199,7 +238,7 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
               out.write(f"## Release {m['commit'][:12]}\n\n")
               out.write("Blocking scans: " + ("passed" if status == 0 else "**FAILED — do not deploy**") + "\n\n")
-              out.write(f"```\nsudo faoj deploy {app}\n```\n\n")
+              out.write(f"```\nGCP_APPROVAL=\"…\" deploy/gcp-move.sh deploy {app}\n```\n\n")
               if status == 0 and os.environ["FROM_MAIN"] == "true":
                   out.write("Tagged `main`: staging deploys it within 5 minutes if `faoj auto-deploy` is on; "
                             "production takes it with `sudo faoj promote --approval \"…\"` after staging passes.\n\n")
