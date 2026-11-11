@@ -12,12 +12,12 @@
 | เว็บเจ้าหน้าที่ | `https://dedcenter-381083094942.asia-southeast3.run.app/` เป็น Cloud Run ที่ส่งต่อไปยังเครื่อง ใช้ได้ในเครือข่าย กฟน. ส่วน `https://34-15-129-131.sslip.io/` เข้าเครื่องตรง แต่ FortiGate ของ กฟน. บล็อกไว้ |
 | LINE webhook | `https://crabmeat-lake-lunar.ngrok-free.dev/webhooks/line` ผ่าน container ngrok บนเครื่อง เปิด Webhook redelivery ไว้แล้ว |
 | Mini App | Endpoint (Published) คือ `https://dedcenter-381083094942.asia-southeast3.run.app/broadcasts/` |
-| image | OCIR `ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:…` จาก Release workflow เครื่องดึงด้วย auth token ที่ pull ได้อย่างเดียว |
+| image | Artifact Registry `asia-southeast3-docker.pkg.dev/mea-ded-center-line-oa/faoj/app@sha256:…` จาก Release workflow เครื่องดึงด้วย service account ของ VM เอง (ไม่มี token เก็บไว้) ตั้งแต่ 11 พ.ย. 2569 เพราะ OCIR ไม่รับ push หลังบัญชี OCI กลายเป็น free tier |
 | backup | pgBackRest ไป OCI Object Storage ที่ path `/pgbackrest/production-gcp` ส่วนไฟล์แนบและ n8n ไป restic repo เดียวกับที่ E5 ใช้ แยกกันด้วย host tag `production-gcp` |
 | เครื่องสำรอง | Mac (`~/faoj-standby`) ดึง WAL ของ `production-gcp` มาทุก 5 นาที |
 | เครดิต | Free Trial ของ GCP หมดราวปลาย ม.ค. 2570 ห้ามกด Upgrade และห้ามผูก billing account อื่น ต้องย้ายออกให้ได้ภายในกลาง ม.ค. |
 
-เจ้าของลบ VM `faoj-prod-e5` (E5) แล้วเมื่อ 5 พ.ย. 2569 จึงย้ายกลับ E5 (`gcp-move.sh reverse-move`) ไม่ได้อีก และ `168-107-70-170.sslip.io` เปิดไม่ได้แล้ว ที่ OCI ยังเก็บ data volume `faoj-prod-e5-data` (ฐานข้อมูล E5 ตอน freeze), boot volume, reserved IP 168.107.70.170, bucket `faoj-backup` และ `faoj-files` (GCP ยัง backup ลงที่นี่) และ OCIR (GCP ดึง image จากที่นี่) ห้ามลบของเหล่านี้
+เจ้าของลบ VM `faoj-prod-e5` (E5) แล้วเมื่อ 5 พ.ย. 2569 จึงย้ายกลับ E5 (`gcp-move.sh reverse-move`) ไม่ได้อีก และ `168-107-70-170.sslip.io` เปิดไม่ได้แล้ว ที่ OCI ยังเก็บ data volume `faoj-prod-e5-data` (ฐานข้อมูล E5 ตอน freeze), boot volume, reserved IP 168.107.70.170, bucket `faoj-backup` และ `faoj-files` (GCP ยัง backup ลงที่นี่) และ OCIR (image ก่อน 11 พ.ย. 2569 รวมรุ่นที่ใช้ rollback) ห้ามลบของเหล่านี้
 
 ## ก่อนเริ่ม
 
@@ -113,7 +113,7 @@ Tree <hash> passed every stage in pull request run <run id>; not tested again.
 
 Release workflow เริ่มเองเมื่อ CI ของ `main` ผ่าน ขั้นตอนคือ
 
-1. build image `faoj/db` และ `faoj/app` ทั้ง amd64 และ arm64 แล้ว push ขึ้น OCIR ตาม digest
+1. build image `faoj/db` และ `faoj/app` ทั้ง amd64 และ arm64 แล้ว push ขึ้น Artifact Registry `faoj` ตาม digest โดย login เป็น `faoj-ci` ผ่าน Workload Identity Federation (ไม่มี key ใน GitHub) ซึ่งเชื่อเฉพาะ branch `main` ของ repo นี้
 2. สแกน app และ db ด้วย Trivy ถ้าพบช่องโหว่ระดับ HIGH หรือ CRITICAL ที่มีตัวแก้แล้ว หรือพบ secret รุ่นนั้นจะไม่ผ่าน image ของผู้อื่นที่ pin ไว้ (n8n, ClamAV, Caddy, backup) สแกนแล้วรายงานอย่างเดียว
 3. ทำ SBOM และ `release.json` ซึ่งมี `app_image` (digest ที่ใช้ deploy) และ `release_ok`
 4. ติด tag `faoj/app:main` เฉพาะรุ่นที่สแกนผ่าน
@@ -127,7 +127,7 @@ id=$(gh run list --workflow release.yml --branch main --limit 1 --json databaseI
 **ถ้าถูกต้อง** จะได้ digest หนึ่งบรรทัด ตามด้วย `release_ok: True` และหน้าสรุปของ Release run เขียนว่า `Blocking scans: passed`
 
 ```
-ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:ec9a92d9f70e… release_ok: True
+asia-southeast3-docker.pkg.dev/mea-ded-center-line-oa/faoj/app@sha256:ec9a92d9f70e… release_ok: True
 ```
 
 ทุกวันจันทร์ 03:00 workflow `scheduled.yml` จะสแกน release ของ `main` ล่าสุดซ้ำ เพื่อจับช่องโหว่ที่ประกาศหลังวันที่ build
@@ -143,7 +143,7 @@ ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:ec9a92d9f70e… release_ok: 
    ```
 
    ```bash
-   GCP_APPROVAL="owner in chat <วันที่>: <PR หรือเหตุผล>" deploy/gcp-move.sh deploy ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:<digest>
+   GCP_APPROVAL="owner in chat <วันที่>: <PR หรือเหตุผล>" deploy/gcp-move.sh deploy asia-southeast3-docker.pkg.dev/mea-ded-center-line-oa/faoj/app@sha256:<digest>
    ```
 
    คำสั่งนี้รัน `faoj` ของรุ่นใหม่ด้วย `systemd-run` บนเครื่อง ถ้า IAP หลุดกลางทาง deploy ก็ยังทำต่อจนเสร็จ ขั้นตอนบนเครื่องคือ backup, เปิด maintenance, migrate, นำเข้า n8n workflow ของรุ่นใหม่, สลับ container และ smoke ถ้า smoke ไม่ผ่าน ระบบจะกลับไปใช้รุ่นก่อนเอง
@@ -154,10 +154,9 @@ ap-singapore-1.ocir.io/axif86tn0tbj/faoj/app@sha256:ec9a92d9f70e… release_ok: 
    deploy/gcp-move.sh ssh 'sudo tail -f /srv/faoj/run/deploy-<12 ตัวแรกของ digest>.log'
    ```
 
-   **ถ้าถูกต้อง** log จะเดินตามลำดับนี้ และจบด้วย `deployed <digest>` (กด Ctrl+C เพื่อออกจาก `tail`) บรรทัดแรกเรื่อง instance principal เป็นเรื่องปกติบน GCP เพราะเครื่องนี้ดึง image ด้วย login ที่บันทึกไว้
+   **ถ้าถูกต้อง** log จะเดินตามลำดับนี้ และจบด้วย `deployed <digest>` (กด Ctrl+C เพื่อออกจาก `tail`) 
 
    ```
-   [17:20:12] OCIR login with the instance principal failed; using Docker's saved login
    [17:20:12] release ec9a92d9f70e (previous: 7359950aa629)
    [17:20:19] maintenance ON (Caddy answers 503 with the fallback channels)
    [17:20:22] restore point: pgBackRest incremental backup
@@ -332,17 +331,18 @@ files: last copy 2026-11-02 23:13
 | เห็นอะไร | แปลว่า | แก้อย่างไร |
 |---|---|---|
 | Release ไม่เริ่มหลัง merge | CI ของ `main` ไม่ผ่าน | ดู CI ของ `main` ก่อน แก้แล้วเปิด PR ใหม่ |
-| notice `OCIR_REGISTRY/OCIR_NAMESPACE not set yet` | ตัวแปรของ repository หาย | เจ้าของตั้ง `OCIR_REGISTRY` และ `OCIR_NAMESPACE` ใน GitHub แล้วรัน Release ใหม่ |
+| notice `GAR_REGISTRY/GAR_REPOSITORY not set yet` | ตัวแปรของ repository หาย | เจ้าของรัน `deploy/gcp-move.sh registry-setup` แล้วรัน Release ใหม่ |
+| `google-github-actions/auth` ล้ม (`unauthorized_client` หรือ `Permission 'iam.serviceAccounts.getAccessToken' denied`) | Release ไม่ได้รันจาก `main` หรือ IAM ยังไม่ครบ | รันจาก `main` เท่านั้น ถ้ายังล้ม เจ้าของรัน `deploy/gcp-move.sh registry-setup` ซ้ำ (รันซ้ำได้) |
 | `release_ok: False` หรือ `Blocking scans: FAILED` | Trivy พบช่องโหว่ที่มีตัวแก้แล้ว หรือพบ secret ใน image | ห้าม deploy ดูตารางผลสแกนในหน้าสรุป อัปเดต package หรือ base image แล้วเปิด PR ใหม่ |
 
 ### Deploy
 
 | เห็นอะไร | แปลว่า | แก้อย่างไร |
 |---|---|---|
-| `give the Release workflow's app image` | digest ไม่ได้มาจาก OCIR ในรูป `ap-singapore-1.ocir.io/…@sha256:…` | คัดลอก `app_image` จากขั้น Release มาใส่ทั้งบรรทัด |
+| `give the Release workflow's app image` | digest ไม่ได้อยู่ในรูป `asia-southeast3-docker.pkg.dev/mea-ded-center-line-oa/faoj/app@sha256:…` | คัดลอก `app_image` จากขั้น Release มาใส่ทั้งบรรทัด |
 | `last database backup is …s old; run 'faoj backup diff' first` | backup ล่าสุดเก่ากว่า 26 ชั่วโมง ระบบไม่ยอม migrate | รัน `deploy/gcp-move.sh ssh 'sudo faoj backup diff'` แล้ว deploy ใหม่ ถ้า backup ไม่สำเร็จ ให้หยุดและหาสาเหตุก่อน |
 | `another deploy holds …` | มี deploy อื่นค้างอยู่ | ดูว่ามี deploy รันอยู่จริงไหมด้วย `deploy/gcp-move.sh ssh 'systemctl list-units "faoj-deploy-*"'` ถ้ารันอยู่ให้รอ ลบ lock เฉพาะเมื่อแน่ใจว่าไม่มี deploy รัน |
-| ดึง image ไม่ได้ (`unauthorized` หรือ `denied`) | auth token สำหรับ pull หมดอายุหรือถูกลบ | เจ้าของรัน `deploy/gcp-move.sh pull-token` (หรือ `ocir-login`) แล้ว deploy ใหม่ |
+| ดึง image ไม่ได้ (`unauthorized` หรือ `denied`) | service account ของ VM ไม่มีสิทธิ์อ่าน repo `faoj` | เจ้าของรัน `deploy/gcp-move.sh registry-setup` ซ้ำ แล้ว deploy ใหม่ (image เก่าบน OCIR ใช้ `pull-token` หรือ `ocir-login`) |
 | `migration failed (RB07); maintenance stays on` | migration ล้ม ระบบกลับไปรุ่นเดิมแต่ยังปิดรับงาน | อ่าน log หาสาเหตุ ถ้ารุ่นเดิมทำงานปกติ ใช้ `sudo faoj maintenance off` แล้วแก้โค้ดในรอบหน้า ถ้าข้อมูลเสีย ใช้ RB05 |
 | `smoke failed` แล้วตามด้วย `rolling back to …` | รุ่นใหม่ไม่ผ่าน smoke ระบบย้อนกลับเอง | ตรวจ `deploy/gcp-move.sh status` ว่ารุ่นเดิมกลับมาและ maintenance เป็น `off` แล้วหาสาเหตุจาก log ก่อนลองใหม่ |
 | maintenance ยังเป็น `on` หลัง deploy จบ | deploy หรือ rollback ไม่ผ่านครบ | ดู `deploy/gcp-move.sh status` ถ้าทุก service `Up` และ `healthy` ให้ `sudo faoj maintenance off` ถ้าไม่ ใช้ `sudo faoj rollback` |

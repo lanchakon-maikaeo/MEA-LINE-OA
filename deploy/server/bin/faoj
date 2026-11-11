@@ -92,9 +92,19 @@ dc_in() {
 }
 dc() { local rel; rel=$(current_dir); [ -n "$rel" ] || die "no current release"; dc_in "$rel" "$@"; }
 
-registry_login() {  # OCIR on an OCI host: a short-lived token from the instance principal, nothing stored
+registry_login() {  # a short-lived token from the host's own identity, nothing stored
   local host=${1%%/*}
-  case "$host" in *.ocir.io) ;; *) return 0;; esac
+  case "$host" in
+    *-docker.pkg.dev)  # Artifact Registry on a GCP host: the VM's service account (11 Nov 2026)
+      curl -sf -H 'Metadata-Flavor: Google' \
+          http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null \
+        | docker login -u oauth2accesstoken --password-stdin "https://$host" >/dev/null 2>&1 \
+        || say "Artifact Registry login with the VM's service account failed; using Docker's saved login"
+      return 0;;
+    *.ocir.io) ;;
+    *) return 0;;
+  esac
   docker run --rm "$OCI_CLI_IMAGE" raw-request --http-method GET --auth instance_principal \
       --target-uri "https://$host/20180419/docker/token" 2>/dev/null \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["token"])' 2>/dev/null \
