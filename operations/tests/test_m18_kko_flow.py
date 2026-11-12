@@ -211,6 +211,9 @@ class TruckTests(KkoTestCase):
         client.force_login(self.kko)
         page = client.get("/divisions/กคอ./warehouse/schedule/").content.decode()
         self.assertIn("ฟขป.", page)
+        # ADR 0056: กคอ. goes by its truck day, so the page has no กำหนดจ่ายตามขนาด of กคว.
+        self.assertNotIn('data-sc-part="sla"', page)
+        self.assertNotIn("ชุดมิเตอร์ CT VT", page)
         r = client.post(
             "/divisions/กคอ./warehouse/schedule/",
             {
@@ -226,6 +229,7 @@ class TruckTests(KkoTestCase):
         self.assertEqual(self.schedule.truck_days["ฟขธ."], [1, 4])
         self.assertEqual((self.schedule.lead_days, self.schedule.contact), (1, "704-5001"))
         self.assertEqual(self.schedule.stage_labels, {"return": {"keyed": "รถมารับแล้ว"}})
+        self.assertEqual(self.schedule.issue_weekdays, [0, 1, 2, 3, 4])  # not on the form: kept
 
 
 class RepairSheetTests(KkoTestCase):

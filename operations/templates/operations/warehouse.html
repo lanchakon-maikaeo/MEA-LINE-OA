@@ -11,11 +11,11 @@
     <p class="lede">ใบเบิกและใบส่งคืนที่ยังไม่จบ กดปุ่มท้ายแถวเพื่อบันทึกขั้นถัดไป หรือติ๊กหลายใบแล้วบันทึกพร้อมกัน ผู้แจ้งได้ข้อความตอนตั้งวันจ่ายและตอนจ่ายแล้ว</p>
   </div>
   <div class="page-head__actions">
-    <a class="btn btn--secondary" href="{% url 'warehouse-schedule' division.code %}">ตารางกำหนดจ่ายและวันส่งรถ</a>
-    <a class="btn btn--secondary" href="{% url 'calendar' division.code %}">ปฏิทินนัด</a>
+    <a class="btn btn--secondary" href="{% url 'warehouse-schedule' division.code %}">{{ table_title }}</a>
+    {% if division.calendars.exists %}<a class="btn btn--secondary" href="{% url 'calendar' division.code %}">ปฏิทินนัด</a>{% endif %}
   </div>
 </div>
-{% if not schedule.sla %}<div class="notice">ยังไม่มีตารางกำหนดจ่าย ระบบจึงเสนอวันจ่ายไม่ได้ ตอนคีย์จ่ายให้ใส่วันจ่ายเอง หรือ<a href="{% url 'warehouse-schedule' division.code %}">ตั้งตารางก่อน</a></div>{% endif %}
+{% if parts.sla and not schedule.sla %}<div class="notice">ยังไม่มีตารางกำหนดจ่าย ระบบจึงเสนอวันจ่ายไม่ได้ ตอนคีย์จ่ายให้ใส่วันจ่ายเอง หรือ<a href="{% url 'warehouse-schedule' division.code %}">ตั้งตารางก่อน</a></div>{% endif %}
 
 <nav class="chips wh-tabs" aria-label="ขั้นงานคลัง">
   {% for key, label, count in tabs %}

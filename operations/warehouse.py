@@ -48,6 +48,30 @@ def schedule_of(division):
     return DivisionSchedule.objects.filter(division=division).first()
 
 
+def has_slips(division):
+    """งานคลัง is this กอง's work (ADR 0056): it keeps a table, or holds a case followed by
+    its number."""
+    return (
+        schedule_of(division) is not None
+        or Case.objects.filter(
+            owner_division=division, kind__in=(Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
+        )
+        .exclude(sap_kind="")
+        .exists()
+    )
+
+
+def table_parts(division, schedule):
+    """Which tables a กอง keeps (ADR 0056): วันส่งรถ beside a นัดรับของ calendar, กำหนดจ่ายตามขนาด
+    unless the truck day sets the pay day (กคอ. Q40). กอจ. keeps neither (ADR 0034). Rows already
+    saved always show, so saving the page never drops them."""
+    trucks = bool(schedule and schedule.truck_days) or any(
+        c.is_pickup for c in division.calendars.all()
+    )
+    by_truck = schedule is not None and schedule.delivery == schedule.Delivery.TRUCK
+    return {"sla": bool(schedule and schedule.sla) or (trucks and not by_truck), "trucks": trucks}
+
+
 def working_days_after(start, days):
     """Monday to Friday, skipping วันหยุด (รอบใหม่ Q11)."""
     off = calendars.holidays(start, start + timedelta(days=days * 3 + 30))

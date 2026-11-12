@@ -39,6 +39,7 @@ from operations import (
     support,
     units,
     uploads,
+    warehouse,
     warehouse_web,
     web_actions,
     wording,
@@ -317,6 +318,7 @@ def _queue(request, division, admin_all=False):
         request.session["division"] = division.code if division else ALL_QUEUE
     context = {
         "division": division,
+        "has_warehouse": bool(division) and warehouse.has_slips(division),  # ADR 0056
         "admin_all": admin_all,
         "tab": tab,
         "tabs": [(key, queues.TAB_LABELS[key], tally[key]) for key in keys],

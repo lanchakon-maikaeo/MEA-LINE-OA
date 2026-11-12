@@ -83,6 +83,13 @@ def _division(request, code, unit_posts=False):
     return division
 
 
+def _table_title(parts):
+    """The table page's name says only what the กอง keeps (ADR 0056)."""
+    if parts["sla"]:
+        return "ตารางกำหนดจ่ายและวันส่งรถ"
+    return "วันส่งรถและชื่อขั้น" if parts["trucks"] else "ชื่อขั้นงานคลัง"
+
+
 def _day(text, default=None):
     try:
         return date.fromisoformat(text) if text else default
@@ -192,7 +199,9 @@ def warehouse_page(request, code):
             "stages": S.choices,
             "bulk_stage": BULK_DEFAULT.get(tab, S.RECEIVED),
             "today": today,
-            "schedule": warehouse.schedule_of(division),
+            "schedule": (schedule := warehouse.schedule_of(division)),
+            "parts": (parts := warehouse.table_parts(division, schedule)),
+            "table_title": _table_title(parts),
             "may_act": may_act,
         },
     )
@@ -203,17 +212,24 @@ def schedule_page(request, code):
     division = _division(request, code)
     districts = list(District.objects.filter(is_active=True).order_by("code"))
     schedule = warehouse.schedule_of(division)
+    parts = warehouse.table_parts(division, schedule)
     if request.method == "POST":
-        sla = [
-            {"group": g, "size": s, "days": d}
-            for g, s, d in zip(
-                request.POST.getlist("sla_group"),
-                request.POST.getlist("sla_size"),
-                request.POST.getlist("sla_days"),
-                strict=False,
-            )
-        ]
+        # ADR 0056: a part the page does not show is not on the form; it keeps what it holds.
+        sla = list(schedule.sla) if schedule else []
+        issue = schedule.issue_weekdays if schedule else []
+        if parts["sla"]:
+            issue = request.POST.getlist("issue")
+            sla = [
+                {"group": g, "size": s, "days": d}
+                for g, s, d in zip(
+                    request.POST.getlist("sla_group"),
+                    request.POST.getlist("sla_size"),
+                    request.POST.getlist("sla_days"),
+                    strict=False,
+                )
+            ]
         trucks = {d.code: request.POST.getlist(f"truck_{d.code}") for d in districts}
+        more = {k: request.POST[k] for k in ("delivery", "lead_days") if k in request.POST}
         labels = {
             kind: {st: request.POST.get(f"stage_{kind}_{st}", "") for st in S.values}
             for kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
@@ -223,18 +239,17 @@ def schedule_page(request, code):
                 request.user,
                 division,
                 sla,
-                request.POST.getlist("issue"),
+                issue,
                 trucks,
                 request.POST.get("reason", ""),
-                delivery=request.POST.get("delivery", DivisionSchedule.Delivery.CHOOSE),
-                lead_days=request.POST.get("lead_days", 0),
                 contact=request.POST.get("contact", ""),
                 stage_labels=labels,
+                **more,
             )
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์แก้ตารางนี้"])))
         else:
-            messages.success(request, "บันทึกตารางแล้ว")
+            messages.success(request, "บันทึกแล้ว")
         return redirect("warehouse-schedule", code=code)
     rows = list(schedule.sla if schedule else [])
     trucks = schedule.truck_days if schedule else {}
@@ -258,6 +273,8 @@ def schedule_page(request, code):
         "operations/warehouse_schedule.html",
         {
             "division": division,
+            "parts": parts,
+            "table_title": _table_title(parts),
             "may_act": identity.can_access_division(
                 identity.staff_scope(request.user), division.pk
             ),
@@ -800,8 +817,9 @@ def case_panel(user, case):
         "chat_fresh": bool(can_chat and case_chat.fresh_inbox(case)),
         "milestones": list(case.milestones.select_related("recorded_by__staff_profile")),
         "appointments": open_appointments,
+        # ADR 0056: the stages are a tracking case's work in every กอง, table or not.
         "warehouse": case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
-        and warehouse.schedule_of(case.owner_division) is not None,
+        and (warehouse.tracking(case) or warehouse.schedule_of(case.owner_division) is not None),
         "calendar": bool(open_appointments)
         or case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
         and case.owner_division.calendars.exists(),

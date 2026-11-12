@@ -1,27 +1,28 @@
 {% extends "operations/base.html" %}
 {% load static ui %}
-{% block title %}ตารางกำหนดจ่าย {{ division.code }} · DED Center{% endblock %}
+{% block title %}{{ table_title }} {{ division.code }} · DED Center{% endblock %}
 {% block scripts %}<link rel="stylesheet" href="{% static 'operations/warehouse.css' %}"><script src="{% static 'operations/warehouse.js' %}" defer></script>{% endblock %}
 {% block page_id %}warehouse{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-head__text">
     <span class="eyebrow"><a href="{% url 'warehouse' division.code %}">งานคลัง {{ division.code }}</a></span>
-    <h1>ตารางกำหนดจ่ายและวันส่งรถ</h1>
-    <p class="lede">กำหนดจ่ายนับเป็นวันทำการหลังวันรับใบเบิก ไม่นับวันหยุด ใบที่มีหลายขนาดใช้ขนาดที่ช้าที่สุด แล้วเลื่อนไปวันจ่ายประจำวันแรกที่ถึง</p>
+    <h1>{{ table_title }}</h1>
+    {% if parts.sla %}<p class="lede">กำหนดจ่ายนับเป็นวันทำการหลังวันรับใบเบิก ไม่นับวันหยุด ใบที่มีหลายขนาดใช้ขนาดที่ช้าที่สุด แล้วเลื่อนไปวันจ่ายประจำวันแรกที่ถึง</p>{% endif %}
   </div>
 </div>
 
-<nav class="chips sc-tabs js-only" aria-label="ส่วนของตาราง">
-  <button class="chip" type="button" data-sc-tab="sla" aria-current="page">กำหนดจ่าย</button>
+{# ADR 0056: a กอง sees only the tables it keeps; กอจ. has ชื่อขั้น alone, so no tabs. #}
+{% if parts.trucks %}<nav class="chips sc-tabs js-only" aria-label="ส่วนของตาราง">
+  {% if parts.sla %}<button class="chip" type="button" data-sc-tab="sla">กำหนดจ่าย</button>{% endif %}
   <button class="chip" type="button" data-sc-tab="truck">วันส่งรถ</button>
   <button class="chip" type="button" data-sc-tab="stages">ชื่อขั้น</button>
-</nav>
+</nav>{% endif %}
 
 {# ADR 0039: a viewer reads the same table, every field disabled and no save. #}
 {% if may_act %}<form method="post" class="stack">{% else %}<fieldset class="stack" disabled>{% endif %}
   {% csrf_token %}
-  <section class="panel" data-sc-part="sla">
+  {% if parts.sla %}<section class="panel" data-sc-part="sla">
     <div class="panel__head"><h2>กำหนดจ่าย</h2><span class="panel__note">ขนาดที่ไม่มีแถวของตัวเองใช้แถว "ทุกขนาด" ของกลุ่ม ลบแถวโดยล้างช่องจำนวนวัน</span></div>
     <div class="sc-groups">
     {% for g in groups %}
@@ -55,9 +56,9 @@
     <h3 class="mt-18">วันจ่ายประจำ</h3>
     <p class="muted">ไม่เลือกเลย หมายถึงจ่ายได้ทุกวันทำการ</p>
     <div class="wh-days">{% for n, name in weekdays %}<label class="check-pill"><input type="checkbox" name="issue" value="{{ n }}"{% if n in issue %} checked{% endif %}> {{ name }}</label>{% endfor %}</div>
-  </section>
+  </section>{% endif %}
 
-  <section class="panel" data-sc-part="truck">
+  {% if parts.trucks %}<section class="panel" data-sc-part="truck">
     <div class="panel__head"><h2>วันส่งรถ</h2><span class="panel__note">วันที่รถ {{ division.code }} ไปส่งของที่เขต ระบบเสนอวันส่งรถวันแรกตั้งแต่วันจ่าย</span></div>
     <div class="cluster">
       <div class="field"><label for="sc-delivery">วิธีส่งของ</label><select id="sc-delivery" name="delivery">{% for v, l in delivery_choices %}<option value="{{ v }}"{% if v == schedule.delivery %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
@@ -78,7 +79,7 @@
     {% endfor %}
     </div>
     {% if unmapped %}<p class="muted mt-8">ชื่อย่อในตารางรถที่ยังไม่รู้ว่าเป็นเขตไหน: {% for abbr, days in unmapped %}{{ abbr }} ({{ days }}){% if not forloop.last %}, {% endif %}{% endfor %} แอดมินจับคู่ได้ที่หน้าเขต เขตที่ยังไม่มีวันรถจะได้เบอร์ติดต่อแทน</p>{% endif %}
-  </section>
+  </section>{% endif %}
 
   <section class="panel" data-sc-part="stages">
     <div class="panel__head"><h2>ชื่อขั้น</h2><span class="panel__note">ชื่อที่เจ้าหน้าที่และผู้แจ้งเห็น เว้นว่างไว้ใช้ชื่อเดิม</span></div>
@@ -89,16 +90,17 @@
       {% endfor %}
       </fieldset>
     {% endfor %}
+    {% if not parts.trucks %}<div class="field mt-18"><label for="sc-contact">เบอร์ติดต่อของกอง</label><input type="text" id="sc-contact" name="contact" value="{{ schedule.contact }}" maxlength="100"><span class="helptext">ผู้แจ้งที่ถามเรื่องของในคลังจะได้เบอร์นี้</span></div>{% endif %}
   </section>
 
   <div class="panel sc-save">
     {% if may_act %}<div class="field"><label for="sc-reason">เหตุผลที่แก้</label><input type="text" id="sc-reason" name="reason" required maxlength="300" placeholder="เช่น ปรับตามรอบรถเดือนใหม่"></div>
-    <button class="btn" type="submit">บันทึกตาราง</button>{% endif %}
+    <button class="btn" type="submit">บันทึก</button>{% endif %}
     {% if schedule.updated_by %}<p class="muted">แก้ล่าสุดโดย {{ schedule.updated_by.staff_profile.display_name|default:schedule.updated_by.username }} {{ schedule.updated_at|thai_datetime }}</p>{% endif %}
   </div>
 {% if may_act %}</form>{% else %}</fieldset>{% endif %}
 
-<section class="panel mt-24" aria-labelledby="sc-try">
+{% if parts.sla %}<section class="panel mt-24" aria-labelledby="sc-try">
   <div class="panel__head"><h2 id="sc-try">ลองคำนวณจากตารางที่บันทึกแล้ว</h2></div>
   <form method="get" class="cluster">
     <label>รับใบเบิก <select name="pg">{% for v, l in group_choices %}<option value="{{ v }}"{% if v == example.group %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
@@ -106,5 +108,5 @@
     <button class="btn btn--secondary btn--sm" type="submit">คำนวณ</button>
   </form>
   <p class="mt-8">ถ้ารับใบเบิกวันนี้ ({{ example.today }}) {% if example.issue %}จ่ายได้ <strong>{{ example.issue }}</strong>{% if example.truck %} และรถไปส่งที่เขต <strong>{{ example.truck }}</strong>{% else %} เขตนี้ยังไม่มีวันส่งรถ จึงต้องมารับเองตามนัด{% endif %}{% else %}ยังคำนวณไม่ได้ เพราะกลุ่มนี้ยังไม่มีแถว "ทุกขนาด"{% endif %}</p>
-</section>
+</section>{% endif %}
 {% endblock %}
