@@ -319,7 +319,8 @@ def _plan_fulfilment(event, decision, case):
     return instructions are critical (the district must act); a closed return is normal with
     the per-line result; arrivals and inspections wait as 'มีอัปเดตใหม่'."""
     identity = _case_identity(case)
-    if decision.action in ("resolve", "admin_answer"):  # ADR 0030: an admin's answer too
+    # ADR 0030: an admin's answer too; ADR 0057: แจ้งผลให้ผู้แจ้ง of a case followed by its number
+    if decision.action in ("resolve", "admin_answer", "report_result"):
         from operations import problem_chat  # local: builds LINE cards on services
 
         card = problem_chat.resolution_card(case, identity)

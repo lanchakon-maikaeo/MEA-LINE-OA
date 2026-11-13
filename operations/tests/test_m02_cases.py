@@ -352,7 +352,9 @@ class TransitionMatrixTests(CaseTestCase):
 
     def test_return_cases_wait_for_confirmation_only_after_the_last_stage(self):
         for spec in workflow.ACTIONS.values():
-            if spec.name == "finish_on_delivery":  # ADR 0055: a return followed by its number
+            # ADR 0055, ADR 0057: a return followed by its number, after its last stage or once
+            # staff tell the requester the result
+            if spec.name in ("finish_on_delivery", "report_result"):
                 continue
             for source, targets in spec.transitions[K.RETURN].items():
                 if source != S.AWAITING_CONFIRMATION:  # staying there is no way in
@@ -527,7 +529,6 @@ class OnBehalfSubmissionTests(CaseTestCase):
                 )
         for label, payload in {
             "line channel": self.on_behalf(channel="line"),
-            "no note": self.on_behalf(intake_note=""),
             "no requester": {k: v for k, v in self.on_behalf().items() if k != "requester_id"},
             "unknown requester": self.on_behalf(requester_id=999999),
         }.items():

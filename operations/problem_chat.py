@@ -11,7 +11,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from operations import policy, problems, services, workflow
+from operations import policy, problems, services, warehouse, workflow
 from operations.contracts import TEXT_MAX, Actor, CommandFailed
 from operations.models import Case, PostbackToken
 
@@ -35,23 +35,36 @@ def _when(moment):
     return f"{local.day:02d}/{local.month:02d}/{local.year + 543} {local:%H:%M} น."
 
 
+def _result(case):
+    """(title, result category, message) the requester answers, or None. A case followed by its
+    number has what staff typed in แจ้งผลให้ผู้แจ้ง and no category (ADR 0057)."""
+    if case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN):
+        told = case.decisions.filter(action=warehouse.REPORT).order_by("-id").first()
+        said = told and ((told.data or {}).get("notice") or warehouse.DONE_TEXT)
+        return told and (f"ผลการดำเนินการ เรื่อง {case.number}", "", said)
+    resolution = problems.latest(case)
+    if resolution is None:
+        return None
+    heading = "ผลการพิจารณาข้อเสนอแนะ" if case.topic == Case.Topic.SUGGESTION else "ผลการแก้ปัญหา"
+    return f"{heading} เรื่อง {case.number}", resolution.get_category_display(), resolution.message
+
+
 def resolution_card(case, identity, now=None):
     """(plain text, Flex message) asking the requester to accept or dispute the resolution."""
-    resolution = problems.latest(case)
-    if identity is None or resolution is None:
+    result = _result(case)
+    if identity is None or result is None:
         return None
+    title, category, said = result
     now = now or timezone.now()
     accept = _token(identity, "problem_accept", case, now)
     dispute = _token(identity, "problem_dispute", case, now)
     accept_label, dispute_label = labels(case)
     if case.topic == Case.Topic.SUGGESTION:
-        title = f"ผลการพิจารณาข้อเสนอแนะ เรื่อง {case.number}"
         hint = f"กด '{accept_label}' ถ้าไม่มีอะไรเพิ่ม หรือ '{dispute_label}' แล้วพิมพ์ต่อได้"
     else:
-        title = f"ผลการแก้ปัญหา เรื่อง {case.number}"
         hint = f"กด '{accept_label}' ถ้าเรียบร้อย หรือ '{dispute_label}' แล้วพิมพ์เหตุผล"
-    category = resolution.get_category_display()
-    text = "\n".join([title, category, resolution.message, hint])
+    lines = [line for line in (title, category, said, hint) if line]
+    text = "\n".join(lines)
 
     def button(label, data, style):
         return {
@@ -72,8 +85,10 @@ def resolution_card(case, identity, now=None):
                 "spacing": "sm",
                 "contents": [
                     {"type": "text", "text": title, "weight": "bold", "wrap": True},
-                    {"type": "text", "text": category, "size": "sm", "wrap": True},
-                    {"type": "text", "text": resolution.message[:1500], "size": "sm", "wrap": True},
+                    *(
+                        {"type": "text", "text": t[:1500], "size": "sm", "wrap": True}
+                        for t in lines[1:-1]
+                    ),
                     {"type": "text", "text": hint, "size": "xs", "wrap": True, "color": "#555555"},
                 ],
             },
@@ -95,6 +110,8 @@ def labels(case):
     """(accept, dispute) button labels: a suggestion is acknowledged, a problem accepted."""
     if case.topic == Case.Topic.SUGGESTION:
         return "รับทราบ", "มีข้อมูลเพิ่ม"
+    if case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN):  # ADR 0057
+        return warehouse.CONFIRM_LABEL, warehouse.REJECT_LABEL
     return "ยืนยัน", "ยังไม่เรียบร้อย"  # ยอมรับผล until 4 Nov 2569
 
 

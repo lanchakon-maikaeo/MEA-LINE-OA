@@ -2,7 +2,7 @@
 stages in every กอง, table or not; กอจ. keeps no กำหนดจ่ายตามขนาด and no วันส่งรถ, so its page
 has neither.
 
-Acceptance → tests: a กอจ. return filed without a number shows the stage first on its page, is
+Acceptance → tests: a กอจ. return filed without a number has the stage on its page, is
 worked through the four stages, waits for the requester and closes on ยืนยันผล; the queue's menu
 opens งานคลัง once the กอง holds a slip case; the table page of กอจ. shows only ชื่อขั้น and the
 contact, and saves them.
@@ -20,7 +20,7 @@ from operations.tests.test_m03_line import ALICE, buttons
 from operations.tests.test_m24_koj_cases import KojCaseTestCase
 
 
-class KojSlipWorkTests(KojCaseTestCase):
+class KojSlipTestCase(KojCaseTestCase):
     def setUp(self):
         super().setUp()
         self.head = make_staff("koj-head-56", (Role.SUPERVISOR, self.koj.code))
@@ -46,16 +46,22 @@ class KojSlipWorkTests(KojCaseTestCase):
         case.refresh_from_db()
         return case
 
+
+class KojSlipWorkTests(KojSlipTestCase):
     def test_a_return_is_worked_by_its_stages_and_closes_on_the_requesters_answer(self):
         case = self.file_return()
         self.assertFalse(DivisionSchedule.objects.filter(division=self.koj).exists())
         menu = case_menu.build(self.head, case)
-        self.assertEqual((menu.first.kind, menu.first.name), ("stage", "received"))
+        self.assertIsNotNone(menu.find("stage", "received"))  # ADR 0057: after แจ้งผลให้ผู้แจ้ง
         page = self.web.get(reverse("case-detail", args=[case.number])).content.decode()
         self.assertIn("งานคลังและนัด", page)
         self.assertIn(reverse("warehouse", args=[self.koj.code]), page)
         today = timezone.localdate()
-        for stage in CaseMilestone.ORDER:
+        # 13 พ.ย. 2569 (owner): a return has three stages; รถรับของแล้ว is none of them.
+        self.assertEqual(len(warehouse.stage_order(case.kind)), 3)
+        done, skipped = warehouse.record(self.head, [case], CaseMilestone.Stage.KEYED, today)
+        self.assertEqual((done, [why for _, why in skipped]), ([], ["เรื่องคืนไม่มีขั้นรถรับของแล้ว"]))
+        for stage in warehouse.stage_order(case.kind):
             done, skipped = warehouse.record(self.head, [case], stage, today)
             self.assertEqual((len(done), skipped), (1, []))
         case.refresh_from_db()

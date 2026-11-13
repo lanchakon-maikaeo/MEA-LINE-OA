@@ -721,7 +721,7 @@ def step_start(turn, user, case, action):
     turn.set_prompt(
         "staff_step", case=str(case.pk), action=action, revision=case.revision, values={}
     )
-    if not any(f.required for f in _askable(form)) and not offer.irreversible:
+    if not any(f.required or f.ask for f in _askable(form)) and not offer.irreversible:
         step_go(turn, user)  # nothing it needs: one tap does it, notes stay for the web
         return
     _ask_next(turn, user)

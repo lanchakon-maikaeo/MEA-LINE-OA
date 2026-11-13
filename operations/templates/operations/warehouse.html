@@ -31,7 +31,7 @@
   <form method="post" class="disclosure__body">
     {% csrf_token %}<input type="hidden" name="tab" value="{{ tab }}">
     <div class="wh-bulk__grid">
-      <div class="field"><label for="wh-numbers">เลขที่ใบเบิกหรือเลขเรื่อง</label><textarea id="wh-numbers" name="numbers" rows="3" placeholder="4500012345/10&#10;4500012346/10"></textarea><span class="helptext">บรรทัดละเลข หรือคั่นด้วย ,</span></div>
+      <div class="field"><label for="wh-numbers">{% if returns %}เลขที่ใบ{% else %}เลขที่ใบเบิก{% endif %}หรือเลขเรื่อง</label><textarea id="wh-numbers" name="numbers" rows="3" placeholder="4500012345/10&#10;4500012346/10"></textarea><span class="helptext">บรรทัดละเลข หรือคั่นด้วย ,</span></div>
       <div class="field"><label for="wh-stage">บันทึกขั้น</label><select id="wh-stage" name="stage" required data-stage-select>{% for value, label in stages %}<option value="{{ value }}"{% if value == bulk_stage %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
       <div class="field"><label for="wh-on">วันที่</label><input type="date" id="wh-on" name="on" value="{{ today|date:'Y-m-d' }}" max="{{ today|date:'Y-m-d' }}" required></div>
       <div class="field" data-planned><label for="wh-planned">วันจ่าย</label><input type="date" id="wh-planned" name="planned_on"><span class="helptext">ใช้ตอนคีย์จ่าย ว่างไว้ระบบใช้วันที่เสนอตามตาราง</span></div>
@@ -42,17 +42,17 @@
 </details>
 {% endif %}
 
-{% include "operations/_list_tools.html" with list="wh" placeholder="ค้นเลขเรื่อง เลขใบเบิก หรือเขต" %}
+{% include "operations/_list_tools.html" with list="wh" placeholder="ค้นเลขเรื่อง เลขใบ หรือเขต" %}
 <div class="table-wrap"><table class="wh-table table--cards">
-  <thead><tr>{% if tab != "approval" %}<th scope="col"><span class="visually-hidden">เลือก</span></th>{% endif %}<th scope="col">เรื่อง</th><th scope="col">เลขที่ใบเบิก</th><th scope="col">เขต</th><th scope="col">ขั้นล่าสุด</th><th scope="col">วันจ่าย</th><th scope="col">วิธีรับ</th><th scope="col"><span class="visually-hidden">ขั้นถัดไป</span></th></tr></thead>
+  <thead><tr>{% if tab != "approval" %}<th scope="col"><span class="visually-hidden">เลือก</span></th>{% endif %}<th scope="col">เรื่อง</th><th scope="col">{% if returns %}เลขที่ใบ{% else %}เลขที่ใบเบิก{% endif %}</th><th scope="col">เขต</th><th scope="col">ขั้นล่าสุด</th><th scope="col">วันจ่าย</th><th scope="col">วิธีรับ</th><th scope="col"><span class="visually-hidden">ขั้นถัดไป</span></th></tr></thead>
   <tbody data-list-items="wh">
   {% for r in rows %}
     <tr data-item data-search="{{ r.case.number|lower }} {{ r.case.sap_number|default:''|lower }} {{ r.extra|join:' '|lower }} {{ r.case.district.name }}"{% if r.late %} class="is-late"{% endif %}>
       {% if tab != "approval" %}<td class="wh-pick">{% if r.next %}<label class="qrow__pick"><input type="checkbox" name="case" value="{{ r.case.number }}" form="wh-bar" aria-label="เลือก {{ r.case.number }}"></label>{% endif %}</td>{% endif %}
       <td><a href="{% url 'case-detail' r.case.number %}">{{ r.case.number }}</a><div class="muted">{{ r.case.get_kind_display }}</div></td>
-      <td data-label="เลขที่ใบเบิก">{{ r.case.sap_number|default:"ยังไม่มี" }}{% if r.case.sap_kind == "work_order" %} <span class="tag tag--outline">ใบสั่งงาน</span>{% elif r.case.sap_kind == "memo" %} <span class="tag tag--outline">M/N</span>{% elif r.case.sap_kind == "return_transfer" %} <span class="tag tag--outline">ใบโอนขอคืน</span>{% elif r.case.sap_kind == "other_number" %} <span class="tag tag--outline">เลขอื่น</span>{% endif %}{% if r.extra %}<div class="muted">และ {{ r.extra|join:", " }}</div>{% endif %}</td>
+      <td data-label="{% if returns %}เลขที่ใบ{% else %}เลขที่ใบเบิก{% endif %}">{{ r.case.sap_number|default:"ยังไม่มี" }}{% if r.case.sap_kind == "work_order" %} <span class="tag tag--outline">ใบสั่งงาน</span>{% elif r.case.sap_kind == "memo" %} <span class="tag tag--outline">M/N</span>{% elif r.case.sap_kind == "return_transfer" %} <span class="tag tag--outline">ใบโอนขอคืน</span>{% elif r.case.sap_kind == "other_number" %} <span class="tag tag--outline">เลขอื่น</span>{% endif %}{% if r.extra %}<div class="muted">และ {{ r.extra|join:", " }}</div>{% endif %}</td>
       <td data-label="เขต">{{ r.case.district.name }}</td>
-      <td data-label="ขั้นล่าสุด">{% if r.stage %}{{ r.stage.label }}<div class="muted">{{ r.stage.on|thai_date }}</div>{% elif tab == "approval" %}<span class="tag">รอรับเรื่อง</span>{% else %}<span class="muted">ยังไม่รับใบเบิก</span>{% endif %}</td>
+      <td data-label="ขั้นล่าสุด">{% if r.stage %}{{ r.stage.label }}<div class="muted">{{ r.stage.on|thai_date }}</div>{% elif tab == "approval" %}<span class="tag">รอรับเรื่อง</span>{% else %}<span class="muted">{% if r.case.kind == "return" %}ยังไม่รับใบส่งคืน{% else %}ยังไม่รับใบเบิก{% endif %}</span>{% endif %}</td>
       <td data-label="วันจ่าย">{% if r.planned %}{{ r.planned|thai_date }}{% if r.late %} <span class="tag tag--alert">เลยวันจ่าย</span>{% endif %}{% if r.left %}<div><span class="tag">ยังไม่คีย์จ่าย {{ r.left|join:", " }}</span></div>{% endif %}{% elif r.suggested %}<span class="muted">เสนอ {{ r.suggested|thai_date }}</span>{% else %}<span class="muted">ยังไม่กำหนด</span>{% endif %}</td>
       <td data-label="วิธีรับ">{% if r.method %}{{ r.method.get_method_display }}{% if r.method.status == "requested" %} <span class="tag">รอยืนยัน</span>{% endif %}{% else %}<span class="muted">ยังไม่เลือก</span>{% endif %}</td>
       <td class="cell--wide wh-act">

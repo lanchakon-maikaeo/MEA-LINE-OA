@@ -33,19 +33,18 @@ from operations import (
     line_menu_catalog,
     orchestration,
     services,
+    warehouse,
 )
 from operations import identity as identity_services
-from operations.contracts import Actor, CommandFailed
-from operations.management.commands.demo_withdrawal import _grant, _user
+from operations.contracts import Actor
+from operations.management.commands.demo_withdrawal import _user
 from operations.management.commands.run_worker import handle_event
 from operations.models import (
     AIRun,
-    AuthorityGrant,
     Case,
-    CaseTriage,
+    CaseMilestone,
     ChannelIdentity,
-    EquipmentType,
-    FakeSerial,
+    Division,
     LineMenuItem,
     NotificationDelivery,
     OutboxEvent,
@@ -64,18 +63,7 @@ TEMPLATE = Path(__file__).resolve().parent / "line_assets" / "mockup.html"
 MENU = dict(conversation.MENU)
 IMAGE = Path(__file__).resolve().parent / "line_assets" / "user.jpg"
 LINE = ChannelIdentity.Channel.LINE
-STAFF = {
-    "sim-intake": [(Role.STAFF, "SIM-TRIAGE")],
-    "sim-mtr": [(Role.STAFF, "SIM-MTR")],
-    "sim-mtr-issuer": [(Role.ISSUER, "SIM-MTR")],
-    "sim-mtr-receiver": [(Role.RECEIVER, "SIM-MTR")],
-    "sim-mtr-inspector": [(Role.INSPECTOR, "SIM-MTR")],
-    "sim-eqp": [(Role.STAFF, "SIM-EQP")],
-    "sim-trf": [(Role.STAFF, "SIM-TRF")],
-    "sim-trf-resolver": [(Role.RESOLVER, "SIM-TRF")],
-    "sim-approver": [(Role.APPROVER, "SIM-MTR"), (Role.APPROVER, "SIM-EQP")],
-    "sim-allocator": [(Role.SUPERVISOR, "SIM-REG")],
-}
+S = CaseMilestone.Stage
 
 
 class _Rollback(Exception):
@@ -130,6 +118,9 @@ class Recorder:
     # Patched in during recording.
     def capture(self, inbox_id, messages):
         self.sent.setdefault(inbox_id, []).extend(messages)
+        # As the real reply does: the token is spent, so a later staff message waits in the
+        # chat for the requester's next message instead of answering this one.
+        WebhookInbox.objects.filter(pk=inbox_id).update(reply_used_at=timezone.now())
 
     def model_answer(self, text, draft_context, version, budget_seconds=None, catalog=None):
         if text not in self.answers:
@@ -189,6 +180,10 @@ class Recorder:
         rows = list(NotificationDelivery.objects.filter(pk__gt=self.push_mark).order_by("pk"))
         if rows:
             self.push_mark = rows[-1].pk
+        # The mockup shows each push as delivered, so the chat treats it as read too.
+        NotificationDelivery.objects.filter(pk__in=[r.pk for r in rows]).update(
+            status=NotificationDelivery.Status.SENT
+        )
         return [
             row.message or conversation.text_message(row.text)
             for row in rows
@@ -226,7 +221,7 @@ class Recorder:
             contents = message["contents"]
             where = "carousel" if contents["type"] == "carousel" else "flex"
             for action in _actions(contents):
-                if label in (action["label"], action.get("displayText")):
+                if label in (action.get("label"), action.get("displayText")):
                     return action["data"], action.get("displayText"), where
         raise MockupError(f"No button '{label}' in the latest messages.")
 
@@ -279,9 +274,11 @@ class Recorder:
 
 
 def _actions(node):
+    """Every postback in a card: its buttons, and the boxes that are tapped as a whole."""
     if isinstance(node, dict):
-        if node.get("type") == "button":
-            yield node["action"]
+        action = node.get("action")
+        if isinstance(action, dict) and action.get("type") == "postback":
+            yield action
         for value in node.values():
             yield from _actions(value)
     elif isinstance(node, list):
@@ -294,14 +291,12 @@ def _actions(node):
 
 @dataclass
 class World:
-    users: dict
     admin: object
     requester: object = None
 
     def act(self, who, case, action, payload=None):
-        actor = Actor.staff(self.users[who]) if isinstance(who, str) else Actor.staff(who)
         return services.perform_action(
-            actor,
+            Actor.staff(who),
             case.pk,
             action,
             expected_revision=Case.objects.get(pk=case.pk).revision,
@@ -311,17 +306,6 @@ class World:
 
     def latest_case(self):
         return Case.objects.filter(requester=self.requester).order_by("-pk").first()
-
-    def triage(self, case, division, staff, expected=None):
-        """Intake hands the case to the division, which confirms the suggested level."""
-        self.act("sim-intake", case, "start_triage")
-        self.act("sim-intake", case, "request_handoff", {"to_division": division})
-        self.act(staff, case, "accept_handoff")
-        suggested = CaseTriage.objects.get(case=case).suggested_priority
-        if expected and suggested != expected:
-            raise MockupError(f"{case.number}: the rules now suggest {suggested}, not {expected}.")
-        self.act(staff, case, "set_priority", {"priority": suggested})
-        self.act(staff, case, "complete_triage")
 
 
 def _world():
@@ -334,16 +318,13 @@ def _world():
         "seed_fake_inventory",
     ):
         call_command(command, stdout=quiet)
-    users = {name: _user(name, roles) for name, roles in STAFF.items()}
-    _grant(users["sim-approver"], AuthorityGrant.Activity.WITHDRAWAL_APPROVAL)
-    _grant(users["sim-allocator"], AuthorityGrant.Activity.ALLOCATION)
     admin, created = get_user_model().objects.get_or_create(username="sim-mockup-admin")
     if created:
         admin.set_unusable_password()
         admin.save(update_fields=["password"])
         StaffProfile.objects.create(user=admin, display_name="แอดมินจำลอง")
     RoleGrant.objects.get_or_create(user=admin, role=Role.ADMIN, division=None)
-    return World(users, admin)
+    return World(admin)
 
 
 def _registered(world, user_id):
@@ -355,15 +336,13 @@ def _registered(world, user_id):
 
 
 def register(r, w):
-    r.follow("ผู้แจ้งเพิ่มบัญชี LINE ของ ฝอจ. เป็นเพื่อนครั้งแรก ระบบทักทายและขอชื่อเพื่อลงทะเบียน")
-    r.type(REQUESTER, "พิมพ์ชื่อ-นามสกุล แล้วเลื่อนการ์ดเพื่อเลือกเขตที่สังกัด (18 เขต)")
+    r.follow("ผู้แจ้งเพิ่มบัญชี LINE ของ ฝอจ. เป็นเพื่อนครั้งแรก ระบบถามว่าเป็นพนักงาน กฟน. ไหม")
+    r.tap("พนักงาน กฟน.", "กด พนักงาน กฟน. ระบบขอรหัสพนักงาน")
+    r.tap("ใช้วิธีอื่น", "ยืนยันด้วยรหัสพนักงานไม่ได้ กด ใช้วิธีอื่น ให้เจ้าหน้าที่ตรวจแทน")
+    r.type(REQUESTER, "พิมพ์ชื่อ-นามสกุล แล้วเลือกหน่วยงานที่สังกัด")
     r.tap(
         "การไฟฟ้านครหลวงเขตคลองเตย",
-        "เลือกเขตแล้ว คำขอลงทะเบียนไปรอเจ้าหน้าที่ ฝอจ. รับรอง",
-    )
-    r.menu(
-        "ส่งเรื่องใหม่",
-        "ระหว่างรอรับรอง กดเมนูไหนก็ได้คำตอบเดิม และยกเลิกคำขอได้",
+        "เลือกหน่วยงานแล้ว คำขอไปรอแอดมินตรวจ ระหว่างรอแจ้งปัญหาหรือข้อเสนอแนะได้",
     )
     registration = ChannelIdentity.objects.get(channel=LINE, external_id=r.user_id)
     pending = registration.registrations.get()
@@ -374,142 +353,120 @@ def register(r, w):
         "แอดมินรับรองแล้ว ระบบส่งข้อความแจ้งผู้แจ้งทันที",
         later=timedelta(minutes=35),
     )
-    r.menu("ส่งเรื่องใหม่", "พร้อมแจ้งเรื่องแล้ว ระบบถามว่าจะแจ้งเรื่องประเภทใด")
-
-
-def withdrawal(r, w):
-    meter = EquipmentType.objects.get(code="MTR_SYN_A")
-    r.menu("ส่งเรื่องใหม่", "กดเมนู 'ส่งเรื่องใหม่' ระบบถามประเภทเรื่อง ตอบด้วยปุ่มได้ทุกข้อ")
-    r.tap("เบิก", "เลือก 'เบิก' แล้วเลือกหมวดอุปกรณ์")
-    r.tap("มิเตอร์", "ระบบแสดงรายการของในหมวดมิเตอร์")
-    r.tap(meter.name, "เลือกรุ่นแล้ว ระบบถามจำนวน")
-    r.type("3", "พิมพ์จำนวนเป็นตัวเลข จะมีหน่วยต่อท้ายหรือใช้เลขไทยก็ได้")
-    r.tap("ไปต่อ", "ไม่เพิ่มรายการแล้ว ระบบถามวัตถุประสงค์")
-    r.type(
-        "เปลี่ยนมิเตอร์ชำรุดของผู้ใช้ไฟ 3 ราย ในซอยตัวอย่าง 50",
-        "พิมพ์วัตถุประสงค์ ระบบถามวันที่ต้องการใช้ (ข้ามได้)",
-    )
-    r.type(
-        thai_date(timezone.localdate() + timedelta(days=7)),
-        "พิมพ์วันที่แบบ พ.ศ. ระบบสรุปให้ตรวจก่อนยืนยัน",
-        note="ข้อสังเกต: หน้าสรุปแสดงวันที่ที่พิมพ์เป็นแบบ ค.ศ. (ปี-เดือน-วัน) "
-        "ควรแสดงกลับเป็น วัน/เดือน/ปี พ.ศ. ตามที่ผู้แจ้งพิมพ์",
-    )
-    r.tap(
-        "ยืนยันส่งเรื่อง",
-        "กดยืนยันแล้วได้เลขเรื่องทันที เรื่องเข้าคิวของกองรับเรื่องกลาง",
-    )
-    case = w.latest_case()
-    r.staff(
-        "กองรับเรื่องกลาง → กองมิเตอร์",
-        "คัดกรองแล้วส่งต่อให้กองมิเตอร์ กองมิเตอร์รับงานและยืนยันระดับความเร่งด่วนที่ระบบเสนอ",
-        lambda: w.triage(case, "SIM-MTR", "sim-mtr"),
-        "การคัดกรองและส่งต่อเป็นงานภายใน ผู้แจ้งจึงไม่ได้รับข้อความ",
-        later=timedelta(minutes=25),
-    )
-    r.staff(
-        "ผู้อนุมัติ กองมิเตอร์",
-        "อนุมัติ 2 จาก 3 เครื่อง (อีก 1 เครื่องไม่อนุมัติ พร้อมเหตุผล)",
-        lambda: w.act(
-            "sim-approver",
-            case,
-            "approve",
-            {"lines": [{"line_no": 1, "quantity": "2", "reason": "เครื่องที่ 3 ใช้ซ่อมแทนได้"}]},
-        ),
-        "อนุมัติบางส่วนไม่ส่งข้อความทันที ผู้แจ้งจะเห็นเป็น 'มีอัปเดตใหม่' ตอนทักแชตครั้งถัดไป",
-        later=timedelta(hours=2),
-    )
-    serials = list(
-        FakeSerial.objects.filter(item=meter, status=FakeSerial.Status.AVAILABLE)
-        .order_by("serial")
-        .values_list("serial", flat=True)[:2]
-    )
-
-    def issue():
-        payload = {
-            "recipient_name": "ผู้รับของจำลอง เขตคลองเตย",
-            "lines": [{"line_no": 1, "quantity": "2", "serials": serials}],
-        }
-        try:
-            w.act("sim-mtr-issuer", case, "issue", payload)
-        except CommandFailed:
-            # Other open cases want the same stock (Q8): the allocator decides first.
-            w.act(
-                "sim-allocator",
-                case,
-                "allocate",
-                {"lines": [{"line_no": 1, "quantity": "2"}], "reason": "จัดสรรตามลำดับคิว"},
-            )
-            w.act("sim-mtr-issuer", case, "issue", payload)
-
-    r.staff(
-        "ผู้จ่าย กองมิเตอร์",
-        f"จ่ายมิเตอร์ 2 เครื่อง เลขเครื่อง {', '.join(serials)}",
-        issue,
-        "จ่ายของแล้ว ระบบส่งการ์ด 'ของพร้อมรับ' ให้ผู้แจ้งยืนยันทันที",
-        later=r.wait_until(1, 10, 5),
-    )
-    r.tap(
-        "ได้รับครบ",
-        "ผู้แจ้งได้ของครบแล้วกด 'ได้รับครบ' ถ้าจำนวนหรือเลขเครื่องไม่ตรงให้กด 'ไม่ตรง'",
-        note="ข้อสังเกต: 'มีอัปเดตใหม่' ซ้ำกับการ์ดที่เพิ่งได้รับ เพราะข้อความที่ส่งไปแล้ว"
-        "ยังไม่นับว่าผู้แจ้งเห็น (เกิดเหมือนกันหลังขอข้อมูลเพิ่มและหลังการ์ดผลการแก้ปัญหา)",
-    )
     r.menu(
-        "ติดตามเรื่อง",
-        "เรื่องปิดแล้วจึงไม่อยู่ใน 'เรื่องของฉัน' แต่ยังติดตามได้ ระบบเสนอเลขเรื่องล่าสุดให้กด",
+        "ส่งเรื่องใหม่",
+        "รับรองแล้วแจ้งปัญหาหรือข้อเสนอแนะได้ ส่วนการติดตามใบเบิกและใบส่งคืนต้องยืนยันรหัสพนักงานก่อน",
     )
-    r.tap(case.number, "รายละเอียดแสดงจำนวนขอ อนุมัติ จ่าย รับ แยกกัน พร้อมเหตุผลที่ไม่อนุมัติ")
+
+
+def _desk(w, code, username):
+    """A real กอง of ฝอจ. and its แอดมินกอง. The real structure has no กองรับเรื่องกลาง (ADR
+    0008): the tile's กอง takes the case and numbers it, so the demo world's intake desk steps
+    aside. Following a slip needs a verified employee; the mockup registers without the roster.
+    Everything here is rolled back with the scenario."""
+    if not Division.objects.filter(code=code).exists():
+        raise MockupError(f"ยังไม่มีหน่วยงาน {code} โหลดโครงสร้างองค์กรก่อน")
+    line_menu_catalog.sync()  # the tiles as the release sets them up
+    w.requester.is_external = False
+    w.requester.save(update_fields=["is_external"])
+    Division.objects.filter(is_intake=True).update(is_intake=False)
+    head = _user(username, [(Role.SUPERVISOR, code)])
+    StaffProfile.objects.filter(user=head).update(display_name=f"เจ้าหน้าที่ {code} (จำลอง)")
+    return head
+
+
+def _start(head, case, priority="P3"):
+    """ดำเนินการ, with the level (ADR 0025 Q25)."""
+    services.perform_form_action(
+        Actor.staff(head),
+        case.pk,
+        "approve",
+        expected_revision=case.revision,
+        idempotency_key=f"mockup-{uuid.uuid4().hex}",
+        payload={"priority": priority},
+    )
 
 
 def kcw(r, w):
-    """ปุ่ม Meter, CT, VT (23 Oct 2569): the equipment first, the SAP slip number, typed rows."""
-    line_menu_catalog.sync()  # the tiles as the release sets them up (rolled back afterwards)
-    # Withdrawals need a verified employee; the mockup registers without the roster.
-    w.requester.is_external = False
-    w.requester.save(update_fields=["is_external"])
+    """ติดตามใบเบิก at กคว.: the slip number in chat, the four warehouse stages, ยืนยันผล."""
+    head = _desk(w, "กคว.", "sim-kcw")
     tile = LineMenuItem.objects.get(place="tile", label="Meter, CT, VT")
     r.menu(
         "Meter, CT, VT",
-        "กดปุ่ม Meter, CT, VT บน Rich Menu ระบบแสดงการ์ดให้เลือกอุปกรณ์ก่อน",
+        "กดปุ่ม Meter, CT, VT บน Rich Menu ระบบให้เลือกอุปกรณ์ก่อน",
         data=f"m=item&id={tile.pk}",
     )
-    r.tap("มิเตอร์", "เลือกมิเตอร์ แล้วเลือกสิ่งที่ต้องการในการ์ดที่ 2")
-    r.tap("ติดตามใบเบิก", "เลือกติดตามใบเบิก ระบบขอเลขใบเบิก SAP ก่อนทุกอย่าง")
+    r.tap("มิเตอร์", "เลือกมิเตอร์ แล้วเลือกสิ่งที่ต้องการ")
+    r.tap("ติดตามใบเบิก", "เลือกติดตามใบเบิก ระบบถามว่าจะติดตามด้วยเลขอะไร")
+    r.tap("เลขที่ใบเบิก", "เลือกเลขที่ใบเบิก")
+    r.type("4500012345/10", "พิมพ์เลขที่ใบเบิกที่ทำไว้ใน SAP ระบบไม่รับเลขที่อยู่ในเรื่องที่ยังไม่จบ")
     r.type(
-        "4500012345",
-        "พิมพ์เลขใบเบิกที่ทำไว้ใน SAP ระบบไม่รับเลขที่อยู่ในเรื่องที่ยังไม่จบ",
+        "มิเตอร์ 5(100)A 2 เครื่อง ใช้ติดตั้งผู้ใช้ไฟรายใหม่",
+        "พิมพ์ของที่เบิกในข้อความเดียว ระบบสรุปให้ตรวจก่อนยืนยัน",
     )
-    r.type(
-        "12345678 12345679 / 5(100)A / 2",
-        "พิมพ์หมายเลขเครื่องวัด ขนาด และจำนวนในบรรทัดเดียวคั่นด้วย / (หรือพิมพ์ทีละช่องก็ได้)",
+    r.tap("ยืนยันส่งเรื่อง", "ยืนยันแล้วได้เลขเรื่อง เรื่องส่งถึง กคว. พร้อมเลขที่ใบเบิก")
+    case = w.latest_case()
+    today = timezone.localdate()
+
+    def stage(name):
+        def work():
+            now = Case.objects.get(pk=case.pk)
+            plan = None
+            if name == S.KEYED and warehouse.suggested_issue(now, today, today) is None:
+                plan = today + timedelta(days=5)  # no table yet: the clerk types the pay day
+            done, skipped = warehouse.record(head, [now], name, today, plan)
+            if not done:
+                raise MockupError(f"{case.number}: {skipped[0][1]}")
+
+        return work
+
+    r.staff(
+        "กคว.",
+        "กดดำเนินการ แล้วบันทึกรับใบเบิกในหน้างานคลัง",
+        lambda: (_start(head, case), stage(S.RECEIVED)()),
+        "การรับเรื่องและการรับใบเบิกเป็นงานภายใน ผู้แจ้งดูได้จากเรื่องของฉัน",
+        later=timedelta(minutes=30),
     )
-    r.tap("เพิ่มรายการ", "ใบเบิกเดียวกันมี CT ด้วย กดเพิ่มรายการแล้วเลือกอุปกรณ์")
-    r.tap("CT", "เลือก CT ระบบถามขนาดและจำนวน")
-    r.type("100/5A / 3", "ขนาด 100/5A มี / อยู่ในตัว ระบบยังแยกขนาดกับจำนวนได้")
-    r.tap("ไปต่อ", "ไม่เพิ่มรายการแล้ว ระบบถามวัตถุประสงค์")
-    r.type(
-        "ติดตั้งมิเตอร์ผู้ใช้ไฟรายใหม่ 2 ราย และชุดวัด CT อาคารตัวอย่าง",
-        "พิมพ์วัตถุประสงค์ ระบบถามวันที่ต้องการใช้ (ข้ามได้)",
+    r.staff(
+        "กคว.",
+        "บันทึกคีย์จ่าย ระบบคำนวณวันจ่ายจากตารางกำหนดจ่ายของกอง",
+        stage(S.KEYED),
+        "ข้อความวันจ่ายรอผู้แจ้งอยู่ในแชต ไปถึงตอนผู้แจ้งเปิดแชตครั้งถัดไป",
+        later=r.wait_until(1, 9, 30),
     )
-    r.tap("ข้าม", "สรุปแสดงเลขใบเบิก SAP และรายการที่พิมพ์ทั้งสองบรรทัดให้ตรวจก่อนยืนยัน")
-    r.tap("ยืนยันส่งเรื่อง", "ยืนยันแล้วได้เลขเรื่อง เรื่องส่งถึง กคว. พร้อมเลขใบเบิก SAP")
+    r.menu("เรื่องของฉัน", "ผู้แจ้งเปิดแชต ได้กำหนดจ่ายพร้อมปุ่มเลือกวิธีรับของ")
+    ways = [item["action"]["label"] for item in r.last[-1]["quickReply"]["items"]]
+    # The truck day is the กอง's own table; a กอง without one offers มารับเอง only.
+    r.tap(
+        next((label for label in ways if label.startswith("รถส่ง")), "มารับเอง"),
+        "เลือกวิธีรับของจากปุ่ม เจ้าหน้าที่เห็นคำตอบในเรื่อง",
+    )
+    r.staff(
+        "กคว.",
+        "บันทึกจ่ายแล้ว",
+        stage(S.ISSUED),
+        "ข้อความว่าจ่ายแล้วรอผู้แจ้งอยู่ในแชตเช่นกัน",
+        later=r.wait_until(2, 10, 0),
+    )
+    r.staff(
+        "กคว.",
+        "บันทึกเขตได้รับแล้ว ซึ่งเป็นขั้นสุดท้าย",
+        stage(S.DELIVERED),
+        "เรื่องรอผู้แจ้งยืนยันผล ข้อความขั้นนี้ไปพร้อมคำตอบของข้อความถัดไปที่ผู้แจ้งพิมพ์",
+        later=timedelta(hours=3),
+    )
+    r.menu("เรื่องของฉัน", "ผู้แจ้งเปิดแชต ได้ข้อความที่รออยู่ พร้อมปุ่มยืนยันผลและปุ่มปฏิเสธ")
+    r.tap("ยืนยันผล", "ได้รับของครบแล้ว กดยืนยันผล เรื่องปิด")
 
 
-# A meter out at the district that no other case holds (the demo database keeps other returns).
-RETURNED = "MTR_SYN_021"
-TYPED = "ขอเบิกฟิวส์ 20 ชิ้น กับสายไฟ 50 เมตร ใช้ซ่อมตู้จ่ายไฟชุมชนริมคลองที่ชำรุด"
-REPLY = "ตู้หมายเลข 12 ปากซอยริมคลอง 3 ครับ"
+TYPED = "ขอเบิกมิเตอร์ 20 เครื่อง ใช้ติดตั้งผู้ใช้ไฟรายใหม่"
 ANSWERS = {
     TYPED: {
         "requests": [
             {
                 "intent": "withdrawal",
-                "items": [
-                    {"item_code": "FUSE_SYN_A", "item_text": "ฟิวส์", "quantity": "20"},
-                    {"item_code": "CBL_SYN_A", "item_text": "สายไฟ", "quantity": "50"},
-                ],
-                "purpose": "ซ่อมตู้จ่ายไฟชุมชนริมคลองที่ชำรุด",
+                "items": [{"item_code": "MTR_SYN_A", "item_text": "มิเตอร์", "quantity": "20"}],
+                "purpose": "ติดตั้งผู้ใช้ไฟรายใหม่",
             }
         ]
     },
@@ -517,171 +474,112 @@ ANSWERS = {
 
 
 def typed(r, w):
+    line_menu_catalog.sync()
+    w.requester.is_external = False
+    w.requester.save(update_fields=["is_external"])
     r.type(
         TYPED,
-        "ไม่ต้องกดเมนูก็ได้ พิมพ์แจ้งเหมือนคุยกับเจ้าหน้าที่ ระบบอ่านข้อความแล้วเติมร่างให้",
+        "พิมพ์ขอเบิกของในแชต ระบบบอกว่าการเบิกทำใน SAP แล้วเสนอปุ่มติดตามของอุปกรณ์ที่พิมพ์ถึง",
         note="ขั้นนี้ใช้คำตอบ AI ที่กำหนดไว้ล่วงหน้า (ไม่ได้เรียก AI จริง) แต่ผ่านการตรวจ"
         "กับทะเบียนและข้อความต้นฉบับด้วยโค้ดจริง",
     )
-    r.tap("ข้าม", "ข้อความไม่ได้บอกวันที่ต้องการใช้ ระบบจึงถามเฉพาะข้อที่ขาด")
-    r.tap("ยืนยันส่งเรื่อง", "ตรวจสรุปแล้วกดยืนยัน ผู้แจ้งเป็นคนยืนยันทุกครั้ง AI ไม่ยื่นเรื่องเอง")
-    case = w.latest_case()
-    r.staff(
-        "กองรับเรื่องกลาง",
-        "ขอข้อมูลเพิ่ม: ตำแหน่งตู้ที่จะซ่อม",
-        lambda: (
-            w.act("sim-intake", case, "start_triage"),
-            w.act(
-                "sim-intake",
-                case,
-                "request_info",
-                {"reason": "ขอทราบตำแหน่งตู้ (ซอยและหมายเลขตู้) เพื่อเตรียมของให้ถูกจุด"},
-            ),
-        ),
-        "เจ้าหน้าที่ขอข้อมูลเพิ่มจากหน้าเว็บ ผู้แจ้งได้รับข้อความทันที",
-        later=timedelta(minutes=50),
-    )
-    r.type(
-        REPLY,
-        "ผู้แจ้งตอบกลับในแชตตามที่ข้อความบอก ระบบผูกคำตอบกับเรื่องที่รอข้อมูลให้เอง (ไม่ส่งให้ AI และไม่เปิดร่างใหม่)",
-    )
-    r.staff(
-        "กองรับเรื่องกลาง",
-        "เห็นคำตอบในหน้าเรื่อง (ข้อมูลเพิ่มจากผู้แจ้ง) แล้วกด 'ได้ข้อมูลครบแล้ว'",
-        lambda: w.act("sim-intake", case, "info_received", {"reason": "ได้ตำแหน่งตู้แล้ว"}),
-        "คิวขึ้นป้าย 'ผู้แจ้งตอบข้อมูลแล้ว' เจ้าหน้าที่ยืนยันแล้วเรื่องเดินต่อ",
-        later=timedelta(minutes=15),
-    )
-
-
-def return_case(r, w):
-    meter = EquipmentType.objects.get(code="MTR_SYN_A")
-    r.menu("ส่งเรื่องใหม่", "เริ่มเรื่องใหม่จากเมนู")
-    r.tap("ส่งคืน", "เลือก 'ส่งคืน'")
-    r.tap("มิเตอร์", "เลือกหมวดอุปกรณ์ที่จะคืน")
-    r.tap(meter.name, "เลือกรุ่น")
-    r.type("1", "พิมพ์จำนวน ของที่มีเลขเครื่องต้องบอกเลขทุกเครื่อง")
-    r.type(RETURNED, "พิมพ์เลขเครื่อง (หลายเครื่องคั่นด้วยเว้นวรรค)")
-    r.tap("ไปต่อ", "ไม่มีรายการอื่น ระบบถามสภาพของ")
-    r.type("ชำรุด หน้าจอไม่แสดงผล", "บอกสภาพของ")
-    r.type("ถอดเปลี่ยนเครื่องใหม่ให้ผู้ใช้ไฟแล้ว", "บอกเหตุผลที่ส่งคืน")
-    r.tap("ข้าม", "ไม่มีเลขเอกสารเบิกเดิม กดข้ามได้")
-    r.tap("ยืนยันส่งเรื่อง", "ยืนยันแล้วได้เลขเรื่องคืน (ขึ้นต้นด้วย R)")
-    case = w.latest_case()
-    start = timezone.localdate() + timedelta(days=1)
-
-    def instructions():
-        w.triage(case, "SIM-MTR", "sim-mtr")
-        w.act(
-            "sim-mtr",
-            case,
-            "return_instructions",
-            {
-                "place": "คลังกองมิเตอร์ อาคาร 2 ชั้น 1 (จำลอง)",
-                "from_date": start.isoformat(),
-                "to_date": (start + timedelta(days=6)).isoformat(),
-                "note": "นำของมาพร้อมใบนำส่งของเขต",
-            },
-        )
-
-    r.staff(
-        "กองมิเตอร์",
-        "รับเรื่องคืนแล้วแจ้งสถานที่และช่วงวันที่ส่งคืน",
-        instructions,
-        "ผู้แจ้งได้รับข้อความบอกว่าจะส่งของคืนที่ไหน เมื่อไร",
-        later=timedelta(minutes=40),
-        note="ข้อสังเกต: วันที่ในข้อความยังเป็นรูปแบบ ค.ศ. (ปี-เดือน-วัน) ควรแสดงแบบ วัน/เดือน/ปี พ.ศ. เหมือนส่วนอื่น",
-    )
-    r.staff(
-        "ผู้รับคืน กองมิเตอร์",
-        f"รับมิเตอร์ {RETURNED} ที่เขตนำมาส่ง",
-        lambda: w.act(
-            "sim-mtr-receiver",
-            case,
-            "receive",
-            {
-                "carrier_name": "ผู้นำส่งจำลอง เขตคลองเตย",
-                "items": [{"item_code": meter.code, "serials": [RETURNED]}],
-            },
-        ),
-        "ของมาถึงแล้ว ยังไม่ส่งข้อความทันที (รอผลตรวจสภาพ)",
-        later=r.wait_until(1, 9, 30),
-    )
-    r.staff(
-        "ผู้ตรวจสภาพ กองมิเตอร์",
-        "ตรวจสภาพแล้ว ส่งซ่อม 1 เครื่อง",
-        lambda: w.act("sim-mtr-inspector", case, "inspect", {"unit": 1, "split": {"repair": "1"}}),
-        "ตรวจครบทุกหน่วยแล้ว เรื่องปิดเอง และระบบแจ้งผลการรับคืน",
-        later=timedelta(hours=3),
-        note="ข้อสังเกต: บรรทัดผลแสดงทุกตัวเลขแม้เป็น 0 (พร้อมใช้ ซ่อม อื่น รอตรวจ ยุติ ค้างส่ง) "
-        "ผู้แจ้งอ่านยาก ควรแสดงเฉพาะตัวเลขที่มีค่า",
-    )
-    r.menu("ติดตามเรื่อง", "ติดตามเรื่องจากเมนู ระบบเสนอเลขเรื่องล่าสุดให้กด หรือพิมพ์เลขเรื่องเอง")
-    r.type(case.number, "พิมพ์เลขเรื่องเพื่อดูสถานะ")
+    r.tap("มิเตอร์", "กดปุ่มอุปกรณ์ ระบบให้เลือกติดตามใบเบิกหรือใบส่งคืน")
+    r.tap("ติดตามใบเบิก", "มีเลขใบแล้วจึงติดตามต่อได้จากตรงนี้")
 
 
 def problem(r, w):
-    transformer = EquipmentType.objects.get(code="TRF_SYN_A")
-    r.menu("ส่งเรื่องใหม่", "เริ่มเรื่องใหม่จากเมนู")
-    r.tap("แจ้งปัญหา/ข้อเสนอแนะ", "เลือก 'แจ้งปัญหา/ข้อเสนอแนะ'")
-    r.tap("หม้อแปลง", "เลือกว่าเรื่องเกี่ยวกับอะไร (กด ไม่แน่ใจ ได้)")
-    r.tap(transformer.name, "เลือกรุ่น")
-    r.type("TRF_SYN_004", "บอกเลขเครื่องที่มีปัญหา")
-    r.tap("ไปต่อ", "ระบบถามอาการ")
+    head = _desk(w, "กอจ.", "sim-koj")
+    r.menu("ส่งเรื่องใหม่", "กดส่งเรื่องใหม่ ระบบถามว่าจะทำเรื่องใด")
+    r.tap("แจ้งปัญหา/ข้อเสนอแนะ", "เลือกแจ้งปัญหา/ข้อเสนอแนะ แล้วเลื่อนการ์ดเลือกกอง")
+    r.tap("กองอุปกรณ์การจำหน่าย", "เลือกกองที่ต้องการแจ้ง")
     r.type(
         "หม้อแปลงหน้าซอยมีควันออกและมีกลิ่นไหม้หลังฝนตก",
-        "แจ้งอาการด้วยคำของตัวเอง",
+        "แจ้งอาการด้วยคำของตัวเอง ข้อความมีคำว่าควันและไหม้ ระบบให้คำแนะนำเร่งด่วนก่อนสรุป",
     )
-    r.photo("ส่งรูปประกอบได้ทุกเมื่อ ระบบตรวจไวรัสก่อนให้เจ้าหน้าที่เปิด แล้วถามข้อเดิมต่อ")
-    r.type("ไฟดับประมาณ 30 ครัวเรือน", "บอกผลกระทบ")
-    r.tap("ข้าม", "ไม่เกี่ยวกับเรื่องเดิม กดข้าม")
-    r.tap(
-        "ยืนยันส่งเรื่อง",
-        "ข้อความมีคำว่า 'ควัน' และ 'ไหม้' ระบบให้คำแนะนำเร่งด่วนทันทีพร้อมเลขเรื่อง",
-    )
+    r.photo("ส่งรูปประกอบได้ ระบบตรวจไวรัสก่อนให้เจ้าหน้าที่เปิด")
+    r.tap("ยืนยันส่งเรื่อง", "กดยืนยันแล้วได้เลขเรื่อง เรื่องส่งถึง กอจ.")
     case = w.latest_case()
+
+    def resolve(text):
+        return lambda: w.act(
+            head, case, "resolve", {"category": "fixed", "as": "problem", "message": text}
+        )
+
+    r.menu("เรื่องของฉัน", "ผู้แจ้งเปิดดูความคืบหน้า")
+    r.tap(case.number, "เรื่องถึง กอจ. แล้วโดยไม่ผ่านกองกลาง รายละเอียดบอกสถานะและกองที่รับผิดชอบ")
     r.staff(
-        "กองรับเรื่องกลาง → กองหม้อแปลง",
-        "เห็นเรื่องเป็นระดับ 'ฉุกเฉิน' ส่งต่อกองหม้อแปลง กองหม้อแปลงรับงานทันที",
-        lambda: w.triage(case, "SIM-TRF", "sim-trf", "P0"),
-        "การส่งต่อเป็นงานภายใน ผู้แจ้งดูความคืบหน้าได้จากเมนู",
-        later=timedelta(minutes=8),
-    )
-    r.menu("ติดตามเรื่อง", "ผู้แจ้งเปิดดูความคืบหน้า")
-    r.tap(case.number, "สถานะบอกกองที่รับผิดชอบและกำหนดอัปเดตถัดไป")
-    r.staff(
-        "ผู้แก้ปัญหา กองหม้อแปลง",
+        "เจ้าหน้าที่ กอจ.",
         "บันทึกผลการแก้ปัญหา: แก้แล้ว",
-        lambda: w.act(
-            "sim-trf-resolver",
-            case,
-            "resolve",
-            {
-                "category": "fixed",
-                "message": "ตัดไฟ เปลี่ยนขั้วต่อที่ไหม้ และจ่ายไฟคืนแล้ว (ข้อมูลจำลอง)",
-            },
-        ),
-        "ผู้แจ้งได้รับการ์ดผลการแก้ปัญหา ให้กดยืนยันหรือแจ้งว่ายังไม่เรียบร้อย",
+        resolve("ตัดไฟ เปลี่ยนขั้วต่อที่ไหม้ และจ่ายไฟคืนแล้ว (ข้อมูลจำลอง)"),
+        "ผู้แจ้งได้การ์ดผลการแก้ปัญหา ให้กดยืนยันหรือแจ้งว่ายังไม่เรียบร้อย",
         later=timedelta(hours=2, minutes=10),
     )
-    r.tap("ยังไม่เรียบร้อย", "ยังมีอาการอยู่ กด 'ยังไม่เรียบร้อย' ระบบให้พิมพ์เหตุผล")
-    r.type("ไฟยังกะพริบเป็นช่วง ๆ ตอนหัวค่ำ", "เรื่องกลับไปให้กองหม้อแปลงทำต่อ")
+    r.tap("ยังไม่เรียบร้อย", "ยังมีอาการอยู่ กด ยังไม่เรียบร้อย ระบบให้พิมพ์เหตุผล")
+    r.type("ไฟยังกะพริบเป็นช่วง ๆ ตอนหัวค่ำ", "เรื่องกลับไปให้ กอจ. ทำต่อ")
     r.staff(
-        "ผู้แก้ปัญหา กองหม้อแปลง",
+        "เจ้าหน้าที่ กอจ.",
         "แก้เพิ่มแล้วบันทึกผลใหม่",
-        lambda: w.act(
-            "sim-trf-resolver",
-            case,
-            "resolve",
-            {
-                "category": "fixed",
-                "message": "เปลี่ยนฟิวส์แรงต่ำและขันขั้วต่อใหม่ ตรวจวัดแรงดันปกติ (ข้อมูลจำลอง)",
-            },
-        ),
-        "ผู้แจ้งได้รับการ์ดผลการแก้ปัญหาอีกครั้ง",
+        resolve("เปลี่ยนฟิวส์แรงต่ำและขันขั้วต่อใหม่ ตรวจวัดแรงดันปกติ (ข้อมูลจำลอง)"),
+        "ผู้แจ้งได้การ์ดผลการแก้ปัญหาอีกครั้ง",
         later=r.wait_until(1, 11, 20),
     )
-    r.tap("ยืนยัน", "ยืนยันผลแล้ว เรื่องปิด (เปิดใหม่ได้ภายใน 30 วัน)")
+    r.tap("ยืนยัน", "ยืนยันผลแล้ว เรื่องปิด")
+
+
+def slip_result(r, w):
+    """ADR 0057: กอจ. answers a ติดตามใบส่งคืน with แจ้งผลให้ผู้แจ้ง; ยืนยันผล or ปฏิเสธ."""
+    koj = _desk(w, "กอจ.", "sim-koj")
+    found = {}
+
+    def start():
+        # Filed as the กอจ. tile files it; the tile's own chat depends on กอจ.'s lookup sheet.
+        filed = services.submit_case(
+            Actor.for_requester(w.requester),
+            idempotency_key=f"mockup-{uuid.uuid4().hex}",
+            payload={
+                "kind": "return",
+                "lines": [],
+                "menu_label": "หม้อแปลง LBS RMU · LBS · ติดตามใบส่งคืน",
+                "division_code": "กอจ.",
+                "sap_number": "4917646",
+                "sap_kind": "return_transfer",
+                "condition": "LBS 1 ชุด ส่งใบโอนขอคืนแล้ว",
+                "reason": "LBS 1 ชุด ส่งใบโอนขอคืนแล้ว",
+            },
+        )
+        found["case"] = Case.objects.get(pk=filed.case_id)
+        _start(koj, found["case"])
+
+    def tell(text):
+        return lambda: w.act(koj, found["case"], "report_result", {"message": text})
+
+    r.staff(
+        "กอจ.",
+        "ผู้แจ้งติดตามใบโอนขอคืน 4917646 ทางปุ่ม หม้อแปลง LBS RMU แล้ว กอจ. กดดำเนินการ",
+        start,
+        "เรื่องอยู่ที่ กอจ. สถานะกำลังดำเนินการ",
+        later=timedelta(minutes=20),
+    )
+    r.staff(
+        "เจ้าหน้าที่ กอจ.",
+        "กด แจ้งผลให้ผู้แจ้ง (บนเว็บหรือในการ์ด LINE ของเจ้าหน้าที่) แล้วพิมพ์รายละเอียด",
+        tell("รับใบโอนขอคืนแล้ว รถของ กอจ. จะเข้าไปรับ LBS ที่เขตวันพฤหัสนี้"),
+        "ผู้แจ้งได้การ์ดทันที มีข้อความที่เจ้าหน้าที่พิมพ์ ปุ่มยืนยันผล และปุ่มปฏิเสธ",
+        later=timedelta(hours=1),
+    )
+    r.tap("ปฏิเสธ", "ยังไม่เรียบร้อย กดปฏิเสธ ระบบให้พิมพ์เหตุผล")
+    r.type(
+        "รถยังไม่มารับของ รบกวนแจ้งวันใหม่",
+        "เรื่องกลับไปกำลังดำเนินการที่ กอจ. ผู้รับผิดชอบได้แจ้งเตือน",
+    )
+    r.staff(
+        "เจ้าหน้าที่ กอจ.",
+        "กด แจ้งผลให้ผู้แจ้ง อีกครั้ง",
+        tell("รถไปรับ LBS แล้ว 13 พ.ย. รับคืนเข้าคลังเรียบร้อย"),
+        "ผู้แจ้งได้การ์ดใบใหม่",
+        later=r.wait_until(1, 14, 0),
+    )
+    r.tap("ยืนยันผล", "เรียบร้อยแล้ว กดยืนยันผล เรื่องปิด")
 
 
 @dataclass(frozen=True)
@@ -699,21 +597,20 @@ def order(r, w):
     from django.utils import timezone as tz
 
     from operations import staff_orders_chat
-    from operations.models import Division
 
     director = _user("sim-director", [])
     RoleGrant.objects.get_or_create(user=director, role=Role.DEPARTMENT_SUPERVISOR, division=None)
     StaffProfile.objects.filter(user=director).update(display_name="ผอ.จำลอง")
-    head = _user("sim-eqp-head", [(Role.SUPERVISOR, "SIM-EQP")])
-    StaffProfile.objects.filter(user=head).update(
-        display_name="สมศักดิ์", division=Division.objects.get(code="SIM-EQP")
-    )
+    eqp = Division.objects.filter(code="กอจ.").first()
+    if eqp is None:
+        raise MockupError("ยังไม่มีหน่วยงาน กอจ. โหลดโครงสร้างองค์กรก่อน")
+    head = _user("sim-koj-head", [(Role.SUPERVISOR, eqp.code)])
+    StaffProfile.objects.filter(user=head).update(display_name="สมศักดิ์", division=eqp)
     ChannelIdentity.objects.filter(channel=LINE, external_id=r.user_id).update(
         staff_user=director, staff_linked_at=tz.now()
     )
-    eqp = Division.objects.get(code="SIM-EQP")
     r.type("สั่งงาน", "แอดมินฝ่ายพิมพ์ สั่งงาน ระบบเปิดการ์ดให้เลือกกอง (อื่นๆ คือแอดมินฝ่ายคนอื่น)")
-    r.tap("SIM-EQP", "เลือกกอง ระบบแสดงแอดมินกองของกองนั้น และปุ่มสั่งทั้งกอง")
+    r.tap(eqp.code, "เลือกกอง ระบบแสดงแอดมินกองของกองนั้น และปุ่มสั่งทั้งกอง")
     head.refresh_from_db()
     r.tap(staff_orders_chat.who(head, eqp), "เลือกผู้รับ ระบบขอให้พิมพ์รายละเอียดงาน")
     r.type(
@@ -733,35 +630,29 @@ SCENARIOS = [
         registered=False,
     ),
     Scenario(
-        "withdrawal",
-        "เบิกของด้วยปุ่ม",
-        "กดตอบทีละข้อ อนุมัติบางส่วน จ่ายของ แล้วยืนยันรับในแชต",
-        withdrawal,
-    ),
-    Scenario(
         "kcw",
-        "Meter, CT, VT ติดตามใบเบิก",
-        "เลือกอุปกรณ์ก่อน พิมพ์เลขใบเบิก SAP แล้วพิมพ์ช่องของมิเตอร์และ CT",
+        "กคว. ติดตามใบเบิก",
+        "พิมพ์เลขที่ใบเบิก กคว. บันทึกขั้นงานคลังสี่ขั้น ผู้แจ้งได้วันจ่ายแล้วกดยืนยันผล",
         kcw,
     ),
     Scenario(
         "typed",
-        "พิมพ์แจ้งเรื่องเอง",
-        "พิมพ์ประโยคเดียว ระบบเติมร่างให้ เจ้าหน้าที่ขอข้อมูลเพิ่ม",
+        "พิมพ์ขอเบิกของในแชต",
+        "ระบบบอกว่าการเบิกทำใน SAP แล้วพาไปติดตามใบเบิกของอุปกรณ์นั้น",
         typed,
         needs_ai=True,
     ),
     Scenario(
-        "return",
-        "ส่งคืนของ",
-        "แจ้งคืนพร้อมเลขเครื่อง รับคำแนะนำการส่งคืน แล้วรับผลการตรวจ",
-        return_case,
-    ),
-    Scenario(
         "problem",
         "แจ้งปัญหาเร่งด่วน",
-        "มีควันและกลิ่นไหม้ ได้คำแนะนำทันที โต้แย้งผลครั้งแรก แล้วกดยืนยัน",
+        "เลือกกอง พิมพ์อาการ ได้คำแนะนำทันที แจ้งว่ายังไม่เรียบร้อยครั้งแรก แล้วกดยืนยัน",
         problem,
+    ),
+    Scenario(
+        "slip_result",
+        "กอจ. แจ้งผลเรื่องติดตามใบส่งคืน",
+        "เจ้าหน้าที่พิมพ์ผล ผู้แจ้งกดปฏิเสธครั้งแรก เจ้าหน้าที่แจ้งผลใหม่ แล้วผู้แจ้งกดยืนยันผล",
+        slip_result,
     ),
     Scenario(
         "order",

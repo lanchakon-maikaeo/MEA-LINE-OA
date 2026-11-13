@@ -270,12 +270,9 @@ class ProblemTests(ProblemTestCase):
     def test_accepting_closes_and_intake_may_answer_for_the_requester(self):
         case = self.resolved()
         self.assertFails(ErrorCode.FORBIDDEN, self.act, self.trf_staff, case, "confirm")
-        self.assertFails(
-            ErrorCode.VALIDATION_ERROR, self.act, self.intake, case, "confirm", {"channel": "phone"}
-        )
-        result = self.act(
-            self.intake, case, "confirm", {"channel": "phone", "intake_note": "เขตโทรมา"}
-        )
+        self.assertFails(ErrorCode.VALIDATION_ERROR, self.act, self.intake, case, "confirm")
+        # 13 พ.ย. 2569: the channel is chosen, the note is not forced.
+        result = self.act(self.intake, case, "confirm", {"channel": "phone"})
         self.assertEqual(result.status, S.CLOSED)
 
     def test_disputes_go_back_and_a_second_one_is_flagged(self):

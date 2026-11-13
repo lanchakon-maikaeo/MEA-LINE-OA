@@ -817,6 +817,7 @@ HANDLERS = {
     "start_work": approvals.system_only,
     "skip_screening": approvals.system_only,
     "finish_on_delivery": approvals.system_only,  # ADR 0055: warehouse.record does it
+    "report_result": warehouse.report,  # ADR 0057
 }
 
 # Shared lifecycle actions: each kind has its own rules (M07 Q6, M08 Q11/Q13, M09 Q1-Q4).
@@ -844,6 +845,9 @@ def _handler(action, case):
     ):
         # ADR 0055: the last warehouse stage waits for the requester like a resolution does.
         return warehouse.confirm_done if action == "confirm" else warehouse.close_done
+    if action == "dispute_resolution" and case.kind != Case.Kind.PROBLEM:
+        if not warehouse.tracking(case):  # ADR 0057: item rows answer per delivery
+            fail(ErrorCode.INVALID_TRANSITION, "เรื่องนี้ตอบผลตามรายการที่จ่าย")
     if action in BY_KIND:
         return BY_KIND[action][case.kind]
     return HANDLERS[action]
@@ -887,14 +891,8 @@ def _with_notes(ctx, case, action, from_status, payload, reason, data):
     if case.status == from_status:
         notice = ""  # a notice belongs to a status change
     else:
+        # 13 พ.ย. 2569 (owner): staff type nothing they do not want to; the status speaks.
         notice = requester_steps.notice_of(action, {**payload, "notice": notice}, reason)
-        staff = ctx.requester is None
-        if (
-            staff
-            and not notice
-            and requester_steps.notice_required(action, from_status, case.status)
-        ):
-            fail(ErrorCode.VALIDATION_ERROR, "เขียนข้อความแจ้งสถานะถึงผู้แจ้งก่อนบันทึก")
     if not (notice or internal) or (data is not None and not isinstance(data, dict)):
         return data
     return {

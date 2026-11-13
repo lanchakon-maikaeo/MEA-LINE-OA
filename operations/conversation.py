@@ -49,6 +49,7 @@ from operations.models import (
     Division,
     EquipmentType,
     LineMenuItem,
+    NotificationDelivery,
     PostbackToken,
     RegistrationRequest,
     Requester,
@@ -1393,6 +1394,13 @@ def expire_drafts(now=None, identity=None):
 
 
 def _requester_turn(turn):
+    from operations import case_chat  # local: case_chat builds on this module (ADR 0024)
+
+    _requester_reply(turn)
+    case_chat.carry(turn)
+
+
+def _requester_reply(turn):
     expire_drafts(turn.now, turn.identity)
     expired = ConversationDraft.objects.filter(
         identity=turn.identity, status=D.EXPIRED, expiry_notified=False
@@ -1564,6 +1572,8 @@ def _updates(turn):
             continue  # its card shows the step and the notice in this same reply
         if not _news(case, since):
             continue  # ADR 0028: a move inside the same step is not news for the requester
+        if _pushed(case, since):
+            continue  # they read it in the push (a result card, a request for information)
         if len(lines) == 3:
             break
         line = f"{case.number} · {requester_steps.label(case)}"
@@ -1578,6 +1588,32 @@ def _updates(turn):
         lines.append(line)
     if lines:
         turn.say("มีอัปเดตใหม่\n" + "\n".join(lines))
+
+
+def _pushed(case, since):
+    """LINE took a push about this case after its last change of status, or a staff message
+    about it waits in the chat and goes out with this very answer."""
+    from operations.models import CaseMessage
+
+    M = CaseMessage
+    if M.objects.filter(case=case, direction=M.Direction.STAFF, status=M.Status.HELD).exists():
+        return True
+    last = (
+        case.decisions.filter(created_at__gt=since)
+        .exclude(from_status=F("to_status"))
+        .order_by("-id")
+        .first()
+    )
+    N = NotificationDelivery
+    return last is not None and (
+        N.objects.filter(
+            case=case,
+            identity__requester_id=case.requester_id,
+            channel=N.Channel.LINE_PUSH,
+            status=N.Status.SENT,
+            created_at__gte=last.created_at,
+        ).exists()
+    )
 
 
 def _news(case, since):
@@ -2496,6 +2532,7 @@ def _case_detail(turn, number):
         text += f"\nงานเสร็จแล้ว ถ้าเรียบร้อย กด “{warehouse.CONFIRM_LABEL}” เรื่องจะปิด"
         buttons = [
             turn.button(warehouse.CONFIRM_LABEL, "done_confirm", {"case": str(case.pk)}),
+            turn.button(warehouse.REJECT_LABEL, "problem_dispute", {"case": str(case.pk)}),
             *buttons,
         ]
     if case.kind == K.WITHDRAWAL:

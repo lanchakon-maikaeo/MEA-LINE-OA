@@ -147,7 +147,6 @@ ACTIONS = {
             "ขอคืนงาน",
             "M02",
             _per_kind(lambda k, st: _same([*st, *PAUSED])),
-            reason_required=True,
         ),
         ActionSpec(
             "request_info",
@@ -160,7 +159,7 @@ ACTIONS = {
                     if s in {S.TRIAGE, S.AWAITING_APPROVAL, S.AWAITING_EXECUTION, S.IN_PROGRESS}
                 }
             ),
-            reason_required=True,
+            reason_required=True,  # the question itself: nothing to answer without it
         ),
         ActionSpec(
             "info_received", "ได้ข้อมูลแล้ว", "M02", _per_kind(lambda k, _: {S.AWAITING_INFO: {RESUME}})
@@ -226,7 +225,6 @@ ACTIONS = {
             "แอดมินส่งให้กอง",
             "M06",
             _per_kind(lambda k, st: _same([s for s in st if s not in TERMINAL])),
-            reason_required=True,
         ),
         ActionSpec(
             "set_priority",
@@ -432,11 +430,13 @@ ACTIONS = {
                 )
             ),
         ),
+        # ADR 0057: also the requester's ปฏิเสธ of a case followed by its number (services
+        # refuses it for a withdrawal with item rows, which answers per delivery).
         ActionSpec(
             "dispute_resolution",
             "โต้แย้งผล",
             "M09",
-            _per_kind(_only(K.PROBLEM, {S.AWAITING_CONFIRMATION: {S.IN_PROGRESS}})),
+            _per_kind(lambda k, _: {S.AWAITING_CONFIRMATION: {S.IN_PROGRESS}}),
         ),
         ActionSpec("request_child_work", "สร้างงานย่อย", "M09", _per_kind(_child(False))),
         ActionSpec("accept_child_work", "ตอบรับงานย่อย", "M09", _per_kind(_child(False))),
@@ -497,6 +497,23 @@ ACTIONS = {
         ActionSpec(
             "finish_on_delivery",
             "งานคลังขั้นสุดท้าย รอหน่วยงาน (เขต/ฝ่าย)ยืนยันผล",
+            "M07-M08",
+            _per_kind(
+                lambda k, _: (
+                    {}
+                    if k == K.PROBLEM
+                    else {
+                        S.AWAITING_EXECUTION: {S.AWAITING_CONFIRMATION},
+                        S.IN_PROGRESS: {S.AWAITING_CONFIRMATION},
+                    }
+                )
+            ),
+        ),
+        # ADR 0057: staff type what was done on a case followed by its number; the requester
+        # then confirms or refuses it, with or without the warehouse stages.
+        ActionSpec(
+            "report_result",
+            "แจ้งผลให้ผู้แจ้ง",
             "M07-M08",
             _per_kind(
                 lambda k, _: (

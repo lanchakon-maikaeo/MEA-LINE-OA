@@ -72,6 +72,13 @@ def table_parts(division, schedule):
     return {"sla": bool(schedule and schedule.sla) or (trucks and not by_truck), "trucks": trucks}
 
 
+def works_by_stage(division):
+    """ADR 0057: a กอง that keeps กำหนดจ่ายตามขนาด (กคว.) works a slip stage by stage, since คีย์จ่าย
+    sets the pay day from that table. Any other กอง, กคอ. and กอจ. among them, answers with
+    แจ้งผลให้ผู้แจ้ง first and keeps the stages as a choice."""
+    return table_parts(division, schedule_of(division))["sla"]
+
+
 def working_days_after(start, days):
     """Monday to Friday, skipping วันหยุด (รอบใหม่ Q11)."""
     off = calendars.holidays(start, start + timedelta(days=days * 3 + 30))
@@ -159,11 +166,33 @@ def truck_day(case, on_or_after):
     return next_weekday(on_or_after, weekdays) if weekdays else None
 
 
+# A return is not paid out: its stages read as grill กคอ. Q32 named them, in every กอง, until
+# the กอง sets its own in ชื่อขั้นงานคลัง. รถรับของแล้ว is no stage any more (owner, 13 พ.ย.
+# 2569); its name stays for the returns that recorded it.
+RETURN_LABELS = {
+    S.RECEIVED: "รับใบส่งคืนแล้ว",
+    S.KEYED: "รถรับของแล้ว",
+    S.ISSUED: "ตรวจสภาพแล้ว",
+    S.DELIVERED: "รับเข้าคลังแล้ว",
+}
+
+
+def stage_order(kind):
+    """The stages a case of this kind goes through: a return has no stage between its slip and
+    the inspection."""
+    returning = kind == Case.Kind.RETURN
+    return [s for s in CaseMilestone.ORDER if not (returning and s == S.KEYED)]
+
+
+def default_label(kind, stage):
+    return RETURN_LABELS[stage] if kind == Case.Kind.RETURN else S(stage).label
+
+
 def stage_label(case, stage):
     """The division's own name of a stage for this kind of case (Q7, Q32), else the default."""
     schedule = schedule_of(case.owner_division)
     names = (schedule.stage_labels or {}).get(case.kind, {}) if schedule else {}
-    return names.get(stage) or S(stage).label
+    return names.get(stage) or default_label(case.kind, stage)
 
 
 def preview(schedule, group, district_code, received_on):
@@ -358,7 +387,6 @@ def record(actor, cases, stage, on, planned_on=None, note="", numbers=(), via=""
     if on > timezone.localdate():
         raise ValidationError("วันที่ต้องไม่เกินวันนี้")
     scope = identity.staff_scope(actor)
-    order = CaseMilestone.ORDER
     done, skipped = [], []
     typed = {str(n).strip().upper() for n in numbers}
     for case in cases:
@@ -371,6 +399,10 @@ def record(actor, cases, stage, on, planned_on=None, note="", numbers=(), via=""
             continue
         if case.awaits_acceptance and case.assignee_id == actor.pk:  # ADR 0049 Q9, ADR 0055
             skipped.append((case, "กดรับงานเรื่องนี้ก่อน แล้วจึงบันทึกขั้นงานคลังได้"))
+            continue
+        order = stage_order(case.kind)
+        if stage not in order:
+            skipped.append((case, f"เรื่องคืนไม่มีขั้น{stage_label(case, stage)}"))
             continue
         have = stages(case)
         targets = [("", "")]
@@ -433,7 +465,10 @@ def tracking(case):
 
 
 FINISH = "finish_on_delivery"
+REPORT = "report_result"  # ADR 0057: staff typed the result; the stages are a choice
 CONFIRM_LABEL = "ยืนยันผล"
+REJECT_LABEL = "ปฏิเสธ"
+DONE_TEXT = "เจ้าหน้าที่ดำเนินการแล้วเสร็จ"  # the card's words when staff typed none (13 พ.ย. 2569)
 
 
 def _finish(actor, case):
@@ -471,20 +506,39 @@ def _finish(actor, case):
         text = (
             f"{case.number} {stage_label(case, S.DELIVERED)}\n"
             f"ถ้าเรียบร้อยแล้ว กด “{CONFIRM_LABEL}” เรื่องจะปิด"
-            "\nถ้ายังไม่เรียบร้อย พิมพ์บอกเจ้าหน้าที่ในแชตนี้"
+            f"\nถ้ายังไม่เรียบร้อย กด “{REJECT_LABEL}” แล้วพิมพ์เหตุผล"
         )
-        button = [
-            CONFIRM_LABEL,
-            _token(found, "done_confirm", {"case": str(case.pk)}),
-            CONFIRM_LABEL,
+        value = {"case": str(case.pk)}
+        taps = [
+            [CONFIRM_LABEL, _token(found, "done_confirm", value), CONFIRM_LABEL],
+            # ADR 0057: the refusal is the problem card's, a typed reason and back to staff
+            [REJECT_LABEL, _token(found, "problem_dispute", value), REJECT_LABEL],
         ]
-        case_chat.send_system(actor, case, text, [button])
+        case_chat.send_system(actor, case, text, taps)
     return True
 
 
+def report(ctx, case, payload, reason, target):
+    """แจ้งผลให้ผู้แจ้ง (ADR 0057): what staff typed goes to the requester, who confirms or
+    refuses it; notifications sends the card. No warehouse stage is needed first."""
+    from operations import coordination
+    from operations.contracts import ErrorCode, clean_text, fail
+
+    if ctx.requester is not None or not identity.holds(ctx.scope, case.owner_division_id):
+        fail(ErrorCode.FORBIDDEN, "สมาชิกกองเจ้าภาพเป็นผู้แจ้งผล")
+    if not tracking(case):
+        fail(ErrorCode.VALIDATION_ERROR, "เรื่องที่มีรายการของแจ้งผลด้วยการจ่ายหรือรับคืนตามรายการ")
+    if coordination.blocks_closing(case):
+        fail(ErrorCode.VALIDATION_ERROR, "ยังมีงานย่อยค้าง แจ้งผลไม่ได้")
+    clean_text(payload, "message", False)  # kept as the decision's notice (requester_steps)
+    case.status = target
+    return {}
+
+
 def finished_at(case):
-    """When the last stage asked the requester to confirm, for ปิดเรื่อง after the wait."""
-    decision = case.decisions.filter(action=FINISH).order_by("-id").first()
+    """When the last stage or แจ้งผลให้ผู้แจ้ง asked the requester to confirm, for ปิดเรื่อง after
+    the wait."""
+    decision = case.decisions.filter(action__in=(FINISH, REPORT)).order_by("-id").first()
     return decision.created_at if decision else None
 
 

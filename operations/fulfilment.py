@@ -543,7 +543,7 @@ def confirm(ctx, case, payload, reason, target):
         channel = payload.get("channel")
         if channel not in STAFF_CHANNELS:
             fail(ErrorCode.VALIDATION_ERROR, "channel must be phone, letter or counter.")
-        note = clean_text(payload, "intake_note", True)
+        note = clean_text(payload, "intake_note", False)
         recorded_by = ctx.user
         if identity.separated(ctx) and delivery.issued_by_id == ctx.user.pk:
             fail(ErrorCode.FORBIDDEN, "ผู้จ่ายไม่ยืนยันรับการส่งมอบของตนเอง (Q4)")

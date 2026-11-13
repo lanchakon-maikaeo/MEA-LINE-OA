@@ -150,13 +150,11 @@ class AcceptTests(AcceptTestCase):
         case = self.assign(case, self.head, by=self.head)
         self.assertEqual(case.accepted_by, self.head)
 
-    def test_giving_it_back_needs_a_reason_and_tells_the_division_admin(self):
+    def test_giving_it_back_tells_the_division_admin(self):
         # ADR 0050 Q6: the แอดมินกอง hear of it while their switch is on (off by default).
         keep_original_recipients(["staff_assignment_returned"])
         options.change(None, "push:staff_assignment_returned:duty", "off", "")
         case = self.assign(self.withdraw("4500070103"), self.kcw)
-        with self.assertRaises(CommandFailed):
-            self.act(self.kcw, case, "return_assignment")
         case = self.act(self.kcw, case, "return_assignment", reason="ลาพักร้อน")
         self.assertIsNone(case.assignee)
         told = self.alerts(case, "staff_assignment_returned")

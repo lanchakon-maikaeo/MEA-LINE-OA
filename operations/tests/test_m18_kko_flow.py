@@ -194,7 +194,9 @@ class TruckTests(KkoTestCase):
         filed = [m for m in self.sent if "ยื่นเรื่องแล้ว" in texts(m)][-1]
         self.assertNotIn("TE-Delivery", texts(filed))  # no one ฟข.'s truck day for everyone
         today = timezone.localdate()
-        for stage in CaseMilestone.ORDER:
+        # 13 พ.ย. 2569 (owner): รถรับของแล้ว is no stage of a return any more.
+        self.assertEqual(warehouse.stage_order(case.kind), [S.RECEIVED, S.ISSUED, S.DELIVERED])
+        for stage in warehouse.stage_order(case.kind):
             done, skipped = warehouse.record(self.kko, [case], stage, today)
             self.assertEqual((len(done), skipped), (1, []))
         case.refresh_from_db()

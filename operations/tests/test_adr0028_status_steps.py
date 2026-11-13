@@ -133,17 +133,9 @@ class RuleTests(StatusTestCase):
         options.change(None, options.STEP_PREFIX + "on_hold", "need_you", "ทดสอบ")
         self.assertEqual(requester_steps.key(S.ON_HOLD), "need_you")
         self.assertEqual(requester_steps.bar(S.ON_HOLD), "●●●○")
-        refused = self.act("hold", reason="รอของ")
-        self.assertContains(refused, "เขียนข้อความแจ้งสถานะถึงผู้แจ้งก่อนบันทึก", status_code=400)
-        self.assertEqual(self.case.status, S.IN_PROGRESS)
-        self.act("hold", reason="รอของ", notice="รอคุณส่งรูปใบเบิก")
+        self.act("hold", reason="รอของ")  # 13 พ.ย. 2569: the notice is never forced
         self.assertEqual(self.case.status, S.ON_HOLD)
 
-    def test_which_moves_need_a_notice(self):
-        need = requester_steps.notice_required
-        self.assertTrue(need("close", S.AWAITING_CONFIRMATION, S.CLOSED))
-        self.assertFalse(need("confirm", S.AWAITING_CONFIRMATION, S.CLOSED))
-        self.assertFalse(need("hold", S.AWAITING_EXECUTION, S.ON_HOLD))
-        self.assertFalse(need("close", S.CLOSED, S.CLOSED))
+    def test_a_refused_case_has_no_step_and_a_closed_one_is_done(self):
         self.assertEqual(requester_steps.bar(S.REJECTED), "")
         self.assertEqual(requester_steps.LABEL[requester_steps.key(S.CLOSED)], "เสร็จสิ้น")
