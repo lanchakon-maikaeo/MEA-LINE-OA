@@ -137,14 +137,20 @@ class IssueTests(OrderTestCase):
 
 
 class FlowTests(OrderTestCase):
+    def test_finishing_forces_no_typed_result(self):
+        # 13 พ.ย. 2569 (owner): the web forces no typing; the issuer still hears and closes.
+        order = work_orders.act(self.kcw, self.order(), "start")
+        order = work_orders.act(self.kcw, order, "done")
+        self.assertEqual((order.status, order.result), (S.DONE, ""))
+        self.assertEqual(self.notices("staff_order_done", self.director).count(), 1)
+        self.assertEqual(work_orders.act(self.director, order, "close").status, S.CLOSED)
+
     def test_start_finish_and_close(self):
         order = self.order()
         self.assertEqual(dict(work_orders.steps_for(self.ktf, order)), {})  # another division
         order = work_orders.act(self.kcw, order, "start", urgent=True)
         self.assertEqual((order.status, order.is_urgent), (S.IN_PROGRESS, True))
         self.assertEqual(self.notices("staff_order_ack", self.director).count(), 1)
-        with self.assertRaises(ValidationError):
-            work_orders.act(self.kcw, order, "done")
         order = work_orders.act(self.kcw, order, "done", result="นับครบ 120 ตัว")
         self.assertEqual((order.status, order.result), (S.DONE, "นับครบ 120 ตัว"))
         self.assertEqual(self.notices("staff_order_done", self.director).count(), 1)

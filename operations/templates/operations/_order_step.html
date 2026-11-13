@@ -6,7 +6,7 @@
       <label class="choice choice--sm"><input type="radio" name="urgent" value="0"{% if not order.is_urgent %} checked{% endif %}> <span>ปกติ</span></label>
     </fieldset>
   {% elif s.needs == "result" %}
-    <label class="field"><span>ผลการดำเนินงาน <span class="req" aria-hidden="true">*</span></span><textarea name="result" rows="3" required></textarea></label>
+    <label class="field"><span>ผลการดำเนินงาน (ไม่บังคับ)</span><textarea name="result" rows="3"></textarea></label>
   {% elif s.needs == "reason" %}
     <label class="field"><span>เหตุผล (ไม่บังคับ)</span><textarea name="reason" rows="2"></textarea></label>
   {% elif s.needs == "person" %}
