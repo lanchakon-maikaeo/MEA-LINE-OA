@@ -194,6 +194,7 @@ ACTION_EXTRA_FIELDS = {
     "admin_send": {"division"},
     "admin_answer": {"category", "message", "internal_note", "as"},
     "dispute_resolution": {"channel", "intake_note"},
+    "report_result": {"message"},  # ADR 0057
     "request_child_work": {"division", "task", "deliverable", "rule", "lines"},
     "accept_child_work": {"child"},
     "decline_child_work": {"child"},
@@ -416,7 +417,7 @@ def parse_submission(payload, on_behalf):
                 ErrorCode.VALIDATION_ERROR,
                 "channel must be phone, letter, counter or fallback_form.",
             )
-        note = _text(payload, "intake_note", True)
+        note = _text(payload, "intake_note", False)
         reported_at = _reported_at(payload.get("reported_at"))
         if channel == Case.Channel.FALLBACK_FORM and reported_at is None:
             fail(ErrorCode.VALIDATION_ERROR, "reported_at is required for the fallback form.")

@@ -15,28 +15,9 @@ S = Case.Status
 STEPS = ("รับเรื่องแล้ว", "กำลังดำเนินการ", "รอข้อมูลจากคุณ", "เสร็จสิ้น")
 INDEX = {"received": 0, "working": 1, "need_you": 2, "done_confirm": 3, "done": 3}
 LABEL = {**{key: STEPS[i] for key, i in INDEX.items()}, "done_confirm": "เสร็จสิ้น รอคุณยืนยัน"}
-NEEDS_NOTICE = {"need_you", "done_confirm", "done"}
 # Q14: actions whose own text already reaches the requester; it counts as their notice.
 REASON_IS_NOTICE = {"request_info", "decline", "deny_approval", "cancel", "reopen"}
-MESSAGE_IS_NOTICE = {"resolve", "admin_answer"}
-# No notice is required where the requester already knows the outcome: goods flows tell them
-# themselves (the issue day, the receipt to confirm, what came back), an answer recorded for the
-# district is their own word, and child work ends inside the case.
-OWN_OUTCOME = {
-    "allocate",
-    "issue",
-    "confirm",
-    "dispute_resolution",
-    "resolve_discrepancy",
-    "terminate_outstanding",
-    "receive",
-    "inspect",
-    "decide_inspection",
-    "resolve_return_discrepancy",
-    "terminate_return",
-    "accept_child_work",
-    "finish_child_work",
-}
+MESSAGE_IS_NOTICE = {"resolve", "admin_answer", "report_result"}
 
 
 def key(status):
@@ -80,14 +61,6 @@ def notice_of(action, payload, reason):
     if action in MESSAGE_IS_NOTICE:
         return str(payload.get("message") or "").strip()
     return ""
-
-
-def notice_required(action, from_status, to_status):
-    """Q3: staff moving a case into รอข้อมูลจากคุณ or เสร็จสิ้น write to the requester (the
-    requester's own steps never need one)."""
-    if to_status == from_status or to_status not in S.values or key(to_status) not in NEEDS_NOTICE:
-        return False
-    return action not in OWN_OUTCOME
 
 
 def notices(case):

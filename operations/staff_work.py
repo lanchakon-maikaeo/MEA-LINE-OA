@@ -372,11 +372,7 @@ def order_step(
         )
         return
 
-    if (
-        step in ("done", "send_back", "cancel")
-        and not text
-        and not (skip_reason and step != "done")
-    ):
+    if step in ("done", "send_back", "cancel") and not text and not skip_reason:
         turn.set_prompt("staff_os_text", order=str(order.pk), step=step)
         turn.say(
             "โปรดสรุปผลการดำเนินงาน"
@@ -384,18 +380,14 @@ def order_step(
             else "โปรดระบุเหตุผลที่ส่งกลับ"
             if step == "send_back"
             else "โปรดระบุเหตุผลที่ยกเลิก",
-            (
-                [
-                    turn.button(
-                        "ไม่ระบุเหตุผล",
-                        "staff_os",
-                        {"order": str(order.pk), "step": step, "skip_reason": True},
-                    )
-                ]
-                if step != "done"
-                else []
-            )
-            + [turn.button("กลับไปที่งาน", "staff_order", {"order": str(order.pk)})],
+            [
+                turn.button(
+                    "ข้าม" if step == "done" else "ไม่ระบุเหตุผล",  # 13 พ.ย.: the result too
+                    "staff_os",
+                    {"order": str(order.pk), "step": step, "skip_reason": True},
+                ),
+                turn.button("กลับไปที่งาน", "staff_order", {"order": str(order.pk)}),
+            ],
         )
         return
     if step == "assign_person" and person is None:
@@ -721,7 +713,7 @@ def step_start(turn, user, case, action):
     turn.set_prompt(
         "staff_step", case=str(case.pk), action=action, revision=case.revision, values={}
     )
-    if not any(f.required for f in _askable(form)) and not offer.irreversible:
+    if not any(f.required or f.ask for f in _askable(form)) and not offer.irreversible:
         step_go(turn, user)  # nothing it needs: one tap does it, notes stay for the web
         return
     _ask_next(turn, user)

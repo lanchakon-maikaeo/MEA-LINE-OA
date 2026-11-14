@@ -194,7 +194,9 @@ class TruckTests(KkoTestCase):
         filed = [m for m in self.sent if "ยื่นเรื่องแล้ว" in texts(m)][-1]
         self.assertNotIn("TE-Delivery", texts(filed))  # no one ฟข.'s truck day for everyone
         today = timezone.localdate()
-        for stage in CaseMilestone.ORDER:
+        # 13 พ.ย. 2569 (owner): รถรับของแล้ว is no stage of a return any more.
+        self.assertEqual(warehouse.stage_order(case.kind), [S.RECEIVED, S.ISSUED, S.DELIVERED])
+        for stage in warehouse.stage_order(case.kind):
             done, skipped = warehouse.record(self.kko, [case], stage, today)
             self.assertEqual((len(done), skipped), (1, []))
         case.refresh_from_db()
@@ -211,6 +213,9 @@ class TruckTests(KkoTestCase):
         client.force_login(self.kko)
         page = client.get("/divisions/กคอ./warehouse/schedule/").content.decode()
         self.assertIn("ฟขป.", page)
+        # ADR 0056: กคอ. goes by its truck day, so the page has no กำหนดจ่ายตามขนาด of กคว.
+        self.assertNotIn('data-sc-part="sla"', page)
+        self.assertNotIn("ชุดมิเตอร์ CT VT", page)
         r = client.post(
             "/divisions/กคอ./warehouse/schedule/",
             {
@@ -226,6 +231,7 @@ class TruckTests(KkoTestCase):
         self.assertEqual(self.schedule.truck_days["ฟขธ."], [1, 4])
         self.assertEqual((self.schedule.lead_days, self.schedule.contact), (1, "704-5001"))
         self.assertEqual(self.schedule.stage_labels, {"return": {"keyed": "รถมารับแล้ว"}})
+        self.assertEqual(self.schedule.issue_weekdays, [0, 1, 2, 3, 4])  # not on the form: kept
 
 
 class RepairSheetTests(KkoTestCase):

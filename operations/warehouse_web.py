@@ -66,6 +66,22 @@ NEXT_LABELS = {
 BULK_DEFAULT = {"none": S.RECEIVED, S.RECEIVED: S.KEYED, S.KEYED: S.ISSUED, S.ISSUED: S.DELIVERED}
 
 
+def _tab_labels(rows):
+    """The tabs name the stages of what the page holds: a page of ใบส่งคืน reads the return's
+    stages, and a page of both reads the two names side by side."""
+    labels = dict(TABS)
+    sample = {row["case"].kind: row["case"] for row in rows}
+    if Case.Kind.RETURN not in sample:
+        return labels
+    labels["none"] = "ยังไม่รับใบ" if len(sample) > 1 else "ยังไม่รับใบส่งคืน"
+    for stage in S.values:
+        kinds = sorted(sample, reverse=True)  # ใบเบิก first
+        kinds = [kind for kind in kinds if stage in warehouse.stage_order(kind)]
+        names = [warehouse.stage_label(sample[kind], stage) for kind in kinds]
+        labels[stage] = " / ".join(dict.fromkeys(names))  # "" hides a tab no slip here has
+    return labels
+
+
 def _division(request, code, unit_posts=False):
     division = Division.objects.filter(code=code, is_active=True).first()
     scope = identity.staff_scope(request.user)
@@ -81,6 +97,13 @@ def _division(request, code, unit_posts=False):
     if not allowed:
         raise Http404
     return division
+
+
+def _table_title(parts):
+    """The table page's name says only what the กอง keeps (ADR 0056)."""
+    if parts["sla"]:
+        return "ตารางกำหนดจ่ายและวันส่งรถ"
+    return "วันส่งรถและชื่อขั้น" if parts["trucks"] else "ชื่อขั้นงานคลัง"
 
 
 def _day(text, default=None):
@@ -122,7 +145,7 @@ def warehouse_page(request, code):
             messages.error(request, " ".join(exc.messages))
             return redirect(back)
         if done:
-            messages.success(request, f"บันทึก{S(stage).label} {len(done)} ใบ")
+            messages.success(request, f"บันทึก{warehouse.stage_label(done[0], stage)} {len(done)} ใบ")
         for case, why in skipped[:20]:
             messages.error(request, f"{case.number} ({case.sap_number or '-'}): {why}")
         if missing:
@@ -145,7 +168,8 @@ def warehouse_page(request, code):
     by_tab = {key: [] for key, _ in TABS}
     for case in cases[:500]:
         done = {m.stage: m for m in case.milestones.all()}
-        now = next((done[s] for s in reversed(CaseMilestone.ORDER) if s in done), None)
+        order = warehouse.stage_order(case.kind)
+        now = next((done[s] for s in reversed(order) if s in done), None)
         waiting = case.status == Case.Status.AWAITING_APPROVAL
         keyed = done.get(S.KEYED)
         received = done.get(S.RECEIVED)
@@ -168,7 +192,12 @@ def warehouse_page(request, code):
             "late": bool(planned and planned < today and S.ISSUED not in done),
             "method": method,
             "next": nxt,
-            "next_label": NEXT_LABELS.get(nxt, ""),
+            # A return, or a กอง with its own names, reads its own stage on the row's button.
+            "next_label": (
+                NEXT_LABELS.get(nxt, "")
+                if not nxt or warehouse.stage_label(case, nxt) == S(nxt).label
+                else warehouse.stage_label(case, nxt)
+            ),
             "extra": [n.number for n in case.extra_numbers.all()],
             "left": [n for _, n in warehouse.unkeyed(case)] if several and keyed else [],
             "several": several,
@@ -176,23 +205,34 @@ def warehouse_page(request, code):
         if waiting:
             by_tab["approval"].append(row)
             continue
+        if (
+            case.status == Case.Status.AWAITING_CONFIRMATION
+            and S.DELIVERED not in done
+            and case.sap_kind
+            and not case.lines.all()
+        ):
+            continue  # ADR 0057: answered without its stages; the requester's turn, no work here
         by_tab[now.stage if now else "none"].append(row)
         by_tab["all"].append(row)
     # 28 ต.ค. 2569 Q3: tabs by stage, each with its count; all open work by default.
     tab = request.GET.get("tab", "all")
     tab = tab if tab in by_tab else "all"
+    labels = _tab_labels(by_tab["all"] + by_tab["approval"])
     return render(
         request,
         "operations/warehouse.html",
         {
             "division": division,
             "rows": by_tab[tab],
-            "tabs": [(key, label, len(by_tab[key])) for key, label in TABS],
+            "tabs": [(key, labels[key], len(by_tab[key])) for key, _ in TABS if labels[key]],
             "tab": tab,
-            "stages": S.choices,
+            "returns": labels != dict(TABS),
+            "stages": [(stage, labels[stage]) for stage in S.values if labels[stage]],
             "bulk_stage": BULK_DEFAULT.get(tab, S.RECEIVED),
             "today": today,
-            "schedule": warehouse.schedule_of(division),
+            "schedule": (schedule := warehouse.schedule_of(division)),
+            "parts": (parts := warehouse.table_parts(division, schedule)),
+            "table_title": _table_title(parts),
             "may_act": may_act,
         },
     )
@@ -203,17 +243,24 @@ def schedule_page(request, code):
     division = _division(request, code)
     districts = list(District.objects.filter(is_active=True).order_by("code"))
     schedule = warehouse.schedule_of(division)
+    parts = warehouse.table_parts(division, schedule)
     if request.method == "POST":
-        sla = [
-            {"group": g, "size": s, "days": d}
-            for g, s, d in zip(
-                request.POST.getlist("sla_group"),
-                request.POST.getlist("sla_size"),
-                request.POST.getlist("sla_days"),
-                strict=False,
-            )
-        ]
+        # ADR 0056: a part the page does not show is not on the form; it keeps what it holds.
+        sla = list(schedule.sla) if schedule else []
+        issue = schedule.issue_weekdays if schedule else []
+        if parts["sla"]:
+            issue = request.POST.getlist("issue")
+            sla = [
+                {"group": g, "size": s, "days": d}
+                for g, s, d in zip(
+                    request.POST.getlist("sla_group"),
+                    request.POST.getlist("sla_size"),
+                    request.POST.getlist("sla_days"),
+                    strict=False,
+                )
+            ]
         trucks = {d.code: request.POST.getlist(f"truck_{d.code}") for d in districts}
+        more = {k: request.POST[k] for k in ("delivery", "lead_days") if k in request.POST}
         labels = {
             kind: {st: request.POST.get(f"stage_{kind}_{st}", "") for st in S.values}
             for kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
@@ -223,18 +270,17 @@ def schedule_page(request, code):
                 request.user,
                 division,
                 sla,
-                request.POST.getlist("issue"),
+                issue,
                 trucks,
                 request.POST.get("reason", ""),
-                delivery=request.POST.get("delivery", DivisionSchedule.Delivery.CHOOSE),
-                lead_days=request.POST.get("lead_days", 0),
                 contact=request.POST.get("contact", ""),
                 stage_labels=labels,
+                **more,
             )
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, " ".join(getattr(exc, "messages", ["ไม่มีสิทธิ์แก้ตารางนี้"])))
         else:
-            messages.success(request, "บันทึกตารางแล้ว")
+            messages.success(request, "บันทึกแล้ว")
         return redirect("warehouse-schedule", code=code)
     rows = list(schedule.sla if schedule else [])
     trucks = schedule.truck_days if schedule else {}
@@ -258,6 +304,8 @@ def schedule_page(request, code):
         "operations/warehouse_schedule.html",
         {
             "division": division,
+            "parts": parts,
+            "table_title": _table_title(parts),
             "may_act": identity.can_access_division(
                 identity.staff_scope(request.user), division.pk
             ),
@@ -277,8 +325,12 @@ def schedule_page(request, code):
                     kind,
                     label,
                     [
-                        (st, S(st).label, (stage_names.get(kind) or {}).get(st, ""))
-                        for st in S.values
+                        (
+                            st,
+                            warehouse.default_label(kind, st),
+                            (stage_names.get(kind) or {}).get(st, ""),
+                        )
+                        for st in warehouse.stage_order(kind)
                     ],
                 )
                 for kind, label in ((Case.Kind.WITHDRAWAL, "ใบเบิก"), (Case.Kind.RETURN, "ใบส่งคืน"))
@@ -596,7 +648,7 @@ def case_chat_post(request, number):
 
 
 def _next_stage(case, done):
-    for stage in CaseMilestone.ORDER:
+    for stage in warehouse.stage_order(case.kind):
         if stage not in done:
             return stage
     return None
@@ -617,9 +669,12 @@ def case_steps(case, panel):
         }
         for a in panel["waiting"]
     ]
-    if panel["warehouse"] and case.status not in (
-        Case.Status.AWAITING_APPROVAL,
-        Case.Status.CLOSED,
+    # ADR 0057: no stage leads while a case followed by its number waits for the requester.
+    asked = case.status == Case.Status.AWAITING_CONFIRMATION and warehouse.tracking(case)
+    if (
+        panel["warehouse"]
+        and not asked
+        and case.status not in (Case.Status.AWAITING_APPROVAL, Case.Status.CLOSED)
     ):
         url = reverse("case-stage", args=[case.number])
         if panel["next_stage"]:
@@ -800,8 +855,9 @@ def case_panel(user, case):
         "chat_fresh": bool(can_chat and case_chat.fresh_inbox(case)),
         "milestones": list(case.milestones.select_related("recorded_by__staff_profile")),
         "appointments": open_appointments,
+        # ADR 0056: the stages are a tracking case's work in every กอง, table or not.
         "warehouse": case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
-        and warehouse.schedule_of(case.owner_division) is not None,
+        and (warehouse.tracking(case) or warehouse.schedule_of(case.owner_division) is not None),
         "calendar": bool(open_appointments)
         or case.kind in (Case.Kind.WITHDRAWAL, Case.Kind.RETURN)
         and case.owner_division.calendars.exists(),

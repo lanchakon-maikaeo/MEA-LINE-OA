@@ -245,7 +245,7 @@ def finish_child_work(ctx, case, payload, reason, target):
     if result not in (C.DONE, C.FAILED):
         fail(ErrorCode.VALIDATION_ERROR, "result is done or failed.")
     child.status = result
-    child.result_summary = clean_text(payload, "summary", True)
+    child.result_summary = clean_text(payload, "summary", False)
     child.finished_by, child.finished_at = ctx.user, timezone.now()
     child.save()
     _settle_parent(case)

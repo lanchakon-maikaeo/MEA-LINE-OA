@@ -96,6 +96,7 @@ BUTTON_LABELS = {
     "resolve_return_discrepancy": "ปิดส่วนต่างการรับคืน",
     "terminate_return": "ยุติส่วนที่ค้างส่งคืน",
     "resolve": "บันทึกผลการแก้ปัญหา",
+    "report_result": "แจ้งผลให้ผู้แจ้ง",
     "admin_send": "ส่งให้กอง",
     "admin_answer": "ตอบเรื่อง",
     "request_child_work": "สร้างงานย่อย",
@@ -152,6 +153,7 @@ PRIMARY_ORDER = [
     "receive",
     "inspect",
     "resolve",
+    "report_result",
     "finish_child_work",
     "info_received",
     "resume",
@@ -336,15 +338,15 @@ def _unit_division(st, unit):
     return st.line_division.get(unit.line.line_no, st.owner) if unit.line_id else st.owner
 
 
+def _tracking(st):
+    """warehouse.tracking without a query: a withdrawal or return followed by its number."""
+    return bool(st.case.sap_kind) and not st.lines and st.case.kind != K.PROBLEM
+
+
 def _done_waiting(st):
-    """ADR 0055: a case followed by its SAP number waits for the requester after its last
-    warehouse stage."""
-    return (
-        st.case.status == S.AWAITING_CONFIRMATION
-        and bool(st.case.sap_kind)
-        and not st.lines
-        and st.case.kind != K.PROBLEM
-    )
+    """ADR 0055, ADR 0057: a case followed by its SAP number waits for the requester after its
+    last warehouse stage or แจ้งผลให้ผู้แจ้ง."""
+    return st.case.status == S.AWAITING_CONFIRMATION and _tracking(st)
 
 
 RULES = {
@@ -422,7 +424,13 @@ RULES = {
             )
         )
     ),
-    "dispute_resolution": lambda st: st.case.kind == K.PROBLEM and st.answers_for_district(),
+    "dispute_resolution": lambda st: (
+        (st.case.kind == K.PROBLEM or _done_waiting(st)) and st.answers_for_district()
+    ),
+    # ADR 0057: the answer of a case followed by its number, with or without the stages.
+    "report_result": lambda st: (
+        _tracking(st) and st.member(st.owner) and not coordination.blocks_closing(st.case)
+    ),
     # ADR 0052 Q13: a แอดมินแผนก sends their own cases on; a แอดมินกลุ่มงาน keeps the แผนก.
     "set_section": lambda st: (
         bool(st.sections)
@@ -655,6 +663,7 @@ class Field:
     rows: list = field(default_factory=list)  # for kind "lines"
     columns: list = field(default_factory=list)
     ui_only: bool = False  # helps the page, never part of the payload
+    ask: bool = False  # optional, yet the LINE card asks it (with ข้าม) before it saves
     value: object = None  # what the form shows: the posted value, else the initial one
 
 
@@ -1039,11 +1048,11 @@ def build_form(action, st, params, demo=False):
         else:
             form.intro = "หน่วยงาน (เขต/ฝ่าย)ยอมรับผลการแก้ปัญหาแล้ว บันทึกแทนหน่วยงาน (เขต/ฝ่าย)"
         add(Field("channel", "หน่วยงาน (เขต/ฝ่าย)แจ้งทาง", "select", True, STAFF_CHANNELS))
-        add(Field("intake_note", "บันทึกการรับแจ้ง", "textarea", True, help="เช่น ใครโทรมา เวลาไหน"))
+        add(Field("intake_note", "บันทึกการรับแจ้ง (ไม่บังคับ)", "textarea", help="เช่น ใครโทรมา เวลาไหน"))
     elif action == "dispute_resolution":
         form.intro = "หน่วยงาน (เขต/ฝ่าย)แจ้งว่ายังไม่เรียบร้อย เรื่องจะกลับไปที่กองเจ้าภาพ"
         add(Field("channel", "หน่วยงาน (เขต/ฝ่าย)แจ้งทาง", "select", True, STAFF_CHANNELS))
-        add(Field("intake_note", "บันทึกการรับแจ้ง", "textarea", True))
+        add(Field("intake_note", "บันทึกการรับแจ้ง (ไม่บังคับ)", "textarea"))
         add(_reason(True, "หน่วยงาน (เขต/ฝ่าย)แจ้งว่ายังไม่เรียบร้อยอย่างไร"))
     elif action == "close":
         if case.kind == K.WITHDRAWAL and not _done_waiting(st):
@@ -1184,7 +1193,7 @@ def build_form(action, st, params, demo=False):
     elif action == "admin_send":
         here = None if case.held_by_admin else case.owner_division_id
         add(Field("division", "ส่งให้กอง", "select", True, _divisions(here, real=True)))
-        add(Field("reason", "เหตุผล", "textarea", True))
+        add(_reason())
     elif action in ("resolve", "admin_answer"):
         suggestion = case.topic == Case.Topic.SUGGESTION
         results = dict(ProblemResolution.Category.choices)
@@ -1218,9 +1227,32 @@ def build_form(action, st, params, demo=False):
                 choices,
             )
         )
-        add(Field("message", "ข้อความถึงผู้แจ้ง", "textarea", True, help="ผู้แจ้งเห็นข้อความนี้ใน LINE"))
+        add(
+            Field(
+                "message",
+                "ข้อความถึงผู้แจ้ง (ไม่บังคับ)",
+                "textarea",
+                help="ผู้แจ้งเห็นข้อความนี้ใน LINE",
+                ask=True,
+            )
+        )
         add(Field("internal_note", "บันทึกภายใน (ผู้แจ้งไม่เห็น)", "textarea"))
         add(Field("files", "แนบไฟล์ (JPG, PNG, PDF)", "file", help="ไม่เกิน 5 ไฟล์ ไฟล์ละไม่เกิน 10 MB"))
+    elif action == "report_result":
+        form.intro = (
+            "ผู้แจ้งได้ข้อความนี้ใน LINE พร้อมปุ่มยืนยันผลและปฏิเสธ กดยืนยันผลแล้วเรื่องปิด"
+            if st.line
+            else "ผู้แจ้งไม่ได้ผูก LINE จึงไม่ได้รับข้อความนี้ ติดต่อทางอื่น แล้วบันทึกคำตอบแทนหน่วยงาน (เขต/ฝ่าย)"
+        )
+        add(
+            Field(
+                "message",
+                "ข้อความถึงผู้แจ้ง (ไม่บังคับ)",
+                "textarea",
+                help=f"เช่น ทำอะไรไปแล้ว วันไหน เว้นว่างได้ ผู้แจ้งจะได้ข้อความว่า {warehouse.DONE_TEXT}",
+                ask=True,
+            )
+        )
     elif action == "request_child_work":
         add(Field("division", "กองที่ทำงานย่อย", "select", True, _divisions(case.owner_division_id)))
         add(Field("task", "งานที่ขอ", "textarea", True))
@@ -1293,7 +1325,7 @@ def build_form(action, st, params, demo=False):
                     [(ChildWork.Status.DONE, "ทำเสร็จ"), (ChildWork.Status.FAILED, "ทำไม่ได้")],
                 )
             )
-            add(Field("summary", "สรุปผล", "textarea", True))
+            add(Field("summary", "สรุปผล (ไม่บังคับ)", "textarea"))
         add(_reason(action in ("decline_child_work", "cancel_child_work", "decide_child_work")))
     else:
         add(_reason(spec.reason_required, "หมายเหตุ" if not spec.reason_required else "เหตุผล"))
@@ -1336,14 +1368,12 @@ def _status_notes(form, action, case, spec):
             if f.name == "reason" and not f.help:
                 f.help = "ผู้แจ้งเห็นข้อความนี้ใน LINE"
     else:
-        required = all(requester_steps.notice_required(action, case.status, t) for t in targets)
         form.fields.append(
             Field(
                 "notice",
-                "ข้อความแจ้งสถานะ",
+                "ข้อความแจ้งสถานะ (ไม่บังคับ)",
                 "textarea",
-                required,
-                help="ผู้แจ้งเห็นในรายละเอียดเรื่องใน LINE" + ("" if required else " ไม่บังคับ"),
+                help="ผู้แจ้งเห็นในรายละเอียดเรื่องใน LINE",
             )
         )
     if not any(f.name == "internal_note" for f in form.fields):

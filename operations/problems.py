@@ -56,7 +56,7 @@ def _record_result(ctx, case, payload, target):
     resolution = ProblemResolution.objects.create(
         case=case,
         category=category,
-        message=clean_text(payload, "message", True),
+        message=clean_text(payload, "message", False),
         internal_note=clean_text(payload, "internal_note", False),
         resolved_by=ctx.user,
     )
@@ -114,7 +114,7 @@ def _requester_or_intake(ctx, case, payload):
     return {
         "by": "intake" if intake else "owner",
         "channel": channel,
-        "intake_note": clean_text(payload, "intake_note", True),
+        "intake_note": clean_text(payload, "intake_note", False),
     }
 
 

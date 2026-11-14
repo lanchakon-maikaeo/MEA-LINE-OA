@@ -180,13 +180,34 @@ def deliver(turn):
     cases = {}
     for message in held:
         cases.setdefault(message.case, []).append(message)
+    turn.held = []
     for case, messages in list(cases.items())[:3]:
-        turn.replies.append(_bubble(case, messages))
+        turn.held.append(_bubble(case, messages))
+        turn.replies.append(turn.held[-1])
         M.objects.filter(pk__in=[m.pk for m in messages]).update(
             status=M.Status.SENT, sent_at=turn.now, inbox=turn.inbox
         )
     _open_chat(turn.identity, list(cases)[min(len(cases), 3) - 1], turn.now)
     turn.conversation.refresh_from_db()
+
+
+def carry(turn):
+    """LINE shows the quick replies of the last message only. When an answer follows the held
+    staff messages, their buttons (ยืนยันผล, ปฏิเสธ, the ways to get the goods) move to it."""
+    from operations import conversation  # local: conversation builds on this module
+
+    held = getattr(turn, "held", [])
+    if not held or any(turn.replies[-1] is bubble for bubble in held):
+        return
+    items = [
+        item
+        for bubble in held
+        for item in bubble["quickReply"]["items"]
+        if item["action"].get("data") != END_POSTBACK
+    ]
+    if items:
+        last = turn.replies[-1].setdefault("quickReply", {}).setdefault("items", [])
+        last[:0] = items[: max(conversation.MAX_QUICK - len(last), 0)]
 
 
 def chatting(turn):

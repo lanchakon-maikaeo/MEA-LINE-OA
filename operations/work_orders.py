@@ -255,8 +255,7 @@ def act(
         if first:
             notice = ("staff_order_ack", [order.issued_by])
     elif step == "done":
-        if not result:
-            raise ValidationError("แจ้งผลสั้น ๆ ว่าทำอะไรไปแล้ว")
+        # 13 พ.ย. 2569 (owner): no typing is forced; the result is a choice.
         order.status, order.result, order.done_at = S.DONE, result, now
         notice = ("staff_order_done", [order.issued_by])
     elif step == "send_back":

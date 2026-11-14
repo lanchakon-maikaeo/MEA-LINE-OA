@@ -56,7 +56,7 @@ class Menu:
 
 def build(user, case, st=None, panel=None, line=False):
     """The menu of `user` for `case`; `line` also works out which steps chat can ask."""
-    from operations import warehouse_web, web_actions
+    from operations import warehouse, warehouse_web, web_actions
 
     st = st or web_actions.situation(user, case)
     offers = web_actions.available(user, case, st)
@@ -66,7 +66,13 @@ def build(user, case, st=None, panel=None, line=False):
         # ADR 0049 Q9, ADR 0055 Q6: no warehouse stage or นัดรับของ before รับงาน; the
         # โน้ตบุ๊กและหัวอ่าน appointment keeps its flow as it was.
         steps = [s for s in steps if "appointment" in s and not s["appointment"].calendar.is_pickup]
-    head = [o for o in offers if o.primary and (o.name == "accept_assignment" or not steps)]
+    # ADR 0057: a กอง without กำหนดจ่ายตามขนาด answers first; its stages are a choice.
+    # An appointment the requester waits on still comes first (ADR 0051 Q8).
+    waits = any("appointment" in s for s in steps)
+    answer = "" if waits or warehouse.works_by_stage(case.owner_division) else warehouse.REPORT
+    head = [
+        o for o in offers if o.primary and (o.name in ("accept_assignment", answer) or not steps)
+    ]
     rest = [o for o in offers if o not in head]  # already the irreversible ones last
     items = [
         *(_offer(user, case, st, o, line) for o in head),

@@ -19,7 +19,7 @@
     <details class="menu" data-tour="queue-menu">
       <summary class="btn btn--secondary">สิ่งที่ทำได้ <span aria-hidden="true">▾</span></summary>
       <div class="menu__panel">
-        {% if division.schedule %}<a class="menu__item" href="{% url 'warehouse' division.code %}">งานคลัง</a>{% endif %}
+        {% if has_warehouse %}<a class="menu__item" href="{% url 'warehouse' division.code %}">งานคลัง</a>{% endif %}
         {% if division.calendars.exists %}<a class="menu__item" href="{% url 'calendar' division.code %}">ปฏิทินนัด</a>{% endif %}
         {% if may_order %}<a class="menu__item" href="{% url 'order-new' %}{% if division %}?to=d:{{ division.pk }}{% endif %}">{% if division %}สั่งงานถึงกองนี้{% else %}สั่งงานใหม่{% endif %}</a>{% endif %}
         <a class="menu__item" href="{% if division %}{% url 'division-export' division.code %}{% else %}{% url 'queue-all-export' %}{% endif %}?tab={{ tab }}{% if base_query %}&amp;{{ base_query }}{% endif %}" data-tour="export">ดาวน์โหลด CSV</a>

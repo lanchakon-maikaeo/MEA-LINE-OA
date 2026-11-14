@@ -48,7 +48,7 @@
       });
     });
     var opened = location.hash.slice(1);
-    show(document.querySelector('[data-sc-tab="' + opened + '"]') ? opened : "sla");
+    show(document.querySelector('[data-sc-tab="' + opened + '"]') ? opened : tabs[0].dataset.scTab);
   }
 
   // A size row is added from the group's blank row and removed by its own button.

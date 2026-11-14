@@ -824,19 +824,19 @@ class ReceiptTests(FulfilmentTestCase):
             "confirm",
             {"delivery": 1, "result": "full"},
         )
-        self.assertFails(
+        self.assertFails(  # the channel is a choice to make; the note is not forced (13 พ.ย.)
             ErrorCode.VALIDATION_ERROR,
             self.act,
             self.intake,
             case,
             "confirm",
-            {"delivery": 1, "result": "full", "channel": "phone"},
+            {"delivery": 1, "result": "full"},
         )
         self.act(
             self.intake,
             case,
             "confirm",
-            {"delivery": 1, "result": "full", "channel": "phone", "intake_note": "เขตโทรยืนยัน"},
+            {"delivery": 1, "result": "full", "channel": "phone"},
         )
         receipt = Receipt.objects.get()
         self.assertEqual((receipt.recorded_by, receipt.channel), (self.intake, "phone"))

@@ -163,8 +163,6 @@ def approve_case(ctx, case, payload, reason, target):
 
 def deny_case(ctx, case, payload, reason, target):
     _check(ctx, case)
-    if not reason:
-        fail(ErrorCode.VALIDATION_ERROR, "บอกเหตุผลที่ไม่รับเรื่อง")
     case.status = S.REJECTED
     return {"whole": True}
 

@@ -99,24 +99,15 @@ class ApprovalTests(NoScreeningTestCase):
         self.assertEqual(case.status, "in_progress")
         self.assertEqual(policy.state_for(case).confirmed_priority, "P2")
 
-    def test_not_approving_needs_a_reason_and_staff_without_authority_cannot(self):
+    def test_not_approving_forces_no_reason_and_staff_without_authority_cannot(self):
         case = self.waiting(self.withdraw("4500100003"))
-        with self.assertRaises(CommandFailed):
-            services.perform_action(
-                Actor.staff(self.approver),
-                case.pk,
-                "deny_approval",
-                expected_revision=case.revision,
-                idempotency_key="deny-no-reason",
-                payload={},
-            )
-        services.perform_action(
+        services.perform_action(  # 13 พ.ย. 2569: the reason is a choice
             Actor.staff(self.approver),
             case.pk,
             "deny_approval",
             expected_revision=case.revision,
-            idempotency_key="deny-with-reason",
-            payload={"reason": "ใบเบิกไม่มีลายเซ็น"},
+            idempotency_key="deny-no-reason",
+            payload={},
         )
         case.refresh_from_db()
         self.assertEqual(case.status, "rejected")

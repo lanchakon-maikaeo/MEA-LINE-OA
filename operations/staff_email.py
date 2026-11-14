@@ -41,7 +41,7 @@ SUBJECTS = {
     "staff_handoff": "มีเรื่องส่งต่อมาถึงกอง",
     "staff_child_work": "มีงานย่อยใหม่ถึงกอง",
     "staff_routing": "มีเรื่องรอผู้ประสานตัดสิน",
-    "staff_dispute": "ผู้แจ้งยังไม่ยอมรับผลการแก้ปัญหา",
+    "staff_dispute": "ผู้แจ้งยังไม่ยอมรับผล",  # a problem's result or a slip case's (ADR 0057)
     "staff_reopen": "ผู้แจ้งเปิดเรื่องใหม่",
     "staff_overdue": "เรื่องเกินกรอบเวลา",
     "staff_escalated": "เรื่องถูกยกระดับมาถึงคุณ",
