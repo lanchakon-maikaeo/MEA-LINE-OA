@@ -643,14 +643,14 @@ def case_rows(case):
     if case.assignee:
         who = f" · ผู้รับผิดชอบ {work_orders.name_of(case.assignee)}"
         if case.awaits_acceptance:
-            who += " · รอรับงาน"
+            who += " · ยังไม่กดรับงาน"
         elif case.accepted_at:  # ADR 0049
             at = timezone.localtime(case.accepted_at)
             who += f" · รับงานแล้ว {units.thai_date(at.date())} {at:%H:%M} น."
     rows = [
         f"เรื่อง {case.number} · {case.get_kind_display()}",
         *reporter(case),
-        f"สถานะ: {case.get_status_display()}"
+        f"สถานะ: {workflow.shown_status(case)}"
         + (f" · ระดับ{queues.urgent_name(level)}" if queues.urgent_name(level) else ""),
         f"กอง {case.owner_division.code}{who}",
         # The kind of number the requester picked, and the ones staff added (ADR 0047).

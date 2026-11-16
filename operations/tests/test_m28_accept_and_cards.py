@@ -120,12 +120,12 @@ class AcceptTests(AcceptTestCase):
         self.assertTrue(case.awaits_acceptance)
         self.assertEqual(self.names(self.kcw, case), ["accept_assignment", "return_assignment"])
         self.assertNotIn("accept_assignment", self.names(self.head, case))
-        self.assertIn(case, staff_inbox.sources(self.head, "unassigned")[0])
+        self.assertIn(case, staff_inbox.sources(self.head, "untaken")[0])  # ADR 0058
         with self.assertRaises(CommandFailed):
             self.act(self.head, case, "accept_assignment")  # nobody presses it for them
         case = self.act(self.kcw, case, "accept_assignment")
         self.assertEqual((case.accepted_by, case.awaits_acceptance), (self.kcw, False))
-        self.assertNotIn(case, staff_inbox.sources(self.head, "unassigned")[0])
+        self.assertNotIn(case, staff_inbox.sources(self.head, "untaken")[0])
         self.assertIn("request_info", self.names(self.kcw, case))
         page = Client()
         page.force_login(self.head)

@@ -6,14 +6,12 @@ Acceptance → tests: the LINE joins the account whichever comes first, the regi
 account's รหัส, even when the roster row names no กอง, and an admin typing the รหัส ties it too
 (TieTests); the deploy sweep ties what waits and leaves an account that already has a LINE
 (TieTests); the tied LINE hears once of each case waiting for its รับงาน and takes it from the
-push (CatchUpTests); the LINE list row shows the case status while the card keeps รอรับงาน, the
-web row tags รอรับงาน, the web handoff tab reads ส่งต่อมาถึงกอง, and the staff email carries no
-mock-data note (ListTests).
+push (CatchUpTests); the staff email carries no mock-data note (ListTests). ADR 0058 replaced how
+lists show รอรับงาน (test_adr0058_untaken); the handoff tab name stays in WebTests there.
 """
 
 from django.conf import settings
-from django.test import Client, override_settings
-from django.urls import reverse
+from django.test import override_settings
 
 from operations import identity, roster_match, staff_email, staff_line
 from operations.models import (
@@ -29,7 +27,7 @@ from operations.models import (
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import buttons, texts
 from operations.tests.test_m13_roster import RosterTestCase
-from operations.tests.test_m28_accept_and_cards import HEAD, AcceptTestCase
+from operations.tests.test_m28_accept_and_cards import AcceptTestCase
 
 N = NotificationDelivery
 CHANANPORN = "U" + "4" * 32
@@ -131,23 +129,6 @@ class CatchUpTests(AcceptTestCase):
 
 
 class ListTests(AcceptTestCase):
-    def test_the_line_row_shows_the_case_status_and_the_card_keeps_awaiting(self):
-        case = self.assign(self.withdraw("4500070302"), self.kcw)
-        reply = self.say(self.postback(HEAD, "m=staff_inbox"))
-        shown = texts(reply)
-        self.assertIn(case.get_status_display(), shown)
-        self.assertNotIn("รอรับงาน", shown)
-        self.assertIn("· รอรับงาน", texts(self.press(HEAD, case.number, reply)))
-
-    def test_the_web_row_tags_awaiting_and_the_handoff_tab_has_its_own_name(self):
-        case = self.assign(self.withdraw("4500070303"), self.kcw)
-        client = Client()
-        client.force_login(self.head)
-        page = client.get(reverse("division-detail", args=["กคว."]) + "?tab=host")
-        self.assertContains(page, case.number)
-        self.assertContains(page, '<span class="tag tag--alert">รอรับงาน</span>', count=1)
-        self.assertContains(page, "ส่งต่อมาถึงกอง")
-
     def test_the_staff_email_has_no_mock_data_note(self):
         case = self.assign(self.withdraw("4500070304"), self.kcw)
         text = staff_email._text("staff_assigned", case)

@@ -735,13 +735,13 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
 
         if action == "staff_inbox_divisions":
             staff_inbox.choose_division(
-                turn, user, value.get("status", "active"), value.get("page", 1)
+                turn, user, value.get("status", "untaken"), value.get("page", 1)
             )
         else:
             staff_inbox.show(
                 turn,
                 user,
-                value.get("status", "active"),
+                value.get("status", "untaken"),
                 value.get("division"),
                 value.get("page", 1),
             )

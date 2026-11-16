@@ -599,6 +599,8 @@ class Case(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
     accepted_at = models.DateTimeField(null=True, blank=True)
+    # ADR 0058: the first รับงาน by anyone, never cleared; until then the case is รอรับงาน.
+    first_accepted_at = models.DateTimeField(null=True, blank=True)
     # Empty when the requester submitted on LINE; the staff member when filed on their behalf.
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"

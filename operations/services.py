@@ -964,6 +964,7 @@ def perform_action(actor, case_id, action, *, expected_revision, idempotency_key
         now = timezone.now()
         case.revision += 1
         case.updated_at = now
+        case.first_accepted_at = case.first_accepted_at or case.accepted_at  # ADR 0058
         if case.status in workflow.TERMINAL and from_status not in workflow.TERMINAL:
             case.ended_at = now
         case.save()

@@ -97,7 +97,8 @@ class WorkTabTests(StaffChatTestCase):
         # 1 Nov 2569: the system's admins read every กอง there; สมาชิกกอง have no work tab.
         self.link(self.admin, ALICE)
         order = work_orders.create(self.director, "งานที่แอดมินระบบเห็น", self.kae)
-        reply = self.say(self.postback(ALICE, "m=staff_inbox"))
+        # ADR 0058: the card opens on รอรับงาน, which holds cases only
+        reply = self.press(ALICE, "กำลังดำเนินการ", self.say(self.postback(ALICE, "m=staff_inbox")))
         self.assertIn(order.number, texts(reply))
         self.assertIn("เลือกกอง/ศูนย์", buttons(reply))
         member = make_staff("kaemember", (Role.STAFF, "กองอุปกรณ์ฯ"))
@@ -113,7 +114,7 @@ class WorkTabTests(StaffChatTestCase):
     def test_new_received_tile_opens_scoped_inbox(self):
         self.link(self.head, ALICE)
         order = work_orders.create(self.director, "งานจากปุ่มใหม่", self.kae)
-        reply = self.say(self.postback(ALICE, "m=staff_inbox"))
+        reply = self.press(ALICE, "กำลังดำเนินการ", self.say(self.postback(ALICE, "m=staff_inbox")))
         self.assertIn(order.number, texts(reply))
         self.assertIn(order.number, buttons(reply))  # ADR 0042 Q4: one row per order
 
@@ -125,7 +126,7 @@ class WorkTabTests(StaffChatTestCase):
             recipient_user=self.head, channel=NotificationDelivery.Channel.LINE_PUSH
         )
         self.assertIn(conversation._fit(f"ดูงาน {order.number}", 20), buttons([push.message]))
-        reply = self.tile(A.WORK_ORDERS)
+        reply = self.press(ALICE, "กำลังดำเนินการ", self.tile(A.WORK_ORDERS))
         detail = self.press(ALICE, order.number, reply)
         self.assertIn("เช็กสต็อกหม้อแปลง", texts(detail))
         urgency = self.press(ALICE, "ดำเนินการ", detail)  # ADR 0044: ด่วน or ปกติ first
