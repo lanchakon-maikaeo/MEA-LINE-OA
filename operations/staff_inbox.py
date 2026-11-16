@@ -2,18 +2,25 @@
 
 ADR 0042 Q4: one card per page, filter tabs on top and one row per item (number, title, status),
 for แอดมินฝ่าย (every กอง, or one) and แอดมินกอง (their own) alike. New cases start work at
-once (Q10), so there is no รอรับเรื่อง tab; the few cases still waiting show under กำลังดำเนินการ."""
+once (Q10), so there is no รอรับเรื่อง tab; the few cases still waiting show under กำลังดำเนินการ.
+ADR 0058: รอรับงาน comes first, in red, and the card opens on it."""
 
 from django.core.paginator import Paginator
-from django.db.models import CharField, F, Q, Value
+from django.db.models import CharField, F, Value
 from django.db.models.functions import Cast
 
 from operations import case_numbers, identity, queues, work_orders, workflow
 from operations.models import Division, WorkOrder
 
-FILTERS = {"active": "กำลังดำเนินการ", "unassigned": "รอมอบหมาย", "all": "ทั้งหมด"}
+FILTERS = {
+    "untaken": "รอรับงาน",
+    "active": "กำลังดำเนินการ",
+    "unassigned": "รอมอบหมาย",
+    "all": "ทั้งหมด",
+}
 PER_PAGE = 10
 GREEN = "#16804A"
+ALERT, ALERT_SOFT = "#D30005", "#FADAD8"  # the web's tag--alert red and its pale tint
 
 
 def picks_division(scope):
@@ -21,7 +28,7 @@ def picks_division(scope):
     return scope.is_department_supervisor or scope.is_admin or scope.is_support
 
 
-def sources(user, status="active", division=None):
+def sources(user, status="untaken", division=None):
     scope = identity.staff_scope(user)
     divisions = set(scope.division_roles) | set(scope.overseen)
     if picks_division(scope):
@@ -30,18 +37,19 @@ def sources(user, status="active", division=None):
         divisions &= {division}
     cases = queues.visible(user).filter(owner_division_id__in=divisions)
     orders = work_orders.visible(user).filter(division_id__in=divisions)
-    if status == "active":
+    if status == "untaken":  # ADR 0058: cases only; an order has no รับงาน
+        cases = cases.filter(first_accepted_at__isnull=True, status__in=workflow.UNTAKEN)
+        orders = orders.none()
+    elif status == "active":
         cases = cases.filter(status__in=workflow.OPEN)
         orders = orders.filter(status__in=WorkOrder.OPEN)
-    elif status == "unassigned":  # ADR 0049: and the ones whose ผู้รับผิดชอบ has not taken them
-        cases = cases.filter(status__in=workflow.OPEN).filter(
-            Q(assignee__isnull=True) | Q(accepted_by__isnull=True)
-        )
+    elif status == "unassigned":
+        cases = cases.filter(status__in=workflow.OPEN, assignee__isnull=True)
         orders = orders.filter(status__in=WorkOrder.OPEN, assignee__isnull=True)
     return cases, orders
 
 
-def page_for(user, status="active", division=None, page=1):
+def page_for(user, status="untaken", division=None, page=1):
     cases, orders = sources(user, status, division)
     index = (
         cases.order_by()
@@ -100,11 +108,12 @@ def title(case):
 
 
 def row(turn, source, item):
-    """One line: number, title, status; the whole line opens the item. The status is the item's
-    own, as on the web list; รอรับงาน sits beside the ผู้รับผิดชอบ on the card (ADR 0053 Q1)."""
+    """One line: number, title, status; the whole line opens the item. The status reads as on
+    the web list: รอรับงาน in red for a case nobody has taken yet (ADR 0058)."""
     is_case = source == "case"
     text = title(item) if is_case else item.title
-    status = item.get_status_display()
+    untaken = is_case and workflow.untaken(item)
+    status = workflow.shown_status(item) if is_case else item.get_status_display()
     _, data = turn.button(
         item.number, "staff_case" if is_case else "staff_order", {source: str(item.pk)}
     )
@@ -122,7 +131,7 @@ def row(turn, source, item):
                 "type": "text",
                 "text": status,
                 "size": "xxs",
-                "color": "#888888",
+                "color": ALERT if untaken else "#888888",
                 "flex": 2,
                 "align": "end",
             },
@@ -130,8 +139,15 @@ def row(turn, source, item):
     }
 
 
-def show(turn, user, status="active", division=None, page=1):
-    status = status if status in FILTERS else "active"
+def _tab_color(key, picked):
+    """Picked: filled red for รอรับงาน, green for the rest; รอรับงาน stays pale red otherwise."""
+    if key == "untaken":
+        return ALERT if picked else ALERT_SOFT
+    return GREEN if picked else None
+
+
+def show(turn, user, status="untaken", division=None, page=1):
+    status = status if status in FILTERS else "untaken"
     try:
         division = int(division) if division else None
     except (ValueError, TypeError):
@@ -143,7 +159,7 @@ def show(turn, user, status="active", division=None, page=1):
             "type": "button",
             "height": "sm",
             "style": "primary" if key == status else "secondary",
-            **({"color": GREEN} if key == status else {}),
+            **({"color": c} if (c := _tab_color(key, key == status)) else {}),
             "action": _tap(label, turn.button(label, "staff_inbox", {**state, "status": key})[1]),
         }
         for key, label in FILTERS.items()
@@ -177,7 +193,7 @@ def show(turn, user, status="active", division=None, page=1):
                     "size": "xs",
                     "color": "#888888",
                 },
-                {"type": "box", "layout": "horizontal", "spacing": "sm", "contents": tabs},
+                *_grid(tabs),  # two tabs a row, so no label is cut (ADR 0058)
                 {"type": "separator"},
                 *lines,
             ],
@@ -193,7 +209,7 @@ def show(turn, user, status="active", division=None, page=1):
     turn.replies.append({"type": "flex", "altText": "งานสั่งที่ได้รับ", "contents": bubble})
 
 
-def choose_division(turn, user, status="active", page=1):
+def choose_division(turn, user, status="untaken", page=1):
     if not picks_division(identity.staff_scope(user)):
         return show(turn, user)
     from operations import staff_orders_chat

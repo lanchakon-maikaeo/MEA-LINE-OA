@@ -185,7 +185,12 @@ kbd {
 .flex .ffooter { padding: 0 12px 12px; display: flex; gap: 8px; }
 .ftext { white-space: pre-wrap; word-break: break-word; }
 .ftext.bold { font-weight: 700; }
+.ftext.xxs { font-size: 11px; } .ftext.lg { font-size: 18px; }
 .ftext.sm { font-size: 13px; } .ftext.xs { font-size: 12px; } .ftext.md { font-size: 15px; }
+/* LINE keeps a text on one line and cuts it with "…" unless it says wrap. */
+.ftext.nowrap { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A giga bubble takes the chat's width (LINE caps it at 500px). */
+.flex.giga { flex: 1; min-width: 0; width: auto; max-width: 500px; }
 .fbtn {
   flex: 1; border: 0; border-radius: 8px; padding: 9px 8px; font-size: 14px; font-weight: 600;
   background: #edeff2; color: #111; min-height: 40px;
@@ -393,7 +398,7 @@ kbd {
   }
 
   // --- LINE message rendering ---------------------------------------------------------------
-  function flexNode(node) {
+  function flexNode(node, inRow) {
     if (node.type === "box") {
       var box = el("div");
       box.style.display = "flex";
@@ -404,11 +409,14 @@ kbd {
       if (node.borderColor) box.style.border = (node.borderWidth || "1px") + " solid " + node.borderColor;
       if (node.cornerRadius) box.style.borderRadius = { sm: "4px", md: "8px", lg: "12px" }[node.cornerRadius] || node.cornerRadius;
       if (node.paddingAll) box.style.padding = node.paddingAll;
+      if (node.paddingTop) box.style.paddingTop = node.paddingTop;
+      if (node.paddingBottom) box.style.paddingBottom = node.paddingBottom;
       if (node.justifyContent) box.style.justifyContent = node.justifyContent;
       if (node.height) box.style.minHeight = node.height;
       if (node.flex !== undefined) box.style.flex = String(node.flex);
       if (node.margin) box.style.marginTop = { sm: "6px", md: "10px", lg: "14px" }[node.margin] || node.margin;
-      (node.contents || []).forEach(function (c) { box.appendChild(flexNode(c)); });
+      var row = node.layout === "horizontal";
+      (node.contents || []).forEach(function (c) { box.appendChild(flexNode(c, row)); });
       return box;
     }
     if (node.type === "separator") {
@@ -422,14 +430,21 @@ kbd {
       return gap;
     }
     if (node.type === "text") {
-      var t = el("div", "ftext " + (node.size || "md") + (node.weight === "bold" ? " bold" : ""), node.text);
+      var t = el("div", "ftext " + (node.size || "md") + (node.weight === "bold" ? " bold" : "") + (node.wrap ? "" : " nowrap"), node.text);
+      // LINE: a text in a horizontal box takes flex 1 unless it says otherwise; 0 fits its words.
+      if (inRow) {
+        var grow = node.flex === undefined ? 1 : node.flex;
+        t.style.flex = grow === 0 ? "none" : grow + " 1 0";
+        t.style.minWidth = "0";
+      }
       if (node.color) t.style.color = node.color;
       if (node.align) t.style.textAlign = node.align;
       return t;
     }
     if (node.type === "button") {
       var b = el("button", "fbtn" + (node.style === "primary" ? " primary" : ""), node.action.label);
-      if (node.color && node.style === "primary") b.style.background = node.color;
+      // LINE: color is the background of a primary or secondary button, the text of a link.
+      if (node.color && node.style !== "link") b.style.background = node.color;
       if (node.color && node.style === "link") b.style.color = node.color;
       b.type = "button";
       b.dataset.label = node.action.label;
@@ -439,7 +454,7 @@ kbd {
     return el("div");
   }
   function bubble(contents) {
-    var card = el("div", "flex");
+    var card = el("div", "flex" + (contents.size === "giga" ? " giga" : ""));
     if (contents.header) {
       var head = el("div", "fbody");
       head.appendChild(flexNode(contents.header));

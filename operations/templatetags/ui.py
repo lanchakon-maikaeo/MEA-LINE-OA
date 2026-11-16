@@ -150,12 +150,16 @@ ENDED = {"rejected", "cancelled"}
 
 @register.simple_tag
 def status_tag(case):
+    from operations import workflow
+
     css = "tag"
-    if case.status in CLOSED:
+    if workflow.untaken(case):
+        css += " tag--alert"  # ADR 0058: one tag, รอรับงาน in red
+    elif case.status in CLOSED:
         css += " tag--closed"
     elif case.status in ENDED:
         css += " tag--muted"
-    return format_html('<span class="{}">{}</span>', css, case.get_status_display())
+    return format_html('<span class="{}">{}</span>', css, workflow.shown_status(case))
 
 
 @register.filter

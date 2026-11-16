@@ -368,4 +368,5 @@ class LevelTests(LineCardTestCase):
         CaseTriage.objects.filter(case=case).update(effective_priority="P1")
         self.assertContains(self.web(self.head, case), 'class="prio prio--P1"')
         case = Case.objects.get(pk=case.pk)
-        self.assertIn("สถานะ: กำลังดำเนินการ · ระดับเร่งด่วน", staff_work.case_rows(case))
+        # ADR 0058: nobody has taken it, so the status reads รอรับงาน
+        self.assertIn("สถานะ: รอรับงาน · ระดับเร่งด่วน", staff_work.case_rows(case))
