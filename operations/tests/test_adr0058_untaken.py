@@ -64,6 +64,11 @@ class RuleTests(AcceptTestCase):
         self.assertIn(case, staff_inbox.sources(self.head, "untaken")[0])
         self.assertIn(case, staff_inbox.sources(self.head, "unassigned")[0])
 
+    def test_a_case_waiting_for_the_division_reads_its_own_status(self):
+        case = self.older_waiting("4500070590")  # รอรับเรื่อง: รับเรื่อง is not รับงาน
+        self.assertEqual(workflow.shown_status(case), "รอรับเรื่อง")
+        self.assertNotIn(case, staff_inbox.sources(self.head)[0])
+
     def test_a_paused_case_shows_its_own_status(self):
         case = self.assign(self.withdraw("4500070583"), self.kcw)
         case = self.act(self.other, case, "request_info", reason="ขอเลขเครื่อง")

@@ -56,9 +56,10 @@ OPEN = frozenset(set(S) - TERMINAL)
 ACCEPTANCE_STEPS = frozenset({"accept_assignment", "return_assignment"})
 # ADR 0054 Q6: an assignee who may assign passes the case on without รับงาน first.
 BEFORE_ACCEPTANCE = ACCEPTANCE_STEPS | {"assign"}
-# ADR 0058: รอรับงาน, a case nobody has pressed รับงาน on since it came in, while it is neither
-# paused nor ended. Staff read it in place of the case's status, on the web and in LINE.
-UNTAKEN = OPEN - PAUSED
+# ADR 0058: รอรับงาน, a case at กำลังดำเนินการ that nobody has pressed รับงาน on since it came
+# in. Staff read it in place of that status, on the web and in LINE; every other status, รอรับเรื่อง
+# included (รับเรื่อง is not รับงาน), keeps its own name.
+UNTAKEN = frozenset({S.IN_PROGRESS})
 
 
 def untaken(case):

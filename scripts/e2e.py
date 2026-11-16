@@ -289,7 +289,8 @@ def take_case(page, section=None):
     optionally name the แผนก."""
     expect(page.locator(".case-head__title")).to_contain_text("รอรับเรื่อง")
     act(page, "ดำเนินการ", [lambda f: f.locator("[name=priority]").select_option("P3")])
-    expect(page.locator(".case-head__title")).to_contain_text("กำลังดำเนินการ")
+    # ADR 0058: กำลังดำเนินการ that nobody has taken yet reads รอรับงาน
+    expect(page.locator(".case-head__title")).to_contain_text("รอรับงาน")
     if section:
         act(page, "ระบุแผนก", [lambda f: f.locator("[name=section]").select_option(label=section)])
         expect(page.locator("dl.facts dd").first).to_contain_text(section)
@@ -332,7 +333,7 @@ def real_structure(browser, base_url, password):
     open_case(kae, base_url, fuses)
     take_case(kae, section="แผนกซ่อมสร้างอุปกรณ์ไฟฟ้า")
     # ADR 0032: the slip is issued in SAP, so no issue step shows; the case waits for the slip.
-    expect(kae.locator(".case-head__title")).to_contain_text("กำลังดำเนินการ")
+    expect(kae.locator(".case-head__title")).to_contain_text("รอรับงาน")
     expect(kae.locator("#actions")).not_to_contain_text("บันทึกการจ่ายของ")
     kae.screenshot(path="reports/e2e-real-withdrawal.png", full_page=True)
     kae.context.close()
