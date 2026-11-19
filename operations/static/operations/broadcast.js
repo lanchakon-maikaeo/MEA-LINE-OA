@@ -22,12 +22,32 @@
   }
   function node(tag, text, className) { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; }
   function options(id, rows) { $(id).replaceChildren(...rows.map(row => { const o = node('option', row.name); o.value = row.id; return o; })); }
+  function checks(id, rows) { $(id).replaceChildren(...rows.map(row => { const label = node('label',undefined,'check'), box = document.createElement('input'); box.type = 'checkbox'; box.value = row.id; label.append(box,node('span',row.name)); return label; })); }
+  // A group keeps its units by key: ฟข. and the other ฝ่าย are both "districts" (หน่วยงาน rows).
+  const SEGMENT_KEYS = ['divisions','districts','roles'];
+  const boxes = (key, only = '') => [...document.querySelectorAll(`#segment-form [data-key=${key}] input${only}`)];
+  const picked = key => boxes(key,':checked').map(box => box.value);
+  const shown = id => [...$(id).querySelectorAll('.check:not([hidden]) input')];
+  function segmentSummary() {
+    const [divisions,districts,roles] = SEGMENT_KEYS.map(key => picked(key).length);
+    const parts = [divisions && `${divisions} กอง`, districts && `${districts} หน่วยงาน`, roles && `เฉพาะ ${roles} บทบาท`].filter(Boolean);
+    $('segment-summary').textContent = parts.length ? 'เลือกแล้ว ' + parts.join(' · ') : 'ยังไม่ได้เลือกหน่วยงาน';
+    document.querySelectorAll('[data-all]').forEach(button => { const list = shown(button.dataset.all); button.textContent = list.length && list.every(box => box.checked) ? 'ล้างที่เลือก' : 'เลือกทั้งหมด'; });
+  }
+  function filterUnits() {
+    const text = $('segment-search').value.trim();
+    document.querySelectorAll('#segment-form [data-key=divisions] .check, #segment-form [data-key=districts] .check').forEach(chip => { chip.hidden = Boolean(text) && !chip.textContent.includes(text); });
+    segmentSummary();
+  }
   function section(name) { ['history','editor','details'].forEach(id => { $(id).hidden = id !== name; }); }
   const datetime = value => value ? new Date(value).toLocaleString('th-TH',{timeZone:'Asia/Bangkok',dateStyle:'medium',timeStyle:'short'}) : '—';
   function pairs(target, rows) { target.replaceChildren(...rows.flatMap(([label,value]) => [node('dt',label),node('dd',String(value))])); }
   function safeUrl(value) { try { const u = new URL(value); return u.protocol === 'https:' ? u.href : ''; } catch { return ''; } }
   function renderContent(target, content) {
     target.replaceChildren();
+    // LINE gets a picture or video's text as its own message, sent before the media.
+    const textFirst = ['image','video'].includes(content.kind);
+    if (textFirst && content.text) target.append(node('p', content.text));
     if (content.url && safeUrl(content.url)) {
       const media = document.createElement(content.kind === 'video' ? 'video' : 'img');
       media.src = safeUrl(content.url);
@@ -36,7 +56,7 @@
       target.append(media);
     }
     if (content.title) target.append(node('h3', content.title));
-    target.append(node('p', content.text || (content.kind === 'text' ? 'ข้อความประกาศของท่านจะแสดงที่นี่' : '')));
+    if (!textFirst) target.append(node('p', content.text || (content.kind === 'text' ? 'ข้อความประกาศของท่านจะแสดงที่นี่' : '')));
     const buttons = content.kind === 'click_image' ? [{label:'ดูรายละเอียด',url:content.link}] : content.buttons || [];
     buttons.forEach(button => { if (safeUrl(button.url)) { const a = node('a',button.label); a.href = button.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; target.append(a); } });
   }
@@ -46,7 +66,12 @@
     if (c.kind === 'image' && $('media-url').dataset.previewUrl) c.preview = $('media-url').dataset.previewUrl;
     if (c.kind === 'video' && $('preview-url').dataset.mediaId) c.preview_id = $('preview-url').dataset.mediaId;
     if (c.kind === 'video') c.preview = $('preview-url').value.trim();
-    if (['card','click_image'].includes(c.kind)) c.title = $('card-title').value;
+    if (['card','click_image'].includes(c.kind)) {
+      c.title = $('card-title').value;
+      // LINE shows the card's picture at the ratio sent; the server knows an uploaded file's own.
+      const picture = $('preview-message').querySelector('img');
+      if (picture?.naturalWidth && picture.src === safeUrl(c.url)) { c.width = picture.naturalWidth; c.height = picture.naturalHeight; }
+    }
     if (c.kind === 'click_image') c.link = $('link-url').value.trim();
     if (c.kind === 'card') c.buttons = [...$('button-rows').children].map(row => ({label:row.querySelector('[data-label]').value,url:row.querySelector('[data-url]').value.trim()}));
     return c;
@@ -138,7 +163,10 @@
   }
   async function bootstrap() {
     data = await api('/broadcasts/api/bootstrap/'); $('account').textContent = data.user;
-    options('segment',data.segments); options('segment-divisions',data.divisions); options('segment-districts',data.districts); options('segment-roles',data.roles);
+    options('segment',data.segments); checks('segment-divisions',data.divisions); checks('segment-roles',data.roles);
+    const fk = row => /^(ฟข|การไฟฟ้านครหลวงเขต)/.test(row.name);
+    const unit = row => ({id:row.id, name:row.name.replace(/^การไฟฟ้านครหลวง/,'') + (row.short_name ? ` (${row.short_name})` : '')});
+    checks('segment-fk',data.districts.filter(fk).map(unit)); checks('segment-units',data.districts.filter(row => !fk(row)).map(unit));
     $('quota').textContent = Math.max(0,data.quota.budget-data.quota.used).toLocaleString('th-TH') + ' ข้อความ';
     $('login').hidden = true; $('workspace').hidden = false;
   }
@@ -221,18 +249,23 @@
   });
   function openSegment(row) {
     segmentEditing = row || null; $('segment-form').reset(); $('segment-error').textContent = '';
-    if(row) { $('segment-name').value = row.name; ['divisions','districts','roles'].forEach(key => [...$('segment-'+key).options].forEach(option => {option.selected = (row.criteria[key] || []).map(String).includes(option.value);})); }
-    $('segment-dialog').showModal();
+    if(row) { $('segment-name').value = row.name; SEGMENT_KEYS.forEach(key => boxes(key).forEach(box => {box.checked = (row.criteria[key] || []).map(String).includes(box.value);})); }
+    filterUnits(); $('segment-dialog').showModal();
   }
+  $('segment-form').onchange = segmentSummary;
+  $('segment-search').oninput = filterUnits;
+  $('segment-search').onkeydown = event => { if (event.key === 'Enter') event.preventDefault(); };  // not a save
+  document.querySelectorAll('[data-all]').forEach(button => { button.onclick = () => { const list = shown(button.dataset.all), all = list.every(box => box.checked); list.forEach(box => { box.checked = !all; }); segmentSummary(); }; });
   $('open-segment').onclick = () => openSegment();
   $('edit-segment').onclick = () => { const row = data.segments.find(s => s.id === Number($('segment').value)); if(!row?.may_edit) {notice('ท่านไม่มีสิทธิ์แก้ไขกลุ่มนี้ กรุณาสร้างกลุ่มใหม่');return;} openSegment(row); };
   $('close-segment').onclick = () => $('segment-dialog').close();
   $('segment-form').onsubmit = event => {
     event.preventDefault();
     run(async () => {
-      const criteria = {}; ['divisions','districts','roles'].forEach(key => {const values = [...$('segment-'+key).selectedOptions].map(o => key === 'roles' ? o.value : Number(o.value)); if(values.length) criteria[key] = values;});
+      const criteria = {}; SEGMENT_KEYS.forEach(key => {const values = picked(key).map(v => key === 'roles' ? v : Number(v)); if(values.length) criteria[key] = values;});
       try { const result = await api('/broadcasts/api/segments/',{id:segmentEditing?.id,revision:segmentEditing?.revision,name:$('segment-name').value,criteria});
         data.segments = data.segments.filter(s => s.id !== result.segment.id); data.segments.push(result.segment); options('segment',data.segments); $('segment').value = result.segment.id; $('segment-dialog').close();
+        notice(`บันทึกกลุ่ม “${result.segment.name}” แล้ว ขณะนี้มีผู้รับในกลุ่ม ${result.members.toLocaleString('th-TH')} คน`); $('notice').scrollIntoView({block:'nearest'});
       } catch(error) { $('segment-error').textContent = error.message; }
     });
   };

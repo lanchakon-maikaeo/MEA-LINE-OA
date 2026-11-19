@@ -72,6 +72,20 @@ class BroadcastMediaTests(TestCase):
         with self.assertRaises(ValidationError):
             broadcasts.build_messages({**content, "kind": "video"})
 
+    def test_card_uses_the_uploaded_pictures_own_ratio(self):
+        row = self.clean(broadcast_media.store(self.head, self.image()))
+        card = {
+            "kind": "click_image",
+            "title": "ภาพประกาศ",
+            "media_id": str(row.pk),
+            "link": "https://example.com/",
+            "width": 20,
+            "height": 13,
+        }
+        hero = broadcasts.build_messages(card)[0]["contents"]["hero"]
+        self.assertEqual(hero["url"], broadcast_media.urls(row)["url"])
+        self.assertEqual(hero["aspectRatio"], "300:200")
+
     def test_unavailable_scanner_retries_without_exposing_file(self):
         row = broadcast_media.store(self.head, self.image())
         with patch(

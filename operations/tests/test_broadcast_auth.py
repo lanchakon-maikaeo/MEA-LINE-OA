@@ -128,6 +128,23 @@ class BroadcastAuthTests(TestCase):
         self.assertEqual(self.client.get("/broadcasts/api/campaigns/").json()["total"], 1)
         self.assertEqual(self.client.get("/broadcasts/api/" + path).status_code, 200)
 
+    def test_group_picker_offers_real_units_and_saving_reports_members(self):
+        from operations.models import District
+
+        District.objects.create(code="DA1", name="การไฟฟ้านครหลวงเขตทดสอบ")
+        District.objects.create(code="D00", name="ไม่ระบุหน่วยงาน (เขต/ฝ่าย)", is_active=False)
+        Division.objects.create(code="SIM-X", name="กองจำลอง", is_synthetic=True)
+        self.login()
+        data = self.client.get("/broadcasts/api/bootstrap/").json()
+        self.assertEqual([d["name"] for d in data["districts"]], ["การไฟฟ้านครหลวงเขตทดสอบ"])
+        self.assertEqual([d["id"] for d in data["divisions"]], [self.division.pk])
+        self.assertNotIn("developer_admin", [r["id"] for r in data["roles"]])
+        saved = self.post_api(
+            "segments/", {"name": "กองทดสอบ", "criteria": {"divisions": [self.division.pk]}}
+        )
+        self.assertEqual(saved.status_code, 200, saved.content)
+        self.assertEqual(saved.json()["members"], 1)
+
     def test_api_rejects_invalid_input_and_anonymous_access(self):
         self.assertEqual(self.client.get("/broadcasts/api/bootstrap/").status_code, 403)
         self.login()
