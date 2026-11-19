@@ -224,4 +224,10 @@ def resolve_content(content):
             result["url"] = urls(row)["url"]
             if not is_video:
                 result["preview"] = urls(row)["preview"]
+                # The card shows the picture at its own ratio; the stored file knows it for sure.
+                try:
+                    with Image.open(root() / row.storage_name) as image:
+                        result["width"], result["height"] = image.size
+                except OSError:
+                    pass  # the card then fits the whole picture into 20:13
     return result

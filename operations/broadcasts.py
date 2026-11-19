@@ -5,6 +5,7 @@ import uuid
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.validators import URLValidator
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from operations import identity
@@ -89,24 +90,30 @@ def save_segment(user, name, criteria, *, segment_id=None, revision=None):
 
 
 def segment_members(segment):
+    """Owner, 19 Nov 2569: units mix. Everyone in any chosen หน่วยงาน (a District row: a เขต,
+    a ฟข. or another ฝ่าย such as ฝบก., the unit a registered person files for) or กอง of ฝอจ.
+    (or picked by name) is in; roles only narrow the กอง staff."""
     criteria = validate_criteria(segment.criteria)
+    chosen = Q(pk__in=criteria.get("people", []))
+    if "districts" in criteria:
+        chosen |= Q(requester__district_id__in=criteria["districts"], requester__status="active")
+    if "divisions" in criteria or "roles" in criteria:
+        grants = RoleGrant.objects.filter(revoked_at__isnull=True)
+        if "divisions" in criteria:
+            # A closed กอง reaches nobody, as before.
+            ids = Division.objects.filter(pk__in=criteria["divisions"], is_active=True).values("pk")
+            grants = grants.filter(division_id__in=ids)
+        if "roles" in criteria:
+            grants = grants.filter(role__in=criteria["roles"])  # held in a chosen กอง, as before
+        staff = Q(staff_user_id__in=grants.values("user_id"))
+        if "divisions" in criteria and "roles" not in criteria:
+            # Or the สังกัด the roster gives: a เจ้าหน้าที่ holds no role.
+            staff |= Q(staff_user__staff_profile__division_id__in=ids)
+        chosen |= staff & Q(staff_user__is_active=True)
     rows = ChannelIdentity.objects.filter(channel="line", is_following=True).exclude(
         status=ChannelIdentity.Status.REVOKED
     )
-    if "districts" in criteria:
-        rows = rows.filter(
-            requester__district_id__in=criteria["districts"], requester__status="active"
-        )
-    grants = RoleGrant.objects.filter(revoked_at__isnull=True, user__is_active=True)
-    if "divisions" in criteria:
-        grants = grants.filter(division_id__in=criteria["divisions"], division__is_active=True)
-    if "roles" in criteria:
-        grants = grants.filter(role__in=criteria["roles"])
-    if "divisions" in criteria or "roles" in criteria:
-        rows = rows.filter(staff_user_id__in=grants.values("user_id"))
-    if "people" in criteria:
-        rows = rows.filter(pk__in=criteria["people"])
-    return rows.order_by("external_id")
+    return rows.filter(chosen).order_by("external_id")
 
 
 def sender_identity(user):
@@ -138,6 +145,14 @@ def _url(value):
         raise ValidationError("ลิงก์ไม่ถูกต้อง")
     URLValidator(schemes=["https"])(value)
     return value
+
+
+def _ratio(content):
+    """The picture's own width:height, so LINE shows all of it (LINE: height ≤ 3 × width)."""
+    width, height = content.get("width"), content.get("height")
+    if type(width) is int and type(height) is int and 0 < width <= 100000 and 0 < height <= 100000:
+        return f"{width}:{min(height, 3 * width)}"
+    return "20:13"
 
 
 def build_messages(content):
@@ -176,47 +191,51 @@ def build_messages(content):
         if text.strip():
             bubble["body"]["contents"].append({"type": "text", "text": text, "wrap": True})
         if content.get("url"):
+            # "cover" at a fixed 20:13 cut the top and bottom off posters; "fit" never crops.
             bubble["hero"] = {
                 "type": "image",
                 "url": _url(content["url"]),
                 "size": "full",
-                "aspectMode": "cover",
-                "aspectRatio": "20:13",
+                "aspectMode": "fit",
+                "aspectRatio": _ratio(content),
             }
         if kind == "click_image":
             if "hero" not in bubble:
                 raise ValidationError("กรุณาเลือกรูปภาพ")
-            bubble["hero"]["action"] = {"type": "uri", "uri": _url(content.get("link"))}
+            link = _url(content.get("link"))
+            bubble["hero"]["action"] = {"type": "uri", "uri": link}
+            # The composer's preview shows this button under the picture, so LINE gets it too.
+            buttons = [{"label": "ดูรายละเอียด", "url": link}]
         else:
             buttons = content.get("buttons", [])
             if not isinstance(buttons, list) or not 1 <= len(buttons) <= 3:
                 raise ValidationError("กรุณาระบุปุ่มการ์ด 1 ถึง 3 ปุ่ม")
-            actions = []
-            for button in buttons:
-                if (
-                    not isinstance(button, dict)
-                    or not isinstance(button.get("label"), str)
-                    or not 1 <= len(button["label"].strip()) <= 40
-                ):
-                    raise ValidationError("ชื่อปุ่มต้องมี 1 ถึง 40 ตัวอักษร")
-                actions.append(
-                    {
-                        "type": "button",
-                        "style": "primary",
-                        "color": "#16804A",
-                        "action": {
-                            "type": "uri",
-                            "label": button["label"],
-                            "uri": _url(button.get("url")),
-                        },
-                    }
-                )
-            bubble["footer"] = {
-                "type": "box",
-                "layout": "vertical",
-                "spacing": "sm",
-                "contents": actions,
-            }
+        actions = []
+        for button in buttons:
+            if (
+                not isinstance(button, dict)
+                or not isinstance(button.get("label"), str)
+                or not 1 <= len(button["label"].strip()) <= 40
+            ):
+                raise ValidationError("ชื่อปุ่มต้องมี 1 ถึง 40 ตัวอักษร")
+            actions.append(
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "color": "#16804A",
+                    "action": {
+                        "type": "uri",
+                        "label": button["label"],
+                        "uri": _url(button.get("url")),
+                    },
+                }
+            )
+        bubble["footer"] = {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": actions,
+        }
         return [{"type": "flex", "altText": title, "contents": bubble}]
     raise ValidationError("กรุณาเลือกรูปแบบข้อความ")
 

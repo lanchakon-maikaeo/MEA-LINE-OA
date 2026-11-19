@@ -12,6 +12,18 @@ from django.views.decorators.http import require_http_methods
 from operations import broadcast_auth, broadcasts, notifications
 from operations.models import BroadcastCampaign, BroadcastSegment, District, Division, Role
 
+# ADR 0041: the roles a person holds now; the retired developer and duty roles stay out.
+ROLES = (
+    Role.STAFF,
+    Role.WORK_GROUP_ADMIN,
+    Role.SECTION_ADMIN,
+    Role.SUPERVISOR,
+    Role.DIVISION_VIEWER,
+    Role.DEPARTMENT_SUPERVISOR,
+    Role.DEPARTMENT_VIEWER,
+    Role.ADMIN,
+)
+
 
 def endpoint(view):
     @wraps(view)
@@ -85,9 +97,15 @@ def bootstrap(request, user, body):
             }
             for row in BroadcastSegment.objects.order_by("name")
         ],
-        "divisions": list(Division.objects.filter(is_active=True).values("id", "name")),
-        "districts": list(District.objects.values("id", "name")),
-        "roles": [{"id": key, "name": label} for key, label in Role.choices],
+        "divisions": list(
+            Division.objects.filter(is_active=True, is_synthetic=False).values("id", "name")
+        ),
+        # หน่วยงาน: the 18 เขต and every ฝ่าย the roster brought (ฟขข., ฝบก., ...). Inactive ones
+        # include D00, the ไม่ระบุหน่วยงาน holder of anonymous reporters.
+        "districts": list(
+            District.objects.filter(is_active=True).values("id", "name", "short_name")
+        ),
+        "roles": [{"id": role.value, "name": role.label} for role in ROLES],
         "quota": {"budget": budget.budget, "used": budget.used},
     }
 
@@ -184,7 +202,8 @@ def segments(request, user, body):
             "criteria": row.criteria,
             "revision": row.revision,
             "may_edit": True,
-        }
+        },
+        "members": broadcasts.segment_members(row).count(),
     }
 
 

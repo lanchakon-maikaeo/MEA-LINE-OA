@@ -69,6 +69,80 @@ class BroadcastDraftTests(TestCase):
         self.friend.save()
         self.assertEqual(broadcasts.recipients(row), [self.sender.external_id])
 
+    def test_units_mix_and_roles_only_narrow_division_staff(self):
+        from operations.models import District, Requester, StaffProfile
+
+        names = iter("cdefgh")
+
+        def line(**fields):
+            row = ChannelIdentity.objects.create(
+                channel="line", external_id="U" + next(names) * 32, is_following=True, **fields
+            )
+            return row.external_id
+
+        second = Division.objects.create(code="BC2", name="กองที่สอง")
+        district = District.objects.create(code="DB1", name="เขตทดสอบประกาศ")
+        requester = Requester.objects.create(
+            display_name="ผู้แจ้งเขต", district=district, approved_by=self.head
+        )
+        reporter = line(requester=requester, status="active")
+        member = line(staff_user=self.member)
+        clerk = line(staff_user=make_staff("bc-clerk", (Role.STAFF, second.code)))
+        plain = make_staff("bc-plain")  # เจ้าหน้าที่: no role, only the สังกัด from the roster
+        StaffProfile.objects.filter(user=plain).update(division=second)
+        plain = line(staff_user=plain)
+
+        def members(criteria):
+            segment = broadcasts.save_segment(self.head, "กลุ่มผสม", criteria)
+            return set(broadcasts.segment_members(segment).values_list("external_id", flat=True))
+
+        self.assertEqual(
+            members({"divisions": [second.pk], "districts": [district.pk]}),
+            {reporter, clerk, plain},
+        )
+        self.assertEqual(
+            members({"divisions": [self.division.pk, second.pk], "roles": ["staff"]}),
+            {member, clerk},
+        )
+        self.assertEqual(
+            members({"districts": [district.pk], "roles": ["supervisor"]}),
+            {reporter, self.sender.external_id},
+        )
+        mixed = make_staff(
+            "bc-mixed", (Role.STAFF, self.division.code), (Role.SUPERVISOR, second.code)
+        )
+        mixed = line(staff_user=mixed)
+        # A role counts only in the กอง it is held in.
+        self.assertEqual(
+            members({"divisions": [self.division.pk], "roles": ["supervisor"]}),
+            {self.sender.external_id},
+        )
+        self.assertEqual(members({"divisions": [second.pk], "roles": ["supervisor"]}), {mixed})
+        Division.objects.filter(pk=second.pk).update(is_active=False)
+        closed = {"divisions": [second.pk], "districts": [district.pk]}
+        self.assertEqual(members(closed), {reporter})
+
+    def test_card_picture_is_shown_whole_with_its_link_button(self):
+        card = {
+            "kind": "click_image",
+            "title": "สำรวจอุปกรณ์",
+            "url": "https://example.com/poster.png",
+            "link": "https://example.com/form",
+        }
+        for size, ratio in [
+            ({"width": 1080, "height": 1350}, "1080:1350"),
+            ({"width": 100, "height": 1000}, "100:300"),  # LINE: height at most 3 × width
+            ({"width": "1080", "height": True}, "20:13"),
+            ({}, "20:13"),
+        ]:
+            with self.subTest(size=size):
+                bubble = broadcasts.build_messages({**card, **size})[0]["contents"]
+                self.assertEqual(bubble["hero"]["aspectRatio"], ratio)
+                self.assertEqual(bubble["hero"]["aspectMode"], "fit")
+                self.assertEqual(bubble["hero"]["action"]["uri"], card["link"])
+                [button] = bubble["footer"]["contents"]
+                self.assertEqual(button["action"]["uri"], card["link"])
+
     def test_scheduled_edit_pauses_and_requires_confirmation_again(self):
         row = self.draft()
         row = broadcasts.confirm(
