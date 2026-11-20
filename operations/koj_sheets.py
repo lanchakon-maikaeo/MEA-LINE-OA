@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 
 
 def _credentials(service_account):
-    """The read-only key the host mounts (deploy/e5-move.sh google-key); no file, a clear error."""
+    """The read-only key the host mounts ($FAOJ_ROOT/env/google); no file, a clear error."""
     path = os.environ.get("KOJ_GOOGLE_CREDENTIALS_FILE", "")
     if not path:
         raise ValidationError("ยังไม่มีไฟล์กุญแจ Google สำหรับอ่านชีทบนเซิร์ฟเวอร์")

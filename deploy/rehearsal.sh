@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Laptop rehearsal of the OCI host flow (M12): a local registry stands in for OCIR and an S3
-# gateway for Object Storage; everything else (bootstrap, faoj deploy/backup/restore-drill) is
+# Laptop rehearsal of the host flow (M12): a local registry stands in for the image registry and
+# an S3 gateway for backup storage; everything else (bootstrap, faoj deploy/backup/restore-drill) is
 # the same code the hosts run. Synthetic data only; nothing leaves the machine.
 #
 #   FAOJ_ROOT=/path/to/scratch deploy/rehearsal.sh up        registry + S3 + host bootstrap

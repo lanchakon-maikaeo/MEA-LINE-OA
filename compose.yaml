@@ -130,7 +130,7 @@ services:
       n8n-db-init:
         condition: service_completed_successfully
   clamav:
-    # Multi-arch (arm64 for OCI A1); clamd + freshclam signature updates in one container.
+    # Multi-arch (amd64 and arm64); clamd + freshclam signature updates in one container.
     image: clamav/clamav-debian:1.4@sha256:6d0680780fd29855cb7018f68272cb520821f614259e2066f8ec669069ac91b3
     environment:
       CLAMD_CONF_StreamMaxLength: 210M

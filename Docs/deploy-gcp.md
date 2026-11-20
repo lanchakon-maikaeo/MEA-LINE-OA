@@ -1,6 +1,6 @@
 # คู่มือ deploy และดูแล production บน GCP
 
-ปรับปรุงวันที่ 3 พ.ย. 2569 production ย้ายจาก OCI E5 มาอยู่ที่ GCP ตั้งแต่ 2 พ.ย. 2569 เวลา 21:48 น. ตาม [ADR 0043](adr/0043-production-on-gcp-free-trial.md) ขั้นตอนตอนย้ายอยู่ใน [แผนย้าย](release/gcp-move/README.md) ส่วนเอกสารนี้ใช้กับงานประจำหลังย้าย
+ปรับปรุงวันที่ 20 พ.ย. 2569 production ย้ายจาก OCI E5 มาอยู่ที่ GCP ตั้งแต่ 2 พ.ย. 2569 เวลา 21:48 น. ตาม [ADR 0043](adr/0043-production-on-gcp-free-trial.md) ขั้นตอนตอนย้ายอยู่ใน [แผนย้าย](release/gcp-move/README.md) ส่วนเอกสารนี้ใช้กับงานประจำหลังย้าย
 
 แต่ละขั้นในคู่มือมีคำสั่งที่ต้องรัน และย่อหน้า **ถ้าถูกต้อง** ที่บอกว่าควรเห็นอะไร ถ้าเห็นไม่ตรง ให้ไปดูส่วน [ปัญหาที่อาจเจอและวิธีแก้](#ปัญหาที่อาจเจอและวิธีแก้) ท้ายเอกสาร
 
@@ -13,11 +13,11 @@
 | LINE webhook | `https://crabmeat-lake-lunar.ngrok-free.dev/webhooks/line` ผ่าน container ngrok บนเครื่อง เปิด Webhook redelivery ไว้แล้ว |
 | Mini App | Endpoint (Published) คือ `https://dedcenter-381083094942.asia-southeast3.run.app/broadcasts/` |
 | image | Artifact Registry `asia-southeast3-docker.pkg.dev/mea-ded-center-line-oa/faoj/app@sha256:…` จาก Release workflow เครื่องดึงด้วย service account ของ VM เอง (ไม่มี token เก็บไว้) ตั้งแต่ 11 พ.ย. 2569 เพราะ OCIR ไม่รับ push หลังบัญชี OCI กลายเป็น free tier |
-| backup | pgBackRest ไป OCI Object Storage ที่ path `/pgbackrest/production-gcp` ส่วนไฟล์แนบและ n8n ไป restic repo เดียวกับที่ E5 ใช้ แยกกันด้วย host tag `production-gcp` |
-| เครื่องสำรอง | Mac (`~/faoj-standby`) ดึง WAL ของ `production-gcp` มาทุก 5 นาที |
+| backup | pgBackRest ไป Cloud Storage `gs://mea-ded-center-line-oa-faoj-backup` ที่ path `/pgbackrest/production-gcp` ส่วนไฟล์แนบและ n8n ไป restic ที่ `/restic` ใน bucket เดียวกัน host tag `production-gcp` |
+| สำเนานอก GCP | ยังไม่มี standby บน Mac และสำเนาบน OneDrive อ่านจาก OCI จึงหยุดไปพร้อม OCI (ข้อมูลล่าสุดบน OneDrive คือ 2 พ.ย. 2569) |
 | เครดิต | Free Trial ของ GCP หมดราวปลาย ม.ค. 2570 ห้ามกด Upgrade และห้ามผูก billing account อื่น ต้องย้ายออกให้ได้ภายในกลาง ม.ค. |
 
-เจ้าของลบ VM `faoj-prod-e5` (E5) แล้วเมื่อ 5 พ.ย. 2569 จึงย้ายกลับ E5 (`gcp-move.sh reverse-move`) ไม่ได้อีก และ `168-107-70-170.sslip.io` เปิดไม่ได้แล้ว ที่ OCI ยังเก็บ data volume `faoj-prod-e5-data` (ฐานข้อมูล E5 ตอน freeze), boot volume, reserved IP 168.107.70.170, bucket `faoj-backup` และ `faoj-files` (GCP ยัง backup ลงที่นี่) และ OCIR (image ก่อน 11 พ.ย. 2569 รวมรุ่นที่ใช้ rollback) ห้ามลบของเหล่านี้
+ลบ OCI ทั้งหมดแล้วเมื่อ 20 พ.ย. 2569 (VM `faoj-prod-e5` ถูกลบไปก่อนแล้วตั้งแต่ 5 พ.ย.) ก่อนลบได้คัดลอก bucket `faoj-backup` และ `faoj-files` มาไว้ที่ `gs://mea-ded-center-line-oa-faoj-backup/oci-archive/` และตรวจครบทุกไฟล์แล้ว ให้เก็บไว้อย่างน้อยถึง 2 ธ.ค. 2569 ที่ OCI ยังเหลือ 2 อย่าง คือ compartment `mea-faoj` ซึ่งลบได้หลัง 27 พ.ย. 2569 21:47 น. (รอ key ใน Vault ลบเสร็จ) และ repo OCIR `faoj/app` กับ `faoj/db` ที่ API ของ free tier ไม่ยอมลบ ต้องลบในหน้า Console หรือปิดบัญชี OCI สคริปต์และ Terraform ของ OCI ออกจาก repo แล้ว ดูของเดิมได้ใน git history
 
 ## ก่อนเริ่ม
 
@@ -271,9 +271,7 @@ deploy/gcp-move.sh line-menu
 | full backup | วันจันทร์ 03:00 | ที่เดียวกัน |
 | diff backup | วันอังคารถึงอาทิตย์ 03:00 | ที่เดียวกัน |
 | ไฟล์แนบและ n8n | ทุกวัน 03:30 | restic `gs://mea-ded-center-line-oa-faoj-backup/restic` host `production-gcp` |
-| standby บน Mac | ทุก 5 นาที | `~/faoj-standby` แจ้งเตือนบน Mac เมื่อตามหลังเกิน 15 นาที |
 | healthcheck บน Mac | ทุกนาที | ตรวจ `34-15-129-131.sslip.io` และ LINE webhook ล้มติดกัน 3 ครั้งจะแจ้งเตือนบน Mac |
-| สำเนานอก OCI | วันจันทร์ 09:00 | OneDrive โฟลเดอร์ `pgbackrest-production-gcp` และ `restic` |
 
 ดูผลบนเครื่อง
 
@@ -287,22 +285,9 @@ deploy/gcp-move.sh ssh 'sudo faoj backup status 2>&1 | tail -1'
 last database backup: 18294s ago
 ```
 
-ดูผลบน Mac
+`faoj metrics` เขียนตัวเลขลง journal ของเครื่องทุกนาที (`deploy/gcp-move.sh ssh 'journalctl -u faoj-metrics -n 1 -o cat'`) ยังไม่มีระบบไหนอ่านไปแจ้งเตือน การเตือนตอนนี้มีแค่ healthcheck บน Mac กับ UptimeRobot ถ้า Mac ปิดอยู่ จะเหลือแค่ UptimeRobot
 
-```bash
-deploy/standby.sh status
-```
-
-**ถ้าถูกต้อง** ฐานข้อมูลตามหลังไม่เกินราว 10 นาที
-
-```
-database: standby, 2 min 12 s behind production
-files: last copy 2026-11-02 23:13
-```
-
-บน GCP ตั้ง `METRICS_SINK=stdout` ไว้ metric จึงไม่ขึ้น OCI Monitoring และ alarm ของ OCI ไม่เห็นเครื่องนี้ การเตือนตอนนี้มีแค่งานบน Mac กับ UptimeRobot ถ้า Mac ปิดอยู่ จะเหลือแค่ UptimeRobot ส่วน `faoj quota-check` เป็นงบของ OCI และปิดไว้บนเครื่องนี้
-
-**ที่เก็บ backup (ADR 0043, 20 พ.ย. 2569):** pgBackRest และ restic เขียน Cloud Storage ในนามของ service account ของ VM ผ่าน metadata server โดยไม่มีไฟล์ key VM มี scope `devstorage.read_write` และ service account นี้มีสิทธิ์แค่ object ใน bucket นี้ ตั้งค่าด้วย `deploy/gcp-move.sh backup-setup` (เจ้าของรัน login ผ่านเบราว์เซอร์ ครั้งแรกหยุดเครื่อง 2 ถึง 3 นาที) ค่าบนเครื่องคือ `BACKUP_REPO_TYPE=gcs`, `BACKUP_GCS_BUCKET` และ `BACKUP_GCS_PROJECT` ใน `compose.env` กับ `RESTIC_REPOSITORY` ใน `backup.secret.env` standby และสำเนาบน OneDrive ยังอ่านจาก OCI จนกว่าจะแก้ `standby.sh` และ `backup-pull.sh`
+**ที่เก็บ backup (ADR 0043, 20 พ.ย. 2569):** pgBackRest และ restic เขียน Cloud Storage ในนามของ service account ของ VM ผ่าน metadata server โดยไม่มีไฟล์ key VM มี scope `devstorage.read_write` และ service account นี้มีสิทธิ์แค่ object ใน bucket นี้ ตั้งค่าด้วย `deploy/gcp-move.sh backup-setup` (เจ้าของรัน login ผ่านเบราว์เซอร์ ครั้งแรกหยุดเครื่อง 2 ถึง 3 นาที) ค่าบนเครื่องคือ `BACKUP_REPO_TYPE=gcs`, `BACKUP_GCS_BUCKET` และ `BACKUP_GCS_PROJECT` ใน `compose.env` กับ `RESTIC_REPOSITORY` ใน `backup.secret.env`
 
 `faoj-restore-drill.timer` ปิดอยู่บน GCP การซ้อมกู้ต้องสั่งเอง (`sudo faoj restore-drill`) ระหว่างซ้อมระบบจะเข้า maintenance และหยุดชั่วคราว ครั้งล่าสุดวันที่ 2 พ.ย. ใช้เวลา 88 วินาที จึงควรซ้อมนอกเวลางาน
 
@@ -318,7 +303,7 @@ files: last copy 2026-11-02 23:13
 | `no token for faoj-deployer` | ยังไม่ได้สร้าง `faoj-deployer` หรือสิทธิ์ยังไม่มีผล | เจ้าของรัน `deploy/gcp-move.sh deployer-setup` รอ 2 นาที แล้วรัน `login` ใหม่ |
 | gcloud ขึ้น `Permission denied` หรือ `does not have … permission` ทั้งที่เพิ่ง login | `faoj-deployer` ขาดสิทธิ์สำหรับคำสั่งนั้น | ดูชื่อ permission ในข้อความ เพิ่ม role ใน `deployer_setup` ของ `gcp-move.sh` แล้วให้เจ้าของรัน `deployer-setup` ใหม่ |
 | ssh ผ่าน IAP ค้างหรือต่อไม่ติด | IAP หรือเครื่องยังไม่พร้อม หรือเครื่องหยุด | ลองใหม่อีกครั้ง ถ้ายังไม่ได้ ดูสถานะเครื่องด้วย `gcloud compute instances list --project mea-ded-center-line-oa` |
-| เครื่องหยุด (`TERMINATED` หรือ `SUSPENDED`) และทุกอย่างล่ม | เครดิต Free Trial อาจหมด | เปิดหน้า Billing ของ GCP ดูเครดิต ห้ามกด Upgrade และแจ้งเจ้าของทันที ข้อมูลยังอยู่ใน backup ที่ OCI และ standby บน Mac |
+| เครื่องหยุด (`TERMINATED` หรือ `SUSPENDED`) และทุกอย่างล่ม | เครดิต Free Trial อาจหมด | เปิดหน้า Billing ของ GCP ดูเครดิต ห้ามกด Upgrade และแจ้งเจ้าของทันที backup อยู่ใน Cloud Storage ของ project เดียวกัน ยังไม่มีสำเนานอก GCP |
 
 ### CI
 
@@ -344,7 +329,7 @@ files: last copy 2026-11-02 23:13
 | `give the Release workflow's app image` | digest ไม่ได้อยู่ในรูป `asia-southeast3-docker.pkg.dev/mea-ded-center-line-oa/faoj/app@sha256:…` | คัดลอก `app_image` จากขั้น Release มาใส่ทั้งบรรทัด |
 | `last database backup is …s old; run 'faoj backup diff' first` | backup ล่าสุดเก่ากว่า 26 ชั่วโมง ระบบไม่ยอม migrate | รัน `deploy/gcp-move.sh ssh 'sudo faoj backup diff'` แล้ว deploy ใหม่ ถ้า backup ไม่สำเร็จ ให้หยุดและหาสาเหตุก่อน |
 | `another deploy holds …` | มี deploy อื่นค้างอยู่ | ดูว่ามี deploy รันอยู่จริงไหมด้วย `deploy/gcp-move.sh ssh 'systemctl list-units "faoj-deploy-*"'` ถ้ารันอยู่ให้รอ ลบ lock เฉพาะเมื่อแน่ใจว่าไม่มี deploy รัน |
-| ดึง image ไม่ได้ (`unauthorized` หรือ `denied`) | service account ของ VM ไม่มีสิทธิ์อ่าน repo `faoj` | เจ้าของรัน `deploy/gcp-move.sh registry-setup` ซ้ำ แล้ว deploy ใหม่ (image เก่าบน OCIR ใช้ `pull-token` หรือ `ocir-login`) |
+| ดึง image ไม่ได้ (`unauthorized` หรือ `denied`) | service account ของ VM ไม่มีสิทธิ์อ่าน repo `faoj` | เจ้าของรัน `deploy/gcp-move.sh registry-setup` ซ้ำ แล้ว deploy ใหม่ |
 | `migration failed (RB07); maintenance stays on` | migration ล้ม ระบบกลับไปรุ่นเดิมแต่ยังปิดรับงาน | อ่าน log หาสาเหตุ ถ้ารุ่นเดิมทำงานปกติ ใช้ `sudo faoj maintenance off` แล้วแก้โค้ดในรอบหน้า ถ้าข้อมูลเสีย ใช้ RB05 |
 | `smoke failed` แล้วตามด้วย `rolling back to …` | รุ่นใหม่ไม่ผ่าน smoke ระบบย้อนกลับเอง | ตรวจ `deploy/gcp-move.sh status` ว่ารุ่นเดิมกลับมาและ maintenance เป็น `off` แล้วหาสาเหตุจาก log ก่อนลองใหม่ |
 | maintenance ยังเป็น `on` หลัง deploy จบ | deploy หรือ rollback ไม่ผ่านครบ | ดู `deploy/gcp-move.sh status` ถ้าทุก service `Up` และ `healthy` ให้ `sudo faoj maintenance off` ถ้าไม่ ใช้ `sudo faoj rollback` |
@@ -371,11 +356,10 @@ files: last copy 2026-11-02 23:13
 | log ของ worker มี "Automatic LINE menu update incomplete; retry in five minutes" | เผยแพร่เมนูไม่ครบ | worker ลองใหม่เองใน 5 นาที ถ้าอยากให้ทำทันที ใช้ `deploy/gcp-move.sh line-menu` |
 | เมนูในโทรศัพท์ยังเป็นรุ่นเดิม | LINE ในโทรศัพท์อาจยังแสดงเมนูเดิมค้างไว้ | ปิดแล้วเปิดห้องแชต OA ใหม่ ถ้ายังไม่เปลี่ยน ดู log ของ worker |
 
-### Backup และ standby
+### Backup
 
 | เห็นอะไร | แปลว่า | แก้อย่างไร |
 |---|---|---|
-| Mac แจ้งเตือนว่า standby ตามหลังเกิน 15 นาที | Mac ดึง WAL ไม่ได้ หรือ production ส่ง WAL ขึ้น OCI ไม่ได้ | ดู `deploy/standby.sh status` ก่อน ถ้าเน็ตของ Mac ปกติ ให้ดูว่า Postgres บนเครื่องส่ง WAL ผ่านไหมด้วย `deploy/gcp-move.sh ssh 'sudo docker logs --since 30m faoj-db-1 2>&1 \| grep -i archive \| tail'` |
 | Mac แจ้งเตือนว่าระบบล่ม | healthcheck ล้ม 3 ครั้งติดกัน | ดู `deploy/gcp-move.sh status` แล้วทำตาม RB01 ใน `PROJECT.md` ส่วน E.9 หน้าปิดปรับปรุง (503) ไม่นับเป็นล่ม |
 | deploy หยุดที่ `restore point` และ log มี `was not archived before the 60000ms timeout` หรือ `StorageLimitExceeded` | ที่เก็บ backup ไม่รับการเขียน deploy คืนรุ่นเดิมให้เอง (maintenance ปิด, n8n กับ worker กลับมา) | ดู `pg_stat_archiver` ด้วย `deploy/gcp-move.sh ssh 'sudo docker exec -u postgres faoj-db-1 psql -d postgres -Atc "select last_archived_time, failed_count, last_failed_time from pg_stat_archiver"'` แก้ที่เก็บก่อน ถ้าต้อง deploy ระหว่างนั้น ใช้ `deploy/gcp-move.sh deploy <digest> --restore-point dump` ซึ่งทำ pg_dump บนเครื่องแทน และไม่ตรวจอายุ backup ใน pgBackRest |
 | `last database backup` เกิน 26 ชั่วโมง | backup คืนที่ผ่านมาไม่สำเร็จ | ดู `deploy/gcp-move.sh ssh 'systemctl status faoj-backup-diff'` แล้วรัน `sudo faoj backup diff` เอง |

@@ -2,7 +2,7 @@
 # PUBLIC_HOST is <ip>.sslip.io until the organisation's subdomain exists (Q9).
 {
 	# No ACME contact address: Caddy renews by itself and `faoj metrics` alerts on cert_days_left.
-	# "local_certs" for rehearsals on a laptop; empty on OCI (Let's Encrypt).
+	# "local_certs" for rehearsals on a laptop; empty on the hosts (Let's Encrypt).
 	{$CADDY_LOCAL_CERTS}
 	admin off
 }

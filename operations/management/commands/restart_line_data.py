@@ -1,8 +1,8 @@
 """ล้างผู้แจ้งและเรื่องทั้งหมด (29 Oct 2569) at the move to LINE OA @705ttrga; see
 operations/purge.py `plan_restart`.
 
-Without --apply it only prints what would go. Run it as the migration (owner) role: on the host,
-`deploy/e5-move.sh restart-data …` does that after a fresh backup.
+Without --apply it only prints what would go. Run it as the migration (owner) role: after a fresh
+backup, `deploy/gcp-move.sh manage restart_line_data …` runs it in the migrate service.
 """
 
 from django.contrib.auth import get_user_model

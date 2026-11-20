@@ -1,8 +1,8 @@
 """ล้างข้อมูลจำลองบน production (15 ต.ค. 2569 Q1–Q4, Q33, Q37); see operations/purge.py.
 
 Without --apply it only prints what would go, the cases to pick the examples from, and the
-accounts that would be turned off. Run it as the migration (owner) role: on the host,
-`deploy/e5-move.sh purge-demo …` does that after a fresh backup.
+accounts that would be turned off. Run it as the migration (owner) role: after a fresh
+backup, `deploy/gcp-move.sh manage purge_demo_data …` runs it in the migrate service.
 """
 
 from datetime import datetime

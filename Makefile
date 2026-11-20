@@ -4,7 +4,7 @@ ENV_FILE = $(if $(wildcard .env),--env-file .env,)
 RUN = $(UV) run --locked $(ENV_FILE)
 
 .PHONY: bootstrap guard db migrate seed-demo dev line-worker clamav n8n n8n-import eval-ai simulate-line tunnel check test test-module test-e2e security secrets ci build smoke down \
-	deploy rollback restore-drill oci-quota-check oci-stack backup-pull backup-pull-schedule health-schedule standby-schedule image-scan rehearsal-up rehearsal-release rehearsal-down \
+	deploy rollback restore-drill health-schedule image-scan rehearsal-up rehearsal-release rehearsal-down \
 	load-test acceptance-tests release-candidate
 bootstrap:
 	$(PYTHON) scripts/bootstrap_env.py
@@ -111,27 +111,7 @@ rollback:
 restore-drill:
 	$(FAOJ) restore-drill
 
-oci-quota-check:
-	$(FAOJ) quota-check
-
-# Zip of deploy/oci for OCI Resource Manager (Stacks → Create stack → My configuration → .zip).
-oci-stack:
-	@mkdir -p reports && rm -f reports/faoj-oci-stack.zip
-	cd deploy/oci && zip -qr ../../reports/faoj-oci-stack.zip . -x '.terraform/*' '*.tfstate*'
-	@echo "reports/faoj-oci-stack.zip"
-
 # --- M12: this Mac (Q13 a) ------------------------------------------------------------------------
-backup-pull:
-	deploy/backup-pull.sh
-
-backup-pull-schedule:
-	install -d -m 700 $(HOME)/.config/faoj/bin
-	install -m 700 deploy/backup-pull.sh $(HOME)/.config/faoj/bin/backup-pull.sh
-	sed -e "s#@BIN@#$(HOME)/.config/faoj/bin#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.backup-pull.plist \
-		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.backup-pull.plist
-	-launchctl bootout gui/$$(id -u)/th.or.mea.faoj.backup-pull 2>/dev/null
-	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.backup-pull.plist
-
 # ADR 0015 Q13: this Mac checks production every minute and alerts after three failures.
 # launchd jobs cannot read the repository inside OneDrive (macOS privacy: Operation not
 # permitted), so each schedule runs a copy in ~/.config/faoj/bin; run the target again after
@@ -144,15 +124,6 @@ health-schedule:
 		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.health.plist
 	-launchctl bootout gui/$$(id -u)/th.or.mea.faoj.health 2>/dev/null
 	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.health.plist
-
-# ADR 0015 Q9: keep the Mac standby replaying production's WAL (deploy/standby.sh check).
-standby-schedule:
-	install -d -m 700 $(FAOJ_BIN)
-	install -m 700 deploy/standby.sh $(FAOJ_BIN)/standby.sh
-	sed -e "s#@BIN@#$(FAOJ_BIN)#" -e "s#@HOME@#$(HOME)#" deploy/launchd/th.or.mea.faoj.standby.plist \
-		> $(HOME)/Library/LaunchAgents/th.or.mea.faoj.standby.plist
-	-launchctl bootout gui/$$(id -u)/th.or.mea.faoj.standby 2>/dev/null
-	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/th.or.mea.faoj.standby.plist
 
 # Same blocking scan as the Release workflow, on locally built images (IMAGES="ref …").
 image-scan:

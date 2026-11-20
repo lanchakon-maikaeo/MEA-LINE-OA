@@ -1,5 +1,5 @@
 """Operational numbers for alerts (M12, E.9): ages and counts only, never names, LINE user IDs or
-message text. The host's metrics job sends them to OCI Monitoring every minute."""
+message text. The host's metrics job writes them to its journal every minute."""
 
 import json
 from datetime import timedelta

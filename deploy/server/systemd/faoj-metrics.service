@@ -1,5 +1,5 @@
 [Unit]
-Description=Send faoj metrics to OCI Monitoring
+Description=faoj metrics to the journal (one JSON line a minute)
 After=docker.service
 Requires=docker.service
 

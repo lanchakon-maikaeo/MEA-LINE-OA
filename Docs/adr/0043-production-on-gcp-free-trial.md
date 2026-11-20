@@ -45,4 +45,14 @@ status: accepted
 - **deploy ที่สลับ:** container ของฐานข้อมูลรุ่นเดิมยังชี้ไป OCI จุดกู้คืนก่อน migrate จึงใช้ `--restore-point dump` (pg_dump บนดิสก์ของเครื่อง) ครั้งเดียว dump ที่ทำก่อน migrate เป็นจุดกู้คืนที่ใหม่อยู่แล้ว การ deploy แบบนี้จึงไม่ตรวจอายุ backup ล่าสุดใน pgBackRest (backup ล่าสุดบน OCI คือ 19 พ.ย. 20:12Z ซึ่งจะเกิน 26 ชั่วโมง) container รุ่นใหม่สร้าง stanza ใน Cloud Storage แล้วส่ง WAL ที่ค้างขึ้นไป จากนั้นทำ full backup และ backup ไฟล์ทันที
 - **`faoj deploy`:** ถ้าทำจุดกู้คืนไม่ได้ จะเปิด n8n กับ worker คืน ปิด maintenance บันทึกว่า failed แล้วหยุด โดยยังไม่เปลี่ยนอะไร ถ้า stanza-create ล้มหลังสลับรุ่นแล้ว deploy ทำต่อ เพราะ WAL รอใน `pg_wal` ได้ ดีกว่าค้างครึ่งทางในโหมด maintenance
 - **ซ้อมกู้:** `faoj restore-drill` อ่านจาก Cloud Storage เมื่อ `BACKUP_REPO_TYPE=gcs` ต้องซ้อมกู้ผ่านก่อนลบ OCI
-- **ยังต้องทำ:** `standby.sh` และ `backup-pull.sh` บน Mac ยังอ่านจาก OCI จึงหยุดได้ข้อมูลใหม่ตั้งแต่ 15:03 น. ต้องเปลี่ยนให้อ่าน Cloud Storage ก่อนลบ OCI backup อยู่ผู้ให้บริการเดียวกับ production สำเนานอก GCP จึงเหลือแค่สำเนาบน OneDrive ของ `backup-pull.sh`
+- **ผลจริง:** deploy `17bc09edb8c8` (PR #61 และ #62) ด้วย `--restore-point dump` เมื่อ 20:28 ถึง 20:32 น. maintenance ราว 80 วินาที WAL ที่ค้างส่งขึ้น Cloud Storage จนหมด (`pg_wal` จาก 2.7 GB เหลือ 81 MB) full backup `20261120-133042F` ผ่าน และซ้อมกู้ผ่าน (RTO 40 วินาที ไฟล์แนบครบ)
+
+## ลบ OCI (20 พ.ย. 2569)
+
+เจ้าของสั่ง "ลบ OCI ให้สิ้นซาก" หลัง backup บน Cloud Storage และการซ้อมกู้ผ่าน และยืนยันรายการก่อนลบ ("ยืนยัน คัดลอกก่อนลบ")
+
+- **คัดลอกก่อนลบ:** VM คัดลอก bucket `faoj-backup` และ `faoj-files` ไปที่ `gs://mea-ded-center-line-oa-faoj-backup/oci-archive/` แล้วตรวจด้วย rclone (10,419 และ 42 ไฟล์ ไม่มีไฟล์ต่าง) ในนั้นมี stanza `production` ของ E5 และ `production-gcp` ช่วง 15 ถึง 20 พ.ย. เก็บไว้อย่างน้อยถึง 2 ธ.ค. 2569 ตามกฎเก็บข้อมูล 30 วัน
+- **ลบแล้ว:** bucket ทั้งสอง alarm, topic แจ้งเตือน, budget, quota, Bastion, volume ของ E5, reserved IP, VCN, stack ของ Resource Manager, user ของระบบ (`faoj-ci`, `faoj-backup-writer`, `faoj-backup-reader`), group, dynamic group และ policy ของ faoj รวมทั้ง secret และ variable ของ OCIR ใน GitHub
+- **ยังเหลือ:** Vault `faoj-vault` ลบเสร็จ 27 พ.ย. 2569 21:47 น. หลังจากนั้นจึงลบ compartment `mea-faoj` ได้ (ลองแล้วได้ `CompartmentNotEmpty`) ส่วน repo OCIR `faoj/app` กับ `faoj/db` API ของ free tier ตอบ `FREE_TIER_NOT_SUPPORTED` เจ้าของต้องลบในหน้า Console หรือปิดบัญชี OCI
+- **ใน repo:** ลบ Terraform (`deploy/oci`), `e5-move.sh`, `ci-ocir-setup.sh`, `standby.sh`, `backup-pull.sh`, `faoj quota-check`, การ login OCIR, `faoj promote` และ metric ที่ส่งไป OCI Monitoring ส่วนคำสั่งย้ายจาก E5 ใน `gcp-move.sh` ก็ลบด้วย ดูของเดิมได้ใน git history `faoj metrics` เขียนลง journal ของเครื่องอย่างเดียว gate "metric" ของ `faoj auto-promote` รอรายงานจาก staging ซึ่งไม่มีแล้ว จึงไม่ปล่อยรุ่นไหน (เหมือนก่อนลบ) จนกว่าจะมี staging ส่งรายงานอีกครั้ง หรือตั้ง `AUTO_PROMOTE_STAGING_GATE=none`
+- **ยังต้องตัดสินใจ:** backup อยู่ผู้ให้บริการเดียวกับ production และยังไม่มีสำเนานอก GCP (สำเนาล่าสุดบน OneDrive คือ 2 พ.ย.) โปรเจกต์ไม่ออก key ของ service account จึงต้องเลือกวิธีใหม่ที่ไม่ใช้ key

@@ -16,8 +16,8 @@ x-app: &app
     PRIVATE_MEDIA_ROOT: /data/private-media
     BEHIND_TLS_PROXY: "true"
     RELEASE_ID: ${RELEASE_ID:?release.env}
-    # ค้นในชีท (ADR 0027): the read-only service-account key, put there by
-    # `deploy/e5-move.sh google-key`; without it the sheets stay off with a clear message.
+    # ค้นในชีท (ADR 0027): the read-only service-account key in $FAOJ_ROOT/env/google (the owner
+    # puts it there); without it the sheets stay off with a clear message.
     KOJ_GOOGLE_CREDENTIALS_FILE: /run/faoj-google/sheets-reader.json
   volumes:
     - ${FAOJ_ROOT}/data/media:/data/private-media
@@ -73,7 +73,7 @@ services:
       PGBACKREST_REPO1_CIPHER_TYPE: aes-256-cbc
       # BACKUP_REPO_TYPE=gcs (GCP, 20 Nov 2026, after OCI Object Storage filled up): Cloud Storage
       # as the VM's own service account (metadata server; no key file, which the project's policy
-      # forbids). Each type ignores the other's options, so the S3 lines above stay for OCI hosts.
+      # forbids). Each type ignores the other's options, so the S3 lines above stay for rehearsals.
       PGBACKREST_REPO1_GCS_BUCKET: ${BACKUP_GCS_BUCKET:-none}
       PGBACKREST_REPO1_GCS_KEY_TYPE: auto
       PGBACKREST_REPO1_RETENTION_FULL: "2"
