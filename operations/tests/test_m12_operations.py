@@ -6,10 +6,10 @@ fallback-form channel with its เวลาแจ้งจริง, while clock
 alert metrics carry ages and counts only (OpsMetricsTests); a restore drill notices missing or
 changed files (VerifyRestoreTests); synthetic seeding is refused in production
 (SeedStagingTests); a release manifest pins every image (ReleaseManifestTests); the host stack,
-edge, database access, OCI budget and pipelines keep the rules of E.2.1/E.7/E.8
-(HostStackTests, EdgeTests, BudgetTests, PipelineTests); staging follows CI's main tag only when
-switched on and production takes only what staging passed (AutoDeployTests, option ข 12 ต.ค.
-2569). Runtime evidence (rehearsal deploy, rollback, backups, restore drill) is in PROJECT.md M12.
+edge, database access and pipelines keep the rules of E.2.1/E.7/E.8 (HostStackTests, EdgeTests,
+PipelineTests); staging follows CI's main tag only when switched on (AutoDeployTests, option ข
+12 ต.ค. 2569). Runtime evidence (rehearsal deploy, rollback, backups, restore drill) is in
+PROJECT.md M12.
 """
 
 import hashlib
@@ -19,7 +19,7 @@ import re
 import subprocess
 import tempfile
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import yaml
@@ -34,7 +34,6 @@ from operations.tests.test_m10_web import WebTestCase
 
 ROOT = Path(settings.BASE_DIR)
 SERVER = ROOT / "deploy/server"
-OCI = ROOT / "deploy/oci"
 PINNED = re.compile(r"@sha256:[0-9a-f]{64}$")
 
 
@@ -279,128 +278,6 @@ class EdgeTests(SimpleTestCase):
         self.assertIn('env "FALLBACK_FORM_URL"', page)
 
 
-class BudgetTests(SimpleTestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.budget = json.loads((SERVER / "oci/budget.json").read_text())
-        cls.hosts = json.loads((OCI / "hosts.auto.tfvars.json").read_text())["hosts"]
-
-    def test_terraform_hosts_match_the_budget(self):
-        credit = self.budget["credit"]
-        plans = self.budget["instances"] | credit["instances"]
-        self.assertEqual(set(plans), set(self.hosts))
-        for name, plan in plans.items():
-            host = self.hosts[name]
-            self.assertEqual(
-                (host.get("shape", "VM.Standard.A1.Flex"), host["ocpus"], host["memory_gb"]),
-                (plan.get("shape", "VM.Standard.A1.Flex"), plan["ocpus"], plan["memory_gb"]),
-                name,
-            )
-            self.assertEqual((host["boot_gb"], host["data_gb"]), (plan["boot_gb"], plan["data_gb"]))
-        a1 = [
-            h
-            for h in self.hosts.values()
-            if h.get("shape", "VM.Standard.A1.Flex") in self.budget["allowed_shapes"]
-        ]
-        paid = [h for h in self.hosts.values() if h not in a1]
-        self.assertTrue(all(h["shape"] in credit["shapes"] for h in paid))
-        # ADR 0015: staging runs on the Mac and the A1 hosts are parked (volumes kept, no VM).
-        running = {n for n, h in self.hosts.items() if h.get("instance", True)}
-        self.assertEqual(running, set(credit["instances"]))
-        self.assertLessEqual(sum(h["ocpus"] for h in a1), self.budget["a1_ocpus"])
-        self.assertLessEqual(sum(h["memory_gb"] for h in a1), self.budget["a1_memory_gb"])
-        self.assertLessEqual(
-            sum(h["boot_gb"] + h["data_gb"] for h in a1), self.budget["block_storage_gb"]
-        )
-        self.assertLessEqual(sum(h["ocpus"] for h in paid), credit["caps"]["ocpus"])
-        self.assertLessEqual(sum(h["memory_gb"] for h in paid), credit["caps"]["memory_gb"])
-        self.assertLessEqual(
-            sum(h["boot_gb"] + h["data_gb"] for h in paid), credit["caps"]["block_gb"]
-        )
-
-    def test_terraform_credit_defaults_repeat_the_budget(self):
-        credit = self.budget["credit"]
-        variables = (OCI / "variables.tf").read_text()
-        self.assertIn(f'default     = "{credit["until"]}"', variables)
-        self.assertIn(f"default     = {credit['amount_sgd']}", variables)
-        self.assertIn(f'default     = "{credit["move_by"]}"', variables)
-        caps = credit["caps"]
-        self.assertIn(
-            f"default = {{ ocpus = {caps['ocpus']}, memory_gb = {caps['memory_gb']}, "
-            f"block_gb = {caps['block_gb']} }}",
-            variables,
-        )
-
-    def test_quota_policy_repeats_the_budget(self):
-        governance = (OCI / "governance.tf").read_text()
-        self.assertIn(f"standard-a1-core-count to {self.budget['a1_ocpus']}", governance)
-        self.assertIn(f"standard-a1-memory-count to {self.budget['a1_memory_gb']}", governance)
-        # "zero" also clears the regional counts; without these the first apply was refused.
-        self.assertIn(f"standard-a1-core-regional-count to {self.budget['a1_ocpus']}", governance)
-        self.assertIn(
-            f"standard-a1-memory-regional-count to {self.budget['a1_memory_gb']}", governance
-        )
-        self.assertIn(
-            "depends_on = [oci_limits_quota.always_free]", (OCI / "compute.tf").read_text()
-        )
-        self.assertIn(
-            f"total-storage-gb to ${{{self.budget['block_storage_gb']} + (local.credit_active",
-            governance,
-        )
-
-    def test_only_web_ports_are_public(self):
-        network = (OCI / "network.tf").read_text()
-        public = re.findall(r'(\w+)\s*=\s*\{ port = (\d+), source = "0\.0\.0\.0/0" \}', network)
-        self.assertEqual(sorted(public), [("http", "80"), ("https", "443")])
-        self.assertIn("ssh   = { port = 22, source = oci_core_subnet.public.cidr_block }", network)
-        self.assertIn("security_list_ids = [oci_core_security_list.egress_only.id]", network)
-
-    def test_quota_check_flags_over_and_near(self):
-        check = load(SERVER / "oci/quota_check.py")
-        usage = {
-            "shapes": ["VM.Standard.A1.Flex"] * 2,
-            "a1_ocpus": 2,
-            "a1_memory_gb": 12,
-            "block_storage_gb": 200,
-            "volume_backups": 4,
-            "object_storage_gb": 9.5,
-            "load_balancers": 0,
-            "ocir_images": {"faoj/app": 5},
-        }
-        self.assertEqual(check.evaluate(usage, self.budget), [])
-        usage |= {"a1_ocpus": 3, "object_storage_gb": 17, "ocir_images": {"faoj/app": 7}}
-        usage["shapes"].append("VM.Standard.E4.Flex")
-        after_credit = date.fromisoformat(self.budget["credit"]["until"])
-        levels = sorted(level for level, _ in check.evaluate(usage, self.budget, after_credit))
-        self.assertEqual(levels, ["near", "near", "over", "over"])
-
-    def test_quota_check_allows_the_credit_host_until_the_credit_ends(self):
-        check = load(SERVER / "oci/quota_check.py")
-        until = date.fromisoformat(self.budget["credit"]["until"])
-        usage = {
-            "shapes": ["VM.Standard.E5.Flex"],
-            "a1_ocpus": 0,
-            "a1_memory_gb": 0,
-            "credit_ocpus": 2,
-            "credit_memory_gb": 16,
-            "block_storage_gb": 150,
-            "volume_backups": 1,
-            "object_storage_gb": 2,
-            "load_balancers": 0,
-            "ocir_images": {},
-        }
-        self.assertEqual(check.evaluate(usage, self.budget, until - timedelta(days=10)), [])
-        near = check.evaluate(usage, self.budget, until - timedelta(days=2))
-        self.assertEqual([level for level, _ in near], ["near"])
-        over = check.evaluate(usage, self.budget, until)
-        self.assertIn(("over", "shape not in the budget: VM.Standard.E5.Flex"), over)
-        usage |= {"credit_ocpus": 6, "block_storage_gb": 420}
-        texts = [t for _, t in check.evaluate(usage, self.budget, until - timedelta(days=10))]
-        self.assertIn("credit OCPUs: 6 > 4", texts)
-        self.assertIn("block storage GB: 420 > 400", texts)
-
-
 class PipelineTests(SimpleTestCase):
     def test_workflows_are_least_privilege_and_pinned(self):
         for path in (ROOT / ".github/workflows").glob("*.yml"):
@@ -614,17 +491,8 @@ class AutoDeployTests(SimpleTestCase):
     def test_production_never_follows_the_tag(self):
         result = self.faoj("production", "auto-deploy", "on", "faster releases")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("production uses 'faoj promote'", result.stderr)
+        self.assertIn("production uses 'faoj deploy'", result.stderr)
         self.assertFalse((self.root / "run/auto-deploy").exists())
-
-    def test_promote_is_production_only_and_needs_an_approval(self):
-        result = self.faoj("staging", "promote", "--approval", "owner 12 Oct")
-        self.assertIn("promote is for production", result.stderr)
-        result = self.faoj("production", "promote")
-        self.assertIn("promote needs --approval", result.stderr)
-        result = self.faoj("production", "promote", "--approval", "owner 12 Oct")
-        self.assertIn("no release yet", result.stderr)
-        self.assertFalse((self.root / "docker.log").exists())
 
     def test_bootstrap_enables_the_timer_on_staging_only(self):
         bootstrap = (SERVER / "bootstrap-host.sh").read_text()

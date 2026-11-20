@@ -77,7 +77,7 @@ FALLBACK_FORM_URL=$FORM
 # ADR 0015: LINE's webhook host (ngrok static domain); empty keeps the ngrok container off.
 NGROK_DOMAIN=
 # ADR 0015 Q6/Q20: faoj auto-promote (production, minor releases only, off until switched on).
-# The staging gate "metric" needs a staging host reporting to OCI Monitoring; "none" skips it.
+# The staging gate "metric" holds every release while no staging host reports; "none" skips it.
 AUTO_PROMOTE_WINDOW=18-07
 AUTO_PROMOTE_SOAK_MINUTES=60
 AUTO_PROMOTE_STAGING_GATE=metric
@@ -88,9 +88,9 @@ N8N_MEM=$N8NMEM
 CLAMAV_ENABLED=$CLAM
 BACKUP_MODE=$BACKUP
 PG_ARCHIVE_MODE=$ARCHIVE
-# Object Storage (S3-compatible) for pgBackRest and restic; filled in from Terraform outputs.
+# S3-compatible storage for pgBackRest and restic (the rehearsal's local S3).
 BACKUP_S3_ENDPOINT=
-BACKUP_S3_REGION=ap-singapore-1
+BACKUP_S3_REGION=
 BACKUP_DB_BUCKET=faoj-backup
 BACKUP_S3_VERIFY_TLS=y
 # s3 (above) or gcs: Cloud Storage as the VM's service account (gcp-move.sh backup-setup).
@@ -104,10 +104,7 @@ DRILL_REPO_PATH=
 # restic host of this host's files snapshots; empty means \$FAOJ_ENV (DRILL_HOST_TAG likewise).
 BACKUP_HOST_TAG=
 DRILL_HOST_TAG=
-# Metrics to OCI Monitoring (instance principal); stdout on rehearsals.
-METRICS_SINK=$([ "$ENV" = rehearsal ] && echo stdout || echo oci)
-OCI_REGION=ap-singapore-1
-OCI_COMPARTMENT_OCID="
+"
 
 write_once "$FAOJ_ROOT/env/django.env" 644 "# Django settings (non-secret) for $ENV.
 APP_ENV=$APP_ENV
@@ -184,7 +181,7 @@ if $LINUX; then
   timers="faoj-metrics.timer"
   case "$ENV" in
     # auto-promote is a no-op until 'faoj auto-promote on "reason"' (ADR 0015 Q6/Q20).
-    production) timers="$timers faoj-backup-full.timer faoj-backup-diff.timer faoj-backup-files.timer faoj-quota-check.timer faoj-auto-promote.timer";;
+    production) timers="$timers faoj-backup-full.timer faoj-backup-diff.timer faoj-backup-files.timer faoj-auto-promote.timer";;
     # auto-deploy is a no-op until an operator runs 'faoj auto-deploy on "reason"' (option ข).
     staging) timers="$timers faoj-backup-dump.timer faoj-auto-deploy.timer"
       [ -s "$FAOJ_ROOT/env/drill.secret.env" ] && timers="$timers faoj-restore-drill.timer";;

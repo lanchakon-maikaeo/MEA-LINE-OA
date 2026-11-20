@@ -240,8 +240,7 @@ jobs:
               out.write("Blocking scans: " + ("passed" if status == 0 else "**FAILED — do not deploy**") + "\n\n")
               out.write(f"```\nGCP_APPROVAL=\"…\" deploy/gcp-move.sh deploy {app}\n```\n\n")
               if status == 0 and os.environ["FROM_MAIN"] == "true":
-                  out.write("Tagged `main`: staging deploys it within 5 minutes if `faoj auto-deploy` is on; "
-                            "production takes it with `sudo faoj promote --approval \"…\"` after staging passes.\n\n")
+                  out.write("Tagged `main`: a staging host deploys it within 5 minutes if `faoj auto-deploy` is on.\n\n")
               out.write("| scan | findings |\n|---|---|\n")
               for name, n in m["scans"].items():
                   out.write(f"| {name} | {n} |\n")

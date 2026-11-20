@@ -1,4 +1,4 @@
-# PostgreSQL 17 with pgBackRest (M12): WAL archive and backups go to OCI Object Storage from
+# PostgreSQL 17 with pgBackRest (M12): WAL archive and backups go to Cloud Storage (or S3) from
 # inside the database container; the same image runs restores and restore drills.
 FROM postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826 AS base
 # Security updates at build time (the release digest then fixes them). The base image already
