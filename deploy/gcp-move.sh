@@ -8,8 +8,12 @@
 #   deploy/gcp-move.sh deployer-setup  once, by the owner: the faoj-deployer service account
 #   deploy/gcp-move.sh registry-setup  once, by the owner: Artifact Registry faoj, GitHub's keyless
 #                                     push (faoj-ci) and the VM's pull, after OCIR went free tier
-#   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's image digest, detached;
-#                                     GCP_APPROVAL="who/when approved" goes into the release record
+#   deploy/gcp-move.sh backup-setup   once, by the owner: backups to Cloud Storage after OCI Object
+#                                     Storage filled up (20 Nov 2026); bucket, and the VM may write
+#                                     to it (a 2-3 minute stop)
+#   deploy/gcp-move.sh deploy IMG [--restore-point dump]  `faoj deploy` the Release workflow's image
+#                                     digest, detached; GCP_APPROVAL="who/when approved" goes into
+#                                     the release record
 #   deploy/gcp-move.sh status         faoj status and /health/ready/
 #   deploy/gcp-move.sh line-menu      publish the Rich Menu from the running release, nothing else
 #   deploy/gcp-move.sh manage CMD...  one manage.py command in the migrate service
@@ -149,6 +153,80 @@ registry_setup() {  # once; IAM changes, so the owner runs it
   gh variable set GCP_CI_SERVICE_ACCOUNT --repo "$GITHUB_REPO" --body "$CI_SA"
   say "ready; IAM takes a minute or two, then re-run the Release workflow"
 }
+# OCI Object Storage refused every upload from 20 Nov 2026 08:03Z (StorageLimitExceeded: the
+# tenancy's 20 GB Always Free), so WAL and backups stopped. They move to Cloud Storage in this
+# project, written as the VM's own service account through the metadata server. A key file was the
+# first plan, but the project's policy forbids service account keys
+# (iam.disableServiceAccountKeyCreation); so the VM's scopes change from Storage read-only to
+# read-write, which Google only allows on a stopped VM. IAM still limits the account to this
+# bucket and the faoj registry.
+BACKUP_BUCKET=${GCP_BACKUP_BUCKET:-$PROJECT-faoj-backup}
+backup_setup() {  # once; IAM changes and a 2-3 minute stop of the VM, so the owner runs it
+  trap 'gcloud auth revoke --all --quiet >/dev/null 2>&1' EXIT
+  gcloud auth login "$ACCOUNT" --force --brief
+  local vm_sa scopes role
+  vm_sa=$(gcloud compute instances describe "$VM" --project "$PROJECT" --zone "$ZONE" --format='value(serviceAccounts[0].email)')
+  say "bucket gs://$BACKUP_BUCKET in asia-southeast3, private; $vm_sa writes to it"
+  gcloud services enable storage.googleapis.com --project "$PROJECT" --quiet
+  gcloud storage buckets describe "gs://$BACKUP_BUCKET" --project "$PROJECT" >/dev/null 2>&1 \
+    || gcloud storage buckets create "gs://$BACKUP_BUCKET" --project "$PROJECT" --location asia-southeast3 \
+         --default-storage-class STANDARD --uniform-bucket-level-access --public-access-prevention --quiet
+  # restic looks the bucket up (storage.buckets.get) before init, which objectAdmin lacks.
+  for role in roles/storage.objectAdmin roles/storage.legacyBucketReader; do
+    gcloud storage buckets add-iam-policy-binding "gs://$BACKUP_BUCKET" --project "$PROJECT" \
+      --member "serviceAccount:$vm_sa" --role "$role" --quiet >/dev/null
+  done
+  # The key-file plan's account (20 Nov 2026), never given a key: its grants and the account go.
+  local old=faoj-backup@$PROJECT.iam.gserviceaccount.com
+  if gcloud iam service-accounts describe "$old" --project "$PROJECT" >/dev/null 2>&1; then
+    for role in roles/storage.objectAdmin roles/storage.legacyBucketReader; do
+      gcloud storage buckets remove-iam-policy-binding "gs://$BACKUP_BUCKET" --project "$PROJECT" \
+        --member "serviceAccount:$old" --role "$role" --quiet >/dev/null 2>&1 || true
+    done
+    gcloud iam service-accounts delete "$old" --project "$PROJECT" --quiet
+  fi
+  scopes=$(gcloud compute instances describe "$VM" --project "$PROJECT" --zone "$ZONE" \
+             --format='value(serviceAccounts[0].scopes)' | tr ';,' '\n\n')
+  if grep -q -e devstorage.read_write -e devstorage.full_control -e auth/cloud-platform <<<"$scopes"; then
+    say "$VM already writes to Cloud Storage"
+  else
+    scopes="$(grep -v devstorage <<<"$scopes" | paste -sd, -),https://www.googleapis.com/auth/devstorage.read_write"
+    say "stopping $VM to let it write to Cloud Storage: production is down for 2-3 minutes"
+    gcloud compute instances stop "$VM" --project "$PROJECT" --zone "$ZONE" --quiet
+    gcloud compute instances set-service-account "$VM" --project "$PROJECT" --zone "$ZONE" \
+      --service-account "$vm_sa" --scopes "$scopes" --quiet
+    gcloud compute instances start "$VM" --project "$PROJECT" --zone "$ZONE" --quiet
+    # Every service restarts on its own (restart: unless-stopped; /srv/faoj mounts from fstab).
+    local n=0
+    until gcp_cmd "sudo faoj smoke" >/dev/null 2>&1; do
+      n=$((n + 1)); [ "$n" -lt 40 ] || die "$VM is up but 'faoj smoke' still fails after 10 minutes"
+      sleep 10
+    done
+    say "$VM is back; smoke ok"
+  fi
+  say "host settings: pgBackRest and restic to gs://$BACKUP_BUCKET (they take effect on the next deploy)"
+  lib <<EOF | gcp_root
+set_kv /srv/faoj/env/compose.env BACKUP_REPO_TYPE gcs
+set_kv /srv/faoj/env/compose.env BACKUP_GCS_BUCKET $BACKUP_BUCKET
+set_kv /srv/faoj/env/compose.env BACKUP_GCS_PROJECT $PROJECT
+set_kv /srv/faoj/env/backup.secret.env RESTIC_REPOSITORY gs:$BACKUP_BUCKET:/restic
+# The VM's token reaches the bucket from a container: list the (empty) pgBackRest repository with
+# this release's database image, then write and delete one object as the host.
+db_image=\$(sed -n 's/^DB_IMAGE=//p' "\$rel/release.env")
+docker run --rm --user postgres -e PGBACKREST_REPO1_TYPE=gcs -e PGBACKREST_REPO1_GCS_BUCKET=$BACKUP_BUCKET \
+  -e PGBACKREST_REPO1_GCS_KEY_TYPE=auto -e PGBACKREST_LOG_LEVEL_FILE=off \
+  --entrypoint pgbackrest "\$db_image" repo-ls >/dev/null
+token=\$(curl -sSf -H 'Metadata-Flavor: Google' \
+  http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -sSf -o /dev/null -H "Authorization: Bearer \$token" --data-binary ok \
+  "https://storage.googleapis.com/upload/storage/v1/b/$BACKUP_BUCKET/o?uploadType=media&name=setup-check"
+curl -sSf -o /dev/null -X DELETE -H "Authorization: Bearer \$token" \
+  "https://storage.googleapis.com/storage/v1/b/$BACKUP_BUCKET/o/setup-check"
+echo "$VM reads and writes gs://$BACKUP_BUCKET"
+EOF
+  say "ready. Next, signed in: GCP_APPROVAL=\"…\" deploy/gcp-move.sh deploy <app@sha256> --restore-point dump"
+}
 # Docker on the VM signs in to Artifact Registry with the VM's own hour-long metadata token.
 HOST_GAR_LOGIN="curl -sf -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"access_token\"])' | sudo docker login -u oauth2accesstoken --password-stdin https://$REGISTRY >/dev/null"
 signed_in() {
@@ -263,7 +341,12 @@ skeleton_config() {
 
 deploy() {
   image_arg "${1:-}"
-  local sha=${1##*@sha256:}; sha=${sha:0:12}
+  local sha=${1##*@sha256:} extra=""; sha=${sha:0:12}
+  case "${2:-}" in
+    "") ;;
+    --restore-point) [ "${3:-}" = dump ] || die "deploy IMG [--restore-point dump]"; extra=" --restore-point dump";;
+    *) die "deploy IMG [--restore-point dump]";;
+  esac
   say "faoj deploy $sha (detached; log /srv/faoj/run/deploy-$sha.log)"
   # systemd-run keeps the deploy alive when the IAP session drops (1 Nov 2026 on E5).
   on_gcp "set -e
@@ -277,7 +360,7 @@ deploy() {
     sudo systemd-run --unit faoj-deploy-$sha --setenv FAOJ_ROOT=/srv/faoj \
       --property StandardOutput=file:/srv/faoj/run/deploy-$sha.log \
       --property StandardError=file:/srv/faoj/run/deploy-$sha.log \
-      \$bin deploy '$1' --approval '$APPROVAL'"
+      \$bin deploy '$1' --approval '$APPROVAL'$extra"
   say "follow: deploy/gcp-move.sh ssh 'sudo tail -f /srv/faoj/run/deploy-$sha.log'"
 }
 
@@ -754,12 +837,13 @@ EOF
 }
 
 cmd=${1:-}; shift || true
-case "$cmd" in login|logout|deployer-setup|registry-setup|"") ;; *) signed_in;; esac
+case "$cmd" in login|logout|deployer-setup|registry-setup|backup-setup|"") ;; *) signed_in;; esac
 case "$cmd" in
   login) login;;
   logout) logout;;
   deployer-setup) deployer_setup;;
   registry-setup) registry_setup;;
+  backup-setup) backup_setup;;
   prepare) prepare;;
   pull-token) pull_token "$@";;
   ocir-login) ocir_login;;

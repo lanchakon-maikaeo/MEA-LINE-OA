@@ -71,6 +71,11 @@ services:
       PGBACKREST_REPO1_S3_URI_STYLE: path
       PGBACKREST_REPO1_STORAGE_VERIFY_TLS: ${BACKUP_S3_VERIFY_TLS:-y}
       PGBACKREST_REPO1_CIPHER_TYPE: aes-256-cbc
+      # BACKUP_REPO_TYPE=gcs (GCP, 20 Nov 2026, after OCI Object Storage filled up): Cloud Storage
+      # as the VM's own service account (metadata server; no key file, which the project's policy
+      # forbids). Each type ignores the other's options, so the S3 lines above stay for OCI hosts.
+      PGBACKREST_REPO1_GCS_BUCKET: ${BACKUP_GCS_BUCKET:-none}
+      PGBACKREST_REPO1_GCS_KEY_TYPE: auto
       PGBACKREST_REPO1_RETENTION_FULL: "2"
       PGBACKREST_REPO1_BUNDLE: "y"
       PGBACKREST_REPO1_BLOCK: "y"
@@ -270,6 +275,8 @@ services:
     environment:
       RESTIC_CACHE_DIR: /cache
       AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-none}
+      # A gs: RESTIC_REPOSITORY (GCP since 20 Nov 2026) signs in as the VM, like pgBackRest.
+      GOOGLE_PROJECT_ID: ${BACKUP_GCS_PROJECT:-none}
     volumes:
       - ${FAOJ_ROOT}/data/media:/backup/media:ro
       - ${FAOJ_ROOT}/data/n8n:/backup/n8n:ro

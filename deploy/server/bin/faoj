@@ -6,7 +6,7 @@
 # deploy never builds or edits files on the host. CI holds no host or database credentials; an
 # operator runs these commands on the host (over OCI Bastion) after recording the approval.
 #
-#   faoj deploy <image@sha256:…> [--approval "who/when/where approved"]
+#   faoj deploy <image@sha256:…> [--approval "who/when/where approved"] [--restore-point dump]
 #   faoj rollback [<image@sha256:…>]           previous release when omitted; no DB restore
 #   faoj install <image@sha256:…>              unpack a release and make it current, start nothing
 #                                              (the Mac standby, ADR 0015 Q9)
@@ -263,18 +263,40 @@ backup_fresh_or_first() {  # production: refuse to migrate without a recent back
   [ "$age" -le 93600 ] || die "last database backup is ${age}s old; run 'faoj backup diff' first"
 }
 
+# The restore point before a migration. It runs as an `if` condition, where set -e is off, so every
+# step chains; die here would exit before the caller puts the old release back.
+restore_point() {  # old release dir, pgbackrest|dump
+  [ "$FAOJ_ENV" = "production" ] || return 0
+  if [ "$2" = dump ]; then
+    say "restore point: database dump"
+    local f; f="$FAOJ_ROOT/data/dumps/$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$FAOJ_ROOT/data/dumps" \
+      && dc_in "$1" exec -T -u postgres db pg_dump -Fc faoj > "$f-faoj.dump" \
+      && dc_in "$1" exec -T -u postgres db pg_dump -Fc n8n > "$f-n8n.dump"
+  else
+    say "restore point: pgBackRest incremental backup"
+    dc_in "$1" exec -T -u postgres db pgbackrest backup --type=incr
+  fi
+}
+
 deploy() {
-  local image="" approval=""
+  local image="" approval="" point=${BACKUP_MODE:-pgbackrest}
   while [ $# -gt 0 ]; do
     case "$1" in
       --approval) approval=${2:-}; shift 2;;
+      # A local dump instead, for a deploy while the backup repository refuses writes (20 Nov 2026:
+      # OCI Object Storage full; the deploy that moved backups to Cloud Storage).
+      --restore-point) point=${2:-}; shift 2;;
       *) image=$1; shift;;
     esac
   done
   [ -n "$image" ] || die "deploy <image@sha256:…>"
+  case "$point" in pgbackrest|dump) ;; *) die "--restore-point pgbackrest|dump";; esac
   release_id "$image" >/dev/null
   [ "$FAOJ_ENV" != "production" ] || [ -n "$approval" ] || die "production needs --approval \"…\" (E.8 step 1)"
-  lock; preflight; image_room; backup_fresh_or_first
+  lock; preflight; image_room
+  # A dump is a fresh restore point of its own, so the repository's last backup does not matter.
+  [ "$point" = dump ] || backup_fresh_or_first
   local new old; new=$(install_bundle "$image"); old=$(current_dir)
   # A first install that failed midway left "current" without any "ok" release: there is nothing
   # to drain, back up or roll back to, and its containers may hold settings since corrected.
@@ -285,20 +307,24 @@ deploy() {
     maintenance on
     say "drain: stop claiming (n8n, worker)"
     dc_in "$old" stop -t 60 n8n worker || true
-    if [ "$FAOJ_ENV" = "production" ] && [ "${BACKUP_MODE:-pgbackrest}" = "dump" ]; then
-      # A host without Object Storage keys yet (the empty GCP skeleton, 2 Nov 2026).
-      say "restore point: database dump (BACKUP_MODE=dump)"
-      backup dump
-    elif [ "$FAOJ_ENV" = "production" ]; then
-      say "restore point: pgBackRest incremental backup"
-      dc_in "$old" exec -T -u postgres db pgbackrest backup --type=incr
+    if ! restore_point "$old" "$point"; then
+      # 20 Nov 2026: a failed backup ended the script here, and maintenance stayed on with n8n and
+      # the worker stopped for 16 minutes. Nothing has changed yet, so the old release goes on.
+      say "no restore point: $(basename "$old") carries on as before"
+      dc_in "$old" start n8n worker || true
+      maintenance off
+      record failed "$image" "$approval" "no restore point"
+      die "deploy stopped before any change: the restore point failed (log above)"
     fi
   fi
   ln -sfn "$new" "$RELEASES/current"
   dc_in "$new" up -d --wait db
   if [ "${BACKUP_MODE:-pgbackrest}" = "pgbackrest" ]; then
-    # Idempotent; WAL waits in pg_wal until the stanza exists, so create it before any write.
-    dc_in "$new" exec -T -u postgres db pgbackrest stanza-create --log-level-console=warn
+    # Idempotent; WAL waits in pg_wal until the stanza exists, so create it before any write. A
+    # repository that refuses it only delays the archive, so the deploy goes on rather than halt
+    # halfway with maintenance on.
+    dc_in "$new" exec -T -u postgres db pgbackrest stanza-create --log-level-console=warn \
+      || say "stanza-create failed: WAL waits in pg_wal until 'faoj backup stanza' succeeds"
   fi
   say "migrate (owner role, one job) and narrow runtime grants"
   if ! dc_in "$new" run --rm migrate; then
@@ -558,11 +584,22 @@ restore_drill() {
   # The production repository, read-only key: the restore and, during recovery, archive-get.
   local repo=(--env-file "$ENV_DIR/drill.secret.env"
     -e PGBACKREST_STANZA=faoj -e PGBACKREST_PG1_PATH=/var/lib/postgresql/data/pgdata
-    -e PGBACKREST_REPO1_TYPE=s3 -e PGBACKREST_REPO1_PATH="${DRILL_REPO_PATH:-/pgbackrest/$source}"
-    -e PGBACKREST_REPO1_S3_ENDPOINT="$BACKUP_S3_ENDPOINT" -e PGBACKREST_REPO1_S3_BUCKET="$BACKUP_DB_BUCKET"
-    -e PGBACKREST_REPO1_S3_REGION="$BACKUP_S3_REGION" -e PGBACKREST_REPO1_S3_URI_STYLE=path
-    -e PGBACKREST_REPO1_STORAGE_VERIFY_TLS="${BACKUP_S3_VERIFY_TLS:-y}" -e PGBACKREST_REPO1_CIPHER_TYPE=aes-256-cbc)
-  [ -f "$FAOJ_ROOT/tls/backup/ca.crt" ] && repo+=(-v "$FAOJ_ROOT/tls/backup/ca.crt:/run/faoj-backup-tls/ca.crt:ro" -e PGBACKREST_REPO1_STORAGE_CA_FILE=/run/faoj-backup-tls/ca.crt)
+    -e PGBACKREST_REPO1_PATH="${DRILL_REPO_PATH:-/pgbackrest/$source}" -e PGBACKREST_REPO1_CIPHER_TYPE=aes-256-cbc)
+  # Files: restic reads RESTIC_REPOSITORY from drill.secret.env; on Cloud Storage the bucket here wins.
+  local files=(--env-file "$ENV_DIR/drill.secret.env" -e AWS_DEFAULT_REGION="${BACKUP_S3_REGION:-none}")
+  if [ "${BACKUP_REPO_TYPE:-s3}" = gcs ]; then
+    # Cloud Storage (GCP since 20 Nov 2026): the drill runs on production's own host and reads as
+    # the VM's service account; archive-mode=off below keeps it from writing anything back.
+    repo+=(-e PGBACKREST_REPO1_TYPE=gcs -e PGBACKREST_REPO1_GCS_BUCKET="$BACKUP_GCS_BUCKET"
+      -e PGBACKREST_REPO1_GCS_KEY_TYPE=auto)
+    files+=(-e RESTIC_REPOSITORY="gs:$BACKUP_GCS_BUCKET:/restic" -e GOOGLE_PROJECT_ID="$BACKUP_GCS_PROJECT")
+  else
+    repo+=(-e PGBACKREST_REPO1_TYPE=s3
+      -e PGBACKREST_REPO1_S3_ENDPOINT="$BACKUP_S3_ENDPOINT" -e PGBACKREST_REPO1_S3_BUCKET="$BACKUP_DB_BUCKET"
+      -e PGBACKREST_REPO1_S3_REGION="$BACKUP_S3_REGION" -e PGBACKREST_REPO1_S3_URI_STYLE=path
+      -e PGBACKREST_REPO1_STORAGE_VERIFY_TLS="${BACKUP_S3_VERIFY_TLS:-y}")
+    [ -f "$FAOJ_ROOT/tls/backup/ca.crt" ] && repo+=(-v "$FAOJ_ROOT/tls/backup/ca.crt:/run/faoj-backup-tls/ca.crt:ro" -e PGBACKREST_REPO1_STORAGE_CA_FILE=/run/faoj-backup-tls/ca.crt)
+  fi
   docker run --rm "${repo[@]}" \
     -v "$drill/pg:/var/lib/postgresql/data" --user root --entrypoint sh "$db_image" -c \
     'install -d -o postgres -g postgres -m 700 /var/lib/postgresql/data/pgdata && su postgres -c "pgbackrest restore --archive-mode=off --log-level-console=warn"'
@@ -582,7 +619,7 @@ SELECT format('ALTER ROLE faoj_app PASSWORD %L', :'pw')\gexec
 SQL
   say "restore files (restic)"
   local rcafile=(); [ -f "$FAOJ_ROOT/tls/backup/ca.crt" ] && rcafile=(--cacert /run/faoj-backup-tls/ca.crt)
-  docker run --rm --env-file "$ENV_DIR/drill.secret.env" -e AWS_DEFAULT_REGION="$BACKUP_S3_REGION" \
+  docker run --rm "${files[@]}" \
     -v "$drill:/restore" -v "$FAOJ_ROOT/tls/backup:/run/faoj-backup-tls:ro" \
     restic/restic:0.18.1@sha256:39d9072fb5651c80d75c7a811612eb60b4c06b32ffe87c2e9f3c7222e1797e76 \
     "${rcafile[@]+"${rcafile[@]}"}" -o s3.bucket-lookup=path restore latest --host "${DRILL_HOST_TAG:-$source}" --target /restore/tree >/dev/null

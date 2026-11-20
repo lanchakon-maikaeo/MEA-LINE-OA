@@ -267,10 +267,10 @@ deploy/gcp-move.sh line-menu
 
 | งาน | เมื่อไร | ที่ไหน |
 |---|---|---|
-| WAL ของ Postgres | ตลอดเวลา | OCI Object Storage `/pgbackrest/production-gcp` |
+| WAL ของ Postgres | ตลอดเวลา | Cloud Storage `gs://mea-ded-center-line-oa-faoj-backup/pgbackrest/production-gcp` (ก่อน 20 พ.ย. 2569 อยู่ที่ OCI Object Storage) |
 | full backup | วันจันทร์ 03:00 | ที่เดียวกัน |
 | diff backup | วันอังคารถึงอาทิตย์ 03:00 | ที่เดียวกัน |
-| ไฟล์แนบและ n8n | ทุกวัน 03:30 | restic host `production-gcp` |
+| ไฟล์แนบและ n8n | ทุกวัน 03:30 | restic `gs://mea-ded-center-line-oa-faoj-backup/restic` host `production-gcp` |
 | standby บน Mac | ทุก 5 นาที | `~/faoj-standby` แจ้งเตือนบน Mac เมื่อตามหลังเกิน 15 นาที |
 | healthcheck บน Mac | ทุกนาที | ตรวจ `34-15-129-131.sslip.io` และ LINE webhook ล้มติดกัน 3 ครั้งจะแจ้งเตือนบน Mac |
 | สำเนานอก OCI | วันจันทร์ 09:00 | OneDrive โฟลเดอร์ `pgbackrest-production-gcp` และ `restic` |
@@ -301,6 +301,8 @@ files: last copy 2026-11-02 23:13
 ```
 
 บน GCP ตั้ง `METRICS_SINK=stdout` ไว้ metric จึงไม่ขึ้น OCI Monitoring และ alarm ของ OCI ไม่เห็นเครื่องนี้ การเตือนตอนนี้มีแค่งานบน Mac กับ UptimeRobot ถ้า Mac ปิดอยู่ จะเหลือแค่ UptimeRobot ส่วน `faoj quota-check` เป็นงบของ OCI และปิดไว้บนเครื่องนี้
+
+**ที่เก็บ backup (ADR 0043, 20 พ.ย. 2569):** pgBackRest และ restic เขียน Cloud Storage ในนามของ service account ของ VM ผ่าน metadata server โดยไม่มีไฟล์ key VM มี scope `devstorage.read_write` และ service account นี้มีสิทธิ์แค่ object ใน bucket นี้ ตั้งค่าด้วย `deploy/gcp-move.sh backup-setup` (เจ้าของรัน login ผ่านเบราว์เซอร์ ครั้งแรกหยุดเครื่อง 2 ถึง 3 นาที) ค่าบนเครื่องคือ `BACKUP_REPO_TYPE=gcs`, `BACKUP_GCS_BUCKET` และ `BACKUP_GCS_PROJECT` ใน `compose.env` กับ `RESTIC_REPOSITORY` ใน `backup.secret.env` standby และสำเนาบน OneDrive ยังอ่านจาก OCI จนกว่าจะแก้ `standby.sh` และ `backup-pull.sh`
 
 `faoj-restore-drill.timer` ปิดอยู่บน GCP การซ้อมกู้ต้องสั่งเอง (`sudo faoj restore-drill`) ระหว่างซ้อมระบบจะเข้า maintenance และหยุดชั่วคราว ครั้งล่าสุดวันที่ 2 พ.ย. ใช้เวลา 88 วินาที จึงควรซ้อมนอกเวลางาน
 
@@ -375,6 +377,7 @@ files: last copy 2026-11-02 23:13
 |---|---|---|
 | Mac แจ้งเตือนว่า standby ตามหลังเกิน 15 นาที | Mac ดึง WAL ไม่ได้ หรือ production ส่ง WAL ขึ้น OCI ไม่ได้ | ดู `deploy/standby.sh status` ก่อน ถ้าเน็ตของ Mac ปกติ ให้ดูว่า Postgres บนเครื่องส่ง WAL ผ่านไหมด้วย `deploy/gcp-move.sh ssh 'sudo docker logs --since 30m faoj-db-1 2>&1 \| grep -i archive \| tail'` |
 | Mac แจ้งเตือนว่าระบบล่ม | healthcheck ล้ม 3 ครั้งติดกัน | ดู `deploy/gcp-move.sh status` แล้วทำตาม RB01 ใน `PROJECT.md` ส่วน E.9 หน้าปิดปรับปรุง (503) ไม่นับเป็นล่ม |
+| deploy หยุดที่ `restore point` และ log มี `was not archived before the 60000ms timeout` หรือ `StorageLimitExceeded` | ที่เก็บ backup ไม่รับการเขียน deploy คืนรุ่นเดิมให้เอง (maintenance ปิด, n8n กับ worker กลับมา) | ดู `pg_stat_archiver` ด้วย `deploy/gcp-move.sh ssh 'sudo docker exec -u postgres faoj-db-1 psql -d postgres -Atc "select last_archived_time, failed_count, last_failed_time from pg_stat_archiver"'` แก้ที่เก็บก่อน ถ้าต้อง deploy ระหว่างนั้น ใช้ `deploy/gcp-move.sh deploy <digest> --restore-point dump` ซึ่งทำ pg_dump บนเครื่องแทน และไม่ตรวจอายุ backup ใน pgBackRest |
 | `last database backup` เกิน 26 ชั่วโมง | backup คืนที่ผ่านมาไม่สำเร็จ | ดู `deploy/gcp-move.sh ssh 'systemctl status faoj-backup-diff'` แล้วรัน `sudo faoj backup diff` เอง |
 
 ## เมื่อต้องย้ายออกจาก GCP

@@ -106,7 +106,9 @@ class SkeletonDeployTests(SimpleTestCase):
         # The empty GCP skeleton has no Object Storage keys: its deploys take a dump instead.
         faoj = (Path(settings.BASE_DIR) / "deploy/server/bin/faoj").read_text()
         deploy = faoj[faoj.index("\ndeploy() {") :]
-        deploy = deploy[: deploy.index("\n}\n")]
-        dump, incr = deploy.index("backup dump"), deploy.index("pgbackrest backup --type=incr")
-        self.assertIn('"${BACKUP_MODE:-pgbackrest}" = "dump"', deploy[:dump])
+        self.assertIn("point=${BACKUP_MODE:-pgbackrest}", deploy[: deploy.index("\n}\n")])
+        point = faoj[faoj.index("\nrestore_point() {") :]
+        point = point[: point.index("\n}\n")]
+        dump, incr = point.index("pg_dump -Fc faoj"), point.index("pgbackrest backup --type=incr")
+        self.assertIn('[ "$2" = dump ]', point[:dump])
         self.assertLess(dump, incr)

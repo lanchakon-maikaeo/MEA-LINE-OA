@@ -448,6 +448,108 @@ class PipelineTests(SimpleTestCase):
         self.assertLess(release.index('-t "$repo:main"'), release.index('exit "$status"'))
 
 
+class DeployRestorePointTests(SimpleTestCase):
+    """20 Nov 2026: a full backup repository failed the restore point and left production down."""
+
+    OLD, NEW = "a" * 64, "b" * 64
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = self.root = Path(self.tmp.name)
+        for name in ("django.env", "app.secret.env", "migrate.secret.env", "db.secret.env"):
+            (root / "env").mkdir(exist_ok=True)
+            (root / "env" / name).write_text("")
+        (root / "env/n8n.secret.env").write_text("")
+        (root / "env/compose.env").write_text("FAOJ_ENV=production\nPUBLIC_HOST=example.test\n")
+        (root / "tls/db").mkdir(parents=True)
+        (root / "tls/db/server.key").write_text("")
+        releases = root / "releases"
+        for digest in (self.OLD, self.NEW):
+            (releases / digest[:12]).mkdir(parents=True)
+            (releases / digest[:12] / "release.env").write_text(f"APP_IMAGE={self.image(digest)}\n")
+        (releases / "current").symlink_to(releases / self.OLD[:12])
+        (releases / "history.jsonl").write_text(
+            json.dumps({"result": "ok", "app_image": self.image(self.OLD)}) + "\n"
+        )
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        python = bin_dir / "python3"  # the disk checks read this runner's disks: report room
+        python.write_text(
+            '#!/bin/sh\ncase "$*" in *disk_usage*) echo 50;; *) exec /usr/bin/python3 "$@";; esac\n'
+        )
+        python.chmod(0o755)
+        self.path = f"{bin_dir}:/usr/bin:/bin"
+
+    @staticmethod
+    def image(digest):
+        return f"registry.example/app@sha256:{digest}"
+
+    def deploy(self, *extra, fail=(), backup_age=0):
+        """Docker records every call and succeeds, except calls that contain a word in fail."""
+        cases = "".join(f'  *"{word}"*) exit 82;;\n' for word in fail)
+        info = '[{"backup": [{"timestamp": {"stop": %s}}]}]'  # the repository's last backup
+        docker = self.root / "bin/docker"
+        docker.write_text(
+            '#!/bin/sh\necho "$*" >> "$FAOJ_ROOT/docker.log"\ncase "$*" in\n'
+            f"{cases}"
+            f'  *"pgbackrest info"*) printf \'{info}\\n\' "$(($(date +%s) - {backup_age}))";;\n'
+            "esac\nexit 0\n"
+        )
+        docker.chmod(0o755)
+        result = subprocess.run(
+            ["bash", str(SERVER / "bin/faoj"), "deploy", self.image(self.NEW)]
+            + ["--approval", "owner in chat (test)", *extra],
+            env={"PATH": self.path, "FAOJ_ROOT": str(self.root), "USER": "operator1"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        log = self.root / "docker.log"
+        return result, log.read_text().splitlines() if log.exists() else []
+
+    def last_record(self):
+        return json.loads((self.root / "releases/history.jsonl").read_text().splitlines()[-1])
+
+    def test_a_failed_backup_puts_the_old_release_back_as_it_was(self):
+        result, calls = self.deploy(fail=["pgbackrest backup"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("the restore point failed", result.stderr)
+        backup = next(i for i, call in enumerate(calls) if "pgbackrest backup" in call)
+        self.assertTrue(any(call.endswith("start n8n worker") for call in calls[backup:]))
+        self.assertFalse((self.root / "run/maintenance").exists())
+        self.assertFalse((self.root / "run/deploy.lock").exists())
+        self.assertEqual((self.root / "releases/current").resolve().name, self.OLD[:12])
+        self.assertEqual(
+            (self.last_record()["result"], self.last_record()["note"]),
+            ("failed", "no restore point"),
+        )
+
+    def test_a_dump_restore_point_and_a_refused_stanza_do_not_stop_the_deploy(self):
+        result, calls = self.deploy(
+            "--restore-point", "dump", fail=["stanza-create", "run --rm migrate"]
+        )
+        self.assertFalse(any("pgbackrest backup" in call for call in calls))
+        self.assertEqual(len([call for call in calls if "pg_dump -Fc" in call]), 2)
+        self.assertEqual(len(list((self.root / "data/dumps").glob("*.dump"))), 2)
+        self.assertIn("stanza-create failed", result.stderr)
+        self.assertTrue(any("run --rm migrate" in call for call in calls))  # it went on
+        self.assertIn("migration failed", result.stderr)
+
+    def test_a_dump_restore_point_stands_in_for_a_stale_repository(self):
+        result, calls = self.deploy(backup_age=200000)
+        self.assertIn("last database backup is", result.stderr)
+        self.assertFalse(any("pgbackrest backup" in call for call in calls))
+        _, calls = self.deploy(
+            "--restore-point", "dump", backup_age=200000, fail=["run --rm migrate"]
+        )
+        self.assertEqual(len([call for call in calls if "pg_dump -Fc" in call]), 2)
+
+    def test_restore_point_is_checked(self):
+        result, _ = self.deploy("--restore-point", "snapshot")
+        self.assertIn("--restore-point pgbackrest|dump", result.stderr)
+
+
 class AutoDeployTests(SimpleTestCase):
     """Option ข: off until an operator switches staging on with a reason; never on production."""
 
