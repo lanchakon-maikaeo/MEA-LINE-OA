@@ -172,9 +172,15 @@ backup_setup() {  # once (again to replace the key); IAM changes and a key, so t
     || gcloud iam service-accounts create faoj-backup --project "$PROJECT" \
          --display-name "pgBackRest and restic on $VM: objects in gs://$BACKUP_BUCKET only"
   # restic looks the bucket up (storage.buckets.get) before init, which objectAdmin lacks.
+  # A service account just created reads "does not exist" to Cloud Storage for a while (20 Nov 2026).
+  local role try
   for role in roles/storage.objectAdmin roles/storage.legacyBucketReader; do
-    gcloud storage buckets add-iam-policy-binding "gs://$BACKUP_BUCKET" --project "$PROJECT" \
-      --member "serviceAccount:$BACKUP_SA" --role "$role" --quiet >/dev/null
+    try=0
+    until gcloud storage buckets add-iam-policy-binding "gs://$BACKUP_BUCKET" --project "$PROJECT" \
+            --member "serviceAccount:$BACKUP_SA" --role "$role" --quiet >/dev/null; do
+      try=$((try + 1)); [ "$try" -lt 12 ] || die "Cloud Storage still does not see $BACKUP_SA; run backup-setup again"
+      say "waiting for IAM to show faoj-backup to Cloud Storage ($try)"; sleep 10
+    done
   done
   say "a new key for faoj-backup, straight onto $VM"
   gcloud iam service-accounts keys create "$tmp/key.json" --iam-account "$BACKUP_SA" --project "$PROJECT" --quiet
