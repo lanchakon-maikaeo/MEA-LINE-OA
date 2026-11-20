@@ -237,7 +237,7 @@ services:
   # ADR 0015 (Q2): the ngrok static domain follows production from host to host, so LINE's
   # webhook URL never changes. Only one agent may hold the domain: stop it on the old host first.
   ngrok:
-    image: ngrok/ngrok:3@sha256:14d80d083e5b53145f416bbbd36238336c9de4016c43fd950eb2eb845670583b
+    image: ngrok/ngrok:3@sha256:ff3b5c3674432d14a786349908b7bdf28ee56c25662637afcbe7180d471993ef
     env_file:
       - ${FAOJ_ROOT}/env/ngrok.secret.env
     command: ["http", "--url=${NGROK_DOMAIN:-none}", "http://caddy:8081", "--log=stdout", "--log-format=logfmt"]
