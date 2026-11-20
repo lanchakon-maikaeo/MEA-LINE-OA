@@ -142,6 +142,32 @@ class BroadcastDraftTests(TestCase):
                 self.assertEqual(bubble["hero"]["action"]["uri"], card["link"])
                 [button] = bubble["footer"]["contents"]
                 self.assertEqual(button["action"]["uri"], card["link"])
+                # Saved before the admin could name or hide the button.
+                self.assertEqual(button["action"]["label"], "ดูรายละเอียด")
+
+    def test_picture_button_is_named_or_left_out_by_the_admin(self):
+        card = {
+            "kind": "click_image",
+            "title": "สำรวจอุปกรณ์เก่ารอส่งคืน ฝอจ.",
+            "url": "https://example.com/poster.png",
+            "link": "https://example.com/form",
+        }
+        named = {**card, "show_button": True, "button_label": "คลิกส่งข้อมูล"}
+        [button] = broadcasts.build_messages(named)[0]["contents"]["footer"]["contents"]
+        self.assertEqual(
+            button["action"], {"type": "uri", "label": "คลิกส่งข้อมูล", "uri": card["link"]}
+        )
+
+        # No button: the picture alone opens the link, and the label typed earlier is ignored.
+        bubble = broadcasts.build_messages({**card, "show_button": False, "button_label": ""})[0][
+            "contents"
+        ]
+        self.assertNotIn("footer", bubble)
+        self.assertEqual(bubble["hero"]["action"]["uri"], card["link"])
+
+        for label in ["", "   ", "ก" * 41, None]:
+            with self.subTest(label=label), self.assertRaises(ValidationError):
+                broadcasts.build_messages({**card, "show_button": True, "button_label": label})
 
     def test_scheduled_edit_pauses_and_requires_confirmation_again(self):
         row = self.draft()

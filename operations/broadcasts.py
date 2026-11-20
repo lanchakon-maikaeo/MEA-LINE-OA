@@ -204,8 +204,11 @@ def build_messages(content):
                 raise ValidationError("กรุณาเลือกรูปภาพ")
             link = _url(content.get("link"))
             bubble["hero"]["action"] = {"type": "uri", "uri": link}
-            # The composer's preview shows this button under the picture, so LINE gets it too.
-            buttons = [{"label": "ดูรายละเอียด", "url": link}]
+            # The admin picks whether a button sits under the picture and what it says.
+            # Drafts saved before that choice existed carry neither key: "ดูรายละเอียด".
+            buttons = []
+            if content.get("show_button", True) is not False:
+                buttons = [{"label": content.get("button_label", "ดูรายละเอียด"), "url": link}]
         else:
             buttons = content.get("buttons", [])
             if not isinstance(buttons, list) or not 1 <= len(buttons) <= 3:
@@ -230,12 +233,13 @@ def build_messages(content):
                     },
                 }
             )
-        bubble["footer"] = {
-            "type": "box",
-            "layout": "vertical",
-            "spacing": "sm",
-            "contents": actions,
-        }
+        if actions:
+            bubble["footer"] = {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "contents": actions,
+            }
         return [{"type": "flex", "altText": title, "contents": bubble}]
     raise ValidationError("กรุณาเลือกรูปแบบข้อความ")
 

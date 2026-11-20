@@ -57,7 +57,9 @@
     }
     if (content.title) target.append(node('h3', content.title));
     if (!textFirst) target.append(node('p', content.text || (content.kind === 'text' ? 'ข้อความประกาศของท่านจะแสดงที่นี่' : '')));
-    const buttons = content.kind === 'click_image' ? [{label:'ดูรายละเอียด',url:content.link}] : content.buttons || [];
+    // A picture with a link: drafts saved before the button choice existed show "ดูรายละเอียด".
+    const clickButton = content.show_button === false ? [] : [{label:content.button_label ?? 'ดูรายละเอียด',url:content.link}];
+    const buttons = content.kind === 'click_image' ? clickButton : content.buttons || [];
     buttons.forEach(button => { if (safeUrl(button.url)) { const a = node('a',button.label); a.href = button.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; target.append(a); } });
   }
   function content() {
@@ -72,7 +74,7 @@
       const picture = $('preview-message').querySelector('img');
       if (picture?.naturalWidth && picture.src === safeUrl(c.url)) { c.width = picture.naturalWidth; c.height = picture.naturalHeight; }
     }
-    if (c.kind === 'click_image') c.link = $('link-url').value.trim();
+    if (c.kind === 'click_image') { c.link = $('link-url').value.trim(); c.show_button = $('show-button').checked; c.button_label = $('click-button-label').value; }
     if (c.kind === 'card') c.buttons = [...$('button-rows').children].map(row => ({label:row.querySelector('[data-label]').value,url:row.querySelector('[data-url]').value.trim()}));
     return c;
   }
@@ -92,6 +94,7 @@
     $('media-upload').accept = kind === 'video' ? 'video/mp4' : 'image/jpeg,image/png';
     $('media-fields').hidden = kind === 'text'; $('video-fields').hidden = kind !== 'video';
     $('card-fields').hidden = !['card','click_image'].includes(kind); $('card-buttons').hidden = kind !== 'card'; $('click-link-field').hidden = kind !== 'click_image';
+    $('click-button-fields').hidden = kind !== 'click_image'; $('click-label-field').hidden = !$('show-button').checked;
     $('segment-choice').hidden = document.querySelector('[name=audience]:checked').value !== 'segment';
     $('schedule-field').hidden = document.querySelector('[name=timing]:checked').value !== 'later';
     renderContent($('preview-message'),content());
@@ -110,7 +113,8 @@
     $('title').value = row?.title || ''; $('kind').value = c.kind; $('text').value = c.text || '';
     $('media-url').dataset.mediaId = c.media_id || ''; $('preview-url').dataset.mediaId = c.preview_id || ''; $('media-url').dataset.previewUrl = c.preview || '';
     $('media-url').value = c.url || ''; $('preview-url').value = c.preview || ''; $('card-title').value = c.title || '';
-    $('link-url').value = c.link || ''; $('button-rows').replaceChildren(); (c.buttons || [{label:'ดูรายละเอียด',url:''}]).forEach(addCardButton);
+    $('link-url').value = c.link || ''; $('show-button').checked = c.show_button !== false; $('click-button-label').value = c.button_label ?? 'ดูรายละเอียด';
+    $('button-rows').replaceChildren(); (c.buttons || [{label:'ดูรายละเอียด',url:''}]).forEach(addCardButton);
     document.querySelector(`[name=audience][value=${row?.audience || 'all'}]`).checked = true;
     if (row?.segment_id) $('segment').value = row.segment_id;
     if (row?.scheduled_at) {
