@@ -35,3 +35,14 @@ status: accepted
 - ซ้อมกู้ผ่านสองรอบ รอบล่าสุด RTO 88 วินาที
 - `gcp-move.sh staff-proxy`, `manage` และ `line-menu` ส่วน `standby.sh`, `backup-pull.sh` และ `healthcheck.sh` ตามเครื่อง GCP แล้ว
 - release record สองรุ่นแรกหลังย้าย (`79d3c22` และ `86cfdc5`) บันทึก approval เป็นข้อความของระยะขึ้นโครง เพราะค่า default ของ `GCP_APPROVAL` ยังเป็นของระยะนั้น แก้ค่า default แล้ว บันทึกเดิมไม่แก้ย้อนหลัง
+
+## Backup ย้ายไป Cloud Storage (20 พ.ย. 2569)
+
+ตั้งแต่ 15:03 น. ของวันที่ 20 พ.ย. OCI Object Storage ปฏิเสธการเขียนทุกครั้งด้วย `StorageLimitExceeded` เพราะ tenancy เหลือแค่ Always Free ซึ่งมีที่ 20 GB รวม OCIR และ restic WAL จึงค้างใน `pg_wal` (ฐานข้อมูล 116 MB แต่สร้าง WAL ราว 13 GB ต่อวัน) และกู้ถึงจุดเวลาได้แค่ 15:03 น. การเตือนเรื่องโควตา (`faoj quota-check` ที่ 16 GB) ต้องใช้ instance principal ของ OCI ซึ่งเครื่อง GCP ไม่มี จึงไม่มีอะไรเตือนก่อนเต็ม ตอน 18:54 น. deploy PR #61 ล้มที่ขั้นทำจุดกู้คืน script ออกโดยไม่ปิด maintenance และไม่เปิด n8n กับ worker คืน ระบบจึงหยุดรับงาน 16 นาทีจนเจ้าของรันคำสั่งกู้เอง เจ้าของสั่งให้ย้าย backup ไป GCP และลบ OCI ทั้งหมดหลังจากนั้น
+
+- **ที่เก็บ:** bucket `mea-ded-center-line-oa-faoj-backup` ใน `asia-southeast3` (กรุงเทพฯ) แบบ private ทั้ง bucket ค่าใช้จ่ายหักจากเครดิต Free Trial pgBackRest ใช้ path เดิม `/pgbackrest/production-gcp` (`BACKUP_REPO_TYPE=gcs`) restic ใช้ `gs:<bucket>:/restic` และ host tag เดิม
+- **สิทธิ์:** VM ได้ scope `devstorage.read_only` ซึ่งเปลี่ยนได้เฉพาะตอนหยุดเครื่อง เจ้าของเลือกไม่หยุดเครื่อง จึงใช้ key ของ service account `faoj-backup` ที่มีแค่ `storage.objectAdmin` กับ `storage.legacyBucketReader` บน bucket นี้ (restic ต้องอ่านข้อมูล bucket ก่อน init) key อยู่ที่ `/srv/faoj/gcs/faoj-backup.json` (root:999, 0640) `deploy/gcp-move.sh backup-setup` ที่เจ้าของรันสร้างทุกอย่าง ส่ง key จาก Google ไปที่เครื่องโดยไม่ค้างบน Mac ลบ key เก่าของบัญชีนี้ ตั้งค่าบนเครื่อง และลองอ่าน bucket จากเครื่อง รันซ้ำเพื่อหมุน key ได้
+- **deploy ที่สลับ:** container ของฐานข้อมูลรุ่นเดิมยังชี้ไป OCI จุดกู้คืนก่อน migrate จึงใช้ `--restore-point dump` (pg_dump บนดิสก์ของเครื่อง) ครั้งเดียว dump ที่ทำก่อน migrate เป็นจุดกู้คืนที่ใหม่อยู่แล้ว การ deploy แบบนี้จึงไม่ตรวจอายุ backup ล่าสุดใน pgBackRest (backup ล่าสุดบน OCI คือ 19 พ.ย. 20:12Z ซึ่งจะเกิน 26 ชั่วโมง) container รุ่นใหม่สร้าง stanza ใน Cloud Storage แล้วส่ง WAL ที่ค้างขึ้นไป จากนั้นทำ full backup และ backup ไฟล์ทันที
+- **`faoj deploy`:** ถ้าทำจุดกู้คืนไม่ได้ จะเปิด n8n กับ worker คืน ปิด maintenance บันทึกว่า failed แล้วหยุด โดยยังไม่เปลี่ยนอะไร ถ้า stanza-create ล้มหลังสลับรุ่นแล้ว deploy ทำต่อ เพราะ WAL รอใน `pg_wal` ได้ ดีกว่าค้างครึ่งทางในโหมด maintenance
+- **ซ้อมกู้:** `faoj restore-drill` อ่านจาก Cloud Storage เมื่อ `BACKUP_REPO_TYPE=gcs` ต้องซ้อมกู้ผ่านก่อนลบ OCI
+- **ยังต้องทำ:** `standby.sh` และ `backup-pull.sh` บน Mac ยังอ่านจาก OCI จึงหยุดได้ข้อมูลใหม่ตั้งแต่ 15:03 น. ต้องเปลี่ยนให้อ่าน Cloud Storage ก่อนลบ OCI backup อยู่ผู้ให้บริการเดียวกับ production สำเนานอก GCP จึงเหลือแค่สำเนาบน OneDrive ของ `backup-pull.sh`

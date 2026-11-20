@@ -8,8 +8,11 @@
 #   deploy/gcp-move.sh deployer-setup  once, by the owner: the faoj-deployer service account
 #   deploy/gcp-move.sh registry-setup  once, by the owner: Artifact Registry faoj, GitHub's keyless
 #                                     push (faoj-ci) and the VM's pull, after OCIR went free tier
-#   deploy/gcp-move.sh deploy IMG     `faoj deploy` the Release workflow's image digest, detached;
-#                                     GCP_APPROVAL="who/when approved" goes into the release record
+#   deploy/gcp-move.sh backup-setup   once, by the owner: backups to Cloud Storage after OCI Object
+#                                     Storage filled up (20 Nov 2026); bucket, faoj-backup and its key
+#   deploy/gcp-move.sh deploy IMG [--restore-point dump]  `faoj deploy` the Release workflow's image
+#                                     digest, detached; GCP_APPROVAL="who/when approved" goes into
+#                                     the release record
 #   deploy/gcp-move.sh status         faoj status and /health/ready/
 #   deploy/gcp-move.sh line-menu      publish the Rich Menu from the running release, nothing else
 #   deploy/gcp-move.sh manage CMD...  one manage.py command in the migrate service
@@ -149,6 +152,59 @@ registry_setup() {  # once; IAM changes, so the owner runs it
   gh variable set GCP_CI_SERVICE_ACCOUNT --repo "$GITHUB_REPO" --body "$CI_SA"
   say "ready; IAM takes a minute or two, then re-run the Release workflow"
 }
+# OCI Object Storage refused every upload from 20 Nov 2026 08:03Z (StorageLimitExceeded: the
+# tenancy's 20 GB Always Free), so WAL and backups stopped. They move to Cloud Storage in this
+# project. The VM's scopes only read Storage and changing them means stopping it, so pgBackRest and
+# restic sign in with a key of faoj-backup, which reaches the objects of this one bucket and nothing
+# else. The key goes from Google to the host; on this Mac it lives seconds in a private temp folder.
+BACKUP_BUCKET=${GCP_BACKUP_BUCKET:-$PROJECT-faoj-backup}
+BACKUP_SA=faoj-backup@$PROJECT.iam.gserviceaccount.com
+backup_setup() {  # once (again to replace the key); IAM changes and a key, so the owner runs it
+  local tmp; tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"; gcloud auth revoke --all --quiet >/dev/null 2>&1' EXIT
+  gcloud auth login "$ACCOUNT" --force --brief
+  say "bucket gs://$BACKUP_BUCKET in asia-southeast3, private"
+  gcloud services enable storage.googleapis.com iam.googleapis.com --project "$PROJECT" --quiet
+  gcloud storage buckets describe "gs://$BACKUP_BUCKET" --project "$PROJECT" >/dev/null 2>&1 \
+    || gcloud storage buckets create "gs://$BACKUP_BUCKET" --project "$PROJECT" --location asia-southeast3 \
+         --default-storage-class STANDARD --uniform-bucket-level-access --public-access-prevention --quiet
+  gcloud iam service-accounts describe "$BACKUP_SA" --project "$PROJECT" >/dev/null 2>&1 \
+    || gcloud iam service-accounts create faoj-backup --project "$PROJECT" \
+         --display-name "pgBackRest and restic on $VM: objects in gs://$BACKUP_BUCKET only"
+  # restic looks the bucket up (storage.buckets.get) before init, which objectAdmin lacks.
+  for role in roles/storage.objectAdmin roles/storage.legacyBucketReader; do
+    gcloud storage buckets add-iam-policy-binding "gs://$BACKUP_BUCKET" --project "$PROJECT" \
+      --member "serviceAccount:$BACKUP_SA" --role "$role" --quiet >/dev/null
+  done
+  say "a new key for faoj-backup, straight onto $VM"
+  gcloud iam service-accounts keys create "$tmp/key.json" --iam-account "$BACKUP_SA" --project "$PROJECT" --quiet
+  local id; id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["private_key_id"])' "$tmp/key.json")
+  # The database container reads it as postgres (uid 999); restic runs as root.
+  gcp_cmd "sudo install -d -m 0750 -o root -g 999 /srv/faoj/gcs && sudo install -m 0640 -o root -g 999 /dev/stdin /srv/faoj/gcs/faoj-backup.json" \
+    < "$tmp/key.json"
+  rm -rf "$tmp"
+  local old
+  for old in $(gcloud iam service-accounts keys list --iam-account "$BACKUP_SA" --project "$PROJECT" \
+                 --managed-by user --format='value(name.basename())'); do
+    [ "$old" = "$id" ] || gcloud iam service-accounts keys delete "$old" --iam-account "$BACKUP_SA" \
+                            --project "$PROJECT" --quiet
+  done
+  say "host settings: pgBackRest and restic to gs://$BACKUP_BUCKET (they take effect on the next deploy)"
+  lib <<EOF | gcp_root
+set_kv /srv/faoj/env/compose.env BACKUP_REPO_TYPE gcs
+set_kv /srv/faoj/env/compose.env BACKUP_GCS_BUCKET $BACKUP_BUCKET
+set_kv /srv/faoj/env/compose.env BACKUP_GCS_PROJECT $PROJECT
+set_kv /srv/faoj/env/backup.secret.env RESTIC_REPOSITORY gs:$BACKUP_BUCKET:/restic
+# The key reaches the bucket: list the (empty) repository with this release's database image.
+db_image=\$(sed -n 's/^DB_IMAGE=//p' "\$rel/release.env")
+docker run --rm --user postgres -v /srv/faoj/gcs:/run/faoj-gcs:ro \
+  -e PGBACKREST_REPO1_TYPE=gcs -e PGBACKREST_REPO1_GCS_BUCKET=$BACKUP_BUCKET \
+  -e PGBACKREST_REPO1_GCS_KEY_TYPE=service -e PGBACKREST_REPO1_GCS_KEY=/run/faoj-gcs/faoj-backup.json \
+  -e PGBACKREST_LOG_LEVEL_FILE=off --entrypoint pgbackrest "\$db_image" repo-ls >/dev/null
+echo "faoj-backup can list gs://$BACKUP_BUCKET from the host"
+EOF
+  say "ready. Next, signed in: GCP_APPROVAL=\"…\" deploy/gcp-move.sh deploy <app@sha256> --restore-point dump"
+}
 # Docker on the VM signs in to Artifact Registry with the VM's own hour-long metadata token.
 HOST_GAR_LOGIN="curl -sf -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"access_token\"])' | sudo docker login -u oauth2accesstoken --password-stdin https://$REGISTRY >/dev/null"
 signed_in() {
@@ -263,7 +319,12 @@ skeleton_config() {
 
 deploy() {
   image_arg "${1:-}"
-  local sha=${1##*@sha256:}; sha=${sha:0:12}
+  local sha=${1##*@sha256:} extra=""; sha=${sha:0:12}
+  case "${2:-}" in
+    "") ;;
+    --restore-point) [ "${3:-}" = dump ] || die "deploy IMG [--restore-point dump]"; extra=" --restore-point dump";;
+    *) die "deploy IMG [--restore-point dump]";;
+  esac
   say "faoj deploy $sha (detached; log /srv/faoj/run/deploy-$sha.log)"
   # systemd-run keeps the deploy alive when the IAP session drops (1 Nov 2026 on E5).
   on_gcp "set -e
@@ -277,7 +338,7 @@ deploy() {
     sudo systemd-run --unit faoj-deploy-$sha --setenv FAOJ_ROOT=/srv/faoj \
       --property StandardOutput=file:/srv/faoj/run/deploy-$sha.log \
       --property StandardError=file:/srv/faoj/run/deploy-$sha.log \
-      \$bin deploy '$1' --approval '$APPROVAL'"
+      \$bin deploy '$1' --approval '$APPROVAL'$extra"
   say "follow: deploy/gcp-move.sh ssh 'sudo tail -f /srv/faoj/run/deploy-$sha.log'"
 }
 
@@ -754,12 +815,13 @@ EOF
 }
 
 cmd=${1:-}; shift || true
-case "$cmd" in login|logout|deployer-setup|registry-setup|"") ;; *) signed_in;; esac
+case "$cmd" in login|logout|deployer-setup|registry-setup|backup-setup|"") ;; *) signed_in;; esac
 case "$cmd" in
   login) login;;
   logout) logout;;
   deployer-setup) deployer_setup;;
   registry-setup) registry_setup;;
+  backup-setup) backup_setup;;
   prepare) prepare;;
   pull-token) pull_token "$@";;
   ocir-login) ocir_login;;

@@ -93,6 +93,10 @@ BACKUP_S3_ENDPOINT=
 BACKUP_S3_REGION=ap-singapore-1
 BACKUP_DB_BUCKET=faoj-backup
 BACKUP_S3_VERIFY_TLS=y
+# s3 (above) or gcs: Cloud Storage with \$FAOJ_ROOT/gcs/faoj-backup.json (gcp-move.sh backup-setup).
+BACKUP_REPO_TYPE=s3
+BACKUP_GCS_BUCKET=
+BACKUP_GCS_PROJECT=
 DRILL_SOURCE_ENV=production
 # pgBackRest path; empty means /pgbackrest/\$FAOJ_ENV (DRILL_REPO_PATH likewise for the drill source).
 BACKUP_REPO_PATH=
