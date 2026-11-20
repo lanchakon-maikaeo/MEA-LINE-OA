@@ -588,13 +588,11 @@ restore_drill() {
   # Files: restic reads RESTIC_REPOSITORY from drill.secret.env; on Cloud Storage the bucket here wins.
   local files=(--env-file "$ENV_DIR/drill.secret.env" -e AWS_DEFAULT_REGION="${BACKUP_S3_REGION:-none}")
   if [ "${BACKUP_REPO_TYPE:-s3}" = gcs ]; then
-    # Cloud Storage (GCP since 20 Nov 2026): the drill runs on production's own host and reads
-    # with faoj-backup's key; archive-mode=off below keeps it from writing anything back.
+    # Cloud Storage (GCP since 20 Nov 2026): the drill runs on production's own host and reads as
+    # the VM's service account; archive-mode=off below keeps it from writing anything back.
     repo+=(-e PGBACKREST_REPO1_TYPE=gcs -e PGBACKREST_REPO1_GCS_BUCKET="$BACKUP_GCS_BUCKET"
-      -e PGBACKREST_REPO1_GCS_KEY_TYPE=service -e PGBACKREST_REPO1_GCS_KEY=/run/faoj-gcs/faoj-backup.json
-      -v "$FAOJ_ROOT/gcs:/run/faoj-gcs:ro")
-    files+=(-e RESTIC_REPOSITORY="gs:$BACKUP_GCS_BUCKET:/restic" -e GOOGLE_PROJECT_ID="$BACKUP_GCS_PROJECT"
-      -e GOOGLE_APPLICATION_CREDENTIALS=/run/faoj-gcs/faoj-backup.json -v "$FAOJ_ROOT/gcs:/run/faoj-gcs:ro")
+      -e PGBACKREST_REPO1_GCS_KEY_TYPE=auto)
+    files+=(-e RESTIC_REPOSITORY="gs:$BACKUP_GCS_BUCKET:/restic" -e GOOGLE_PROJECT_ID="$BACKUP_GCS_PROJECT")
   else
     repo+=(-e PGBACKREST_REPO1_TYPE=s3
       -e PGBACKREST_REPO1_S3_ENDPOINT="$BACKUP_S3_ENDPOINT" -e PGBACKREST_REPO1_S3_BUCKET="$BACKUP_DB_BUCKET"

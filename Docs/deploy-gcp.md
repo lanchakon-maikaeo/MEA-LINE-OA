@@ -302,7 +302,7 @@ files: last copy 2026-11-02 23:13
 
 บน GCP ตั้ง `METRICS_SINK=stdout` ไว้ metric จึงไม่ขึ้น OCI Monitoring และ alarm ของ OCI ไม่เห็นเครื่องนี้ การเตือนตอนนี้มีแค่งานบน Mac กับ UptimeRobot ถ้า Mac ปิดอยู่ จะเหลือแค่ UptimeRobot ส่วน `faoj quota-check` เป็นงบของ OCI และปิดไว้บนเครื่องนี้
 
-**ที่เก็บ backup (ADR 0043, 20 พ.ย. 2569):** pgBackRest และ restic เข้า Cloud Storage ด้วย key ของ `faoj-backup` ที่ `/srv/faoj/gcs/faoj-backup.json` ซึ่งแตะได้แค่ object ใน bucket นี้ ตั้งหรือหมุน key ด้วย `deploy/gcp-move.sh backup-setup` (เจ้าของรัน login ผ่านเบราว์เซอร์) ค่าบนเครื่องคือ `BACKUP_REPO_TYPE=gcs`, `BACKUP_GCS_BUCKET` และ `BACKUP_GCS_PROJECT` ใน `compose.env` กับ `RESTIC_REPOSITORY` ใน `backup.secret.env` standby และสำเนาบน OneDrive ยังอ่านจาก OCI จนกว่าจะแก้ `standby.sh` และ `backup-pull.sh`
+**ที่เก็บ backup (ADR 0043, 20 พ.ย. 2569):** pgBackRest และ restic เขียน Cloud Storage ในนามของ service account ของ VM ผ่าน metadata server โดยไม่มีไฟล์ key VM มี scope `devstorage.read_write` และ service account นี้มีสิทธิ์แค่ object ใน bucket นี้ ตั้งค่าด้วย `deploy/gcp-move.sh backup-setup` (เจ้าของรัน login ผ่านเบราว์เซอร์ ครั้งแรกหยุดเครื่อง 2 ถึง 3 นาที) ค่าบนเครื่องคือ `BACKUP_REPO_TYPE=gcs`, `BACKUP_GCS_BUCKET` และ `BACKUP_GCS_PROJECT` ใน `compose.env` กับ `RESTIC_REPOSITORY` ใน `backup.secret.env` standby และสำเนาบน OneDrive ยังอ่านจาก OCI จนกว่าจะแก้ `standby.sh` และ `backup-pull.sh`
 
 `faoj-restore-drill.timer` ปิดอยู่บน GCP การซ้อมกู้ต้องสั่งเอง (`sudo faoj restore-drill`) ระหว่างซ้อมระบบจะเข้า maintenance และหยุดชั่วคราว ครั้งล่าสุดวันที่ 2 พ.ย. ใช้เวลา 88 วินาที จึงควรซ้อมนอกเวลางาน
 

@@ -9,7 +9,8 @@
 #   deploy/gcp-move.sh registry-setup  once, by the owner: Artifact Registry faoj, GitHub's keyless
 #                                     push (faoj-ci) and the VM's pull, after OCIR went free tier
 #   deploy/gcp-move.sh backup-setup   once, by the owner: backups to Cloud Storage after OCI Object
-#                                     Storage filled up (20 Nov 2026); bucket, faoj-backup and its key
+#                                     Storage filled up (20 Nov 2026); bucket, and the VM may write
+#                                     to it (a 2-3 minute stop)
 #   deploy/gcp-move.sh deploy IMG [--restore-point dump]  `faoj deploy` the Release workflow's image
 #                                     digest, detached; GCP_APPROVAL="who/when approved" goes into
 #                                     the release record
@@ -154,60 +155,75 @@ registry_setup() {  # once; IAM changes, so the owner runs it
 }
 # OCI Object Storage refused every upload from 20 Nov 2026 08:03Z (StorageLimitExceeded: the
 # tenancy's 20 GB Always Free), so WAL and backups stopped. They move to Cloud Storage in this
-# project. The VM's scopes only read Storage and changing them means stopping it, so pgBackRest and
-# restic sign in with a key of faoj-backup, which reaches the objects of this one bucket and nothing
-# else. The key goes from Google to the host; on this Mac it lives seconds in a private temp folder.
+# project, written as the VM's own service account through the metadata server. A key file was the
+# first plan, but the project's policy forbids service account keys
+# (iam.disableServiceAccountKeyCreation); so the VM's scopes change from Storage read-only to
+# read-write, which Google only allows on a stopped VM. IAM still limits the account to this
+# bucket and the faoj registry.
 BACKUP_BUCKET=${GCP_BACKUP_BUCKET:-$PROJECT-faoj-backup}
-BACKUP_SA=faoj-backup@$PROJECT.iam.gserviceaccount.com
-backup_setup() {  # once (again to replace the key); IAM changes and a key, so the owner runs it
-  local tmp; tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"; gcloud auth revoke --all --quiet >/dev/null 2>&1' EXIT
+backup_setup() {  # once; IAM changes and a 2-3 minute stop of the VM, so the owner runs it
+  trap 'gcloud auth revoke --all --quiet >/dev/null 2>&1' EXIT
   gcloud auth login "$ACCOUNT" --force --brief
-  say "bucket gs://$BACKUP_BUCKET in asia-southeast3, private"
-  gcloud services enable storage.googleapis.com iam.googleapis.com --project "$PROJECT" --quiet
+  local vm_sa scopes role
+  vm_sa=$(gcloud compute instances describe "$VM" --project "$PROJECT" --zone "$ZONE" --format='value(serviceAccounts[0].email)')
+  say "bucket gs://$BACKUP_BUCKET in asia-southeast3, private; $vm_sa writes to it"
+  gcloud services enable storage.googleapis.com --project "$PROJECT" --quiet
   gcloud storage buckets describe "gs://$BACKUP_BUCKET" --project "$PROJECT" >/dev/null 2>&1 \
     || gcloud storage buckets create "gs://$BACKUP_BUCKET" --project "$PROJECT" --location asia-southeast3 \
          --default-storage-class STANDARD --uniform-bucket-level-access --public-access-prevention --quiet
-  gcloud iam service-accounts describe "$BACKUP_SA" --project "$PROJECT" >/dev/null 2>&1 \
-    || gcloud iam service-accounts create faoj-backup --project "$PROJECT" \
-         --display-name "pgBackRest and restic on $VM: objects in gs://$BACKUP_BUCKET only"
   # restic looks the bucket up (storage.buckets.get) before init, which objectAdmin lacks.
-  # A service account just created reads "does not exist" to Cloud Storage for a while (20 Nov 2026).
-  local role try
   for role in roles/storage.objectAdmin roles/storage.legacyBucketReader; do
-    try=0
-    until gcloud storage buckets add-iam-policy-binding "gs://$BACKUP_BUCKET" --project "$PROJECT" \
-            --member "serviceAccount:$BACKUP_SA" --role "$role" --quiet >/dev/null; do
-      try=$((try + 1)); [ "$try" -lt 12 ] || die "Cloud Storage still does not see $BACKUP_SA; run backup-setup again"
-      say "waiting for IAM to show faoj-backup to Cloud Storage ($try)"; sleep 10
+    gcloud storage buckets add-iam-policy-binding "gs://$BACKUP_BUCKET" --project "$PROJECT" \
+      --member "serviceAccount:$vm_sa" --role "$role" --quiet >/dev/null
+  done
+  # The key-file plan's account (20 Nov 2026), never given a key: its grants and the account go.
+  local old=faoj-backup@$PROJECT.iam.gserviceaccount.com
+  if gcloud iam service-accounts describe "$old" --project "$PROJECT" >/dev/null 2>&1; then
+    for role in roles/storage.objectAdmin roles/storage.legacyBucketReader; do
+      gcloud storage buckets remove-iam-policy-binding "gs://$BACKUP_BUCKET" --project "$PROJECT" \
+        --member "serviceAccount:$old" --role "$role" --quiet >/dev/null 2>&1 || true
     done
-  done
-  say "a new key for faoj-backup, straight onto $VM"
-  gcloud iam service-accounts keys create "$tmp/key.json" --iam-account "$BACKUP_SA" --project "$PROJECT" --quiet
-  local id; id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["private_key_id"])' "$tmp/key.json")
-  # The database container reads it as postgres (uid 999); restic runs as root.
-  gcp_cmd "sudo install -d -m 0750 -o root -g 999 /srv/faoj/gcs && sudo install -m 0640 -o root -g 999 /dev/stdin /srv/faoj/gcs/faoj-backup.json" \
-    < "$tmp/key.json"
-  rm -rf "$tmp"
-  local old
-  for old in $(gcloud iam service-accounts keys list --iam-account "$BACKUP_SA" --project "$PROJECT" \
-                 --managed-by user --format='value(name.basename())'); do
-    [ "$old" = "$id" ] || gcloud iam service-accounts keys delete "$old" --iam-account "$BACKUP_SA" \
-                            --project "$PROJECT" --quiet
-  done
+    gcloud iam service-accounts delete "$old" --project "$PROJECT" --quiet
+  fi
+  scopes=$(gcloud compute instances describe "$VM" --project "$PROJECT" --zone "$ZONE" \
+             --format='value(serviceAccounts[0].scopes)' | tr ';,' '\n\n')
+  if grep -q -e devstorage.read_write -e devstorage.full_control -e auth/cloud-platform <<<"$scopes"; then
+    say "$VM already writes to Cloud Storage"
+  else
+    scopes="$(grep -v devstorage <<<"$scopes" | paste -sd, -),https://www.googleapis.com/auth/devstorage.read_write"
+    say "stopping $VM to let it write to Cloud Storage: production is down for 2-3 minutes"
+    gcloud compute instances stop "$VM" --project "$PROJECT" --zone "$ZONE" --quiet
+    gcloud compute instances set-service-account "$VM" --project "$PROJECT" --zone "$ZONE" \
+      --service-account "$vm_sa" --scopes "$scopes" --quiet
+    gcloud compute instances start "$VM" --project "$PROJECT" --zone "$ZONE" --quiet
+    # Every service restarts on its own (restart: unless-stopped; /srv/faoj mounts from fstab).
+    local n=0
+    until gcp_cmd "sudo faoj smoke" >/dev/null 2>&1; do
+      n=$((n + 1)); [ "$n" -lt 40 ] || die "$VM is up but 'faoj smoke' still fails after 10 minutes"
+      sleep 10
+    done
+    say "$VM is back; smoke ok"
+  fi
   say "host settings: pgBackRest and restic to gs://$BACKUP_BUCKET (they take effect on the next deploy)"
   lib <<EOF | gcp_root
 set_kv /srv/faoj/env/compose.env BACKUP_REPO_TYPE gcs
 set_kv /srv/faoj/env/compose.env BACKUP_GCS_BUCKET $BACKUP_BUCKET
 set_kv /srv/faoj/env/compose.env BACKUP_GCS_PROJECT $PROJECT
 set_kv /srv/faoj/env/backup.secret.env RESTIC_REPOSITORY gs:$BACKUP_BUCKET:/restic
-# The key reaches the bucket: list the (empty) repository with this release's database image.
+# The VM's token reaches the bucket from a container: list the (empty) pgBackRest repository with
+# this release's database image, then write and delete one object as the host.
 db_image=\$(sed -n 's/^DB_IMAGE=//p' "\$rel/release.env")
-docker run --rm --user postgres -v /srv/faoj/gcs:/run/faoj-gcs:ro \
-  -e PGBACKREST_REPO1_TYPE=gcs -e PGBACKREST_REPO1_GCS_BUCKET=$BACKUP_BUCKET \
-  -e PGBACKREST_REPO1_GCS_KEY_TYPE=service -e PGBACKREST_REPO1_GCS_KEY=/run/faoj-gcs/faoj-backup.json \
-  -e PGBACKREST_LOG_LEVEL_FILE=off --entrypoint pgbackrest "\$db_image" repo-ls >/dev/null
-echo "faoj-backup can list gs://$BACKUP_BUCKET from the host"
+docker run --rm --user postgres -e PGBACKREST_REPO1_TYPE=gcs -e PGBACKREST_REPO1_GCS_BUCKET=$BACKUP_BUCKET \
+  -e PGBACKREST_REPO1_GCS_KEY_TYPE=auto -e PGBACKREST_LOG_LEVEL_FILE=off \
+  --entrypoint pgbackrest "\$db_image" repo-ls >/dev/null
+token=\$(curl -sSf -H 'Metadata-Flavor: Google' \
+  http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+curl -sSf -o /dev/null -H "Authorization: Bearer \$token" --data-binary ok \
+  "https://storage.googleapis.com/upload/storage/v1/b/$BACKUP_BUCKET/o?uploadType=media&name=setup-check"
+curl -sSf -o /dev/null -X DELETE -H "Authorization: Bearer \$token" \
+  "https://storage.googleapis.com/storage/v1/b/$BACKUP_BUCKET/o/setup-check"
+echo "$VM reads and writes gs://$BACKUP_BUCKET"
 EOF
   say "ready. Next, signed in: GCP_APPROVAL=\"…\" deploy/gcp-move.sh deploy <app@sha256> --restore-point dump"
 }
