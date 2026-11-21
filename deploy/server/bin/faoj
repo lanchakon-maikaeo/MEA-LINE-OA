@@ -264,7 +264,8 @@ restore_point() {  # old release dir, pgbackrest|dump
       && dc_in "$1" exec -T -u postgres db pg_dump -Fc n8n > "$f-n8n.dump"
   else
     say "restore point: pgBackRest incremental backup"
-    dc_in "$1" exec -T -u postgres db pgbackrest backup --type=incr
+    # --start-fast: a checkpoint now, not at the next regular one (up to 5 min in maintenance).
+    dc_in "$1" exec -T -u postgres db pgbackrest backup --type=incr --start-fast
   fi
 }
 

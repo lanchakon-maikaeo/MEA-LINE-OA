@@ -422,6 +422,13 @@ class DeployRestorePointTests(SimpleTestCase):
         )
         self.assertEqual(len([call for call in calls if "pg_dump -Fc" in call]), 2)
 
+    def test_the_restore_point_backup_does_not_wait_for_a_checkpoint(self):
+        # 21 Nov 2026: waiting for the regular checkpoint kept maintenance on 3 of its 4.5 minutes.
+        _, calls = self.deploy(fail=["run --rm migrate"])
+        backup = [call for call in calls if "pgbackrest backup" in call]
+        self.assertEqual(len(backup), 1)
+        self.assertIn("--type=incr --start-fast", backup[0])
+
     def test_restore_point_is_checked(self):
         result, _ = self.deploy("--restore-point", "snapshot")
         self.assertIn("--restore-point pgbackrest|dump", result.stderr)
