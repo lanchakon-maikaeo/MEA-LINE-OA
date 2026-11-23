@@ -34,7 +34,6 @@ SEPARATION = "separation_of_duties"
 LINE_AUDIENCE = "line_audience"
 REGISTRATION = "registration_approver"
 REGISTRATION_CHECK = "registration_check"
-REGISTRATION_LOCATION = "registration_location"
 REGISTRATION_NAME = "registration_name"
 ANONYMOUS = "anonymous_reports"
 ANONYMOUS_LIMIT = "anonymous_daily_limit"
@@ -181,15 +180,6 @@ OPTIONS = {
         ),
         "ใช้ได้เมื่อแอดมินนำเข้าทะเบียนพนักงานแล้ว ผิดได้วันละ 3 ครั้งต่อบัญชี LINE",
     ),
-    REGISTRATION_LOCATION: Option(
-        "ตำแหน่งของผู้ลงทะเบียน",
-        (
-            ("off", "ไม่ถาม", ""),
-            ("optional", "ถาม แต่ข้ามได้", "เก็บละติจูด/ลองจิจูดที่ผู้ลงทะเบียนส่งจาก LINE"),
-            ("required", "ต้องส่งตำแหน่ง", "ลงทะเบียนไม่ได้ถ้าไม่ส่งตำแหน่ง"),
-        ),
-        "LINE ส่งตำแหน่งเมื่อผู้ใช้กดส่งเองเท่านั้น ระบบแจ้งเหตุผลก่อนขอ",
-    ),
     REGISTRATION_NAME: Option(
         "ชื่อที่พิมพ์ตอนลงทะเบียนทาง LINE",
         (
@@ -207,7 +197,7 @@ OPTIONS = {
         (
             (
                 "on",
-                "เปิด: คนที่ยังไม่ลงทะเบียนแจ้งปัญหา/ข้อเสนอแนะได้ ต้องส่งตำแหน่ง",
+                "เปิด: คนที่ยังไม่ลงทะเบียนแจ้งปัญหา/ข้อเสนอแนะได้",
                 "เบิกและคืนของยังต้องยืนยันตัวตน เจ้าหน้าที่ไม่เห็นว่าใครแจ้ง",
             ),
         ),
@@ -1086,10 +1076,9 @@ def rows(push=False):
     """(key, option, current value, stored row or None) for the settings page; `push`: the
     Push Message page's own instead (ADR 0048)."""
     stored = {row.key: row for row in SystemOption.objects.select_related("updated_by")}
-    # Historical settings remain readable for migrations, but cannot override ADR 0019; LINE
-    # registration asks no location since 31 ต.ค. 2569, whatever the stored value.
+    # Historical settings remain readable for migrations, but cannot override ADR 0019.
     # ADR 0041: one role per person leaves no duties to split; only the SIM test world does.
-    retired = {REGISTRATION_CHECK, EMAIL_TYPED, REGISTRATION_LOCATION, DIVISION_WORK}
+    retired = {REGISTRATION_CHECK, EMAIL_TYPED, DIVISION_WORK}
     return [
         (key, option, get(key), stored.get(key))
         for key, option in OPTIONS.items()

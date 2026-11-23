@@ -34,6 +34,19 @@ def valid_signature(body, signature, secret):
     return hmac.compare_digest(expected, (signature or "").encode())
 
 
+# ADR 0060 Q7: the system takes no location; LINE's own "+" menu can still send one.
+LOCATION_FIELDS = ("latitude", "longitude", "address", "title")
+
+
+def without_location(event):
+    """The event with a location message's place left out (coordinates, address, name)."""
+    message = event.get("message")
+    if not isinstance(message, dict) or message.get("type") != "location":
+        return event
+    kept = {k: v for k, v in message.items() if k not in LOCATION_FIELDS}
+    return {**event, "message": kept}
+
+
 def _event_fields(event, now):
     if not isinstance(event, dict):
         raise InvalidEvent("event")
@@ -47,6 +60,7 @@ def _event_fields(event, now):
     source = event.get("source") if isinstance(event.get("source"), dict) else {}
     reply_token = event.get("replyToken") if isinstance(event.get("replyToken"), str) else ""
     context = event.get("deliveryContext") if isinstance(event.get("deliveryContext"), dict) else {}
+    event = without_location(event)
     canonical = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return {
         "webhook_event_id": event_id,

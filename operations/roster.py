@@ -501,6 +501,7 @@ def follow(actor, employee_ids, old_names, reason):
         name = renamed(requester.display_name, rows[requester.employee.employee_id])
         if name:
             Requester.objects.filter(pk=requester.pk).update(display_name=name)
+    employees.follow_roster(actor)  # ADR 0060 Q8: and their unit
 
 
 LEVELS = ("department", "division_name", "section_name", "work_group")

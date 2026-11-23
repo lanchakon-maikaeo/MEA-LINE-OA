@@ -48,7 +48,7 @@ class ProblemsTestCase(LineTestCase):
         )
         line = ChannelIdentity.objects.create(channel="line", external_id=BOB)
         self.anonymous = identity.anonymous_requester(line)
-        located = {"topic": "suggestion", "latitude": "13.7", "longitude": "100.5", **tile}
+        located = {"topic": "suggestion", **tile}
         self.ideas = [
             self.submit(
                 Actor.for_requester(self.anonymous),

@@ -16,7 +16,7 @@
   <tbody data-more>
   {% for reg in pending %}
     <tr>
-      <td>{{ reg.submitted_name }}{% if reg.employee %}<br><span class="tag">ตรงทะเบียนพนักงาน {{ reg.employee.employee_id }}</span>{% if reg.verified_by %} <span class="tag tag--outline">ยืนยันด้วย{{ reg.get_verified_by_display }}</span>{% endif %}{% endif %}{% if reg.latitude %}<br><a href="https://www.google.com/maps?q={{ reg.latitude }},{{ reg.longitude }}" target="_blank" rel="noopener">ดูตำแหน่งที่ส่ง</a>{% endif %}</td><td class="cell--wide" data-label="หน่วยงาน (เขต/ฝ่าย)ที่ขอ">{{ reg.requested_district.name }}</td><td class="cell--end" data-label="ส่งเมื่อ">{{ reg.created_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ reg.submitted_name }}{% if reg.employee %}<br><span class="tag">ตรงทะเบียนพนักงาน {{ reg.employee.employee_id }}</span>{% if reg.verified_by %} <span class="tag tag--outline">ยืนยันด้วย{{ reg.get_verified_by_display }}</span>{% endif %}{% endif %}</td><td class="cell--wide" data-label="หน่วยงาน (เขต/ฝ่าย)ที่ขอ">{{ reg.requested_district.name }}</td><td class="cell--end" data-label="ส่งเมื่อ">{{ reg.created_at|date:"Y-m-d H:i" }}</td>
       <td class="cell--wide">
         <form class="inline" method="post" action="{% url 'admin-registration-action' reg.pk 'approve' %}">
           {% csrf_token %}<button type="submit">รับรอง</button>

@@ -335,6 +335,23 @@ def _registered(world, user_id):
 # --- Scenarios ---------------------------------------------------------------------------------
 
 
+def register_id(r, w):
+    """ADR 0059: with OTP off (its default) an employee ID matching the roster registers at once."""
+    from operations import options
+    from operations.models import District, Employee, SystemOption
+
+    SystemOption.objects.update_or_create(key=options.EMPLOYEE_OTP, defaults={"value": "off"})
+    Employee.objects.create(
+        employee_id="512345", name="สมใจ", district=District.objects.get(code=DISTRICT)
+    )
+    r.follow("พนักงานเพิ่มบัญชี LINE ของ ฝอจ. เป็นเพื่อนครั้งแรก ระบบถามว่าเป็นพนักงาน กฟน. ไหม")
+    r.tap("พนักงาน กฟน.", "กด พนักงาน กฟน. ระบบขอรหัสพนักงาน")
+    r.type(
+        "512345",
+        "พิมพ์รหัสพนักงานที่ตรงทะเบียนพนักงาน ระบบไม่ส่ง OTP และไม่ถามอีเมล ลงทะเบียนสำเร็จทันที",
+    )
+
+
 def register(r, w):
     r.follow("ผู้แจ้งเพิ่มบัญชี LINE ของ ฝอจ. เป็นเพื่อนครั้งแรก ระบบถามว่าเป็นพนักงาน กฟน. ไหม")
     r.tap("พนักงาน กฟน.", "กด พนักงาน กฟน. ระบบขอรหัสพนักงาน")
@@ -622,6 +639,13 @@ def order(r, w):
 
 
 SCENARIOS = [
+    Scenario(
+        "register_id",
+        "ลงทะเบียนด้วยรหัสพนักงาน",
+        "เพิ่มเพื่อน กด พนักงาน กฟน. พิมพ์รหัสพนักงานที่ตรงทะเบียน แล้วใช้งานได้ทันที (OTP ปิด)",
+        register_id,
+        registered=False,
+    ),
     Scenario(
         "register",
         "ลงทะเบียนครั้งแรก",

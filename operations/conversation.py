@@ -482,20 +482,6 @@ def _event_text(turn):
     return None
 
 
-def _event_location(turn):
-    """(latitude, longitude) of a location message the user chose to send, else None."""
-    message = turn.event.get("message") or {}
-    if turn.inbox.event_type != "message" or message.get("type") != "location":
-        return None
-    try:
-        lat, lng = float(message["latitude"]), float(message["longitude"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
-        return None
-    return round(lat, 6), round(lng, 6)
-
-
 STAFF_WORDS = {"งานของกอง", "เจ้าหน้าที่"}
 LINK_CODE = re.compile(r"^เชื่อม\s*([0-9๐-๙]{6})$")
 
@@ -1343,8 +1329,10 @@ def _not_a_name(turn, text):
 def _ask_district(turn, name, **data):
     """The district list, with 'แก้ชื่อ' in case the name was typed wrong. A proved employee
     typed no name (the employee ID stands for it), so there is nothing to correct."""
+    from operations import employees
+
     turn.set_prompt("reg_district", **data, name=name)
-    districts = District.objects.filter(is_active=True).order_by("code")
+    districts = employees.units()  # หน่วยตามทะเบียน (ADR 0060 Q10)
     employee = bool(data.get("employee"))
     turn.say(f"{name if employee else f'ชื่อ: {name}'}\nเลือกหน่วยงาน (เขต/ฝ่าย)การไฟฟ้าที่คุณสังกัด")
     message = button_list(
@@ -1505,9 +1493,6 @@ def _requester_reply(turn):
     message_type = (turn.event.get("message") or {}).get("type")
     if turn.inbox.event_type == "message" and message_type in {"image", "file"}:
         return _attachment(turn, draft, chat if turn.conversation.prompt == "case_chat" else None)
-    if _event_location(turn) is not None:  # no step asks for one (31 ต.ค. 2569)
-        turn.say("ระบบไม่ได้ใช้ตำแหน่ง")
-        return _reprompt(turn, draft)
 
     data = (turn.event.get("postback") or {}).get("data", "")
     if turn.inbox.event_type == "postback" and not data.startswith("t="):

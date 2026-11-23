@@ -532,7 +532,8 @@ class ReleaseClassTests(SimpleTestCase):
         self.assertFalse(unsafe("migrations.AddField(model_name='x', name='z')"))
         manifest = load(ROOT / "deploy/release_manifest.py").manifest(ROOT, "abc", "")
         self.assertEqual(manifest["postgres_major"], "17")
-        self.assertEqual(manifest["unsafe_migrations"], [])  # 0028/0029 have a reverse (noop)
+        # 0028/0029 have a reverse (noop); 0111 drops the location columns (ADR 0060)
+        self.assertEqual(manifest["unsafe_migrations"], ["0111_no_location"])
 
     def test_minor_and_major(self):
         classify = self.module.classify

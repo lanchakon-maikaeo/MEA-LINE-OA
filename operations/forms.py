@@ -91,10 +91,16 @@ class RequesterCreateForm(forms.Form):
     display_name = forms.CharField(label="ชื่อ-นามสกุลผู้แจ้ง", max_length=200)
     district = forms.ModelChoiceField(
         label="หน่วยงาน (เขต/ฝ่าย)",
-        queryset=District.objects.filter(is_active=True),
+        queryset=District.objects.none(),
         to_field_name="code",
     )
     reason = forms.CharField(label="เหตุผล (เช่น ไม่ใช้ LINE)", max_length=500, required=False)
+
+    def __init__(self, *args, **kwargs):
+        from operations import employees
+
+        super().__init__(*args, **kwargs)
+        self.fields["district"].queryset = employees.units()  # หน่วยตามทะเบียน (ADR 0060 Q10)
 
 
 class AICredentialForm(forms.Form):

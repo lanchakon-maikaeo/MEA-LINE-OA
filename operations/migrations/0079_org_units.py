@@ -10,15 +10,12 @@ def forwards(apps, schema_editor):
     coordinates kept so far go; each staff member's สังกัด starts at the กอง of their แผนก, else
     of their only division role; ผู้รับแจ้งเรื่องฉุกเฉิน move to their กอง card (Q12)."""
     SystemOption = apps.get_model("operations", "SystemOption")
-    RegistrationRequest = apps.get_model("operations", "RegistrationRequest")
     StaffProfile = apps.get_model("operations", "StaffProfile")
     RoleGrant = apps.get_model("operations", "RoleGrant")
     EmergencyContact = apps.get_model("operations", "EmergencyContact")
     UnitRecipient = apps.get_model("operations", "UnitRecipient")
     SystemOption.objects.filter(key="registration_location").update(value="off")
-    RegistrationRequest.objects.exclude(latitude=None, longitude=None).update(
-        latitude=None, longitude=None
-    )
+    # The coordinates kept so far went with their columns in 0111 (ADR 0060).
     for profile in StaffProfile.objects.select_related("section"):
         if profile.section_id:
             profile.division_id = profile.section.division_id

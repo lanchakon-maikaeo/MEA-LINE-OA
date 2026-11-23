@@ -1143,11 +1143,10 @@ def submit_registration(
     submitted_name,
     district_code,
     employee=None,
-    location=None,
     verified_by="",
 ):
     """Record a registration request. Choosing a district is a claim, never a permission; a
-    matched employee and a shared location (10 Oct 2569 Q1, Q3) are evidence for the decider."""
+    matched employee (10 Oct 2569 Q1) is evidence for the decider."""
     submitted_name = " ".join((submitted_name or "").split())
     if not submitted_name or len(submitted_name) > 200:
         raise ValidationError("Name is required (max 200 characters).")
@@ -1169,14 +1168,11 @@ def submit_registration(
         identity.status = ChannelIdentity.Status.PENDING
         identity.requester = None
         identity.save(update_fields=["status", "requester"])
-    latitude, longitude = location or (None, None)
     registration = RegistrationRequest.objects.create(
         identity=identity,
         submitted_name=submitted_name,
         requested_district=district,
         employee=employee,
-        latitude=latitude,
-        longitude=longitude,
         verified_by=verified_by if employee is not None else "",
     )
 

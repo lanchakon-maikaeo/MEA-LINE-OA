@@ -119,7 +119,7 @@ CHECKS = {
     "hazard_overflag": "ไม่ได้แจ้งอันตรายแต่ได้ P0 (ยอมรับได้ตามกติกา)",
     "ai_private": "ข้อความเรื่องการใช้ไฟฟ้าไปถึง AI ตามตัวเลือกระบบ",
     "staff_private": "ข้อความเด้งถึงเจ้าหน้าที่ไม่มีชื่อหรือข้อความของผู้แจ้ง",
-    "anonymous": "ผู้แจ้งไม่ระบุตัวตนไม่มีชื่อ และตำแหน่งตรงกับที่ส่ง",
+    "anonymous": "ผู้แจ้งไม่ระบุตัวตนไม่มีชื่อ",
     "stale_button": "กดปุ่มเก่าแล้วบอทไม่ทำตาม และถามคำถามล่าสุดอีกครั้ง",
     "isolation": "ผู้แจ้งไม่เห็นเรื่องของคนอื่น",
     "idempotent": "กดยืนยันซ้ำได้เรื่องเดียว",
@@ -1105,8 +1105,6 @@ class Dialogue:
             case = self.cases[0]
             if not case.requester.is_anonymous or str(case.requester) != "ไม่ระบุตัวตน":
                 self.fail("anonymous", f"ผู้แจ้งไม่ใช่ผู้แจ้งไม่ระบุตัวตน ({case.requester})")
-            if case.latitude is not None:
-                self.fail("anonymous", "เรื่องไม่ระบุตัวตนมีตำแหน่ง ทั้งที่ไม่ได้ถาม")
             self.passed("anonymous")
 
     def _registration_outcome(self):

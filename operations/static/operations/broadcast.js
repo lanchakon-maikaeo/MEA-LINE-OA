@@ -22,8 +22,8 @@
   }
   function node(tag, text, className) { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; }
   function options(id, rows) { $(id).replaceChildren(...rows.map(row => { const o = node('option', row.name); o.value = row.id; return o; })); }
-  // A unit may stand for several หน่วยงาน rows (ids) and shows only while it reaches someone or is picked.
-  function checks(id, rows) { $(id).replaceChildren(...rows.map(row => { const label = node('label',undefined,'check'), box = document.createElement('input'); box.type = 'checkbox'; box.value = row.id; if (row.ids) box.dataset.ids = row.ids.join(','); if (row.members === 0) label.dataset.empty = ''; label.append(box,node('span',row.name)); return label; })); }
+  // A unit shows only while it reaches someone or is picked (ADR 0059 Q7).
+  function checks(id, rows) { $(id).replaceChildren(...rows.map(row => { const label = node('label',undefined,'check'), box = document.createElement('input'); box.type = 'checkbox'; box.value = row.id; if (row.members === 0) label.dataset.empty = ''; label.append(box,node('span',row.name)); return label; })); }
   // A group keeps its units by key: ฟข. and the other ฝ่าย are both "districts" (หน่วยงาน rows).
   const SEGMENT_KEYS = ['divisions','districts','roles'];
   const boxes = (key, only = '') => [...document.querySelectorAll(`#segment-form [data-key=${key}] input${only}`)];
@@ -174,8 +174,8 @@
   async function bootstrap() {
     data = await api('/broadcasts/api/bootstrap/'); $('account').textContent = data.user;
     options('segment',data.segments); checks('segment-divisions',data.divisions); checks('segment-roles',data.roles);
-    const fk = row => /^(ฟข|การไฟฟ้านครหลวงเขต)/.test(row.name);
-    const unit = row => ({...row, name:`${row.name.replace(/^การไฟฟ้านครหลวง/,'')} (${row.members.toLocaleString('th-TH')} คน)`});
+    const fk = row => row.name.startsWith('ฟข');
+    const unit = row => ({...row, name:`${row.name} (${row.members.toLocaleString('th-TH')} คน)`});
     checks('segment-fk',data.districts.filter(fk).map(unit)); checks('segment-units',data.districts.filter(row => !fk(row)).map(unit));
     $('quota').textContent = Math.max(0,data.quota.budget-data.quota.used).toLocaleString('th-TH') + ' ข้อความ';
     $('login').hidden = true; $('workspace').hidden = false;
@@ -259,7 +259,7 @@
   });
   function openSegment(row) {
     segmentEditing = row || null; $('segment-form').reset(); $('segment-error').textContent = '';
-    if(row) { $('segment-name').value = row.name; SEGMENT_KEYS.forEach(key => boxes(key).forEach(box => {const chosen = (row.criteria[key] || []).map(String); box.checked = (box.dataset.ids || box.value).split(',').some(v => chosen.includes(v));})); }
+    if(row) { $('segment-name').value = row.name; SEGMENT_KEYS.forEach(key => boxes(key).forEach(box => {const chosen = (row.criteria[key] || []).map(String); box.checked = chosen.includes(box.value);})); }
     filterUnits(); $('segment-dialog').showModal();
   }
   $('segment-form').onchange = segmentSummary;
