@@ -297,15 +297,14 @@ class PageTests(UnitTestCase):
 
 class MigrationTests(UnitTestCase):
     def test_location_is_not_asked_and_emergency_contacts_move_to_the_card(self):
-        self.assertEqual(options.get(options.REGISTRATION_LOCATION), "off")
         SystemOption.objects.update_or_create(
-            key=options.REGISTRATION_LOCATION, defaults={"value": "required"}
+            key="registration_location", defaults={"value": "required"}
         )
         EmergencyContact.objects.create(division=self.division, user=self.kae)
         self.kae.staff_profile.section = self.repair
         self.kae.staff_profile.save(update_fields=["section"])
         import_module("operations.migrations.0079_org_units").forwards(apps, None)
-        self.assertEqual(options.get(options.REGISTRATION_LOCATION), "off")
+        self.assertEqual(SystemOption.objects.get(key="registration_location").value, "off")
         row = UnitRecipient.objects.get()
         self.assertEqual((row.division, row.section, row.user), (self.division, None, self.kae))
         self.kae.staff_profile.refresh_from_db()

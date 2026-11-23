@@ -98,8 +98,7 @@ def segment_members(segment):
     criteria = validate_criteria(segment.criteria)
     chosen = Q(pk__in=criteria.get("people", []))
     if "districts" in criteria:
-        ids = same_units(criteria["districts"])
-        chosen |= Q(requester__district_id__in=ids, requester__status="active")
+        chosen |= Q(requester__district_id__in=criteria["districts"], requester__status="active")
     if "divisions" in criteria or "roles" in criteria:
         grants = RoleGrant.objects.filter(revoked_at__isnull=True)
         if "divisions" in criteria:
@@ -122,37 +121,21 @@ def _friends():
     )
 
 
-def _unit(district):
-    return district.short_name or district.name
-
-
-def same_units(ids):
-    """The chosen หน่วยงาน and their twins (owner, 23 พ.ย. 2569): a เขต whose ชื่อย่อ ฟข. an
-    admin set and the roster's row of that name ("ฟขล.") are one unit."""
-    names = {_unit(d) for d in District.objects.filter(pk__in=ids)}
-    return list(
-        District.objects.filter(
-            Q(pk__in=ids) | Q(short_name__in=names) | Q(short_name="", name__in=names)
-        ).values_list("pk", flat=True)
-    )
-
-
 def units():
-    """หน่วยงาน of the segment picker (ADR 0059 Q7, Q8): one entry per unit named as the roster
-    names it, with the registered people (still friends) it reaches now."""
+    """หน่วยงาน of the segment picker (ADR 0060 Q5): the หน่วยตามทะเบียน, named as the roster
+    names them (ฟขป.), with the registered people (still friends) each reaches now."""
+    from operations import employees
+
     reached = dict(
         _friends()
         .filter(requester__status="active")
         .values_list("requester__district")
         .annotate(n=Count("pk"))
     )
-    found = {}
-    for row in District.objects.filter(is_active=True).order_by("code"):
-        name = _unit(row)
-        unit = found.setdefault(name, {"id": row.pk, "ids": [], "name": name, "members": 0})
-        unit["ids"].append(row.pk)
-        unit["members"] += reached.get(row.pk, 0)
-    return list(found.values())
+    return [
+        {"id": row.pk, "name": row.name, "members": reached.get(row.pk, 0)}
+        for row in employees.units()
+    ]
 
 
 def missed(campaign):

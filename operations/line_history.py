@@ -99,7 +99,7 @@ def _user_side(inbox, earlier):
         label = _tap_label(postback.get("data", ""), postback.get("params") or {}, earlier)
         return {"kind": "tap", "text": label}
     message = payload.get("message") or {}
-    kinds = {"image": "[รูปภาพ]", "video": "[วิดีโอ]", "location": "[ตำแหน่ง]", "sticker": "[สติกเกอร์]"}
+    kinds = {"image": "[รูปภาพ]", "video": "[วิดีโอ]", "sticker": "[สติกเกอร์]"}
     if message.get("type") == "text":
         return {"kind": "text", "text": message.get("text", "")}
     return {"kind": "text", "text": kinds.get(message.get("type"), "[ข้อความ]")}

@@ -59,8 +59,7 @@ EXACT = {
     "Only staff of the owner division can set the section.": "เจ้าหน้าที่ของกองเจ้าภาพเท่านั้นระบุแผนกได้",
     "Choose a section of the owner division.": "เลือกแผนกของกองเจ้าภาพ",
     "The case is already with this section.": "เรื่องอยู่กับแผนกนี้แล้ว",
-    # ADR 0010: location, anonymous and internal reporters
-    "latitude and longitude must be numbers.": "ตำแหน่งไม่ถูกต้อง ส่งตำแหน่งใหม่อีกครั้ง",
+    # ADR 0010: anonymous and internal reporters
     "Anonymous reports are turned off.": "ตอนนี้ต้องลงทะเบียนก่อนแจ้งเรื่อง",
     "Withdrawals and returns need a registered requester.": (
         "เบิกและคืนของต้องลงทะเบียนและยืนยันตัวตนก่อน"

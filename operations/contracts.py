@@ -132,8 +132,6 @@ KIND_FIELDS = {
             "impact",
             "related_case_number",
             "topic",
-            "latitude",
-            "longitude",
             "sap_number",
             "meters",
         },
@@ -335,8 +333,6 @@ def parse_submission(payload, on_behalf):
         "needed_by",
         "related_case_number",
         "topic",
-        "latitude",
-        "longitude",
         "sap_number",
         "meters",
     }:
@@ -362,8 +358,6 @@ def parse_submission(payload, on_behalf):
             except (TypeError, ValueError):
                 fail(ErrorCode.VALIDATION_ERROR, "needed_by must be YYYY-MM-DD.")
 
-    if "latitude" in spec["optional"]:
-        fields.update(_location(payload))
     if "topic" in spec["optional"]:
         fields["topic"] = payload.get("topic") or ""
         if fields["topic"] not in ("", *Case.Topic.values):
@@ -457,23 +451,6 @@ def parse_submission(payload, on_behalf):
         intake_data,
         hold,
     )
-
-
-def _location(payload):
-    """ตำแหน่งที่แจ้ง (ADR 0010): both coordinates or neither, within the world."""
-    lat, lng = payload.get("latitude"), payload.get("longitude")
-    if lat in (None, "") and lng in (None, ""):
-        return {}
-    try:
-        lat, lng = Decimal(str(lat)), Decimal(str(lng))
-    except (InvalidOperation, ValueError):
-        fail(ErrorCode.VALIDATION_ERROR, "latitude and longitude must be numbers.")
-    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
-        fail(ErrorCode.VALIDATION_ERROR, "latitude and longitude must be numbers.")
-    return {
-        "latitude": lat.quantize(Decimal("0.000001")),
-        "longitude": lng.quantize(Decimal("0.000001")),
-    }
 
 
 def _reported_at(value):

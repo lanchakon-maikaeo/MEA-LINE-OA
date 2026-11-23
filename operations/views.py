@@ -451,11 +451,7 @@ def admin_registrations(request):
                 (
                     "district",
                     "หน่วยงาน (เขต/ฝ่าย)",
-                    list(
-                        District.objects.filter(is_active=True)
-                        .order_by("code")
-                        .values_list("code", "name")
-                    ),
+                    list(employees.units().values_list("code", "name")),  # ADR 0060 Q10
                 ),
                 (
                     "status",
@@ -629,7 +625,7 @@ def admin_requester_detail(request, pk):
             "requester": requester,
             "grant_form": forms.GrantRoleForm(),
             "row": row,
-            "districts": District.objects.filter(is_active=True).order_by("code"),
+            "districts": employees.units(),  # หน่วยตามทะเบียน (ADR 0060 Q10)
             "lines": lines,
             # ADR 0031 Q12: LINE alerts of the staff account this LINE is linked to are set on
             # its unit's card in ผังหน่วยงาน.

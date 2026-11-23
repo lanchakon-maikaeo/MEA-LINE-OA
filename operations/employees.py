@@ -74,6 +74,46 @@ def has_directory():
     )
 
 
+def units():
+    """หน่วยตามทะเบียน (ADR 0060 Q10): the active units the roster puts someone in, by name, as
+    the choices of a person's unit. The full-name เขต stay for meters and the warehouse only.
+    Before a roster is imported (a new install, the demo), every active unit."""
+    rows = District.objects.filter(is_active=True)
+    named = rows.filter(employee__is_active=True).distinct()
+    return (named if named.exists() else rows).order_by("name")
+
+
+def follow_roster(actor=None):
+    """ADR 0060 Q8: a requester tied to the roster (proved or linked by an admin) belongs to the
+    roster's unit; after each import, those it moved are put there. Returns how many moved."""
+    from django.db.models import F
+
+    from operations import identity
+
+    link = Requester.EmployeeLink
+    rows = (
+        Requester.objects.filter(
+            employee_link__in=[link.VERIFIED, link.ADMIN], employee__district__is_active=True
+        )
+        .exclude(district=F("employee__district"))
+        .select_related("employee")
+    )
+    moved = 0
+    for requester in rows:
+        before = requester.district_id
+        requester.district_id = requester.employee.district_id
+        requester.save(update_fields=["district"])
+        identity.audit(
+            actor,
+            "requester.unit_followed_roster",
+            requester,
+            from_district=before,
+            to_district=requester.district_id,
+        )
+        moved += 1
+    return moved
+
+
 @transaction.atomic
 def import_csv(actor, data, check_label_text, deactivate_missing=False, synthetic=False):
     """Admin only (actor None = manage.py). Upserts by employee_id; returns a summary."""
@@ -137,6 +177,7 @@ def import_csv(actor, data, check_label_text, deactivate_missing=False, syntheti
             .exclude(employee_id__in=seen)
             .update(is_active=False)
         )
+    follow_roster(actor)
     summary = {"created": created, "updated": updated, "closed": closed}
     # Counts only: proof values never go to the audit trail.
     identity.audit(

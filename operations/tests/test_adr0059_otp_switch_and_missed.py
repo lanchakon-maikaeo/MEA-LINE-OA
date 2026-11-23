@@ -258,36 +258,3 @@ class MissedTests(TestCase):
         response = self.client.post(url + "missed/", body, content_type="application/json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get(url).json()["campaign"]["missed"]["count"], 0)
-
-
-class UnitTests(TestCase):
-    def test_a_district_and_its_roster_twin_are_one_unit_counting_registered_friends(self):
-        head = make_staff("unit-head", (Role.DEPARTMENT_SUPERVISOR, None))
-        khet = District.objects.create(code="DU1", name="การไฟฟ้านครหลวงเขตทดสอบ", short_name="ฟขท.")
-        twin = District.objects.create(code="DU2", name="ฟขท.")  # the roster's row
-        alone = District.objects.create(code="DU3", name="ฝทด.")
-        letters = iter("pqrs")
-        for district, status, following in (
-            (khet, "active", True),
-            (twin, "active", True),
-            (twin, "suspended", True),
-            (alone, "active", False),
-        ):
-            ChannelIdentity.objects.create(
-                channel="line",
-                external_id="U" + next(letters) * 32,
-                is_following=following,
-                status="active",
-                requester=Requester.objects.create(
-                    display_name="ผู้แจ้ง", district=district, status=status, approved_by=head
-                ),
-            )
-        found = {unit["name"]: unit for unit in broadcasts.units()}
-        self.assertEqual(
-            (set(found["ฟขท."]["ids"]), found["ฟขท."]["members"]), ({khet.pk, twin.pk}, 2)
-        )
-        self.assertEqual(found["ฝทด."]["members"], 0)
-        self.assertNotIn(khet.name, found)
-        self.assertEqual(set(broadcasts.same_units([twin.pk])), {khet.pk, twin.pk})
-        segment = broadcasts.save_segment(head, "ฟขท.", {"districts": [twin.pk]})
-        self.assertEqual(broadcasts.segment_members(segment).count(), 2)

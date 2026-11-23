@@ -407,8 +407,6 @@ class RegistrationRequest(models.Model):
     employee = models.ForeignKey(
         "Employee", null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     # How the employee proved who they are (15 ต.ค. 2569 Q24): shown to approvers and audited.
     verified_by = models.CharField(
         max_length=16,
@@ -614,9 +612,6 @@ class Case(models.Model):
     # หมวดเรื่อง the requester chose for a problem (Q3): equipment, or การใช้ไฟฟ้า for กตฟ.
     topic = models.CharField(max_length=16, choices=Topic.choices, blank=True)
     intake_note = models.TextField(blank=True)
-    # ตำแหน่งที่แจ้ง (10 Oct 2569 Q1): required from an anonymous reporter, optional otherwise.
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     # เวลาแจ้งจริง (M12 Q8): when the requester reported on a staff channel, before it was recorded
     # here. Shown only; clocks start at submitted_at.
     reported_at = models.DateTimeField(null=True, blank=True)

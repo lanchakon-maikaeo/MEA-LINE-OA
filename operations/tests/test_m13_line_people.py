@@ -26,6 +26,7 @@ from operations.models import (
     Requester,
     Role,
     StaffProfile,
+    WebhookInbox,
 )
 from operations.tests.test_m02_cases import make_staff
 from operations.tests.test_m03_line import ALICE, BOB, LineTestCase, buttons, texts
@@ -139,15 +140,14 @@ class RegistrationTests(PeopleTestCase):
         self.assertEqual(RegistrationRequest.objects.get().status, "pending")
 
     def test_registration_asks_no_location(self):
-        # 31 ต.ค. 2569: the step is gone, whatever the old option holds.
-        options.change(None, options.REGISTRATION_LOCATION, "required", "ทดสอบ")
+        # 31 ต.ค. 2569: the step is gone; ADR 0060: so is the option.
         self.register(BOB)
         self.press(BOB, "ใช้วิธีอื่น")
         reply = self.as_other(BOB, "ผู้ลงทะเบียน ทดสอบ")
         self.assertNotIn("ตำแหน่ง", texts(reply))
         self.assertIn("ส่งคำขอให้แอดมินตรวจแล้ว", texts(reply))
         registration = RegistrationRequest.objects.get(identity__external_id=BOB)
-        self.assertEqual((registration.status, registration.latitude), ("pending", None))
+        self.assertEqual(registration.status, "pending")
         page = Client()
         page.force_login(self.admin)
         self.assertNotContains(page.get("/console/admin/options/"), "ตำแหน่งของผู้ลงทะเบียน")
@@ -194,7 +194,8 @@ class UnverifiedTagTests(PeopleTestCase):
 
 class AnonymousTests(PeopleTestCase):
     def test_an_unregistered_user_reports_a_suggestion_without_a_location(self):
-        # 31 ต.ค. 2569: no step asks for a location; one sent anyway is not kept.
+        # 31 ต.ค. 2569: no step asks for a location; ADR 0060: one LINE's own menu sends anyway
+        # is neither kept nor mentioned.
         options.change(None, options.ANONYMOUS, "on", "ทดสอบ")
         self.say(self.event(ALICE, "follow"))
         start = self.press(ALICE, "ไม่ระบุตัวตน")
@@ -202,11 +203,13 @@ class AnonymousTests(PeopleTestCase):
         self.press(ALICE, "ปัญหาการใช้งานหรืออื่นๆ")  # ADR 0030: the division carousel
         summary = self.type(ALICE, "อยากให้มีที่จอดรถรับของ (ทดสอบ)")
         self.assertIn("แจ้งแบบไม่ระบุตัวตน", texts(summary))
-        self.assertIn("ระบบไม่ได้ใช้ตำแหน่ง", texts(self.say(self.location(ALICE))))
+        self.assertNotIn("ตำแหน่ง", texts(self.say(self.location(ALICE))))
+        sent = WebhookInbox.objects.filter(payload__message__type="location").get().payload
+        self.assertFalse({"latitude", "longitude", "address"} & set(sent["message"]))
         self.press(ALICE, "ยืนยันส่งเรื่อง")
         case = Case.objects.get()
         self.assertTrue(case.requester.is_anonymous)
-        self.assertEqual((case.owner_label, case.latitude), ("แอดมิน", None))
+        self.assertEqual(case.owner_label, "แอดมิน")
         self.assertEqual(ChannelIdentity.objects.get(external_id=ALICE).status, "pending")
         client = Client()
         client.force_login(self.admin)  # the admins hold it (ADR 0030)
