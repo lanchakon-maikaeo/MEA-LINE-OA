@@ -61,6 +61,7 @@ class RequesterListTests(RequesterTestCase):
             division=Division.objects.get(code="กคว.")
         )
         options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")
+        options.change(None, options.EMPLOYEE_OTP, "on", "ทดสอบ")  # the proof asked (ADR 0059)
         self.register(ALICE)
         self.type(ALICE, "SYN10001")
         self.assertIn("ยืนยันตัวตนแล้ว", texts(self.type(ALICE, "01/01/2530")))

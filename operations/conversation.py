@@ -527,8 +527,12 @@ def _staff_turn(turn):
         if options.get(options.STAFF_LINK) == "code_or_otp":
             turn.set_prompt("staff_otp_emp")
             turn.say(
-                "พิมพ์รหัสพนักงานของคุณ ระบบจะส่งรหัส 6 หลักไปที่อีเมลในทะเบียนพนักงาน\n"
-                "หรือพิมพ์ เชื่อม ตามด้วยรหัส 6 หลักจากหน้าเว็บ บัญชีของฉัน"
+                (
+                    "พิมพ์รหัสพนักงานของคุณ ระบบจะส่งรหัส 6 หลักไปที่อีเมลในทะเบียนพนักงาน\n"
+                    if options.otp_on()
+                    else "พิมพ์รหัสพนักงานของคุณเพื่อเชื่อมบัญชีเจ้าหน้าที่\n"
+                )
+                + "หรือพิมพ์ เชื่อม ตามด้วยรหัส 6 หลักจากหน้าเว็บ บัญชีของฉัน"
             )
         elif options.get(options.STAFF_LINK) == "code_or_employee" and employees.has_directory():
             turn.set_prompt("staff_emp")
@@ -544,6 +548,9 @@ def _staff_turn(turn):
         return True
     if prompt == "staff_otp" and command:
         employee_id = turn.conversation.prompt_data.get("employee_id", "")
+        if not options.otp_on():  # ADR 0059: switched off while a code was waiting
+            _staff_by_id(turn, employee_id)
+            return True
         user, reason, left = staff_line.link_with_otp(turn.identity, employee_id, command)
         if user is not None:
             turn.set_prompt()
@@ -871,9 +878,12 @@ def _staff_work_turn(turn, user, token, data, command, prompt):
 
 
 def _staff_send_code(turn, employee_id):
-    """16 Oct 2569 Q10: the employee ID typed for linking; a code goes to the roster e-mail."""
+    """16 Oct 2569 Q10: the employee ID typed for linking; a code goes to the roster e-mail, or
+    with OTP off (ADR 0059 Q9) the ID links at once."""
     from operations import options, staff_line
 
+    if not options.otp_on():
+        return _staff_by_id(turn, employee_id)
     reason = staff_line.send_link_code(turn.identity, employee_id)
     if reason == "":
         turn.set_prompt("staff_otp", employee_id=employee_id)
@@ -893,6 +903,28 @@ def _staff_send_code(turn, employee_id):
             reason,
             "ไม่พบบัญชีเจ้าหน้าที่ที่ใช้รหัสพนักงานนี้ หรือทะเบียนพนักงานไม่มีอีเมล "
             "ให้แอดมินตรวจรหัสพนักงานในบัญชีของคุณ หรือใช้รหัส 6 หลักจากหน้าเว็บแทน",
+        )
+    )
+
+
+def _staff_by_id(turn, employee_id):
+    """ADR 0059 Q9, OTP off: the employee ID of a staff account links this LINE at once."""
+    from operations import staff_line
+
+    user, reason = staff_line.link_by_id(turn.identity, employee_id)
+    turn.set_prompt()
+    if user is not None:
+        turn.say("เชื่อม LINE กับบัญชีเจ้าหน้าที่แล้ว")
+        staff_line.menu(turn, user)
+        return
+    turn.say(
+        {
+            "locked": "ลองครบจำนวนครั้งของวันนี้แล้ว ใช้รหัส 6 หลักจากหน้าเว็บ บัญชีของฉัน แทน",
+            "taken": "บัญชีเจ้าหน้าที่นี้เชื่อมกับ LINE อื่นอยู่แล้ว "
+            "ใช้รหัส 6 หลักจากหน้าเว็บ บัญชีของฉัน เพื่อย้ายมาที่ LINE นี้",
+        }.get(
+            reason,
+            "ไม่พบบัญชีเจ้าหน้าที่ที่ใช้รหัสพนักงานนี้ ให้แอดมินตรวจรหัสพนักงานในบัญชีของคุณ หรือใช้รหัส 6 หลักจากหน้าเว็บแทน",
         )
     )
 
@@ -955,6 +987,15 @@ def _registration(turn):
         turn.set_prompt("reg_external_name")
         turn.say("พิมพ์ชื่อของคุณ แล้วสามารถแจ้งปัญหาหรือข้อเสนอแนะได้")
         return
+    if prompt in ("reg_method", "reg_code", "reg_email", "reg_check") and not (
+        token is not None and token.action == "reg_other"
+    ):
+        from operations import options
+
+        employee = None if options.otp_on() else _trying(data)
+        if employee is not None:
+            # ADR 0059: OTP switched off mid-way; the ID matched already, nothing more is asked.
+            return _by_id(turn, data, employee)
     if prompt in ("reg_employee", "reg_method", "reg_code", "reg_email") and token is not None:
         if token.action == "reg_other":
             return _other_path(turn, data)
@@ -1091,14 +1132,17 @@ def _trying(data):
 
 
 def _employee_id(turn, data, typed):
-    """The roster has this ID: offer the ways to prove it (15 ต.ค. 2569 Q24). The name is never
-    shown before that, so typing someone's ID tells nothing about them."""
-    from operations import email_codes, employees
+    """The roster has this ID: offer the ways to prove it (15 ต.ค. 2569 Q24), or with OTP off
+    take the ID alone (ADR 0059). The name is never shown before that, so typing someone's ID
+    tells nothing about them."""
+    from operations import email_codes, employees, options
 
     employee, reason = employees.lookup(turn.identity, typed)
     if employee is None:
         return _failed(turn, data, reason, "ไม่พบรหัสพนักงานนี้ในทะเบียน", _ask_employee_id)
     data = {**data, "employee_try": employee.pk}
+    if not options.otp_on():
+        return _by_id(turn, data, employee)
     ways = email_codes.methods(employee)
     if not ways and employee.check_hash:  # an older list: its proof value
         turn.set_prompt("reg_check", **data, employee_id=typed)
@@ -1112,6 +1156,32 @@ def _employee_id(turn, data, typed):
         turn.say("รหัสนี้ยังยืนยันทาง LINE ไม่ได้ จะให้เจ้าหน้าที่ตรวจแทน")
         return _other_path(turn, data)
     _ways(turn, data, "ยืนยันว่าเป็นคุณ: รับรหัส 6 หลักทางอีเมลในทะเบียนพนักงาน หรือพิมพ์อีเมลของคุณเอง")
+
+
+def _by_id(turn, data, employee):
+    """ADR 0059, OTP off: the ID matching the roster is the proof and works as a code would
+    (Q2); an ID that an active requester on another LINE holds goes to an admin instead (Q3)."""
+    taken = (
+        ChannelIdentity.objects.filter(
+            status=ChannelIdentity.Status.ACTIVE,
+            requester__employee=employee,
+            requester__status=Requester.Status.ACTIVE,
+        )
+        .exclude(pk=turn.identity.pk)
+        .exists()
+    )
+    if taken:
+        turn.say("รหัสพนักงานนี้ลงทะเบียนกับ LINE อื่นอยู่แล้ว จะให้แอดมินตรวจก่อน")
+        return _employee_proved(turn, data, employee, "")
+    identity_services.audit(
+        None,
+        "identity.employee_check_passed",
+        turn.identity,
+        actor_label="line",
+        employee=employee.employee_id,
+        method="employee_id",
+    )
+    return _employee_proved(turn, data, employee, "employee_id")
 
 
 def _ways(turn, data, text):
@@ -1315,7 +1385,7 @@ def _registration_next(turn, data):
         verified_by=method,
     )
     turn.set_prompt()
-    if employee is not None:
+    if employee is not None and method:  # no method: an ID another LINE holds (ADR 0059 Q3)
         from django.core.exceptions import ValidationError
 
         try:

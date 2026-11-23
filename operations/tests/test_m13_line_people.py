@@ -71,6 +71,10 @@ class PeopleTestCase(LineTestCase):
 
 
 class RegistrationTests(PeopleTestCase):
+    def setUp(self):
+        super().setUp()
+        options.change(None, options.EMPLOYEE_OTP, "on", "ทดสอบ")  # the proof asked (ADR 0059)
+
     def test_the_directory_keeps_only_a_hash_of_the_proof(self):
         row = employees.Employee.objects.get(employee_id="SYN10001")
         self.assertNotIn("2530", row.check_hash)

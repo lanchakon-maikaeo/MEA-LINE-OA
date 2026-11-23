@@ -10,7 +10,7 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
 from operations import broadcast_auth, broadcasts, notifications
-from operations.models import BroadcastCampaign, BroadcastSegment, District, Division, Role
+from operations.models import BroadcastCampaign, BroadcastSegment, Division, Role
 
 # ADR 0041: the roles a person holds now; the retired developer and duty roles stay out.
 ROLES = (
@@ -100,11 +100,9 @@ def bootstrap(request, user, body):
         "divisions": list(
             Division.objects.filter(is_active=True, is_synthetic=False).values("id", "name")
         ),
-        # หน่วยงาน: the 18 เขต and every ฝ่าย the roster brought (ฟขข., ฝบก., ...). Inactive ones
-        # include D00, the ไม่ระบุหน่วยงาน holder of anonymous reporters.
-        "districts": list(
-            District.objects.filter(is_active=True).values("id", "name", "short_name")
-        ),
+        # หน่วยงาน: the 18 เขต and every ฝ่าย the roster brought (ฟขข., ฝบก., ...), one entry
+        # per unit (ADR 0059). Inactive ones include D00, the holder of anonymous reporters.
+        "districts": broadcasts.units(),
         "roles": [{"id": role.value, "name": role.label} for role in ROLES],
         "quota": {"budget": budget.budget, "used": budget.used},
     }
@@ -148,6 +146,13 @@ def detail(request, user, body, pk):
             "sequence", "status", "recipient_count", "attempts", "detail", "accepted_at"
         )
     )
+    if row.status in broadcasts.SENT and not row.test_source_id:
+        count, strangers = broadcasts.missed_counts(row)
+        result["missed"] = {
+            "count": count,
+            "unregistered": strangers,
+            "may_send": broadcasts.may_edit(user, row),
+        }
     return {"campaign": result}
 
 
@@ -169,6 +174,8 @@ def action(request, user, body, pk, action):
         row = broadcasts.test_to_self(user, pk, revision, body.get("request_key"))
     elif action == "copy":
         row = broadcasts.copy_draft(user, pk)
+    elif action == "missed":
+        row = broadcasts.send_missed(user, pk)
     elif action == "preview":
         row = BroadcastCampaign.objects.select_related("created_by", "segment").get(pk=pk)
         broadcasts._revision(row, revision)

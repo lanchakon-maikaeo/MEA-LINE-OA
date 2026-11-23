@@ -14,7 +14,7 @@
   <div><dt>ปิดแล้ว</dt><dd class="num">{{ inactive }} คน</dd></div>
   <div><dt>นำเข้าล่าสุด</dt><dd class="num">{% if latest %}{{ latest.imported_at|date:"Y-m-d H:i" }}{% else %}ยังไม่มี{% endif %}</dd></div>
   <div><dt>กุญแจเข้ารหัสอีเมล</dt><dd>{% if sealing %}พร้อม{% else %}<span class="tag tag--alert">ยังไม่ตั้ง</span> นำเข้าไม่ได้จนกว่าเซิร์ฟเวอร์จะมี PII_SECRET_KEY{% endif %}</dd></div>
-  <div><dt>ส่งรหัส OTP ทางอีเมล</dt><dd>{% if mail %}พร้อม{% else %}ยังไม่ได้ตั้งบัญชีส่งอีเมล ผู้ใช้จะยืนยันได้แบบพิมพ์อีเมลอย่างเดียว{% endif %}</dd></div>
+  <div><dt>ส่งรหัส OTP ทางอีเมล</dt><dd>{% if not otp %}ปิดในตัวเลือกระบบ{% elif mail %}พร้อม{% else %}ยังไม่ได้ตั้งบัญชีส่งอีเมล ผู้ใช้จะยืนยันได้แบบพิมพ์อีเมลอย่างเดียว{% endif %}</dd></div>
   <div><dt>การยืนยันตัวตนตอนลงทะเบียน</dt><dd>{{ check }} · {{ methods }} <a href="{% url 'admin-options' %}">เปลี่ยนในตัวเลือกระบบ</a></dd></div>
 </dl>
 

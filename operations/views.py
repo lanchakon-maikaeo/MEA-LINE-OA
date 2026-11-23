@@ -1461,10 +1461,13 @@ def admin_employees(request):
             "latest": Employee.objects.order_by("-imported_at").first(),
             "sealing": sealing.available(),
             "mail": email_codes.sending_ready(),
+            "otp": options.otp_on(),
             "check": "ยืนยันตัวตนและกองตามทะเบียน แล้วให้สมาชิกกองอัตโนมัติ",
             "methods": options.OPTIONS[options.EMAIL_METHODS].label_of(
                 options.get(options.EMAIL_METHODS)
-            ),
+            )
+            if options.otp_on()
+            else options.OPTIONS[options.EMPLOYEE_OTP].label_of("off"),
             "upload": upload,
             "preview": preview,
             "districts": District.objects.filter(is_active=True).order_by("code"),

@@ -22,7 +22,8 @@
   }
   function node(tag, text, className) { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; }
   function options(id, rows) { $(id).replaceChildren(...rows.map(row => { const o = node('option', row.name); o.value = row.id; return o; })); }
-  function checks(id, rows) { $(id).replaceChildren(...rows.map(row => { const label = node('label',undefined,'check'), box = document.createElement('input'); box.type = 'checkbox'; box.value = row.id; label.append(box,node('span',row.name)); return label; })); }
+  // A unit may stand for several หน่วยงาน rows (ids) and shows only while it reaches someone or is picked.
+  function checks(id, rows) { $(id).replaceChildren(...rows.map(row => { const label = node('label',undefined,'check'), box = document.createElement('input'); box.type = 'checkbox'; box.value = row.id; if (row.ids) box.dataset.ids = row.ids.join(','); if (row.members === 0) label.dataset.empty = ''; label.append(box,node('span',row.name)); return label; })); }
   // A group keeps its units by key: ฟข. and the other ฝ่าย are both "districts" (หน่วยงาน rows).
   const SEGMENT_KEYS = ['divisions','districts','roles'];
   const boxes = (key, only = '') => [...document.querySelectorAll(`#segment-form [data-key=${key}] input${only}`)];
@@ -36,7 +37,7 @@
   }
   function filterUnits() {
     const text = $('segment-search').value.trim();
-    document.querySelectorAll('#segment-form [data-key=divisions] .check, #segment-form [data-key=districts] .check').forEach(chip => { chip.hidden = Boolean(text) && !chip.textContent.includes(text); });
+    document.querySelectorAll('#segment-form [data-key=divisions] .check, #segment-form [data-key=districts] .check').forEach(chip => { chip.hidden = (Boolean(text) && !chip.textContent.includes(text)) || (chip.dataset.empty !== undefined && !chip.querySelector('input').checked); });
     segmentSummary();
   }
   function section(name) { ['history','editor','details'].forEach(id => { $(id).hidden = id !== name; }); }
@@ -155,8 +156,13 @@
   async function details(id) {
     const row = (await api(`/broadcasts/api/campaigns/${id}/`)).campaign;
     $('detail-title').textContent = (row.is_test ? 'ทดสอบ · ' : '') + row.title;
-    pairs($('detail-data'),[['สถานะ',row.status_label],['ผู้สร้าง',row.creator],['เวลาส่ง',datetime(row.scheduled_at)],['ผู้รับ',row.recipient_count ?? 'รอตรวจสอบ'],['รายละเอียด',row.detail || '—']]);
+    const missed = row.missed, count = n => `${n.toLocaleString('th-TH')} คน`;
+    pairs($('detail-data'),[['สถานะ',row.status_label],['ผู้สร้าง',row.creator],['เวลาส่ง',datetime(row.scheduled_at)],['ผู้รับ',row.recipient_count ?? 'รอตรวจสอบ'],...(missed ? [['ยังไม่ได้รับ',count(missed.count) + (row.audience === 'all' && missed.unregistered ? ` (ยังไม่ลงทะเบียน ${count(missed.unregistered)})` : '')]] : []),['รายละเอียด',row.detail || '—']]);
     renderContent($('detail-content'),row.content); $('detail-actions').replaceChildren();
+    if (missed?.count && missed.may_send) {
+      const send = node('button',`ส่งให้คนที่ยังไม่ได้รับ (${count(missed.count)})`); send.onclick = () => run(async () => { if (!window.confirm(`ส่งประกาศนี้ให้อีก ${count(missed.count)} หรือไม่ ใช้โควตาข้อความเท่าจำนวนคน`)) return; await api(`/broadcasts/api/campaigns/${id}/missed/`,{revision:row.revision}); await details(id); notice('รับคำขอส่งให้คนที่ยังไม่ได้รับแล้ว'); });
+      $('detail-actions').append(send);
+    }
     if (row.may_edit) {
       const edit = node('button','เริ่มแก้ไข'); edit.onclick = () => run(async () => { const result = await api(`/broadcasts/api/campaigns/${id}/edit/`,{revision:row.revision}); start(result.campaign); notice('พักการส่งแล้ว กรุณายืนยันใหม่หลังแก้ไขเสร็จ'); });
       const cancel = node('button','ยกเลิกประกาศ','secondary'); cancel.onclick = () => run(async () => { if (!window.confirm('ยืนยันยกเลิกประกาศนี้หรือไม่')) return; await api(`/broadcasts/api/campaigns/${id}/cancel/`,{revision:row.revision}); await details(id); });
@@ -169,7 +175,7 @@
     data = await api('/broadcasts/api/bootstrap/'); $('account').textContent = data.user;
     options('segment',data.segments); checks('segment-divisions',data.divisions); checks('segment-roles',data.roles);
     const fk = row => /^(ฟข|การไฟฟ้านครหลวงเขต)/.test(row.name);
-    const unit = row => ({id:row.id, name:row.name.replace(/^การไฟฟ้านครหลวง/,'') + (row.short_name ? ` (${row.short_name})` : '')});
+    const unit = row => ({...row, name:`${row.name.replace(/^การไฟฟ้านครหลวง/,'')} (${row.members.toLocaleString('th-TH')} คน)`});
     checks('segment-fk',data.districts.filter(fk).map(unit)); checks('segment-units',data.districts.filter(row => !fk(row)).map(unit));
     $('quota').textContent = Math.max(0,data.quota.budget-data.quota.used).toLocaleString('th-TH') + ' ข้อความ';
     $('login').hidden = true; $('workspace').hidden = false;
@@ -253,7 +259,7 @@
   });
   function openSegment(row) {
     segmentEditing = row || null; $('segment-form').reset(); $('segment-error').textContent = '';
-    if(row) { $('segment-name').value = row.name; SEGMENT_KEYS.forEach(key => boxes(key).forEach(box => {box.checked = (row.criteria[key] || []).map(String).includes(box.value);})); }
+    if(row) { $('segment-name').value = row.name; SEGMENT_KEYS.forEach(key => boxes(key).forEach(box => {const chosen = (row.criteria[key] || []).map(String); box.checked = (box.dataset.ids || box.value).split(',').some(v => chosen.includes(v));})); }
     filterUnits(); $('segment-dialog').showModal();
   }
   $('segment-form').onchange = segmentSummary;

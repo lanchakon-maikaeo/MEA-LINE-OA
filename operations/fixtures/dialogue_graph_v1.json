@@ -202,7 +202,7 @@
       "kind": "problem",
       "topics": ["meter", "transformer", "suggestion"],
       "choose": "topic",
-      "options": {"registration_check": "employee_auto"}
+      "options": {"registration_check": "employee_auto", "employee_otp": "on"}
     },
     {
       "id": "newcomer_other_way",
