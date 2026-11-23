@@ -78,7 +78,7 @@ services:
       db:
         condition: service_healthy
   n8n:
-    image: n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b
+    image: n8nio/n8n:2.48.6@sha256:eafe48609be09a2d56dd3628b29932a12c2e81a06ac5a309205652ea36146619
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: db
@@ -112,7 +112,7 @@ services:
       retries: 5
   n8n-import:
     # One-off: make n8n-import (service credential + versioned workflows from workflows/n8n/).
-    image: n8nio/n8n:2.42.3@sha256:240eaa2a3d491adac5817aa4c3f1c521bb18ec79f6e448517158d5220ee0f37b
+    image: n8nio/n8n:2.48.6@sha256:eafe48609be09a2d56dd3628b29932a12c2e81a06ac5a309205652ea36146619
     profiles: ["tools"]
     environment:
       DB_TYPE: postgresdb
