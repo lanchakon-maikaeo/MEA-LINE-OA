@@ -291,6 +291,7 @@ class LineEmailTests(RosterTestCase):
             division=Division.objects.get(code="กคว.")
         )
         options.change(None, options.REGISTRATION_CHECK, "employee_auto", "ทดสอบ")
+        options.change(None, options.EMPLOYEE_OTP, "on", "ทดสอบ")  # ADR 0059: off by default
 
     def say(self, *args, **kwargs):
         # The code mail leaves after the commit, as in production.

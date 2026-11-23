@@ -55,6 +55,7 @@ class StaffChatTestCase(RosterTestCase):
 
 class LinkTests(StaffChatTestCase):
     def test_an_employee_id_and_the_mailed_code_link_line(self):
+        options.change(None, options.EMPLOYEE_OTP, "on", "ทดสอบ")  # ADR 0059: off by default
         reply = self.type(ALICE, "เชื่อมบัญชีเจ้าหน้าที่")
         self.assertIn("รหัสพนักงาน", texts(reply))
         reply = self.type(ALICE, "510001")

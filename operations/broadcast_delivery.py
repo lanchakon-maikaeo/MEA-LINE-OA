@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Max, Sum
 from django.utils import timezone
 
 from operations import broadcasts, identity, line_api, notifications
@@ -137,37 +137,57 @@ def prepare(event):
             ]
             row.recipient_count = None
         else:
-            batches = [
-                (
-                    "multicast",
-                    {"messages": row.messages, "to": people[i : i + 500]},
-                    len(people[i : i + 500]),
-                )
-                for i in range(0, len(people), 500)
-            ]
+            batches = _multicast(row.messages, people)
             row.recipient_count = len(people)
-        for index, (endpoint, payload, count) in enumerate(batches):
-            batch = BroadcastBatch.objects.create(
-                campaign=row,
-                sequence=index,
-                endpoint=endpoint,
-                payload=payload,
-                recipient_count=count,
-            )
-            OutboxEvent.objects.create(
-                event_type=SEND,
-                subject_type="broadcast_batch",
-                subject_id=str(batch.pk),
-                correlation_id=event.correlation_id,
-                payload={"batch": batch.pk},
-                occurred_at=now,
-            )
+        _queue(row, batches, now, event.correlation_id)
         row.status, row.detail = C.SENDING, ""
         row.save(update_fields=["status", "detail", "recipient_count", "updated_at"])
 
 
+def _multicast(messages, people):
+    return [
+        ("multicast", {"messages": messages, "to": people[i : i + 500]}, len(people[i : i + 500]))
+        for i in range(0, len(people), 500)
+    ]
+
+
+def _queue(campaign, batches, now, correlation_id, first=0):
+    for index, (endpoint, payload, count) in enumerate(batches, first):
+        batch = BroadcastBatch.objects.create(
+            campaign=campaign,
+            sequence=index,
+            endpoint=endpoint,
+            payload=payload,
+            recipient_count=count,
+        )
+        OutboxEvent.objects.create(
+            event_type=SEND,
+            subject_type="broadcast_batch",
+            subject_id=str(batch.pk),
+            correlation_id=correlation_id,
+            payload={"batch": batch.pk},
+            occurred_at=now,
+        )
+
+
+def send_more(campaign, people):
+    """ADR 0059 Q5, under the campaign lock: reserve the quota for these people, or refuse, and
+    queue multicast batches after the campaign's last one. The campaign keeps its status."""
+    problem = _outbound_problem(campaign, people)
+    if problem:
+        raise ValidationError(problem)
+    now = timezone.now()
+    notifications.lock_budget(now)
+    state = notifications.budget_state(now)
+    if state.limit_reached or len(people) > max(0, state.budget - state.used):
+        raise ValidationError("โควตาข้อความเดือนนี้ไม่พอสำหรับผู้ที่ยังไม่ได้รับทั้งหมด ยังไม่มีการส่ง")
+    first = campaign.batches.aggregate(n=Max("sequence"))["n"] + 1
+    _queue(campaign, _multicast(campaign.messages, people), now, uuid.uuid4(), first)
+
+
 def _refresh(campaign, event):
     """Called under the campaign lock; pending/unknown work never masquerades as delivered."""
+    before = campaign.status
     states = set(campaign.batches.values_list("status", flat=True))
     partial_result = campaign.batches.filter(result__failureCount__gt=0).exists()
     if states == {B.ACCEPTED} and not partial_result:
@@ -180,7 +200,8 @@ def _refresh(campaign, event):
     else:
         return
     campaign.save(update_fields=["status", "detail", "recipient_count", "updated_at"])
-    if campaign.status != C.ACCEPTED:
+    # A batch sent later to who it missed (ADR 0059) must not repeat a ส่งไม่ครบ notice.
+    if campaign.status not in (C.ACCEPTED, before):
         _notice(campaign, event)
 
 
@@ -339,7 +360,10 @@ def exhausted(event):
         if event.event_type == SEND:
             pk = BroadcastBatch.objects.get(pk=event.payload["batch"]).campaign_id
         row = BroadcastCampaign.objects.select_for_update().get(pk=pk)
-        if row.status in {C.ACCEPTED, C.CANCELLED, C.PAUSED, C.DRAFT}:
+        if row.status in {C.CANCELLED, C.PAUSED, C.DRAFT}:
+            return
+        # Sent already, unless a batch to who it missed (ADR 0059) is still waiting.
+        if row.status == C.ACCEPTED and not row.batches.exclude(status=B.ACCEPTED).exists():
             return
         row.batches.filter(status=B.RESERVED).update(
             status=B.FAILED, detail="ไม่ได้ส่งก่อนสิ้นสุดการลองดำเนินการ"

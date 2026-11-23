@@ -413,7 +413,12 @@ class RegistrationRequest(models.Model):
     verified_by = models.CharField(
         max_length=16,
         blank=True,
-        choices=[("otp", "รหัส OTP ทางอีเมล"), ("email", "พิมพ์อีเมลตรงทะเบียน"), ("proof", "ข้อมูลยืนยัน")],
+        choices=[
+            ("otp", "รหัส OTP ทางอีเมล"),
+            ("email", "พิมพ์อีเมลตรงทะเบียน"),
+            ("proof", "ข้อมูลยืนยัน"),
+            ("employee_id", "รหัสพนักงานตรงทะเบียน"),  # ADR 0059: OTP switched off
+        ],
     )
 
     class Meta:

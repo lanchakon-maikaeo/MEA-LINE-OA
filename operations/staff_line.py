@@ -223,6 +223,36 @@ def send_link_code(identity_row, employee_id):
 
 
 @transaction.atomic
+def link_by_id(identity_row, employee_id):
+    """ADR 0059 Q9, OTP off: the employee ID of an active staff account in the roster links this
+    LINE at once. Returns (user, "") or (None, reason): off, locked, no_match (counted as a
+    failure, so IDs cannot be walked through LINE), or taken when the account has another LINE
+    (a code from the web moves it; an ID alone never takes it over)."""
+    from operations import employees
+    from operations.models import Employee
+
+    if options.get(options.STAFF_LINK) != "code_or_otp" or options.otp_on():
+        return None, "off"
+    if employees.failed_today(identity_row) >= employees.MAX_FAILED:
+        return None, "locked"
+    employee_id = (employee_id or "").strip()[:32]
+    profile = (
+        StaffProfile.objects.select_related("user")
+        .filter(employee_id=employee_id, user__is_active=True)
+        .first()
+        if employee_id and Employee.objects.filter(employee_id=employee_id, is_active=True).exists()
+        else None
+    )
+    if profile is None:
+        identity.audit(None, "identity.employee_check_failed", identity_row, actor_label="line")
+        return None, "no_match"
+    if ChannelIdentity.objects.filter(staff_user=profile.user).exclude(pk=identity_row.pk).exists():
+        return None, "taken"
+    _link(identity_row, profile.user, "employee_id")
+    return profile.user, ""
+
+
+@transaction.atomic
 def link_with_otp(identity_row, employee_id, typed):
     """(user, "", 0) when the code is right and the link is made; else (None, reason, left)."""
     from operations import email_codes

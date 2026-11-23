@@ -5,11 +5,12 @@ import uuid
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.validators import URLValidator
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Min, Q
 from django.utils import timezone
 
 from operations import identity
 from operations.models import (
+    BroadcastBatch,
     BroadcastCampaign,
     BroadcastSegment,
     ChannelIdentity,
@@ -21,6 +22,7 @@ from operations.models import (
 
 S = BroadcastCampaign.Status
 EDITABLE = {S.DRAFT, S.PAUSED, S.SCHEDULED, S.QUEUED, S.HELD}
+SENT = {S.ACCEPTED, S.PARTIAL}
 
 
 def require_supervisor(user):
@@ -96,7 +98,8 @@ def segment_members(segment):
     criteria = validate_criteria(segment.criteria)
     chosen = Q(pk__in=criteria.get("people", []))
     if "districts" in criteria:
-        chosen |= Q(requester__district_id__in=criteria["districts"], requester__status="active")
+        ids = same_units(criteria["districts"])
+        chosen |= Q(requester__district_id__in=ids, requester__status="active")
     if "divisions" in criteria or "roles" in criteria:
         grants = RoleGrant.objects.filter(revoked_at__isnull=True)
         if "divisions" in criteria:
@@ -110,10 +113,88 @@ def segment_members(segment):
             # Or the สังกัด the roster gives: a เจ้าหน้าที่ holds no role.
             staff |= Q(staff_user__staff_profile__division_id__in=ids)
         chosen |= staff & Q(staff_user__is_active=True)
-    rows = ChannelIdentity.objects.filter(channel="line", is_following=True).exclude(
+    return _friends().filter(chosen).order_by("external_id")
+
+
+def _friends():
+    return ChannelIdentity.objects.filter(channel="line", is_following=True).exclude(
         status=ChannelIdentity.Status.REVOKED
     )
-    return rows.filter(chosen).order_by("external_id")
+
+
+def _unit(district):
+    return district.short_name or district.name
+
+
+def same_units(ids):
+    """The chosen หน่วยงาน and their twins (owner, 23 พ.ย. 2569): a เขต whose ชื่อย่อ ฟข. an
+    admin set and the roster's row of that name ("ฟขล.") are one unit."""
+    names = {_unit(d) for d in District.objects.filter(pk__in=ids)}
+    return list(
+        District.objects.filter(
+            Q(pk__in=ids) | Q(short_name__in=names) | Q(short_name="", name__in=names)
+        ).values_list("pk", flat=True)
+    )
+
+
+def units():
+    """หน่วยงาน of the segment picker (ADR 0059 Q7, Q8): one entry per unit named as the roster
+    names it, with the registered people (still friends) it reaches now."""
+    reached = dict(
+        _friends()
+        .filter(requester__status="active")
+        .values_list("requester__district")
+        .annotate(n=Count("pk"))
+    )
+    found = {}
+    for row in District.objects.filter(is_active=True).order_by("code"):
+        name = _unit(row)
+        unit = found.setdefault(name, {"id": row.pk, "ids": [], "name": name, "members": 0})
+        unit["ids"].append(row.pk)
+        unit["members"] += reached.get(row.pk, 0)
+    return list(found.values())
+
+
+def missed(campaign):
+    """Who this sent campaign has not reached (ADR 0059 Q5, Q6): the segment's members now, or
+    for เพื่อนทั้งหมด the friends the system first saw after LINE took the send (LINE keeps
+    no list; one who blocked and came back is missed); less everyone a batch went or may still
+    go to. A failed batch reached nobody."""
+    if campaign.test_source_id or campaign.status not in SENT:
+        return ChannelIdentity.objects.none()
+    batches = campaign.batches.exclude(status=BroadcastBatch.Status.FAILED)
+    if campaign.audience == "all":
+        start = batches.filter(endpoint="narrowcast").aggregate(at=Min("first_attempt_at"))["at"]
+        if start is None:
+            return ChannelIdentity.objects.none()
+        rows = _friends().filter(created_at__gt=start)
+    else:
+        rows = segment_members(campaign.segment)
+    payloads = batches.values_list("payload", flat=True)
+    return rows.exclude(external_id__in={i for p in payloads for i in p.get("to", ())})
+
+
+def missed_counts(campaign):
+    """(not reached, of whom not registered: neither an approved requester nor staff)."""
+    rows = missed(campaign)
+    strangers = rows.exclude(status=ChannelIdentity.Status.ACTIVE).filter(staff_user__isnull=True)
+    return rows.count(), strangers.count()
+
+
+@transaction.atomic
+def send_missed(user, campaign_id):
+    """ส่งให้คนที่ยังไม่ได้รับ (ADR 0059 Q5): more batches of the same campaign, to who it has not
+    reached, under the same quota rules; the editors of the campaign press it."""
+    row = BroadcastCampaign.objects.select_for_update().get(pk=campaign_id)
+    require_editor(user, row)
+    people = sorted(missed(row).values_list("external_id", flat=True))
+    if not people:
+        raise ValidationError("ไม่มีผู้ที่ยังไม่ได้รับประกาศนี้")
+    from operations import broadcast_delivery
+
+    broadcast_delivery.send_more(row, people)
+    identity.audit(user, "broadcast.missed_sent", row, recipients=len(people))
+    return row
 
 
 def sender_identity(user):

@@ -776,6 +776,7 @@ def account(request):
             "line": ChannelIdentity.objects.filter(staff_user=request.user).first(),
             "code": code,
             "code_minutes": staff_line.CODE_MINUTES,
+            "otp": options.otp_on(),
         },
     )
 

@@ -186,10 +186,10 @@ def proves(employee, proof):
 
 
 def lookup(identity_row, employee_id, now=None):
-    """(employee, "") for an active employee with something to prove against; otherwise (None,
-    reason): "locked" after the day's failures, or "no_match" (counted as a failure, so the list
-    cannot be walked through LINE)."""
-    from operations import identity
+    """(employee, "") for an active employee, one with something to prove against while OTP is
+    on (ADR 0059); otherwise (None, reason): "locked" after the day's failures, or "no_match"
+    (counted as a failure, so the list cannot be walked through LINE)."""
+    from operations import identity, options
 
     if failed_today(identity_row, now) >= MAX_FAILED:
         return None, "locked"
@@ -198,7 +198,8 @@ def lookup(identity_row, employee_id, now=None):
         .select_related("district")
         .first()
     )
-    if employee is None or not (employee.check_hash or employee.email_hash):
+    proofless = employee is not None and not (employee.check_hash or employee.email_hash)
+    if employee is None or (proofless and options.otp_on()):
         identity.audit(None, "identity.employee_check_failed", identity_row, actor_label="line")
         return None, "no_match"
     return employee, ""

@@ -32,7 +32,10 @@ def sending_ready():
 
 
 def methods(employee):
-    """What this employee may prove themselves with, as ตัวเลือกระบบ allows: "otp", "email"."""
+    """What this employee may prove themselves with, as ตัวเลือกระบบ allows: "otp", "email";
+    none while OTP is off (ADR 0059), when the employee ID alone is the proof."""
+    if not options.otp_on():
+        return []
     allowed = options.get(options.EMAIL_METHODS)
     out = []
     if (
